@@ -232,6 +232,12 @@ jobs:
         run: node upgrade-tests.mjs --local-edit
       - name: Local-edit canary (an inverted --force branch must go red)
         run: node upgrade-tests.mjs --local-edit-canary
+      - name: A failed later fallback batch aborts and restores the earlier writes (#3825)
+        run: node upgrade-tests.mjs --fallback-batch-failure
+      - name: A blocked restore still removes the failed path's additions (#3825)
+        run: node upgrade-tests.mjs --fallback-persistent-rewrite-blocker
+      - name: A file/directory collision is refused, earlier fallback writes restored (#7250)
+        run: node upgrade-tests.mjs --fallback-collision-refusal
 
   dependency-audit:
     name: Dependency audit

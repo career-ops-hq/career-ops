@@ -46,7 +46,7 @@
  */
 
 import { execFile, execFileSync, execSync, spawnSync } from 'child_process';
-import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, lstatSync, statSync, mkdtempSync, realpathSync, writeSync } from 'fs';
+import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, lstatSync, statSync, mkdtempSync, realpathSync, writeSync, readlinkSync, symlinkSync, chmodSync, renameSync } from 'fs';
 import { join, dirname, basename, resolve, posix as pathPosix } from 'path';
 import { tmpdir } from 'os';
 import { randomBytes, timingSafeEqual } from 'crypto';
@@ -239,8 +239,11 @@ export const UPDATE_APPLIED_INSTALL_FAILED_EXIT = 3;
 // directories. Keep this escape hatch small and reviewable: aliases, parents,
 // children, and case/Unicode variants are not overlaps.
 //
-// Rollback reads this list; apply() does not. apply() leaves the user-layer
-// decision to rejectUserLayerPaths, entry by entry.
+// Rollback reads this list, and apply() does too when refusing user-layer
+// entries: the exact overlaps stay allowed while any other user-layer entry
+// in a target manifest is refused on its own, out loud, and the rest of the
+// update completes (#3782). The re-exec import closure stays fatal - a
+// refused import cannot be skipped.
 export const MANIFEST_USER_PATH_OVERLAPS = Object.freeze([
   'writing-samples/README.md',
   'interview-prep/sessions/.gitkeep',
@@ -405,6 +408,7 @@ const BOOTSTRAP_PATHS = [
  */
 export const USER_PATHS = [
   '.career-ops-web/',
+  '.env',
   'cv.md',
   'config/profile.yml',
   'modes/_profile.md',
@@ -563,6 +567,12 @@ export function effectiveUserPaths(root = ROOT) {
   return [...USER_PATHS, ...localUserPaths(root)];
 }
 
+/** A path folded segment by segment the way manifest screening folds it. */
+function foldedPath(path) {
+  return path.split('/').map((segment) =>
+    segment.normalize('NFC').toLowerCase().toUpperCase().toLowerCase()).join('/');
+}
+
 function manifestPathSegments(path) {
   const withoutTrailingSlash = path.endsWith('/') ? path.slice(0, -1) : path;
   return withoutTrailingSlash.split('/').map((segment) =>
@@ -618,6 +628,13 @@ function unsafeManifestPathReason(path, userPaths) {
  * Whether a manifest entry is canonical and cannot address user data.
  * Comparisons against protected paths are segment-based, NFC-normalized, and
  * case-folded so filesystem aliases fail closed on macOS and Windows.
+ *
+ * Trust model:
+ * A self-updater that re-execs the fetched update-system.mjs trusts upstream,
+ * and no guard changes that. The manifest guards defend against a mis-authored
+ * or corrupted manifest and against user-layer paths ever entering the write
+ * set, not against an adversarial release. .env is protected as user-owned in
+ * practice even though only .env.example is shipped in SYSTEM_PATHS.
  */
 export function isSafeManifestPath(path, userPaths = USER_PATHS) {
   return unsafeManifestPathReason(path, userPaths) === null;
@@ -640,7 +657,7 @@ function filterSafeManifestPaths(paths, userPaths, onRejected = () => {}) {
   return safe;
 }
 
-function assertSafeManifestPaths(paths, userPaths, label) {
+export function assertSafeManifestPaths(paths, userPaths, label) {
   if (!Array.isArray(paths) || paths.length === 0) {
     throw new Error(`${label} is missing or empty; refusing to update`);
   }
@@ -865,8 +882,13 @@ export function rejectUserLayerPaths(manifestPaths, userPaths, probes = {}) {
   // Segment-boundary containment: `cv` must not claim `cv.md`, and `cv.md` must
   // not claim `cv.md.bak` (the over-match userLayerViolations documents at :655).
   const isUnder = (child, parent) => child.startsWith(`${parent}/`);
-  const declared = userPaths.map(trimSlash);
-  const declaredDirs = userPaths.filter((path) => path.endsWith('/')).map(trimSlash);
+  // Compare case-folded keys, the same normalization userPathCoversDeclaration
+  // already applies through manifestPathSegments(): on a case-insensitive
+  // filesystem a case variant (.ENV, DATA/cv.md) writes the same inode as the
+  // user path it varies, so it must refuse the same way. The probes below keep
+  // the raw spelling — tracked/exists/claimsSubtree describe the real tree.
+  const foldKey = (path) => manifestPathSegments(path).join('/');
+  const declared = userPaths.map(foldKey);
 
   const kept = [];
   const refused = [];
@@ -879,12 +901,33 @@ export function rejectUserLayerPaths(manifestPaths, userPaths, probes = {}) {
       continue;
     }
     const entry = trimSlash(path);
+    const key = foldKey(path);
     // Names a user path, or stands above one and would sweep it up.
-    if (declared.some((userPath) => entry === userPath || isUnder(userPath, entry))) {
+    if (declared.some((userPath) => key === userPath || isUnder(userPath, key))) {
       refused.push(path);
       continue;
     }
-    if (declaredDirs.some((dir) => isUnder(entry, dir))) {
+    // A child of a declaration, matched against EVERY ancestor declaration,
+    // slashed or not — never just the first match. A fixed user file (.env,
+    // cv.md) has no children — a target spelling one would make git replace
+    // the file with a directory at checkout — so the child is refused
+    // outright. An overlapping subtree claim listed EARLIER (data/ before
+    // data/secrets) must not soften that refusal; only an unbroken chain of
+    // subtree claims adjudicates the child below. The segment boundary in
+    // isUnder() keeps a sibling like .env.example eligible. A declaration
+    // claims a subtree by the trailing-slash spelling, or a directory on disk
+    // or upstream.
+    const ancestors = declared
+      .map((userPath, i) => (isUnder(key, userPath) ? userPaths[i] : null))
+      .filter(Boolean);
+    if (ancestors.length > 0) {
+      const allSubtree = ancestors.every(
+        (declaration) => declaration.endsWith('/') || claimsSubtree(declaration),
+      );
+      if (!allSubtree) {
+        refused.push(path);
+        continue;
+      }
       // A subtree claim inside user territory is open-ended — upstream decides its
       // contents in this release and every later one — so it cannot be adjudicated
       // once and is refused outright.
@@ -1663,10 +1706,12 @@ export function parsePorcelainStatus(status) {
     const code = field.slice(0, 2);
     entries.push({ code, path: field.slice(3) });
     // R (rename) and C (copy) always sit in the first status column and are
-    // followed by one extra field — the origin path. Emit it too.
+    // followed by one extra field — the origin path. Emit it too. A rename's
+    // origin is marked: it is gone from the index and the disk, which a
+    // restore has to put back, where a copy's origin still exists.
     if (code[0] === 'R' || code[0] === 'C') {
       const origin = fields[++i];
-      if (origin) entries.push({ code, path: origin });
+      if (origin) entries.push(code[0] === 'R' ? { code, path: origin, renameOrigin: true } : { code, path: origin });
     }
   }
   return entries;
@@ -2856,9 +2901,22 @@ export function pathFullyPreserved(path, preservedPaths, preservedSet, ref, ctx 
   if (preservedSet.size === 0) return false;
   const runGitQuiet = ctx.git || gitQuiet;
   const isDirectory = path.endsWith('/');
-  const preservedHere = preservedPaths.filter((f) => (isDirectory ? f.startsWith(path) : f === path));
+  // A slashless entry can still claim a directory: the validators accept that
+  // spelling, so a preserved file under `entry/` marks the directory case,
+  // while an exact match marks the file case. preservedPaths describe the
+  // LOCAL tree; when the TARGET ships the other kind, the caller's
+  // preservedCheckoutCollision() check has already refused the entry before
+  // this skip can hide it.
+  const preservedHere = isDirectory
+    ? preservedPaths.filter((f) => f.startsWith(path))
+    : preservedPaths.filter((f) => f === path || f.startsWith(`${path}/`));
   if (preservedHere.length === 0) return false;
-  if (!isDirectory) return true;
+  // An exactly preserved file skips WITHOUT an upstream lookup: the string
+  // match already proves the local content stays, and the lookup both cost a
+  // round-trip per preserved file and broke the update when it failed (#2337
+  // / test 9b). A target directory in the file's place never reaches here —
+  // the collision check runs first at every call site that holds the listing.
+  if (!isDirectory && preservedHere.includes(path)) return true;
   let upstreamFiles = [];
   try {
     upstreamFiles = runGitQuiet('ls-tree', '-r', '--name-only', ref, '--', path)
@@ -2962,6 +3020,14 @@ export function planSystemCheckout(updatePaths, preservedPaths, upstreamFiles) {
   for (const path of updatePaths) {
     const spec = path.endsWith('/') ? path.slice(0, -1) : path;
     const upstream = upstreamFiles.filter((f) => f === spec || f.startsWith(`${spec}/`));
+    // A cross-version file/directory collision is classified before the
+    // fully-preserved shortcut, so the exact-preserve skip can never hide a
+    // shipped directory. The entry routes to checkout, where
+    // checkoutSystemPathsBatched() refuses it before any git run.
+    if (preservedCheckoutCollision(path, preservedPaths, upstreamFiles)) {
+      plan.checkout.push(path);
+      continue;
+    }
     // The loop's rule, fed this listing instead of a per-directory ls-tree.
     const fullyPreserved = pathFullyPreserved(path, preservedPaths, preservedSet, '', { git: () => upstream.join('\n') });
     if (fullyPreserved === true) plan.preserved.push(path);
@@ -2969,6 +3035,148 @@ export function planSystemCheckout(updatePaths, preservedPaths, upstreamFiles) {
     else plan.checkout.push(path);
   }
   return plan;
+}
+
+const foldedUpstreamCache = new WeakMap();
+/** Folded copy of an upstream listing, computed once per listing (callers pass the same array for every manifest entry). */
+function foldedListing(files) {
+  let folded = foldedUpstreamCache.get(files);
+  if (!folded) {
+    folded = files.map(foldedPath);
+    foldedUpstreamCache.set(files, folded);
+  }
+  return folded;
+}
+
+/**
+ * Whether a manifest entry cannot be checked out safely because the LOCAL
+ * preserved layout and the TARGET tree disagree about what the entry is: one
+ * side holds a file where the other holds a directory. preservedPaths
+ * describe the local tree, upstreamFiles the target's, and across versions an
+ * entry can change kind. Neither checkout resolution is acceptable — naming
+ * the bare entry would write the target's content over the preserved side,
+ * and expanding would silently skip what the target ships — so the caller
+ * refuses before any git run. Returns a short reason string, or null when the
+ * entry is safe to check out. An empty listing bounds the guarantee: a
+ * genuinely empty target tree and an unavailable listing are indistinguishable
+ * here, so no collision is asserted then and the entry proceeds under the
+ * caller's existing absent-upstream handling.
+ *
+ * @param {string} path - Manifest entry (`dir/` or a file, either spelling).
+ * @param {string[]} preservedPaths - Files the update keeps out of the checkout.
+ * @param {string[]} upstreamFiles - Every file in the target tree (`ls-tree -r --name-only`).
+ * @returns {string | null}
+ */
+export function preservedCheckoutCollision(path, preservedPaths, upstreamFiles) {
+  if (upstreamFiles.length === 0) return null;
+  // Folded like manifest screening: on a case-insensitive filesystem
+  // `lib/Local` and `lib/local` are one location. The folding is conservative
+  // (it can only add aliases), which is safe on case-sensitive ones too.
+  const fold = foldedPath;
+  const dir = fold(path.endsWith('/') ? path : `${path}/`);
+  const spec = fold(path.endsWith('/') ? path.slice(0, -1) : path);
+  const preservedChildren = preservedPaths.some((file) => fold(file).startsWith(dir));
+  const preservedExact = preservedPaths.some((file) => fold(file) === spec);
+  const foldedUpstream = foldedListing(upstreamFiles);
+  const targetFile = foldedUpstream.some((file) => file === spec);
+  const targetDir = foldedUpstream.some((file) => file.startsWith(dir));
+  if (preservedChildren && targetFile && !targetDir) {
+    return `the target ships ${spec} as a file but preserved local files sit under it as a directory`;
+  }
+  if (preservedExact && targetDir && !targetFile) {
+    return `the target ships ${spec} as a directory but a preserved local file stands in its place`;
+  }
+  return null;
+}
+
+/**
+ * Whether ONE concrete checkout spec cannot be written safely because the
+ * preserved local layout disagrees about its shape — the entry-level
+ * preservedCheckoutCollision() check applied at the depth the checkout
+ * actually writes. A manifest entry can be clean at the top while a target
+ * file sits where preserved local files form a directory (`lib/nested` shipped
+ * as a file, `lib/nested/local.md` preserved), or a target directory sits on a
+ * preserved local file's place. Git resolves either by deleting the preserved
+ * side, so both planners refuse the entry before any git run. Ordinary
+ * siblings share neither prefix and still update.
+ *
+ * @param {string} spec - Concrete target file the checkout would write.
+ * @param {string[]} preservedPaths - Files the update keeps out of the checkout.
+ * @returns {string | null}
+ */
+export function preservedSpecCollision(spec, preservedPaths) {
+  const file = spec.endsWith('/') ? spec.slice(0, -1) : spec;
+  const foldedFile = foldedPath(file);
+  for (const preserved of preservedPaths) {
+    const foldedPreserved = foldedPath(preserved);
+    if (foldedPreserved === foldedFile) continue;
+    if (foldedPreserved.startsWith(`${foldedFile}/`)) {
+      return `the target ships ${file} as a file but preserved local files sit under it as a directory`;
+    }
+    if (foldedFile.startsWith(`${foldedPreserved}/`)) {
+      return `the target ships files under ${preserved} but a preserved local file stands in its place`;
+    }
+  }
+  return null;
+}
+
+/**
+ * The pathspecs apply()'s per-path fallback checkout names for one manifest
+ * entry, by the same rule checkoutSystemPathsBatched() plans the batched run:
+ * a directory entry with preserved files under it, spelled `dir/` or `dir`,
+ * expands to its upstream files minus the preserved ones; every other entry
+ * names itself. The
+ * fallback passes --literal-pathspecs, so no `:(exclude)` spec can reach it —
+ * there it would be read as a literal filename, fail the checkout, and abort
+ * the update (#3825 review). An empty result means the entry's upstream
+ * content is all preserved and there is nothing to check out. An empty
+ * upstreamFiles means the target tree listing is unavailable or the tree is
+ * empty; the entry then names itself and the loop's absent-upstream handling
+ * decides.
+ *
+ * @param {string} path - Manifest entry (`dir/` or a file).
+ * @param {string[]} preservedPaths - Files the update keeps out of the checkout.
+ * @param {string[]} upstreamFiles - Every file in the target tree (`ls-tree -r --name-only`).
+ * @returns {string[]}
+ */
+export function fallbackCheckoutSpecs(path, preservedPaths, upstreamFiles) {
+  if (upstreamFiles.length === 0) return [path];
+  // A directory entry need not end in '/': the manifest validators accept the
+  // slashless spelling, so directory-ness is read from the TARGET listing —
+  // the entry claims a directory exactly when the listing ships children
+  // under `dir/`. preservedPaths describe the local tree; when the two trees
+  // disagree about the entry's kind the entry names itself here and
+  // preservedCheckoutCollision() makes the caller refuse. Matching `dir/`
+  // with its slash keeps `mode` from claiming `modes/`.
+  const dir = path.endsWith('/') ? path : `${path}/`;
+  const targetChildren = upstreamFiles.filter((file) => file.startsWith(dir));
+  if (targetChildren.length === 0) return [path];
+  if (!preservedPaths.some((file) => file.startsWith(dir))) return [path];
+  const preservedSet = new Set(preservedPaths);
+  return targetChildren.filter((file) => !preservedSet.has(file));
+}
+
+/**
+ * The fallback's literal checkout for one manifest entry, in argvBatches()
+ * runs under the same ARGV_BUDGET rule checkoutSystemPathsBatched() uses: a
+ * directory entry with preserved files under it can expand to thousands of
+ * filenames, and one git call carrying all of them outgrows a Windows
+ * command line, aborting an update that batching would have completed. The
+ * fixed arguments (including the pinned target and the '--' separator)
+ * count against each batch's budget. Throws on the first failed batch; the
+ * caller's per-path restore then covers whatever earlier batches wrote.
+ *
+ * @param {string[]} fallbackSpecs - Output of fallbackCheckoutSpecs() for the entry.
+ * @param {string} targetCommit
+ * @param {{git?: Function}} [ctx] - `git` is a test seam.
+ */
+export function fallbackCheckoutBatched(fallbackSpecs, targetCommit, ctx = {}) {
+  const runGitQuiet = ctx.git || gitQuiet;
+  const fixedArgs = ['--literal-pathspecs', 'checkout', targetCommit, '--'];
+  const fixed = fixedArgs.reduce((total, arg) => total + arg.length + 1, 0);
+  for (const batch of argvBatches(fallbackSpecs, { budget: ARGV_BUDGET - fixed })) {
+    runGitQuiet(...fixedArgs, ...batch);
+  }
 }
 
 /**
@@ -2995,13 +3203,36 @@ export function checkoutSystemPathsBatched(updatePaths, preservedPaths, upstream
   const attempted = ctx.attempted || [];
   const plan = planSystemCheckout(updatePaths, preservedPaths, upstreamFiles);
   const preservedSet = new Set(preservedPaths);
+  // Refuse a cross-version file/directory collision before any git run: the
+  // checkout would either write the target over the preserved local side or
+  // silently skip what the target ships. Every entry is preflighted before
+  // the first batch writes anything, so a collision late in the list cannot
+  // leave a partial primary write behind. In normal apply the fallback
+  // loop's own collision check runs before the pathFullyPreserved skip, so
+  // the refusal speaks there too.
+  for (const path of plan.checkout) {
+    const collision = preservedCheckoutCollision(path, preservedPaths, upstreamFiles);
+    if (collision) throw new Error(`Cannot check out ${path}: ${collision}`);
+  }
   // Each pathspec, and the manifest entry it came from. A file entry that is
-  // itself preserved never reaches plan.checkout, so only a directory entry can
-  // have preserved files under it.
+  // itself preserved reaches plan.checkout only in the collision shape just
+  // refused, so below only a directory entry can have preserved files under
+  // it.
   const entryOf = new Map();
   for (const path of plan.checkout) {
-    const hasPreserved = path.endsWith('/') && preservedPaths.some((file) => file.startsWith(path));
-    const specs = hasPreserved ? upstreamFiles.filter((file) => file.startsWith(path) && !preservedSet.has(file)) : [path];
+    // Either directory spelling: a slashless entry with preserved files under
+    // it must expand the same way, or the bare-directory checkout would write
+    // upstream's files over the preserved ones.
+    const dir = path.endsWith('/') ? path : `${path}/`;
+    const hasPreserved = preservedPaths.some((file) => file.startsWith(dir));
+    const specs = hasPreserved ? upstreamFiles.filter((file) => file.startsWith(dir) && !preservedSet.has(file)) : [path];
+    // The entry-level collision check above looks at the entry itself; a
+    // collision can also sit BELOW it, between a concrete target file and the
+    // preserved local layout. Refuse here too, still before the first write.
+    for (const spec of specs) {
+      const specCollision = preservedSpecCollision(spec, preservedPaths);
+      if (specCollision) throw new Error(`Cannot check out ${path}: ${specCollision}`);
+    }
     for (const spec of specs) entryOf.set(spec, path);
   }
   // Literal: with no `:(exclude)` magic left, a file name from the target tree
@@ -3057,6 +3288,7 @@ export function revertPaths(paths, protectedPaths = new Set(), ctx = {}) {
   if (paths.length === 0) return;
   const stranded = [];
   const unchecked = [];
+  const unrestored = [];
   // A file the update kept out is never one of its additions either.
   if (exclude.length > 0) protectedPaths = new Set([...protectedPaths, ...exclude]);
   // Must restore from HEAD, not from the index (#915 bug 1). After
@@ -3076,21 +3308,32 @@ export function revertPaths(paths, protectedPaths = new Set(), ctx = {}) {
     if (kept.includes(pathspec)) continue;
     if (kept.length === 0 || headHasFilesBesides(pathspec, kept, runGit)) {
       try {
-        runGit('checkout', 'HEAD', '--', p, ...kept.map((file) => `${EXCLUDE_PATHSPEC_PREFIX}${file}`));
+        // literal: a kept file is a real filename, and one like `docs/[x].md`
+        // read as a glob would exclude the wrong files and reset this one.
+        runGit('checkout', 'HEAD', '--', p, ...kept.map((file) => `${LITERAL_EXCLUDE_PATHSPEC_PREFIX}${file}`));
       } catch (err) {
         // Only remove if the path genuinely doesn't exist in HEAD.
-        // Other errors (permissions, corrupt refs) should re-throw.
         let existsInHead = true;
         try { runGit('cat-file', '-e', `HEAD:${pathspec}`); } catch { existsInHead = false; }
-        if (existsInHead) throw err;
-        // A file newly introduced by the update is removed so the working tree
-        // matches HEAD. A directory is not removed wholesale: it may already have
-        // held the user's own untracked files before the update created it
-        // upstream, and deleting it took those along. removeAdditionsNotInHead()
-        // below deletes only what the update added to it.
-        if (!isDirectoryPath(p, join(root, pathspec))) {
-          try { runGit('rm', '-f', '--ignore-unmatch', '--', pathspec); } catch { /* ignore */ }
-          try { rmSync(join(root, pathspec), { force: true }); } catch { /* already gone */ }
+        if (existsInHead) {
+          // A persistent write blocker (an unwritable directory, a file held
+          // open) can defeat the HEAD checkout itself: the old behaviour
+          // rethrew here, which skipped the additions cleanup below and every
+          // path after this one. Record the failure with its specific error
+          // and fall through instead - the update's additions under the path
+          // are still removed, the remaining paths are still restored, and
+          // the caller hears the honest failure once everything was tried.
+          unrestored.push(`${pathspec} (${String(err.message).split('\n')[0]})`);
+        } else {
+          // A file newly introduced by the update is removed so the working tree
+          // matches HEAD. A directory is not removed wholesale: it may already have
+          // held the user's own untracked files before the update created it
+          // upstream, and deleting it took those along. removeAdditionsNotInHead()
+          // below deletes only what the update added to it.
+          if (!isDirectoryPath(p, join(root, pathspec))) {
+            try { runGit('rm', '-f', '--ignore-unmatch', '--', pathspec); } catch { /* ignore */ }
+            try { rmSync(join(root, pathspec), { force: true }); } catch { /* already gone */ }
+          }
         }
       }
     }
@@ -3110,6 +3353,7 @@ export function revertPaths(paths, protectedPaths = new Set(), ctx = {}) {
   // restored first; then the caller hears it failed, so it does not report a
   // full restore and points at `rollback` instead.
   const problems = [];
+  if (unrestored.length > 0) problems.push(`could not restore from HEAD: ${unrestored.join(', ')}`);
   if (stranded.length > 0) problems.push(`could not remove ${stranded.length} file(s) the update added: ${stranded.join(', ')}`);
   if (unchecked.length > 0) problems.push(`could not list what the update added under ${unchecked.join(', ')}`);
   if (problems.length > 0) throw new Error(problems.join('; '));
@@ -3170,6 +3414,36 @@ export function restoreAfterFailedUpdate(paths, protectedPaths, { what, ...ctx }
 }
 
 /**
+ * Put a saved copy's bytes back at a worktree path without following a link.
+ *
+ * A forced checkout can replace a user's file with a symlink (upstream tracks
+ * some paths as mode 120000). copyFileSync() follows a symlink at its
+ * destination, so a plain copy would write the user's bytes into the link's
+ * referent, a different file. A symlink at the destination is removed first so
+ * the copy recreates a regular file at the path; a symlinked parent directory
+ * is refused, since the write would land outside the path's own directory.
+ * The source copy is never touched, so a failure leaves the .bak in place.
+ *
+ * @param {string} root - Repo root.
+ * @param {string} backup - Repo-relative source copy.
+ * @param {string} file - Repo-relative destination.
+ * @param {Function} copyFile - copyFileSync or a test seam.
+ */
+function restoreBytesWithoutFollowingLinks(root, backup, file, copyFile) {
+  const linked = symlinkedAncestor(file, root);
+  if (linked) throw new Error(`${linked} is a symlink; not writing through it`);
+  const destination = join(root, ...file.split('/'));
+  let isLink = false;
+  try {
+    isLink = lstatSync(destination).isSymbolicLink();
+  } catch (err) {
+    if (err?.code !== 'ENOENT') throw err;
+  }
+  if (isLink) unlinkSync(destination);
+  copyFile(join(root, ...backup.split('/')), destination);
+}
+
+/**
  * Put an install's own edits to updater files back after a failed self-reexec.
  *
  * The self-bootstrap overwrites updater files this install had changed, after
@@ -3188,7 +3462,7 @@ export function restoreBootstrapBackups(backups, ctx = {}) {
   const failed = [];
   for (const { file, backup } of backups) {
     try {
-      copyFile(join(root, ...backup.split('/')), join(root, ...file.split('/')));
+      restoreBytesWithoutFollowingLinks(root, backup, file, copyFile);
       console.error(`Put back your local version of ${file} (the copy in ${backup} stays).`);
     } catch (err) {
       failed.push(file);
@@ -3196,6 +3470,266 @@ export function restoreBootstrapBackups(backups, ctx = {}) {
     }
   }
   return failed;
+}
+
+/**
+ * The pre-update index entry (mode + blob) for every path that was STAGED
+ * before apply() ran, read from the porcelain snapshot already taken at the
+ * start. Unstaged and untracked paths need no record: restoring them means
+ * returning the index to HEAD's entry, which `git reset -q HEAD -- <path>`
+ * does without any saved state.
+ *
+ * @param {{code: string, path: string}[]} statusEntries - parsePorcelainStatus() output.
+ * @param {{gitRaw?: Function, root?: string}} [ctx] - Test seams.
+ * @returns {Map<string, {mode: string, sha: string}>}
+ */
+export function capturePreUpdateIndex(statusEntries, ctx = {}) {
+  const root = ctx.root || ROOT;
+  const runRaw = ctx.gitRaw || ((...args) => gitRawIn(root, ...args));
+  const staged = new Set(
+    statusEntries
+      .filter((entry) => entry.code[0] !== ' ' && entry.code[0] !== '?' && entry.code[0] !== '!')
+      .map((entry) => entry.path),
+  );
+  const state = new Map();
+  // The index and the worktree are recorded apart, because a deletion can be
+  // in either one alone:
+  // - `D ` + `?? path`: the entry was removed from the index and a new file
+  //   put on disk. The index has no entry; the file stays (deleted: false).
+  // - `MD` / `AD`: an edit was staged, then the file deleted. The staged blob
+  //   is recorded below; the file is absent (deleted: true).
+  // - ` D`: an unstaged deletion. The index is HEAD's; the file is absent.
+  // - a rename's origin: the entry moved to the destination and the file with
+  //   it. It is the staged deletion's shape, or a checkout that recreates it
+  //   is undone as a HEAD reset — which resurrects the file and degrades the
+  //   staged rename to a copy.
+  // A checkout that recreated an absent file is then undone as a deletion
+  // instead of being reset to HEAD's entry (which would resurrect the file).
+  const untracked = new Set(statusEntries.filter((entry) => entry.code === '??').map((entry) => entry.path));
+  for (const entry of statusEntries) {
+    const stagedDeletion = entry.code[0] === 'D' || entry.renameOrigin === true;
+    if (stagedDeletion || entry.code[1] === 'D') {
+      state.set(entry.path, { deleted: !untracked.has(entry.path), stagedDeletion });
+      if (stagedDeletion) staged.delete(entry.path);
+    }
+  }
+  if (staged.size === 0) return state;
+  // ls-files -s records mode and blob for every index entry; -z keeps quoting
+  // out of unusual names, the same reason the status parse uses it.
+  for (const record of runRaw('ls-files', '-s', '-z').split('\0')) {
+    if (!record) continue;
+    const tab = record.indexOf('\t');
+    const [mode, sha] = record.slice(0, tab).split(' ');
+    const path = record.slice(tab + 1);
+    if (!staged.has(path)) continue;
+    const entry = { ...state.get(path), mode, sha };
+    // The worktree state is a third fact, independent of HEAD and the staged
+    // blob: one edit can be staged while the disk holds other content — bytes
+    // the local-edit detector credits to upstream (taken ahead of a release,
+    // or a reverted edit), so no .bak protects them. Record what the disk
+    // held so a failed update restores exactly that state:
+    // - a symlink is recorded by its TARGET and recreated, never followed:
+    //   hashing it would read the referent, and writing the staged blob would
+    //   materialize a regular file over the link;
+    // - a regular file's RAW bytes and exec bit, read straight from disk: a
+    //   git blob round trip would run the clean and smudge filters
+    //   (autocrlf, eol attributes, custom filters), which are not byte-exact;
+    //   the path instead of guessing the disk held the staged blob.
+    const diskPath = join(root, ...path.split('/'));
+    let stat = null;
+    try {
+      stat = lstatSync(diskPath);
+    } catch (err) {
+      // ENOENT is the staged-then-deleted shape: nothing on disk to record,
+      // and the restore removes what the checkout recreated.
+      if (err?.code !== 'ENOENT') entry.worktreeCaptureFailed = true;
+    }
+    if (stat?.isSymbolicLink()) {
+      try {
+        entry.worktreeSymlink = readlinkSync(diskPath);
+      } catch {
+        entry.worktreeCaptureFailed = true;
+      }
+    } else if (stat) {
+      entry.worktreePerms = stat.mode & 0o7777;
+      try {
+        entry.worktreeBytes = readFileSync(diskPath);
+      } catch {
+        entry.worktreeCaptureFailed = true;
+      }
+    }
+    state.set(path, entry);
+  }
+  return state;
+}
+
+/**
+ * Re-take the pre-update snapshot at a write boundary: after the fetch and the
+ * other network waits, immediately before updater or system files are backed
+ * up and checked out. The snapshot apply() takes at its start predates those
+ * waits. A path the user edited or staged during them is not in it, so a
+ * failed update would reset that edit to HEAD (it is not "protected") and a
+ * restaged blob would come back as the older entry. Both the dirty-path set and
+ * the staged-entry map are rebuilt in place from current status, so every
+ * holder of them (protected set, restore exclusions, dirty-state restore)
+ * sees the same, current picture. The user-layer violation check still
+ * compares against this snapshot, so only changes made AFTER the boundary
+ * can be attributed to the update.
+ *
+ * @param {Set<string>} statusPaths - initialStatusPaths, rebuilt in place.
+ * @param {Map<string, object>} indexState - initialIndexState, rebuilt in place.
+ * @param {{statusEntries?: {code: string, path: string}[], gitRaw?: Function, root?: string}} [ctx] - Test seams.
+ * @returns {string[]} Paths dirty now that were not in the snapshot being replaced.
+ */
+export function refreshPreUpdateSnapshot(statusPaths, indexState, ctx = {}) {
+  // Read first: a failed status leaves the snapshot being replaced untouched.
+  const entries = ctx.statusEntries || gitStatusEntries(ctx.root || ROOT);
+  const fresh = capturePreUpdateIndex(entries, ctx);
+  const added = entries.map((entry) => entry.path).filter((file) => !statusPaths.has(file));
+  statusPaths.clear();
+  for (const entry of entries) statusPaths.add(entry.path);
+  indexState.clear();
+  for (const [file, value] of fresh) indexState.set(file, value);
+  return added;
+}
+
+/**
+ * Return every pre-update-dirty path a failed update's checkouts wrote to its
+ * exact pre-update state, where revertPaths() deliberately leaves them alone
+ * (resetting them to HEAD would destroy an edit the checkout left
+ * byte-identical, and a preserved file was never written at all). For each
+ * written dirty file:
+ * - the worktree gets the local edit back from its .bak when the checkout
+ *   overwrote different bytes (the --force shape backupSystemFiles() covers);
+ *   an equal-content edit needs no copy, since the checkout wrote the same
+ *   bytes it found;
+ * - the index gets its pre-update entry back: the recorded mode+blob for an
+ *   edit staged before apply, HEAD's entry for an unstaged one (or no entry,
+ *   when HEAD does not track the path), so `git status` after the restore
+ *   shows exactly what the user had rather than the blob the checkout staged.
+ * Failures are reported, not thrown: every other path still gets its restore,
+ * matching revertPaths()'s record-and-continue contract.
+ *
+ * @param {string[]} entries - Manifest entries the update's checkouts wrote.
+ * @param {{initialStatusPaths: Set<string>, initialIndexState: Map<string, {mode: string, sha: string}>, backupByFile?: Map<string, string>, preservedSet?: Set<string>}} state
+ * @param {{git?: Function, root?: string, copyFile?: Function}} [ctx] - Test seams.
+ * @returns {string[]} Files whose pre-update state could not be fully restored.
+ */
+export function restoreWrittenDirtyState(entries, state, ctx = {}) {
+  const root = ctx.root || ROOT;
+  const copyFile = ctx.copyFile || copyFileSync;
+  const runGit = ctx.git || gitQuiet;
+  const backupByFile = state.backupByFile || new Map();
+  const preservedSet = state.preservedSet || new Set();
+  // A forced-overwritten IGNORED file is at-risk and backed up like any
+  // untracked one (#5088), but `git status --untracked-files=all` does not
+  // report ignored paths, so initialStatusPaths never names it: only its .bak
+  // records that the update wrote over pre-update local content. Include the
+  // backed-up files, or the restore drops the staged blob the checkout wrote
+  // without putting the user's bytes back.
+  const dirtyCandidates = new Set([...state.initialStatusPaths, ...backupByFile.keys()]);
+  const writtenDirty = [...dirtyCandidates].filter((file) =>
+    !preservedSet.has(file) && entries.some((entry) => pathMatchesManifest(file, entry)));
+  const unrestored = [];
+  for (const file of writtenDirty) {
+    const backup = backupByFile.get(file);
+    if (!backup) continue;
+    try {
+      restoreBytesWithoutFollowingLinks(root, backup, file, copyFile);
+      console.error(`Put back your local version of ${file} (the copy in ${backup} stays).`);
+    } catch (err) {
+      unrestored.push(`${file} (${String(err.message).split('\n')[0]})`);
+    }
+  }
+  for (const file of writtenDirty) {
+    const staged = state.initialIndexState.get(file);
+    const backup = backupByFile.get(file);
+    try {
+      // The file the checkout recreated is removed below, and a symlinked
+      // parent would point that delete outside the worktree: refuse it here,
+      // before the index changes, as restoreBytesWithoutFollowingLinks does.
+      const linked = staged?.deleted ? symlinkedAncestor(file, root) : null;
+      if (linked) throw new Error(`${linked} is a symlink; the recreated file was left in place`);
+      // The index first, independently of what is on disk: a staged deletion
+      // had no entry (update-index removes it whatever the file holds, where
+      // `git rm --cached` refuses content that differs from HEAD and the
+      // index), a staged edit had its recorded blob, anything else HEAD's.
+      if (staged?.stagedDeletion) runGit('update-index', '--force-remove', '--', file);
+      else if (staged?.sha) {
+        runGit('update-index', '--cacheinfo', `${staged.mode},${staged.sha},${file}`);
+        // The worktree goes back to its own recorded pre-update bytes, not
+        // assumed to be the staged blob: the .bak put back above covers an
+        // at-risk edit, but an edit the local-edit detector credits to a
+        // previous update gets no backup, and its on-disk bytes can be the
+        // staged edit, the update's own content taken ahead of a release, or
+        // a reverted edit. The recorded raw bytes (or symlink target) are
+        // written back directly, never through git's clean and smudge
+        // filters, which are not byte-exact. Skipped when the disk already
+        // matches, and refused through a symlinked parent for
+        // restoreBytesWithoutFollowingLinks()'s reason.
+        if (!backup) {
+          const linkedParent = symlinkedAncestor(file, root);
+          if (linkedParent) throw new Error(`${linkedParent} is a symlink; the pre-update worktree state was not put back`);
+          if (staged.worktreeCaptureFailed) throw new Error('the pre-update worktree state could not be recorded, so the checkout\'s bytes were left as they are');
+          const diskPath = join(root, ...file.split('/'));
+          if (staged.worktreeSymlink !== undefined) {
+            // The path was itself a symlink: put the link back, never its referent's bytes.
+            let current = null;
+            try {
+              current = lstatSync(diskPath).isSymbolicLink() ? readlinkSync(diskPath) : null;
+            } catch { /* absent: recreate below */ }
+            if (current !== staged.worktreeSymlink) {
+              rmSync(diskPath, { force: true });
+              symlinkSync(staged.worktreeSymlink, diskPath);
+            }
+          } else if (staged.worktreeBytes) {
+            // Raw bytes back, written directly: `git restore` would pass them
+            // through the smudge filter. A symlink the checkout left at the
+            // path is unlinked first so the write cannot follow it.
+            let current = null;
+            let currentPerms = null;
+            let isLink = false;
+            try {
+              const st = lstatSync(diskPath);
+              isLink = st.isSymbolicLink();
+              currentPerms = st.mode & 0o7777;
+              if (!isLink) current = readFileSync(diskPath);
+            } catch { /* absent: written below */ }
+            const wantedPerms = staged.worktreePerms ?? 0o644;
+            if (!(current && current.equals(staged.worktreeBytes) && currentPerms === wantedPerms)) {
+              // Replace rather than overwrite, and only after a complete write:
+              // the checkout's file may be more readable than the user's was,
+              // so the bytes go into a new sibling created with the recorded
+              // permissions, then renamed over the path. A failed write leaves
+              // the existing file in place (rename also replaces a symlink
+              // itself without following it).
+              const tmpPath = `${diskPath}.restore-${randomBytes(6).toString('hex')}`;
+              try {
+                (ctx.writeFile || writeFileSync)(tmpPath, staged.worktreeBytes, { mode: wantedPerms, flag: 'wx' });
+                chmodSync(tmpPath, wantedPerms);
+                (ctx.rename || renameSync)(tmpPath, diskPath);
+              } catch (err) {
+                rmSync(tmpPath, { force: true });
+                throw err;
+              }
+            }
+          }
+          // No record and no capture failure: the path was absent before the
+          // update (a staged edit then deleted); it is removed again below.
+        }
+      } else runGit('--literal-pathspecs', 'reset', '-q', 'HEAD', '--', file);
+      // Then the worktree: a file absent before the update is removed again.
+      // An untracked replacement (deleted: false) was put back from its .bak.
+      if (staged?.deleted) rmSync(join(root, ...file.split('/')), { force: true });
+    } catch (err) {
+      unrestored.push(`${file} (${String(err.message).split('\n')[0]})`);
+    }
+  }
+  if (unrestored.length > 0) {
+    console.error(`Could not fully restore the pre-update state of: ${unrestored.join(', ')}`);
+    console.error('Run `node update-system.mjs rollback` to return to the version before this update.');
+  }
+  return unrestored;
 }
 
 /**
@@ -3313,21 +3847,60 @@ export function expandToShippedFiles(paths, ref = 'FETCH_HEAD', ctx = {}) {
   const seen = new Set();
   const files = [];
   const take = (p) => { if (p && !seen.has(p)) { seen.add(p); files.push(p); } };
+  // Deliberately uncaught, for the same reason as isTracked: `ls-tree --
+  // absent/` exits 0 with empty output, so a stale manifest entry needs no
+  // handling here. A throw is therefore a real failure — an unreadable ref,
+  // a timeout, a corrupt object store — and swallowing it would report "this
+  // directory ships nothing" and drop every file under it from staging.
+  //
+  // -z: raw, NUL-separated names. Without it git quotes anything non-ASCII
+  // per core.quotePath, and a quoted name is not a usable pathspec.
+  // --literal-pathspecs: a directory prefix still resolves, but no name is
+  // ever reinterpreted as a glob.
+  const expandDir = (dir) => {
+    const listed = runGit('--literal-pathspecs', 'ls-tree', '-r', '--name-only', '-z', ref, '--', dir);
+    for (const file of listed.split('\0')) take(file);
+  };
+
+  // A slashless entry can still name a directory in the target tree (#7250):
+  // passed through as a filename it reaches addPaths, whose rejectDirectories
+  // guard throws on it, and the update stops at staging. Probe every slashless
+  // entry in ONE ls-tree so ordinary file entries stay a single extra call for
+  // the whole manifest; only actual directories pay for a recursive listing.
+  const slashless = paths.filter((path) => !path.endsWith('/'));
+  const slashlessSet = new Set(slashless);
+  const slashlessDirs = new Set();
+  if (slashless.length > 0) {
+    // -t: a probe covering both `lib` and `lib/nested` descends into lib for
+    // the nested pathspec, and without -t git drops the lib tree record from
+    // the output. The parent then reads as an ordinary file below, a bare
+    // directory reaches addPaths, and its guard stops the update at staging.
+    // argvBatches with the fixed arguments counted: several hundred slashless
+    // entries in one call can outgrow a Windows command line, and this probe
+    // is deliberately uncaught (see above), so it must not be able to throw
+    // for that reason outside the staging try.
+    const fixedArgs = ['--literal-pathspecs', 'ls-tree', '-z', '-t', ref, '--'];
+    const fixed = fixedArgs.reduce((total, arg) => total + arg.length + 1, 0);
+    let probed = '';
+    for (const batch of argvBatches(slashless, { budget: ARGV_BUDGET - fixed })) {
+      probed += runGit(...fixedArgs, ...batch);
+    }
+    for (const record of probed.split('\0')) {
+      if (!record) continue;
+      const tab = record.indexOf('\t');
+      if (tab === -1) continue;
+      // "<mode> SP <type> SP <sha> TAB <name>"; a prefix pathspec could match
+      // a longer name, so only an exact hit on a probed entry counts.
+      if (record.slice(0, tab).split(' ')[1] === 'tree' && slashlessSet.has(record.slice(tab + 1))) {
+        slashlessDirs.add(record.slice(tab + 1));
+      }
+    }
+  }
 
   for (const path of paths) {
-    if (!path.endsWith('/')) { take(path); continue; }
-    // Deliberately uncaught, for the same reason as isTracked: `ls-tree --
-    // absent/` exits 0 with empty output, so a stale manifest entry needs no
-    // handling here. A throw is therefore a real failure — an unreadable ref,
-    // a timeout, a corrupt object store — and swallowing it would report "this
-    // directory ships nothing" and drop every file under it from staging.
-    //
-    // -z: raw, NUL-separated names. Without it git quotes anything non-ASCII
-    // per core.quotePath, and a quoted name is not a usable pathspec.
-    // --literal-pathspecs: a directory prefix still resolves, but no name is
-    // ever reinterpreted as a glob.
-    const listed = runGit('--literal-pathspecs', 'ls-tree', '-r', '--name-only', '-z', ref, '--', path);
-    for (const file of listed.split('\0')) take(file);
+    if (path.endsWith('/')) { expandDir(path); continue; }
+    if (slashlessDirs.has(path)) { expandDir(`${path}/`); continue; }
+    take(path);
   }
   return files;
 }
@@ -3550,6 +4123,7 @@ function rejectDirectories(paths, root) {
 // place that has to recognise such an entry again — the index-commit guard —
 // reads the prefix from here rather than re-spelling it.
 const EXCLUDE_PATHSPEC_PREFIX = ':(exclude)';
+const LITERAL_EXCLUDE_PATHSPEC_PREFIX = ':(exclude,literal)';
 
 /**
  * The concrete FILE list to stage and scope-commit for an update.
@@ -4693,6 +5267,11 @@ export function shellQuoteArg(value) {
 export function updateCommitCommand(version, usedIndexCommit, expandedPathsToStage, ctx = {}) {
   const message = `chore: auto-update system files to v${version}`;
   if (usedIndexCommit) return `git commit -m "${message}"`;
+  // --literal-pathspecs is a GLOBAL git option (commitPathspecs passes it the
+  // same way): ahead of the subcommand, so an expanded filename holding
+  // brackets can never glob-match a different tracked file. Behind `commit`
+  // the flag does not exist and the command fails outright.
+  const literal = 'git --literal-pathspecs commit';
   // Reuse the scoped commit's file on failure. Withheld commits need their own
   // file, written by the same helper: large updates exceed Windows argv limits.
   let pathspecArgs;
@@ -4703,7 +5282,7 @@ export function updateCommitCommand(version, usedIndexCommit, expandedPathsToSta
     // Match main's recovery fallback if the git directory is not writable.
     pathspecArgs = `-- ${expandedPathsToStage.map(p => `'${p.replace(/'/g, "'\\''")}'`).join(' ')}`;
   }
-  return `git commit -m "${message}" ${pathspecArgs}`;
+  return `${literal} -m "${message}" ${pathspecArgs}`;
 }
 
 /**
@@ -4852,7 +5431,13 @@ async function apply() {
   const commitOnBranch = commitOnBranchOptIn();
   const updateConfirmed = process.argv.includes('--confirm') ||
     (isReexec && (process.env.CAREER_OPS_UPDATE_CONFIRM === '1' || legacyReexec));
-  const initialStatusPaths = new Set(gitStatusEntries().map(entry => entry.path));
+  const initialStatusEntries = gitStatusEntries();
+  const initialStatusPaths = new Set(initialStatusEntries.map(entry => entry.path));
+  // The pre-update index entry for every staged path, so a failed update can
+  // put the index back exactly: a staged edit stays staged, an unstaged one
+  // returns to HEAD's entry, and neither inherits the blob a checkout staged
+  // over it.
+  const initialIndexState = capturePreUpdateIndex(initialStatusEntries);
   // Backups created by this apply run are expected updater output, not user
   // files the checkout modified. Record only successful copies so an unrelated
   // pre-existing .bak can never receive this exemption.
@@ -5021,9 +5606,13 @@ async function apply() {
     // The fetched manifest is trusted updater code, but its paths still reach
     // git. Validate their canonical form before even the self-bootstrap
     // checkout, and fail closed when the target updater or its manifest is
-    // missing/corrupt. Whether an entry names the user layer is not decided
-    // here: rejectUserLayerPaths refuses those entry by entry (3a), so one bad
-    // entry cannot block every install.
+    // missing/corrupt. Once effectiveUserPaths() is available below, the same
+    // lists are validated against it too, and the outcomes differ by kind:
+    // a malformed (non-canonical) entry aborts before the self-bootstrap, a
+    // user-layer entry in the target updater's re-exec import closure is fatal
+    // because a refused import cannot be skipped, and an ordinary user-layer
+    // manifest entry is refused per entry, out loud, before any system
+    // checkout, with the rest of the update completing (#3782).
     try {
       git('show', `${targetCommit}:update-system.mjs`);
     } catch (err) {
@@ -5042,6 +5631,14 @@ async function apply() {
     // the local list, which must not be empty on the first upgrade to this layout.
     adoptTargetManifest(remoteSystemPaths);
     const manifestUserPaths = effectiveUserPaths();
+    // A target manifest entry naming the user layer (cv.md, data/, .env) is a
+    // manifest error, but refusing it must not abort the update (#3782): the
+    // merged-list refusal below drops the entry out loud before any checkout,
+    // so one bad entry never bricks every install's updates. The re-exec
+    // import closure below stays fatal - a refused import cannot be skipped
+    // without breaking the target updater. MANIFEST_USER_PATH_OVERLAPS keeps
+    // the byte-exact system scaffolds (.gitkeep keepers, dir READMEs) inside
+    // user directories allowed through the refusal's overlap rules.
     const validatedManifestPaths = assertCanonicalManifestPaths(
       mergePathLists(SYSTEM_PATHS, remoteSystemPaths, BOOTSTRAP_PATHS),
       'Merged updater manifest',
@@ -5091,6 +5688,8 @@ async function apply() {
             + 'Your files were NOT touched. Please report this — it is a manifest error.',
           );
         }
+        // Same boundary for the self-bootstrap checkout the parent runs first.
+        refreshPreUpdateSnapshot(initialStatusPaths, initialIndexState);
         const bootstrapAtRisk = locallyModifiedSystemFiles(reexecFiles, targetCommit);
         if (bootstrapAtRisk.length > 0) {
           console.log('');
@@ -5157,8 +5756,16 @@ async function apply() {
         }
         // The child restores what it checked out itself; the files it was
         // loaded from are this process's to put back.
-        restoreAfterFailedUpdate(checkedOutForReexec, initialStatusPaths, { what: 'updater file(s) loaded to run the new version' });
+        // Pre-update-dirty updater files are excluded from the HEAD reset: a
+        // genuine local edit has a .bak that restoreBootstrapBackups() puts
+        // back, and an edit whose content already matched the target was no
+        // edit the checkout changed — resetting it to HEAD would lose it.
+        restoreAfterFailedUpdate(checkedOutForReexec, initialStatusPaths, { what: 'updater file(s) loaded to run the new version', exclude: [...initialStatusPaths] });
         restoreBootstrapBackups(bootstrapBackups);
+        // restoreBootstrapBackups() returns the worktree bytes; the index can
+        // still hold the blob the bootstrap checkout staged over a pre-update
+        // edit. Put the pre-update index entries back too.
+        restoreWrittenDirtyState(checkedOutForReexec, { initialStatusPaths, initialIndexState });
         if (timedOut) {
           // A killed child may have stopped between two checkouts without
           // restoring anything of its own.
@@ -5207,39 +5814,13 @@ async function apply() {
       console.log('');
     }
 
-    // 3b. Local edits to system files (#2337). The checkout is a raw overwrite,
-    // so anything this install fixed locally and upstream has not adopted is
-    // about to vanish silently. Default is to KEEP the local version and say
-    // so; `--force` overwrites. Either way a .bak of the local content is
-    // written first, so the fix is recoverable even from the forced path.
-    const preservedPaths = [];
-    const atRisk = locallyModifiedSystemFiles(updatePaths, targetCommit);
-    if (atRisk.length > 0) {
-      console.log('');
-      console.log(`${atRisk.length} system file(s) differ from upstream because THIS install changed them:`);
-      for (const result of backupSystemFiles(atRisk)) {
-        if (result.error) {
-          // A .bak we could not write is worth saying out loud, but it must not
-          // abort the update — the file itself is still listed either way.
-          console.log(`  ${result.file}  (could not write ${result.backup}: ${result.error})`);
-        } else {
-          generatedBackupPaths.add(result.backup);
-          console.log(`  ${result.file}  (local copy saved: ${result.backup})`);
-        }
-      }
-      if (updateForce) {
-        console.log('--force: overwriting them with the upstream version.');
-      } else {
-        preservedPaths.push(...atRisk);
-        console.log('Keeping your versions. They will NOT receive upstream changes.');
-        console.log('Re-run with `node update-system.mjs apply --force --confirm` to take the upstream version instead.');
-      }
-      console.log('');
-    }
     // Read the active template defaults BEFORE checkout. A configured variant
     // can be present upstream under the same filename; in that case the
     // generic locallyModifiedSystemFiles() baseline check may no longer flag
     // it, but checkout would still overwrite the user's local content.
+    // This runs before the snapshot below, not after it: these are the last
+    // waits before checkout, and a file staged during them must be in the
+    // snapshot and the backups that a failed update restores from.
     let dataRoot = ROOT;
     let profilePaths = [];
     try {
@@ -5270,14 +5851,54 @@ async function apply() {
     for (const warning of configuredSnapshot.warnings) console.log(`Warning: ${warning}`);
     const configuredReferencePaths = configuredSnapshot.localFiles;
     const configuredAtRisk = configuredSnapshot.preservedPaths;
+
+    // 3b. Local edits to system files (#2337). The checkout is a raw overwrite,
+    // so anything this install fixed locally and upstream has not adopted is
+    // about to vanish silently. Default is to KEEP the local version and say
+    // so; `--force` overwrites. Either way a .bak of the local content is
+    // written first, so the fix is recoverable even from the forced path.
+    // Write boundary (see refreshPreUpdateSnapshot): the start snapshot predates
+    // the fetch. Re-take it before any system file is backed up or written.
+    refreshPreUpdateSnapshot(initialStatusPaths, initialIndexState);
+    const preservedPaths = [];
+    // file -> .bak for every successful backup, so a failed update can put a
+    // FORCEd-overwritten local edit back (restoreWrittenDirtyState).
+    const backupByFile = new Map();
+    const atRisk = locallyModifiedSystemFiles(updatePaths, targetCommit);
+    if (atRisk.length > 0) {
+      console.log('');
+      console.log(`${atRisk.length} system file(s) differ from upstream because THIS install changed them:`);
+      for (const result of backupSystemFiles(atRisk)) {
+        if (result.error) {
+          // A .bak we could not write is worth saying out loud, but it must not
+          // abort the update — the file itself is still listed either way.
+          console.log(`  ${result.file}  (could not write ${result.backup}: ${result.error})`);
+        } else {
+          generatedBackupPaths.add(result.backup);
+          backupByFile.set(result.file, result.backup);
+          console.log(`  ${result.file}  (local copy saved: ${result.backup})`);
+        }
+      }
+      if (updateForce) {
+        console.log('--force: overwriting them with the upstream version.');
+      } else {
+        preservedPaths.push(...atRisk);
+        console.log('Keeping your versions. They will NOT receive upstream changes.');
+        console.log('Re-run with `node update-system.mjs apply --force --confirm` to take the upstream version instead.');
+      }
+      console.log('');
+    }
     if (configuredAtRisk.length > 0) {
       preservedPaths.push(...configuredAtRisk.filter((file) => !preservedPaths.includes(file)));
       console.log(`Keeping configured template variant(s) with local content: ${configuredAtRisk.join(', ')}`);
     }
-    // Excluding by pathspec keeps the index and the working tree in agreement:
-    // checking out and restoring afterwards would leave the index holding the
-    // upstream blob, so the scoped commit below would record the very content
-    // the user asked to keep out.
+    // Excluding by pathspec at the scoped commit's staging keeps the index
+    // and the working tree in agreement: checking a preserved file out and
+    // restoring it afterwards would leave the index holding the upstream
+    // blob, so the commit would record the very content the user asked to
+    // keep out. The checkouts themselves leave preserved files out by
+    // expansion instead — see checkoutSystemPathsBatched() and
+    // fallbackCheckoutSpecs().
     const preserveSpecs = preservedPaths.map((file) => `${EXCLUDE_PATHSPEC_PREFIX}${file}`);
 
     const preservedSet = new Set(preservedPaths);
@@ -5289,6 +5910,14 @@ async function apply() {
     // failure falls back to the per-path loop below, which names the path that
     // failed and restores what was written, including anything this attempt
     // wrote before it stopped.
+    // Every failed-update restore below excludes the pre-update-dirty paths
+    // alongside the preserved ones: a file the install had already edited to
+    // the target's content is not preserved (it does not differ from
+    // upstream), yet resetting it to HEAD would destroy an edit the checkout
+    // left byte-identical. Genuinely edited files are already in
+    // preservedPaths; this only spares the equal-content ones. Their index
+    // keeps the staged blob, which `git status` shows.
+    const restoreExclusions = mergePathLists(preservedPaths, [...initialStatusPaths]);
     const batchAttempted = [];
     let batched = false;
     const upstreamFiles = upstreamTreeOutput.split('\0').filter(Boolean);
@@ -5298,29 +5927,64 @@ async function apply() {
         updated.push(...result.updated);
         skippedPaths.push(...result.skipped);
         batched = true;
-      } catch {
+      } catch (err) {
+        // A collision refusal is a verdict about the manifest, not a batch
+        // failure: the per-path loop would write the entries listed before the
+        // colliding one and then refuse the same path, and its restore would
+        // reset those writes — including a pre-update edit whose content
+        // already matched the target, which preserving never flagged. Nothing
+        // has been written yet here, so let the refusal speak as-is.
+        if (String(err?.message || '').startsWith('Cannot check out ')) throw err;
         // Retried path by path below.
       }
     }
     for (const path of batched ? [] : updatePaths) {
-      // `git checkout <ref> -- <path> :(exclude)<path>` errors with "did not
-      // match any file(s)" when the exclusions cancel the whole pathspec — and
-      // that error is indistinguishable from a genuine failure at the catch
-      // below, so it would abort the entire update. Skip the entry outright
-      // when nothing would be left to check out; when the directory's upstream
-      // content could not be enumerated ('unknown'), still check it out but let
-      // the catch treat a cancel-out error as benign (#3824). It reads the same
-      // pinned target this loop checks out from, not FETCH_HEAD.
-      const preservedState = pathFullyPreserved(path, preservedPaths, preservedSet, targetCommit);
-      if (preservedState === true) continue;
+      // In the catch's non-benign branch this loop restores what it wrote;
+      // the collision refusal below throws inside the same try so an earlier
+      // path's writes — or a partial write the primary attempt left — are
+      // restored before the error rethrows.
+      let preservedState;
       try {
+        // Refuse a cross-version file/directory collision before the
+        // exact-preserve skip and before touching the worktree: neither the
+        // skip (which would hide what the target ships) nor the checkout
+        // (which would write over the preserved side) is acceptable. The
+        // refusal message never matches the benign-cancel regex, so the catch
+        // below rethrows it instead of reporting a silent skip.
+        const collision = preservedCheckoutCollision(path, preservedPaths, upstreamFiles);
+        if (collision) throw new Error(`Cannot check out ${path}: ${collision}`);
+        // An entry whose upstream content is all preserved has nothing to check
+        // out. Skip it outright rather than letting git say so: the checkout
+        // would fail with "did not match any file(s)", which the catch below
+        // cannot tell from a genuine failure, and it would abort the entire
+        // update (#3824). pathFullyPreserved reads the same pinned target this
+        // loop checks out from, not FETCH_HEAD.
+        preservedState = pathFullyPreserved(path, preservedPaths, preservedSet, targetCommit);
+        if (preservedState === true) continue;
+        // Name the entry the way checkoutSystemPathsBatched() does — a
+        // directory with preserved files under it expands to its upstream files
+        // minus the preserved ones, and an entry left with nothing to check out
+        // is skipped here — so this checkout can pass --literal-pathspecs: a
+        // `:(exclude)` spec would be read as a literal filename there, fail the
+        // checkout, and abort the update (#3825).
+        const fallbackSpecs = fallbackCheckoutSpecs(path, preservedPaths, upstreamFiles);
+        if (fallbackSpecs.length === 0) continue;
+        // The entry-level check above looks at the entry itself; refuse a
+        // collision sitting below it before any git run here too, matching
+        // checkoutSystemPathsBatched().
+        for (const spec of fallbackSpecs) {
+          const specCollision = preservedSpecCollision(spec, preservedPaths);
+          if (specCollision) throw new Error(`Cannot check out ${path}: ${specCollision}`);
+        }
         // stderr is piped rather than inherited here. A path absent upstream is
         // an EXPECTED skip (a stale manifest entry such as `.gemini/commands/`),
         // but execFileSync inherits stderr by default, so git printed
         // `error: pathspec '...' did not match any file(s) known to git`
         // immediately before the success banner — which reads as a failed
         // update and sends people chasing the wrong root cause (#1998).
-        gitQuiet('checkout', targetCommit, '--', path, ...preserveSpecs);
+        fallbackCheckoutBatched(fallbackSpecs, targetCommit);
+        // Only after every batch landed: the catch restores this path on any
+        // failed run, including one batch of several.
         updated.push(path);
       } catch (err) {
         // A path genuinely absent upstream is the expected skip. But the catch
@@ -5346,8 +6010,15 @@ async function apply() {
           // batchAttempted: paths a failed batched checkout may have written
           // that this loop had not reached yet.
           const written = mergePathLists(updated, batchAttempted).filter((p) => p !== path);
-          restoreAfterFailedUpdate(written, initialStatusPaths, { what: 'system path(s) it had already updated', exclude: preservedPaths });
-          restoreAfterFailedUpdate([path], initialStatusPaths, { what: `path it stopped on (${path})`, exclude: preservedPaths });
+          // Pre-update-dirty paths join the exclusions: a file the install had
+          // already edited to the target's content is not preserved (it does
+          // not differ from upstream), yet resetting it to HEAD would destroy
+          restoreAfterFailedUpdate(written, initialStatusPaths, { what: 'system path(s) it had already updated', exclude: restoreExclusions });
+          restoreAfterFailedUpdate([path], initialStatusPaths, { what: `path it stopped on (${path})`, exclude: restoreExclusions });
+          // The exclusion above spares pre-update-dirty paths from the HEAD
+          // reset; their exact pre-update state (worktree bytes and index
+          // entry) is restored separately here.
+          restoreWrittenDirtyState(mergePathLists(written, [path]), { initialStatusPaths, initialIndexState, backupByFile, preservedSet });
           throw err;
         }
         skippedPaths.push(path);
@@ -5499,14 +6170,27 @@ async function apply() {
       // not silently proceed — that would let a real violation slip
       // through. Revert what we already applied and abort.
       console.error(`Aborting: could not validate user-layer safety (${err.message}).`);
+      // Both repairs are attempted: a path the HEAD restore cannot put back
+      // must not stop a forced-overwritten dirty file getting its bytes and
+      // index entry back (restoreWrittenDirtyState reports its own failures).
+      const revertFailures = [];
       try {
-        revertPaths(updated, initialStatusPaths, { exclude: preservedPaths });
+        revertPaths(updated, initialStatusPaths, { exclude: restoreExclusions });
       } catch (revertErr) {
+        revertFailures.push(revertErr.message);
+      }
+      try {
+        const unrestored = restoreWrittenDirtyState(updated, { initialStatusPaths, initialIndexState, backupByFile, preservedSet });
+        if (unrestored.length > 0) revertFailures.push(`could not fully restore ${unrestored.join(', ')}`);
+      } catch (restoreErr) {
+        revertFailures.push(restoreErr.message);
+      }
+      if (revertFailures.length > 0) {
         // If the revert itself fails (likely whatever broke `git
         // status` also broke `git checkout --`), don't lose the
         // original validation error — chain it via `cause`.
         throw new Error(
-          `Validation failed (${err.message}) and revert also failed (${revertErr.message})`,
+          `Validation failed (${err.message}) and revert also failed (${revertFailures.join('; ')})`,
           { cause: err },
         );
       }
@@ -5523,13 +6207,23 @@ async function apply() {
       // user; leaving them as-is is the safe choice — the user decides
       // what to do with them.
       const violation = new Error('Update aborted: user files were touched.');
+      const revertFailures = [];
       try {
-        revertPaths([...updated], initialStatusPaths, { exclude: preservedPaths });
+        revertPaths([...updated], initialStatusPaths, { exclude: restoreExclusions });
       } catch (revertErr) {
+        revertFailures.push(revertErr.message);
+      }
+      try {
+        const unrestored = restoreWrittenDirtyState([...updated], { initialStatusPaths, initialIndexState, backupByFile, preservedSet });
+        if (unrestored.length > 0) revertFailures.push(`could not fully restore ${unrestored.join(', ')}`);
+      } catch (restoreErr) {
+        revertFailures.push(restoreErr.message);
+      }
+      if (revertFailures.length > 0) {
         // If the revert itself fails, don't lose the safety-violation
         // diagnostic — chain it via `cause` so the user sees both.
         throw new Error(
-          `Safety violation (${violation.message}) and revert also failed (${revertErr.message})`,
+          `Safety violation (${violation.message}) and revert also failed (${revertFailures.join('; ')})`,
           { cause: violation },
         );
       }
@@ -5626,15 +6320,16 @@ async function apply() {
       // staged. Content is committed identically either way; only the mode bits
       // ride on the index-based path.
       //
-      // `pathsToStage` is a git PATHSPEC list, not a path list: the preserved
-      // entries in it are `:(exclude)<path>`, which match no staged path at all.
-      // Handing them to the guard as owned paths would leave a preserved file
-      // claimed by its enclosing owned directory (`providers/` covering
-      // `providers/acme.mjs`) — so strip the exclusions out and pass the
-      // preserved list separately, where preservation outranks ownership.
-      const ownedPaths = pathsToStage.filter((spec) => !spec.startsWith(EXCLUDE_PATHSPEC_PREFIX));
+      // Ownership is judged on the EXPANDED list, not the manifest spelling:
+      // staging expands a slashless directory entry to its concrete shipped
+      // files, and git's name-only output reports those files — the original
+      // spelling (`lib`) would match none of them, marking the update's own
+      // staged files as unrelated work in the notice below and needlessly
+      // blocking the index commit. The expanded list never carries a preserved
+      // file (expansion excludes them), and the preserved argument still wins
+      // for anything preserved that did get staged.
       const unrelated = stagedPathsOutside(
-        [...ownedPaths, ...materializedSkillEntrypoints],
+        [...expandedPathsToStage, ...materializedSkillEntrypoints],
         preservedPaths,
       );
       usedIndexCommit = unrelated.length === 0;
@@ -5654,14 +6349,14 @@ async function apply() {
           commitCommand: updateCommitCommand(remote, usedIndexCommit, expandedPathsToStage),
           unrelatedStaged: unrelated,
           unrelatedUnstaged: unstagedPathsOutside(
-            [...ownedPaths, ...materializedSkillEntrypoints], preservedPaths,
+            [...expandedPathsToStage, ...materializedSkillEntrypoints], preservedPaths,
           ),
         }));
       } else if (branchDecision.commit && usedIndexCommit) {
         git('commit', '-m', `chore: auto-update system files to v${remote}`);
         clearStagedUpdate();
       } else if (branchDecision.commit) {
-        commitPathspecs(`chore: auto-update system files to v${remote}`, expandedPathsToStage);
+        commitPathspecs(`chore: auto-update system files to v${remote}`, expandedPathsToStage, { literal: true });
         clearStagedUpdate();
       }
     } catch (e) {

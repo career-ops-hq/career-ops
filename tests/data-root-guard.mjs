@@ -28,6 +28,7 @@ import { walkTree } from '../lib/walk-tree.mjs';
  * nothing and costs nothing.
  */
 export const GUARDED_PATHS = [
+  '.env',
   'cv.md',
   'article-digest.md',
   'voice-dna.md',

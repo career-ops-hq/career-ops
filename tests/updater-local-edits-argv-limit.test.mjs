@@ -274,8 +274,8 @@ if (NAMES.join(' ').length > WINDOWS_ARGV_LIMIT) {
     pathspecFile: listFile,
     git: () => { throw new Error('the failed commit already wrote the file'); },
   });
-  const match = hint.match(/^git commit -m "([^"]+)" "--pathspec-from-file=([^"]+)" --pathspec-file-nul$/);
-  const recovery = match && ['commit', '-m', match[1], `--pathspec-from-file=${match[2]}`, '--pathspec-file-nul'];
+  const match = hint.match(/^git --literal-pathspecs commit -m "([^"]+)" "--pathspec-from-file=([^"]+)" --pathspec-file-nul$/);
+  const recovery = match && ['--literal-pathspecs', 'commit', '-m', match[1], `--pathspec-from-file=${match[2]}`, '--pathspec-file-nul'];
   let recovered = false;
   try {
     if (match?.[2] === listFile) {
@@ -311,7 +311,7 @@ if (NAMES.join(' ').length > WINDOWS_ARGV_LIMIT) {
   const hint = updateCommitCommand('2', false, NAMES, {
     git: limitedRunner(repo.g, calls), root: repo.dir,
   });
-  const match = hint.match(/^git commit -m "([^"]+)" "--pathspec-from-file=([^"]+)" --pathspec-file-nul$/);
+  const match = hint.match(/^git --literal-pathspecs commit -m "([^"]+)" "--pathspec-from-file=([^"]+)" --pathspec-file-nul$/);
   const contents = match && readFileSync(resolve(repo.dir, match[2]), 'utf8');
   if (hint.length < WINDOWS_ARGV_LIMIT && contents === NAMES.map(p => `${p}\0`).join('')) {
     pass('a withheld update prints a short command backed by the complete NUL-delimited path list');
@@ -319,7 +319,7 @@ if (NAMES.join(' ').length > WINDOWS_ARGV_LIMIT) {
     fail(`withheld recovery hint is invalid or too long (${hint.length} chars)`);
   }
   if (match) {
-    limitedRunner(repo.g, calls)('commit', '-m', match[1], `--pathspec-from-file=${match[2]}`, '--pathspec-file-nul');
+    limitedRunner(repo.g, calls)('--literal-pathspecs', 'commit', '-m', match[1], `--pathspec-from-file=${match[2]}`, '--pathspec-file-nul');
     const committed = repo.g('show', '--name-only', '--format=', 'HEAD').split('\n').filter(Boolean);
     if (committed.length === NAMES.length && !committed.includes('mine.txt')
         && repo.g('diff', '--cached', '--name-only') === 'mine.txt') {
