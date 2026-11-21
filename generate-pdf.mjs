@@ -756,6 +756,36 @@ const SECTION_ALIASES = new Map([
   ['tekniske ferdigheter', 'skills'],
   ['interesser', 'interests'],
   ['fritidsinteresser', 'interests'],
+  // Indonesian (modes/id) — the same failure as the blocks around it: no
+  // Indonesian title resolved here, so cv.sections matched no section of an
+  // Indonesian CV and the order guard compared raw titles. "Keahlian",
+  // "Kompetensi" and "Riwayat karier" are the skills and career-history terms
+  // in modes/id/README.md; the rest are each section's everyday headings.
+  // "Profil" is already in the German block above.
+  ['ringkasan', 'summary'],
+  ['ringkasan profesional', 'summary'],
+  ['tentang saya', 'summary'],
+  ['kompetensi inti', 'competencies'],
+  ['kompetensi utama', 'competencies'],
+  ['pengalaman kerja', 'experience'],
+  ['pengalaman', 'experience'],
+  ['pengalaman profesional', 'experience'],
+  ['riwayat karier', 'experience'],
+  ['riwayat pekerjaan', 'experience'],
+  ['proyek', 'projects'],
+  ['proyek pilihan', 'projects'],
+  ['pendidikan', 'education'],
+  ['riwayat pendidikan', 'education'],
+  ['sertifikasi', 'certifications'],
+  ['sertifikat', 'certifications'],
+  ['penghargaan', 'awards'],
+  ['keahlian', 'skills'],
+  ['kompetensi', 'skills'],
+  ['keterampilan', 'skills'],
+  ['keahlian teknis', 'skills'],
+  ['keterampilan teknis', 'skills'],
+  ['minat', 'interests'],
+  ['hobi', 'interests'],
   // Chinese — the same failure the Polish block above fixes, for the two Chinese
   // markets this repo ships modes for: Traditional (modes/zh-TW) and Simplified
   // (modes/zh), rendered through templates/cv-template.zh-minimal.html. Both
