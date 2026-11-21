@@ -22,6 +22,25 @@ import { randomUUID } from "node:crypto";
 // the event loop for every other request. Adopting it here wants an async
 // atomicWrite rather than a copy of the sync one.
 
+/** Resolve a user-selected CV or profile before replacing it. Mirrors the
+ *  final-component walk of the core's userFileWriteTarget. A dangling link
+ *  still names the file to create. Only callers that own this path opt in. */
+export function resolveUserFileWriteTarget(file: string): string {
+  let target = file;
+  for (let hops = 0; hops < 40; hops++) {
+    let stat;
+    try {
+      stat = fs.lstatSync(target);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return target;
+    }
+    if (!stat.isSymbolicLink()) return target;
+    target = path.resolve(path.dirname(target), fs.readlinkSync(target));
+  }
+  throw new Error(`${file}: too many levels of symbolic links`);
+}
+
 export function atomicWrite(file: string, content: string): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   // Same shape as the core's writeFileAtomic (tracker-utils.mjs): dot-prefixed,

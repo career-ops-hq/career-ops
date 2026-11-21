@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
-import { atomicWrite, atomicWriteWithBackup } from "@/lib/core/safe-write";
+import { atomicWrite, atomicWriteWithBackup, resolveUserFileWriteTarget } from "@/lib/core/safe-write";
 import { decideCvWrite } from "@/lib/cv-write.mjs";
 import { readJsonObject } from "@/lib/json-body";
 
@@ -40,9 +40,10 @@ export async function POST(req: Request) {
   const decision = decideCvWrite(disk, body);
   if (!decision.ok) return NextResponse.json({ error: decision.error }, { status: decision.status });
   try {
+    const target = resolveUserFileWriteTarget(cvPath());
     let bak = null;
-    if (decision.backup) bak = atomicWriteWithBackup(cvPath(), body.content as string);
-    else atomicWrite(cvPath(), body.content as string);
+    if (decision.backup) bak = atomicWriteWithBackup(target, body.content as string);
+    else atomicWrite(target, body.content as string);
     return NextResponse.json({ ok: true, backedUp: !!bak });
   } catch {
     return NextResponse.json({ error: "write failed" }, { status: 500 });
