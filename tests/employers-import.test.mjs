@@ -104,6 +104,8 @@ test('every ATS, region and Workday host form round-trips through its builder', 
     { ats: 'jobvite', board: 'acme' },
     { ats: 'eightfold', board: 'acme' },
     { ats: 'adp-myjobs', board: 'AcmeCareerSite' },
+    { ats: 'successfactors-classic', board: 'career5/eu/ACME001' },
+    { ats: 'successfactors-classic', board: 'career8/com/acme-01' },
     { ats: 'workday', board: 'acme/wd5/External_Careers', workday_host: 'jobs' },
     { ats: 'workday', board: 'acme/wd103/Careers', workday_host: 'site' },
   ];
@@ -172,6 +174,8 @@ const VARIANTS = [
   ['https://jobs.jobvite.com/acme/job/oAbC123', { ats: 'jobvite', board: 'acme' }],
   ['https://Acme.eightfold.ai/careers?domain=acme.com', { ats: 'eightfold', board: 'acme' }],
   ['https://myjobs.adp.com/AcmeCareerSite/cx/job-details?rb=CareerSite&reqId=1', { ats: 'adp-myjobs', board: 'AcmeCareerSite' }],
+  ['https://Career5.SuccessFactors.eu/career?company=ACME001&navBarLevel=JOB_SEARCH&lang=en_US', { ats: 'successfactors-classic', board: 'career5/eu/ACME001' }],
+  ['https://career8.successfactors.com/career/?company=acme-01', { ats: 'successfactors-classic', board: 'career8/com/acme-01' }],
 ];
 
 for (const [url, coords] of VARIANTS) {
@@ -232,6 +236,10 @@ const REJECTS = [
   ['https://jobs.jobvite.com/api/jobs', /placeholder/],
   ['https://myjobs.adp.com/public/staffing/v1/career-site/acme', /own routes/],
   ['https://acme.eu.eightfold.ai/careers', /the board is <company>\.eightfold\.ai/],
+  ['https://career5.successfactors.eu/career', /\?company=/],
+  ['https://career5.successfactors.eu/careers?company=ACME001', /\/career\?company=<id>/],
+  ['https://career5.successfactors.eu/career?company=AC%20ME', /1 to 64 letters/],
+  ['https://a.b.successfactors.eu/career?company=ACME001', /not a board host/],
 ];
 
 for (const [url, why] of REJECTS) {
@@ -323,7 +331,7 @@ test('importList: canonical inbox lines, every default written out; duplicates a
     [3, 'the same board as line 2'],
     [5, 'name contains an email address'],
     [6, 'website "not a domain" is not a domain name'],
-    [8, 'indeed.com is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, avature, clearcompany, jobvite, eightfold, adp-myjobs, workday)'],
+    [8, 'indeed.com is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, avature, clearcompany, jobvite, eightfold, adp-myjobs, successfactors-classic, workday)'],
   ]);
   assert.equal(r.derivedNames, 1);
   assert.equal(r.rewritten, 2);
@@ -426,7 +434,7 @@ test('CLI: the committed boards and new ones become an inbox the validator accep
     assert.equal(written.reduce((sum, n) => sum + n, 0), known.length + 2);
     assert.equal(readFileSync(`${list}.rejected.csv`, 'utf8'), 'line,input,reason\n'
       + `${known.length + 4},https://nope.example/jobs,`
-      + '"nope.example is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, avature, clearcompany, jobvite, eightfold, adp-myjobs, workday)"\n');
+      + '"nope.example is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, avature, clearcompany, jobvite, eightfold, adp-myjobs, successfactors-classic, workday)"\n');
 
     const v = node(VALIDATOR, [], dir);
     assert.equal(v.status, 0, v.stderr);
