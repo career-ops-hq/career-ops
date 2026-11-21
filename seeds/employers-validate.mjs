@@ -50,6 +50,9 @@ import {
   OPTIONAL_REGION_BOARD_URL_BUILDERS,
   REGIONAL_BOARD_URL_BUILDERS,
   REGIONS,
+  SF_CLASSIC_COMPANY_RE,
+  SF_CLASSIC_DOMAINS,
+  SF_CLASSIC_LABEL_RE,
   SLUG_RE,
   SUBDOMAIN_ATS,
   SUBDOMAIN_RESERVED_LABELS,
@@ -183,6 +186,7 @@ const show = (/** @type {unknown} */ v) => JSON.stringify(v);
 export function boardProblem(ats, board) {
   if (typeof board !== 'string' || board === '') return 'board must be a non-empty string';
   if (ats === 'workday') return workdayBoardProblem(board);
+  if (ats === 'successfactors-classic') return sfClassicBoardProblem(board);
   return slugProblem(ats, board, 'board');
 }
 
@@ -227,6 +231,18 @@ function slugProblem(ats, slug, label) {
   if (ats === 'clearcompany' && !CLEARCOMPANY_SITE_RE.test(slug)) return `clearcompany ${label}s are the career site's id, a lowercase GUID`;
   if (ats === 'adp-myjobs' && ADP_MYJOBS_RESERVED.includes(slug.toLowerCase())) return `${label} ${show(slug)} is one of myjobs.adp.com's own routes, not a career site`;
   if (ats === 'adp-myjobs' && !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(slug)) return `adp-myjobs ${label}s are letters, digits, "_" and "-"`;
+  return null;
+}
+
+/** @param {string} board */
+function sfClassicBoardProblem(board) {
+  const parts = board.split('/');
+  if (parts.length !== 3) return `successfactors-classic board is "label/eu|com/company", got ${show(board)}`;
+  const [label, domain, company] = parts;
+  if (!SF_CLASSIC_LABEL_RE.test(label)) return `successfactors-classic label ${show(label)} must be one lowercase host label (career5)`;
+  if (!SF_CLASSIC_DOMAINS.includes(domain)) return `successfactors-classic domain ${show(domain)} is not one of: ${SF_CLASSIC_DOMAINS.join(', ')}`;
+  if (!SF_CLASSIC_COMPANY_RE.test(company)) return `successfactors-classic company ${show(company)} must be 1 to 64 letters, digits, "_" or "-"`;
+  if (PLACEHOLDER_BOARDS.has(company.toLowerCase())) return `successfactors-classic company ${show(company)} is a placeholder, not a company id`;
   return null;
 }
 
