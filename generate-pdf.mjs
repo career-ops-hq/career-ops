@@ -822,6 +822,40 @@ const SECTION_ALIASES = new Map([
   ['技术栈', 'skills'],
   ['興趣', 'interests'],
   ['兴趣', 'interests'],
+  // Arabic (modes/ar) — the same failure as the blocks around it: no Arabic
+  // title resolved here, so cv.sections matched no section of an Arabic CV and
+  // the order guard compared raw titles. "مهارات" and "التاريخ المهني" /
+  // "الخبرات المهنية" are the skills and career-history terms in
+  // modes/ar/README.md; the rest are each section's everyday headings, with and
+  // without the definite article where both are common.
+  ['ملخص', 'summary'],
+  ['الملخص', 'summary'],
+  ['ملخص مهني', 'summary'],
+  ['نبذة', 'summary'],
+  ['نبذة عني', 'summary'],
+  ['الملف الشخصي', 'summary'],
+  ['الكفاءات الأساسية', 'competencies'],
+  ['الكفاءات', 'competencies'],
+  ['الخبرات المهنية', 'experience'],
+  ['الخبرة المهنية', 'experience'],
+  ['الخبرة العملية', 'experience'],
+  ['الخبرات العملية', 'experience'],
+  ['التاريخ المهني', 'experience'],
+  ['الخبرة', 'experience'],
+  ['المشاريع', 'projects'],
+  ['مشاريع', 'projects'],
+  ['التعليم', 'education'],
+  ['المؤهلات العلمية', 'education'],
+  ['المؤهل العلمي', 'education'],
+  ['الشهادات', 'certifications'],
+  ['الشهادات المهنية', 'certifications'],
+  ['الجوائز', 'awards'],
+  ['الجوائز والتكريمات', 'awards'],
+  ['المهارات', 'skills'],
+  ['مهارات', 'skills'],
+  ['المهارات التقنية', 'skills'],
+  ['الاهتمامات', 'interests'],
+  ['الهوايات', 'interests'],
   // Dutch (modes/nl) — the same failure as the blocks around it: no Dutch title
   // resolved here, so cv.sections matched no section of a Dutch CV and the
   // order guard compared raw titles. "Interesses" folds to the Portuguese key
