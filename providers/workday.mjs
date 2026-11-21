@@ -511,6 +511,15 @@ function parsePostedOn(label) {
   return Date.now() - Number(m[1]) * 86_400_000;
 }
 
+// "Posted 30+ Days Ago" gives no date, but it does give a floor on the age.
+// The scan filters use it to drop a posting that is provably older than their
+// window, while postedAt stays undefined so no made-up date reaches
+// scan-history (#7514).
+function minAgeFromPostedOn(label) {
+  const m = String(label || '').match(/posted\s+(\d+)\+\s*day/i);
+  return m ? Number(m[1]) : undefined;
+}
+
 // Workday URL path encodes location as /job/{Location-Slug}/{title-slug}.
 // Use it as fallback when locationsText is absent (common on some tenants).
 function locationFromPath(externalPath) {
@@ -754,8 +763,8 @@ export function locationsFromDetail(detail) {
  *
  * A second direction applies to the "Posted 30+ Days Ago" bucket.
  * `parsePostedOn` returns `undefined` for that label, so without enrichment the
- * posting carries no `postedAt` and passes any age-based filter
- * ("don't penalize missing data"). Once `startDate` provides the real date, the
+ * posting carries no `postedAt`, only `minAgeDays: 30`, and passes any window
+ * of 30 days or more ("don't penalize missing data"). Once `startDate` provides the real date, the
  * posting is accurately dated and a `max_posting_age_days: 30` window can now
  * legitimately exclude it. The "undated passes" rule is a fallback for
  * ignorance, not a policy of inclusion; once the real date is in hand the filter
@@ -818,6 +827,7 @@ export function parseWorkdayResponse(json, entry) {
   for (const j of postings) {
     if (j == null) continue;
     if (!j.externalPath || !String(j.title || '').trim()) continue;
+    const minAgeDays = minAgeFromPostedOn(j.postedOn);
     jobs.push({
       title: j.title || '',
       url: jobBase + j.externalPath,
@@ -836,6 +846,7 @@ export function parseWorkdayResponse(json, entry) {
       ...(listingIdentityOf(ep, j.externalPath)),
       location: withFullyRemote(j.locationsText || locationFromPath(j.externalPath), j.remoteType),
       postedAt: parsePostedOn(j.postedOn),
+      ...(minAgeDays !== undefined && { minAgeDays }),
     });
   }
   return jobs;

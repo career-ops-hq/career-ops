@@ -882,14 +882,19 @@ export function buildLocationFilter(locationFilter) {
 // Optional opt-in. If `max_posting_age_days` is absent (or not a positive
 // integer) in portals.yml, every offer passes. An offer is skipped only when
 // the provider supplied a postedAt (epoch ms) AND it is older than N days.
-// Offers with no date always pass — same "don't penalize missing data"
-// convention as the location filter. `now` is injectable for deterministic tests.
+// Offers with no date pass — same "don't penalize missing data" convention as
+// the location filter — unless the provider gave a lower bound on the age
+// (`minAgeDays`, e.g. Workday's "Posted 30+ Days Ago") that already puts the
+// offer outside the window (#7514). `now` is injectable for deterministic tests.
 export function buildPostingAgeFilter(maxAgeDays, now = Date.now()) {
   const max = Number(maxAgeDays);
   if (!Number.isInteger(max) || max <= 0) return () => true;
   const cutoff = now - max * 24 * 60 * 60 * 1000; // N days in ms, subtracted from now
-  return (postedAt) => {
-    if (typeof postedAt !== 'number' || !Number.isFinite(postedAt)) return true;
+  return (postedAt, minAgeDays) => {
+    if (typeof postedAt !== 'number' || !Number.isFinite(postedAt)) {
+      // Strictly greater: "30+" against a 30-day window could still be day 30.
+      return !(Number.isFinite(minAgeDays) && minAgeDays > max);
+    }
     return postedAt >= cutoff;
   };
 }
@@ -996,16 +1001,22 @@ export function resolveEarlyStopMs(effectiveAfter, maxAgeDays, now = Date.now())
 // ── Absolute posted-date filter ─────────────────────────────────────
 // CLI-only (--posted-after / --posted-before), unlike the config-driven
 // relative max_posting_age_days above. Both bounds optional and inclusive
-// (before is treated as end-of-day). A job with no postedAt always passes —
-// same "don't penalize missing data" convention as buildPostingAgeFilter.
-export function buildPostedDateFilter(afterIso, beforeIso) {
+// (before is treated as end-of-day). A job with no postedAt passes — same
+// "don't penalize missing data" convention as buildPostingAgeFilter — unless
+// its `minAgeDays` lower bound means it was posted before the after-bound.
+export function buildPostedDateFilter(afterIso, beforeIso, now = Date.now()) {
   const afterMs = afterIso ? Date.parse(afterIso) : NaN;
   const beforeMs = beforeIso ? Date.parse(`${beforeIso}T23:59:59.999Z`) : NaN;
   const hasAfter = Number.isFinite(afterMs);
   const hasBefore = Number.isFinite(beforeMs);
   if (!hasAfter && !hasBefore) return () => true;
-  return (postedAt) => {
-    if (typeof postedAt !== 'number' || !Number.isFinite(postedAt)) return true;
+  return (postedAt, minAgeDays) => {
+    if (typeof postedAt !== 'number' || !Number.isFinite(postedAt)) {
+      // The newest date the posting could carry. `now` is taken after the
+      // board was read, so it errs toward keeping the posting.
+      const latest = Number.isFinite(minAgeDays) ? now - minAgeDays * 86_400_000 : Infinity;
+      return !(hasAfter && latest < afterMs);
+    }
     if (hasAfter && postedAt < afterMs) return false;
     if (hasBefore && postedAt > beforeMs) return false;
     return true;
@@ -5625,13 +5636,13 @@ async function main() {
           continue;
         }
         if (!company._isBoard) employerLocationAccepted.add(locationUrl);
-        if (!postingAgeFilter(job.postedAt)) {
+        if (!postingAgeFilter(job.postedAt, job.minAgeDays)) {
           totalFilteredPostingAge++;
           st.age++;
           if (!dryRun) ageFilteredOffers.push({ ...job, source: sourceName });
           continue;
         }
-        if (!postedDateFilter(job.postedAt)) {
+        if (!postedDateFilter(job.postedAt, job.minAgeDays)) {
           totalFilteredPostedDate++;
           st.age++;
           continue;
