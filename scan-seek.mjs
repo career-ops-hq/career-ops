@@ -432,5 +432,9 @@ async function main(args) {
 if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
   validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
-  main(args).catch((err) => { console.error('Fatal:', err.message); process.exit(1); });
+  // process.exitCode, not process.exit(1): a fatal error here comes after the
+  // SEEK requests, and on Windows Node 24 aborts when process.exit() runs right
+  // after a request (nodejs/node#56645, the crash in #3788), printing a libuv
+  // assertion and a crash code instead of this message and exit 1.
+  main(args).catch((err) => { console.error('Fatal:', err.message); process.exitCode = 1; });
 }
