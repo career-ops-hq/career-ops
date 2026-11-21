@@ -646,6 +646,108 @@ try {
     }
   }
 
+  // Share links (/j/<shortcode>) carry no account slug, and Workable API URLs
+  // (/api/v1/widget/accounts/<slug>, /api/v3/accounts/<slug>/jobs) carry the
+  // slug after /accounts/ rather than in segment 0; entry.api takes precedence.
+  {
+    const { resolveWorkableSlug } = workableModule;
+    const shareInputs = [
+      'https://apply.workable.com/j/801183DB79',
+      'https://apply.workable.com/J/801183DB79',
+      'https://apply.workable.com/j/',
+    ];
+    const shareHits = shareInputs
+      .map(url => [url, resolveWorkableSlug({ name: 'Acme', careers_url: url }), workable.detect({ name: 'Acme', careers_url: url })])
+      .filter(([, slug, hit]) => slug !== null || hit !== null);
+    if (shareHits.length === 0) {
+      pass('resolveWorkableSlug() and detect() reject /j/ share links instead of treating "j" as an account slug');
+    } else {
+      fail(`share links were wrongly accepted: ${JSON.stringify(shareHits)}`);
+    }
+
+    const accountPosting = resolveWorkableSlug({ name: 'Acme', careers_url: 'https://apply.workable.com/acme-widgets/j/801183DB79/' });
+    if (accountPosting === 'acme-widgets') {
+      pass('resolveWorkableSlug() still extracts the account slug from /<account>/j/<shortcode>');
+    } else {
+      fail(`account-scoped posting slug = ${JSON.stringify(accountPosting)}`);
+    }
+
+    const apiCases = [
+      [{ name: 'Acme', careers_url: 'https://acme.example/careers', api: 'https://apply.workable.com/api/v1/widget/accounts/acme-widgets?details=true' }, 'acme-widgets'],
+      [{ name: 'Acme', careers_url: 'https://acme.example/careers', api: 'https://apply.workable.com/api/v1/accounts/acme-widgets/jobs/801183DB79' }, 'acme-widgets'],
+      [{ name: 'Acme', careers_url: 'https://acme.example/careers', api: 'https://apply.workable.com/api/v3/accounts/acme-widgets/jobs' }, 'acme-widgets'],
+      [{ name: 'Acme', careers_url: 'https://apply.workable.com/api/v1/widget/accounts/acme-widgets/' }, 'acme-widgets'],
+      [{ name: 'Acme', careers_url: 'https://acme.example/careers', api: 'https://apply.workable.com/acme-widgets' }, 'acme-widgets'],
+      [{ name: 'Acme', careers_url: 'https://apply.workable.com/api/v1/widget/accounts/acme-widgets?details=true' }, 'acme-widgets'],
+      [{ name: 'Acme', careers_url: 'https://apply.workable.com/API/v3/accounts/AcmeWidgets/jobs' }, 'AcmeWidgets'],
+      [{ name: 'Acme', careers_url: 'https://apply.workable.com/old-slug', api: 'https://apply.workable.com/api/v1/widget/accounts/new-slug' }, 'new-slug'],
+      [{ name: 'Acme', careers_url: 'https://apply.workable.com/acme-widgets', api: '   ' }, 'acme-widgets'],
+      [{ name: 'Acme', careers_url: 'https://apply.workable.com/acme-widgets', api: null }, 'acme-widgets'],
+    ];
+    const apiFailures = apiCases
+      .map(([entry, want]) => [entry.api || entry.careers_url, want, resolveWorkableSlug(entry)])
+      .filter(([, want, got]) => got !== want);
+    if (apiFailures.length === 0) {
+      pass('resolveWorkableSlug() extracts account slugs from entry.api and careers_url API endpoints');
+    } else {
+      fail(`API URL resolution failures: ${JSON.stringify(apiFailures)}`);
+    }
+
+    const badApiCases = [
+      { name: 'Acme', careers_url: 'https://apply.workable.com/api' },
+      { name: 'Acme', careers_url: 'https://apply.workable.com/api/' },
+      { name: 'Acme', careers_url: 'https://apply.workable.com/api/v1/widget/accounts/' },
+      { name: 'Acme', careers_url: 'https://apply.workable.com/api/v3/accounts' },
+      { name: 'Acme', careers_url: 'https://apply.workable.com/api/v3/accounts//jobs' },
+      { name: 'Acme', careers_url: 'https://apply.workable.com/api/v1/widget/accounts//jobs' },
+      { name: 'Acme', careers_url: 'https://apply.workable.com/api/v1/widget/accounts/bad.slug' },
+      { name: 'Acme', careers_url: 'https://apply.workable.com/acme-widgets', api: 'https://boards-api.greenhouse.io/v1/boards/acme/jobs' },
+    ];
+    const badApiHits = badApiCases
+      .map(entry => [entry.api || entry.careers_url, resolveWorkableSlug(entry)])
+      .filter(([, got]) => got !== null);
+    if (badApiHits.length === 0) {
+      pass('resolveWorkableSlug() rejects truncated/invalid Workable API paths and respects non-Workable entry.api pins');
+    } else {
+      fail(`invalid API URLs were accepted: ${JSON.stringify(badApiHits)}`);
+    }
+
+    let apiFetchedUrl = null;
+    const pinnedJobs = await workable.fetch(
+      { name: 'Acme', careers_url: 'https://acme.example/careers', api: 'https://apply.workable.com/api/v1/widget/accounts/acme-widgets?details=true' },
+      {
+        transport: 'http',
+        sleep: async () => {},
+        fetchJson: async (url) => { apiFetchedUrl = url; return widgetPayload; },
+        fetchText: async () => { throw new Error('markdown feed should not run'); },
+      },
+    );
+    if (apiFetchedUrl === 'https://apply.workable.com/api/v1/widget/accounts/acme-widgets?details=true' && pinnedJobs.length === 2) {
+      pass('workable.fetch() reads a corporate careers_url entry pinned via entry.api');
+    } else {
+      fail(`entry.api fetch got url=${JSON.stringify(apiFetchedUrl)} jobs=${pinnedJobs.length}`);
+    }
+
+    let shareFetched = 0;
+    try {
+      await workable.fetch(
+        { name: 'ShareLink', careers_url: 'https://apply.workable.com/j/801183DB79' },
+        {
+          transport: 'http',
+          fetchJson: async () => { shareFetched++; return widgetPayload; },
+          fetchText: async () => { shareFetched++; return ''; },
+        },
+      );
+      fail('workable.fetch() should reject a /j/ share link');
+    } catch (e) {
+      if (e.message.includes('cannot derive feed URL') && shareFetched === 0) {
+        pass('workable.fetch() rejects a /j/ share link before any request');
+      } else {
+        fail(`share-link fetch error=${e.message} calls=${shareFetched}`);
+      }
+    }
+  }
+
 } catch (e) {
   fail(`workable provider tests crashed: ${e.message}`);
 }
