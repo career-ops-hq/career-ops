@@ -3412,7 +3412,9 @@ function sourceSpellsFact(sourceText, value) {
 export function collapseMarkdownLinks(text, { keepLines = false } = {}) {
   // keepLines puts back the line breaks a removed span held, so the result
   // has the same line numbers as the input (claimEvidence cites lines).
-  const breaks = (span) => (keepLines ? span.replace(/[^\n]/g, '') : '');
+  const lineBreaks = (span) => span.replace(/[^\n]/g, '');
+  // The line breaks of a replaced span that its kept label does not carry.
+  const breaks = (span, label) => (keepLines ? lineBreaks(span).slice(lineBreaks(label).length) : '');
   let out = '';
   let i = 0;
   const opener = /\[\s*([^\][]*?)\s*\]\(/y;
@@ -3430,7 +3432,7 @@ export function collapseMarkdownLinks(text, { keepLines = false } = {}) {
           j++;
         }
         if (depth === 0) {
-          out += m[1] + breaks(text.slice(i, j));
+          out += m[1] + breaks(text.slice(i, j), m[1]);
           i = j;
           continue;
         }
@@ -3438,7 +3440,7 @@ export function collapseMarkdownLinks(text, { keepLines = false } = {}) {
     }
     out += text[i++];
   }
-  out = out.replace(/\[\s*([^\][]*?)\s*\]\s?\[[^\][]*\]/g, (link, label) => label + breaks(link));
+  out = out.replace(/\[\s*([^\][]*?)\s*\]\s?\[[^\][]*\]/g, (link, label) => label + breaks(link, label));
   // A definition is dropped whole. Anything that is not one, as CommonMark
   // reads it, is text a reader sees and stays:
   //   - it starts its line, after at most three spaces, and cannot interrupt a
@@ -3945,6 +3947,8 @@ function runSelfTest() {
     kind: 'metric', value: '4 hours', source: exampleCv, line: 23,
     text: '- Reduced model deployment time from 2 weeks to 4 hours with CI/CD pipeline (GitHub Actions + SageMaker)',
   }]]);
+  equal('links keep their line numbers for evidence',
+    collapseMarkdownLinks('[Profile\nlink](https://example.invalid)\n[a\nb][ref]\n\n[ref]:\nhttps://x.invalid\nKafka', { keepLines: true }).split('\n').length, 8);
   equal('no evidence unless asked',
     'evidence' in verifyFacts('- Reduced model deployment time to 4 hours.', { sourcePaths: [exampleCv], configPath: '/nonexistent' }), false);
   equal('two plan horizons do not trigger a coverage warning',
