@@ -43,7 +43,9 @@ import { appendFileSync, existsSync, lstatSync, readdirSync, readFileSync, write
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  ADP_MYJOBS_RESERVED,
   BOARD_ATS,
+  CLEARCOMPANY_SITE_RE,
   DNS_LABEL_ATS,
   OPTIONAL_REGION_BOARD_URL_BUILDERS,
   REGIONAL_BOARD_URL_BUILDERS,
@@ -222,6 +224,9 @@ function slugProblem(ats, slug, label) {
   }
   if (ats === 'rippling' && !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(slug)) return `rippling ${label}s are letters, digits and hyphens`;
   if (ats === 'workable' && !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(slug)) return `workable ${label}s are letters, digits, "_" and "-"`;
+  if (ats === 'clearcompany' && !CLEARCOMPANY_SITE_RE.test(slug)) return `clearcompany ${label}s are the career site's id, a lowercase GUID`;
+  if (ats === 'adp-myjobs' && ADP_MYJOBS_RESERVED.includes(slug.toLowerCase())) return `${label} ${show(slug)} is one of myjobs.adp.com's own routes, not a career site`;
+  if (ats === 'adp-myjobs' && !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(slug)) return `adp-myjobs ${label}s are letters, digits, "_" and "-"`;
   return null;
 }
 

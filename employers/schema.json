@@ -10,14 +10,14 @@
       "properties": {
         "ats": {
           "description": "The ATS that hosts the board.",
-          "enum": ["greenhouse", "ashby", "lever", "workable", "smartrecruiters", "rippling", "join", "recruitee", "breezy", "bamboohr", "pinpoint", "applicantpro", "hibob", "hirehive", "homerun", "jazzhr", "keka", "personio", "prevueaps", "schoolspring", "taleez", "teamtailor", "trakstar", "turbohire", "zoho-recruit", "workday"]
+          "enum": ["greenhouse", "ashby", "lever", "workable", "smartrecruiters", "rippling", "join", "recruitee", "breezy", "bamboohr", "pinpoint", "applicantpro", "hibob", "hirehive", "homerun", "jazzhr", "keka", "personio", "prevueaps", "schoolspring", "taleez", "teamtailor", "trakstar", "turbohire", "zoho-recruit", "avature", "clearcompany", "jobvite", "eightfold", "adp-myjobs", "workday"]
         },
         "region": {
           "description": "The region or host the board is on. Greenhouse and Lever: us or eu, always. Personio: com for <id>.jobs.personio.com, absent for <id>.jobs.personio.de. Zoho Recruit: the data-centre domain when it is not zohorecruit.com (au: .com.au, ca, cn: .com.cn, eu, in, jp, sa).",
           "enum": ["us", "eu", "com", "au", "ca", "cn", "in", "jp", "sa"]
         },
         "board": {
-          "description": "The board id. Workday: tenant/wdN/site. Ashby and the Workday site keep their case; the ATS whose board is a subdomain (recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit) are lowercase; all but the first four (recruitee, breezy, bamboohr, pinpoint) are one DNS label of at most 63 characters; those four are not limited yet.",
+          "description": "The board id. Workday: tenant/wdN/site. ClearCompany: the career site's id, a lowercase GUID. Ashby and the Workday site keep their case; the ATS whose board is a subdomain (recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, avature, eightfold) are lowercase; all but the first four (recruitee, breezy, bamboohr, pinpoint) are one DNS label of at most 63 characters; those four are not limited yet.",
           "type": "string",
           "minLength": 2,
           "maxLength": 200
@@ -103,8 +103,12 @@
         { "if": { "required": ["retired"] }, "then": { "required": ["retired_reason"] } },
         { "if": { "required": ["retired_reason"] }, "then": { "required": ["retired"] } },
         {
-          "if": { "properties": { "ats": { "enum": ["applicantpro", "hibob", "hirehive", "homerun", "jazzhr", "keka", "personio", "prevueaps", "schoolspring", "taleez", "teamtailor", "trakstar", "turbohire", "zoho-recruit"] } }, "required": ["ats"] },
+          "if": { "properties": { "ats": { "enum": ["applicantpro", "hibob", "hirehive", "homerun", "jazzhr", "keka", "personio", "prevueaps", "schoolspring", "taleez", "teamtailor", "trakstar", "turbohire", "zoho-recruit", "avature", "eightfold"] } }, "required": ["ats"] },
           "then": { "properties": { "board": { "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$" } } }
+        },
+        {
+          "if": { "properties": { "ats": { "const": "clearcompany" } }, "required": ["ats"] },
+          "then": { "properties": { "board": { "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" } } }
         }
       ]
     },

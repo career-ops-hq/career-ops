@@ -61,11 +61,16 @@ import teamtailor from '../providers/teamtailor.mjs';
 import trakstar from '../providers/trakstar.mjs';
 import turbohire from '../providers/turbohire.mjs';
 import zohoRecruit from '../providers/zoho-recruit.mjs';
+import avature from '../providers/avature.mjs';
+import clearcompany from '../providers/clearcompany.mjs';
+import jobvite from '../providers/jobvite.mjs';
+import eightfold from '../providers/eightfold.mjs';
+import adpMyjobs from '../providers/adp-myjobs.mjs';
 
 const PROVIDERS = {
   greenhouse, ashby, lever, workable, smartrecruiters, rippling, join: joinProvider,
   recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio,
-  prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, 'zoho-recruit': zohoRecruit, workday,
+  prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, 'zoho-recruit': zohoRecruit, avature, clearcompany, jobvite, eightfold, 'adp-myjobs': adpMyjobs, workday,
 };
 
 const VALIDATOR = join(ROOT, 'seeds', 'employers-validate.mjs');
@@ -169,7 +174,8 @@ test('every admitted ATS has the provider that reads it, and that provider reads
   assert.deepEqual(Object.keys(PROVIDERS).sort(), [...BOARD_ATS].sort());
   for (const ats of BOARD_ATS) {
     assert.equal(PROVIDERS[ats].id, ats);
-    const board = ats === 'workday' ? 'acme/wd5/External' : 'acme';
+    // A ClearCompany board is its career site's GUID, not a slug.
+    const board = ats === 'workday' ? 'acme/wd5/External' : ats === 'clearcompany' ? '0f8fad5b-d9cb-469f-a165-70867728950e' : 'acme';
     const regions = Object.hasOwn(REGIONAL_BOARD_URL_BUILDERS, ats) ? regionsOf(ats) : [undefined, ...regionsOf(ats)];
     for (const region of regions) {
       const url = buildBoardUrl({ ats, region, board, workday_host: ats === 'workday' ? 'jobs' : undefined });

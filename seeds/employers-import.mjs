@@ -67,6 +67,8 @@ const PATH_HOSTS = Object.freeze({
   'careers.smartrecruiters.com': 'smartrecruiters',
   'jobs.smartrecruiters.com': 'smartrecruiters',
   'ats.rippling.com': 'rippling',
+  'jobs.jobvite.com': 'jobvite',
+  'myjobs.adp.com': 'adp-myjobs',
 });
 /** ATS whose board is the company's subdomain. */
 const SUBDOMAIN_HOSTS = Object.freeze({
@@ -88,6 +90,8 @@ const SUBDOMAIN_HOSTS = Object.freeze({
   'hire.trakstar.com': 'trakstar',
   'recruiterbox.com': 'trakstar',
   'turbohire.co': 'turbohire',
+  'avature.net': 'avature',
+  'eightfold.ai': 'eightfold',
 });
 /**
  * ATS whose board is the company's subdomain on one of several hosts: the ATS,
@@ -160,6 +164,16 @@ function readCoords(u) {
     const m = /^\/openings\/([^/]+)(?:\/|$)/i.exec(u.pathname);
     if (!m) return { error: 'an ApplicantPro openings URL is www.applicantpro.com/openings/<company>/…' };
     return { ats: 'applicantpro', board: m[1].toLowerCase() };
+  }
+  // ClearCompany: the career site's id, in the API path or in the career-site script's siteId parameter.
+  if (host === 'careers-api.clearcompany.com') {
+    if (segs[0] !== 'v1' || !segs[1]) return { error: 'a ClearCompany board is careers-api.clearcompany.com/v1/<siteId>' };
+    return { ats: 'clearcompany', board: segs[1].toLowerCase() };
+  }
+  if (host === 'careers-content.clearcompany.com') {
+    const id = [...u.searchParams].find(([k]) => k.toLowerCase() === 'siteid')?.[1];
+    if (!id) return { error: 'a ClearCompany career-site URL names its site in ?siteId=' };
+    return { ats: 'clearcompany', board: id.toLowerCase() };
   }
   if ((host === 'taleez.com' || host === 'www.taleez.com') && segs[0] === 'apply') {
     return { error: 'a Taleez job link (taleez.com/apply/<job>) does not name the company; use <company>.taleez.com' };
