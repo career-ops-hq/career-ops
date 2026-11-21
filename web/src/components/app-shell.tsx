@@ -1,5 +1,8 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { PanelLeftClose, PanelLeftOpen, MoveHorizontal } from "lucide-react";
+import { applyAppearance, loadAppearance, saveAppearance } from "@/lib/appearance";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
@@ -22,6 +25,31 @@ import { visibleNavItems, isActivePath } from "@/lib/nav-items";
 
 export function AppShell({ children, followupsEnabled }: { children: React.ReactNode; followupsEnabled: boolean }) {
   const pathname = usePathname();
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    try {
+      setCollapsed(localStorage.getItem("career-ops:sidebar") === "hidden");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  const toggleSidebar = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    try {
+      localStorage.setItem("career-ops:sidebar", next ? "hidden" : "shown");
+    } catch {
+      /* ignore */
+    }
+  };
+  const cycleWidth = () => {
+    const a = loadAppearance();
+    const order = ["small", "medium", "full"] as const;
+    const next = { ...a, width: order[(order.indexOf(a.width) + 1) % 3] };
+    applyAppearance(next);
+    window.dispatchEvent(new Event("appearancechange")); // keep the Config page in step
+    void saveAppearance(next);
+  };
   return (
     <JobsProvider>
       <PipelineProvider>
@@ -35,13 +63,21 @@ export function AppShell({ children, followupsEnabled }: { children: React.React
       </a>
       <MobileNav followupsEnabled={followupsEnabled} />
       <div className="flex min-h-screen">
-        <aside className="sticky top-0 hidden print:hidden h-screen w-60 shrink-0 flex-col overflow-y-auto border-r border-border bg-surface/30 p-4 md:flex">
+        <aside className={cn("sticky top-0 hidden print:hidden h-screen w-60 shrink-0 flex-col overflow-y-auto border-r border-border bg-surface/30 p-4", !collapsed && "md:flex")}>
           <Link href="/" className="mb-8 flex items-center gap-2.5 px-1">
             <CoMark size={32} />
             <span className={`${instrumentSerif.className} relative -top-px text-2xl font-normal tracking-tight text-landing`}>
               career-ops
             </span>
           </Link>
+          <div className="mb-4 flex items-center gap-1 px-1">
+            <button type="button" onClick={toggleSidebar} aria-label="Hide sidebar" title="Hide sidebar" className="rounded-md p-2 text-muted hover:bg-surface-hover hover:text-foreground">
+              <PanelLeftClose className="size-4" />
+            </button>
+            <button type="button" onClick={cycleWidth} aria-label="Change page width" title="Page width: small / medium / full" className="rounded-md p-2 text-muted hover:bg-surface-hover hover:text-foreground">
+              <MoveHorizontal className="size-4" />
+            </button>
+          </div>
           <CommandPalette followupsEnabled={followupsEnabled} />
           <nav className="flex flex-col gap-1">
             {visibleNavItems(followupsEnabled).map(({ href, label, icon: Icon, chip }) => {
@@ -76,6 +112,12 @@ export function AppShell({ children, followupsEnabled }: { children: React.React
             <ThemeToggle showLabel />
           </div>
         </aside>
+        {collapsed && (
+          <button type="button" onClick={toggleSidebar} aria-label="Show sidebar" title="Show sidebar"
+            className="fixed left-3 top-3 z-30 hidden rounded-md border border-border bg-surface p-2 text-muted hover:text-foreground md:block print:hidden">
+            <PanelLeftOpen className="size-4" />
+          </button>
+        )}
         <main id="main-content" tabIndex={-1} className="flex-1 overflow-x-hidden focus:outline-none">{children}</main>
         <div className="print:hidden">
           <AssistantConsole />
