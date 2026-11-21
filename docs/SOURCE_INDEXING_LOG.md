@@ -181,6 +181,22 @@ A general job board with one host per Latin American country. Only the Colombian
 
 ---
 
+## Naukri (not listed)
+
+Naukri, the largest general job board in India, is **not** in `providers/` and has no browser scanner. Measured on 2026-11-20 from a plain HTTPS client with a browser User-Agent and no login:
+
+- `https://www.naukri.com/python-jobs` and a posting URL both answer HTTP 200 with ~38 KB of client-rendered Next.js shell: no `<title>`, no job cards, no JSON-LD. The posting side's flight payload carries `jobDetailsResp: {data: null, loading: true}`.
+- The JSON the page's own client fetches (`/jobapi/v3/search?…`, with the `appid`/`systemid` headers its client sends) answers **HTTP 406** `{"message":"recaptcha required","statusCode":406}`. The mobile host (`m.naukri.com`) answers 403.
+- `https://www.naukri.com/robots.txt` (HTTP 200) blocks AI crawlers by name — `GPTBot`, `ClaudeBot`, `Claude-User`, `OAI-SearchBot` and others — with `Disallow: /`.
+
+**Rule 6, and why it decides this on its own.** `robots.txt` is not a gate (2026-11-08), but a CAPTCHA and a login or user account are stops in both places. Naukri puts the listing data behind a reCAPTCHA challenge and the posting text behind a signed-in account, so no zero-auth path exists and no browser scanner could do better: it would report the challenge and return nothing on every run. A redirect through a guest endpoint, a session cookie or a different User-Agent to defeat either would be the bypass the policy forbids, so none was attempted.
+
+**What was shipped instead.** The part of Naukri that belongs to the candidate is the job-alert email Naukri mails to a registered account. `naukri-import.mjs` reads a paste of that email (or a saved `.eml`) into `data/pipeline.md` with no network request at all — the same shape as the LinkedIn alerts importer — and `url-key.mjs` dedups Naukri URLs on the trailing posting id, so a rewritten slug cannot produce a second tracker row. Naukri links then go through the usual aggregator rule: confirm the role at the employer and evaluate it there. Full record in [NAUKRI.md](NAUKRI.md).
+
+If Naukri ever serves its listings to a plain visitor, re-measure and open a [source proposal](https://github.com/career-ops-hq/career-ops/issues/new?template=source-proposal.yml).
+
+---
+
 ## ElEmpleo (not listed)
 
 Proposed in [#2650](https://github.com/career-ops-hq/career-ops/pull/2650) together with Computrabajo and Magneto365, and taken out of it on 2026-10-23. The comments in `https://www.elempleo.com/robots.txt` (read 2026-10-23) say that extracting or scraping its content by automated means is prohibited without ELEMPLEO's prior written permission. A provider reads the board by automated means, so it is not listed. The provider code stays in the history of #2650 (`providers/elempleo.mjs` at e40e148) in case ELEMPLEO gives that permission.

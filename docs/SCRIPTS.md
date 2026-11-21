@@ -94,6 +94,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `node community-asks.mjs next` | `community-asks.mjs` | The one-time community asks (star, then manifesto): prints at most one line, never in CI or headless runs; `off` turns them off |
 | `node upgrade-tests.mjs --pr-gate` | `upgrade-tests.mjs` | Upgrade an install seeded from the newest old release to this commit and prove user data survived (CI gate; `--canary` proves the gate can fail) |
 | `node linkedin-join.mjs` | `linkedin-join.mjs` | Warm-intro finder — join a LinkedIn `Connections.csv` export against tracker + `portals.yml` companies to answer "do I know anyone here?" (offline, zero-token, read-only; see [LINKEDIN_JOIN.md](LINKEDIN_JOIN.md)) |
+| `node naukri-import.mjs` | `naukri-import.mjs` | Read a pasted Naukri job-alert email (or `.eml`) into `data/pipeline.md` + scan history, deduped by the posting id; no network request, because Naukri's listings sit behind a reCAPTCHA and its posting text behind a login (see [NAUKRI.md](NAUKRI.md)) |
 
 ---
 
