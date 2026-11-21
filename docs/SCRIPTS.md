@@ -1212,6 +1212,21 @@ npm run scan
 node scan.mjs --include-blacklisted   # audit: let blacklisted companies through, annotated
 ```
 
+**Host pacing and rate-limited boards:** a board whose request meets a 429 or a Cloudflare challenge (`cf-mitigated: challenge`) is not dropped: it is re-queued and retried after the sweep in up to `rate_limit_retry.rounds` rounds (default 3), each waiting Retry-After or an exponential backoff measured from when the board failed (`base_delay_s` 60, doubling, capped at `max_delay_s` 300), with `concurrency` boards (default 2) in flight. A round that reads none of its boards ends the retries, since the refusal is evidently not wearing off with time. A board still refused is listed in the summary's ❌ block of boards NOT read this run (a failed board is never reported like an empty one) and counted in `scan-runs.tsv` `boards_failed`; boards rescued by any retry are counted in `boards_recovered`, and the `--json` receipt carries `failed_boards` and `recovered_boards`.
+
+`host_pacing` (opt-in) gives a whole host family ONE request budget (`providers/_host-pacing.mjs`): for Workday, every `*.myworkdayjobs.com` / `*.myworkdaysite.com` tenant shares it, because they share one edge and per-hostname limits never see the sum. Request starts are spaced to `requests_per_minute`; a 429 or challenge anywhere in the family doubles the spacing (up to 8x) and holds the family for Retry-After or 30 s; 20 successes in a row halve it back. It is off by default because on 2026-11-20 pacing Workday to 60/min did not reduce its challenges (83 of 90 boards either way): those challenges were not rate-triggered. Pacing only ever waits; it never solves a challenge or changes headers. `CAREER_OPS_HOST_PACING=0` turns it off for one run.
+
+```yaml
+host_pacing:          # opt-in
+  workday:
+    requests_per_minute: 60
+rate_limit_retry:     # defaults shown
+  rounds: 3
+  base_delay_s: 60
+  max_delay_s: 300
+  concurrency: 2
+```
+
 **Parallel search lanes (#2271):** all four of `scan.mjs`'s files are overridable by environment variable, so a second search with different targeting (a bridge/income track, a career-change track, or a partner sharing the checkout) can be fully self-contained in one clone:
 
 | Variable | Default |
@@ -2319,5 +2334,7 @@ node community-asks.mjs off             # never ask again; CAREER_OPS_NO_ASKS=1 
 * `filtered_visa` — dropped by `visa_filter`
 * `filtered_posted_date` — outside the `--since` / `--posted-after` / `--posted-before` bounds
 * `filtered_country_eligibility` — dropped by `country_eligibility_filter` (#2093)
+* `boards_failed` — boards the run could not read at all (their postings were never seen), after every retry; listed by name in the run summary's ❌ block
+* `boards_recovered` — boards that failed during the sweep (transient error, 429 or Cloudflare challenge) and were read on a retry
 
 As the project is in continuous development, to parse for a stat we recommend doing it by column header instead of position. A file created by an older release keeps its old header while new rows carry the current columns; `node migrate-scan-runs.mjs` reports the mismatch, and `node migrate-scan-runs.mjs --apply` rewrites the file onto the current header after saving `<file>.bak`.

@@ -59,6 +59,8 @@ import path from 'path';
 import { loadYaml } from './lib/yaml-document.mjs';
 
 import { makeHttpCtx } from './providers/_http.mjs';
+import { configureHostPacing, hostPacingStats } from './providers/_host-pacing.mjs';
+import { isRateLimitedError, rateLimitedItem, resolveRateLimitRetry, retryRateLimitedBoards } from './lib/deferred-board-retry.mjs';
 import { formatHttpCacheWindow, httpCacheStats, resolveHttpCacheTtlMs, withHttpCache } from './providers/_http-cache.mjs';
 import { buildTrustValidator } from './providers/_trust-validator.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
@@ -4501,7 +4503,7 @@ const SCAN_RUNS_PATH = path.join(DATA_ROOT, 'data/scan-runs.tsv');
 // writeRunFailureRow (#2643) so trend stats can exclude survivorship bias.
 // Consumers MUST parse by header name, never by position — columns may be
 // appended in later versions.
-export const SCAN_RUNS_HEADER = 'timestamp\tstatus\tcompanies\tboards\tfound\tfiltered_title\tfiltered_tier\tfiltered_location\tfiltered_posting_age\tfiltered_salary\tfiltered_content\tfiltered_cooldown\tdupes\tnew_added\terrors\tfiltered_blacklist\tfiltered_visa\tfiltered_posted_date\tfiltered_country_eligibility\n';
+export const SCAN_RUNS_HEADER = 'timestamp\tstatus\tcompanies\tboards\tfound\tfiltered_title\tfiltered_tier\tfiltered_location\tfiltered_posting_age\tfiltered_salary\tfiltered_content\tfiltered_cooldown\tdupes\tnew_added\terrors\tfiltered_blacklist\tfiltered_visa\tfiltered_posted_date\tfiltered_country_eligibility\tboards_failed\tboards_recovered\n';
 
 // Failure-path writes (#2643). main() registers a snapshot closure once the
 // sweep's counters exist (never on --dry-run, never before the sweep starts —
@@ -4569,6 +4571,10 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
     c.filteredPostedDate ?? 0,
     // filtered_country_eligibility (#2093) appended at the END for the same reason.
     c.filteredCountryEligibility ?? 0,
+    // boards_failed / boards_recovered appended at the END for the same
+    // reason: boards never read this run, and boards read only on a retry.
+    c.boardsFailed ?? 0,
+    c.boardsRecovered ?? 0,
   ].join('\t') + '\n';
   appendLedgerRows(filePath, row);
 }
@@ -5193,6 +5199,15 @@ async function main() {
   const companies = Array.isArray(config.tracked_companies) ? config.tracked_companies : [];
   const boards = Array.isArray(config.job_boards) ? config.job_boards : [];
   const titleFilter = buildTitleFilter(config.title_filter);
+  // One request budget per host family that shares an upstream rate limit
+  // (every Workday tenant sits behind one Cloudflare edge), and the deferred
+  // retry for boards that were rate-limited anyway. See
+  // providers/_host-pacing.mjs and lib/deferred-board-retry.mjs.
+  // CAREER_OPS_HOST_PACING=0 turns pacing off (tests, a one-board debug run).
+  if (process.env.CAREER_OPS_HOST_PACING !== '0') {
+    configureHostPacing(config.host_pacing, { warn: (m) => console.error(`⚠️  ${m}`) });
+  }
+  const rateLimitRetry = resolveRateLimitRetry(config.rate_limit_retry, (m) => console.error(`⚠️  ${m}`));
 
   // Seniority tier classifier integration
   let classifyTier = null;
@@ -5498,6 +5513,15 @@ async function main() {
   // Targets whose fetch threw. Not errors.length: that also holds resolve
   // errors and a local parser rescued by its API fallback, which succeeded.
   let failedTargets = 0;
+  // Boards that could not be read, keyed by company name -> { reason, kind }.
+  // An entry is removed when a retry reads the board, so what is left at the
+  // end is exactly the set of boards whose postings this run never saw: they
+  // are listed in their own summary block and counted in scan-runs.tsv, and
+  // are never mistaken for a board with zero postings.
+  /** @type {Map<string, { reason: string, kind: string }>} */
+  const failedBoards = new Map();
+  // Boards that failed during the sweep and were read on a retry.
+  const recoveredBoards = new Set();
   const emptyTargets = [];
   const unverifiedZeroTargets = [];
   // Boards a provider read only partly (page cap, 429, fetch error), keyed by
@@ -5521,6 +5545,7 @@ async function main() {
       filteredContent: totalFilteredContent,
       filteredCooldown: totalFilteredCooldown, dupes: totalDupes, newAdded: 0,
       errors: errors.length, filteredBlacklist: totalFilteredBlacklist,
+      boardsFailed: failedBoards.size, boardsRecovered: recoveredBoards.size,
       filteredVisa: totalFilteredVisa, filteredPostedDate: totalFilteredPostedDate,
       filteredCountryEligibility: totalFilteredCountryEligibility,
     }));
@@ -5559,6 +5584,22 @@ async function main() {
   /** @type {Array<{ company: any, entry: any }>} */
   const transientFailures = [];
   const retriedTargets = new Set();
+  // Boards that failed on 429 / a Cloudflare challenge, retried in rounds
+  // after the sweep (see retryRateLimitedFailures below).
+  /** @type {Array<{ company: any, entry: any, failedAt: number, retryAfterMs: number|null }>} */
+  const rateLimitedFailures = [];
+  let rateLimitRoundsRun = 0;
+  // Undo one recorded failure before a retry: the retry's own outcome decides.
+  const forgetFailure = (company, entry) => {
+    const at = errors.indexOf(entry);
+    if (at !== -1) errors.splice(at, 1);
+    failedTargets--;
+    failedBoards.delete(company.name);
+    // The row stays marked failed only while a board in it still has a failure.
+    const retriedStat = boardStat(company);
+    retriedStat.failures = Math.max(0, (retriedStat.failures || 0) - 1);
+    retriedStat.error = retriedStat.failures > 0;
+  };
   const tasks = targets.map(company => async () => {
     let provider = company._provider;
     const st = boardStat(company);
@@ -5608,14 +5649,21 @@ async function main() {
       failedTargets++;
       st.failures = (st.failures || 0) + 1;
       st.error = true;
+      const rateLimited = isRateLimitedError(err);
       const entry = {
         company: company.name,
         error: err.message,
-        kind: classifyFetchError(err),
+        // A 429 or a Cloudflare challenge is its own kind: classifyFetchError
+        // files it under 'unknown', which reads like a broken board in
+        // portal-health.tsv rather than one the edge turned away this run.
+        kind: rateLimited ? 'rate_limited' : classifyFetchError(err),
         status: err.status ?? observation.lastStatus,
       };
       errors.push(entry);
-      if (retryable && TRANSIENT_KINDS.has(entry.kind) && !retriedTargets.has(company)) {
+      failedBoards.set(company.name, { reason: err.message, kind: entry.kind });
+      if (retryable && rateLimited && rateLimitRetry.rounds > 0) {
+        rateLimitedFailures.push({ ...rateLimitedItem(company, err), entry });
+      } else if (retryable && TRANSIENT_KINDS.has(entry.kind) && !retriedTargets.has(company)) {
         transientFailures.push({ company, entry });
       }
     };
@@ -5948,16 +5996,35 @@ async function main() {
     process.stderr.write(`scan: retrying ${pending.length} board(s) that failed on a transient error, one at a time: ${pending.map((p) => p.company.name).join(', ')}\n`);
     for (const { company, entry } of pending) {
       retriedTargets.add(company);
-      const at = errors.indexOf(entry);
-      if (at !== -1) errors.splice(at, 1);
-      failedTargets--;
-      // The row stays marked failed only while a board in it still has a failure.
-      const retriedStat = boardStat(company);
-      retriedStat.failures = Math.max(0, (retriedStat.failures || 0) - 1);
-      retriedStat.error = retriedStat.failures > 0;
+      forgetFailure(company, entry);
       await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_GAP_MS));
       await tasks[targets.indexOf(company)]();
+      if (!failedBoards.has(company.name)) recoveredBoards.add(company.name);
     }
+  };
+
+  // Rounds for boards the edge rate-limited or challenged (429,
+  // cf-mitigated: challenge). The request-level retry deliberately does not
+  // repeat a challenge into the burst that caused it (#7182), so before this
+  // such a board was dropped for the whole run — 83-84 Workday boards per
+  // full scan on 2026-11-19/20, although one request minutes later returned
+  // 200. The board is re-queued instead: each round waits out Retry-After or
+  // an exponential backoff measured from when the board failed, then runs the
+  // queue with only rate_limit_retry.concurrency boards in flight (host
+  // pacing still applies inside them). A board refused again goes back on the
+  // queue via recordError; whatever is left after the last round ended failed.
+  const retryRateLimitedFailures = async () => {
+    if (rateLimitedFailures.length === 0) return;
+    ({ rounds: rateLimitRoundsRun } = await retryRateLimitedBoards({
+      queue: rateLimitedFailures,
+      policy: rateLimitRetry,
+      log: (line) => process.stderr.write(`${line}\n`),
+      beforeRetry: ({ company, entry }) => { retriedTargets.add(company); forgetFailure(company, entry); },
+      runBoard: async (company) => {
+        await tasks[targets.indexOf(company)]();
+        if (!failedBoards.has(company.name)) recoveredBoards.add(company.name);
+      },
+    }));
   };
 
   const companyFetches = async () => {
@@ -5966,6 +6033,7 @@ async function main() {
       hostOf: (_task, index) => companyFetchHost(targets[index]),
     });
     await retryTransientFailures();
+    await retryRateLimitedFailures();
   };
   if (process.env.CAREER_OPS_HTTP_CACHE === '0') {
     await companyFetches();
@@ -6184,6 +6252,10 @@ async function main() {
   console.log(`Companies scanned:     ${summaryCompanies}`);
   if (summaryBoards > 0) console.log(`Job boards scanned:    ${summaryBoards}`);
   console.log(`Total jobs found:      ${totalFound}`);
+  if (failedBoards.size > 0 || recoveredBoards.size > 0) {
+    console.log(`Boards failed:         ${failedBoards.size} (not read; listed below)`);
+    console.log(`Boards recovered:      ${recoveredBoards.size} (failed in the sweep, read on retry)`);
+  }
   if (config.title_filter || totalFilteredTitle > 0) {
     console.log(`Filtered by title:     ${totalFilteredTitle} removed`);
   }
@@ -6455,6 +6527,24 @@ async function main() {
       console.log(`  ✗ ${e.company}: ${e.error}`);
     }
   }
+  // Every board this run could not read, in one block, whatever the cause:
+  // its postings were never seen, which is not the same as a board with no
+  // postings. Rate-limited boards land here only after every retry round.
+  if (failedBoards.size > 0) {
+    const rlRounds = rateLimitRoundsRun;
+    console.log(`\n❌ ${failedBoards.size} board(s) NOT read this run — their postings were not seen (this is not an empty board):`);
+    for (const [name, { reason, kind }] of failedBoards) {
+      const after = kind === 'rate_limited' && rlRounds > 0 ? ` (still refused after ${rlRounds} retry round${rlRounds === 1 ? '' : 's'})` : '';
+      console.log(`  ✗ ${name}: ${reason}${after}`);
+    }
+  }
+  if (recoveredBoards.size > 0) {
+    console.log(`\n🔁 ${recoveredBoards.size} board(s) failed in the sweep and were read on retry: ${[...recoveredBoards].join(', ')}`);
+  }
+  for (const [family, st] of Object.entries(hostPacingStats())) {
+    if (st.requests === 0) continue;
+    console.log(`ℹ️  ${family} pacing: ${st.requests} request(s) at ${Math.round(60_000 / st.intervalMs)}/min${st.rateLimited ? `, ${st.rateLimited} rate-limited (slowed to ${Math.round(60_000 / st.maxIntervalMs)}/min at worst)` : ''}, ${Math.round(st.waitedMs / 1000)}s queued in total`);
+  }
 
   if (verifiedOffers.length > 0) {
     console.log('\nNew offers:');
@@ -6491,6 +6581,7 @@ async function main() {
       filteredSalary: totalFilteredSalary, filteredWorkplace: totalFilteredWorkplace,
       filteredContent: totalFilteredContent, filteredCooldown: totalFilteredCooldown,
       dupes: totalDupes, newAdded: verifiedOffers.length, errors: errors.length,
+      boardsFailed: failedBoards.size, boardsRecovered: recoveredBoards.size,
       filteredBlacklist: totalFilteredBlacklist,
       filteredVisa: totalFilteredVisa,
       filteredPostedDate: totalFilteredPostedDate,
@@ -6519,6 +6610,9 @@ async function main() {
       added: verifiedOffers.length,
       added_urls: verifiedOffers.map(offer => offer.url),
       errors: errors.map(({ company, error }) => ({ company, error })),
+      // Boards whose postings this run never saw, and boards a retry rescued.
+      failed_boards: [...failedBoards].map(([company, { reason, kind }]) => ({ company, reason, kind })),
+      recovered_boards: [...recoveredBoards],
       unverified_zero: unverifiedZeroTargets,
       // Boards read only partly (lib/board-truncation.mjs), so automation can
       // tell a short read from a complete one without parsing stdout.
