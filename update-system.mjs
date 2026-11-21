@@ -1551,7 +1551,7 @@ function redirectToMainCheckout(cmd, argv = process.argv, env = process.env) {
     if (cmd === 'check') {
       // Agents stay quiet on unknown statuses (AGENTS.md); `apply` carries the
       // actionable message.
-      console.log(JSON.stringify({ status: 'worktree-without-main', local: localVersion(), worktree_branch: target.branch }));
+      console.log(JSON.stringify({ status: 'worktree-without-main', local: localVersion(), worktree_branch: target.branch, detail: target.error }));
       return 0;
     }
     throw new Error(target.error);
