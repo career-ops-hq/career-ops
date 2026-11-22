@@ -8,6 +8,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { atomicWrite, captureJd, captureName, commitCapture, deriveLabels, appendPendingRow, urlAlreadyPresent, today } from '../capture-jd.mjs';
 import { captureIdentity, findCaptureForUrl } from '../jd-capture.mjs';
 import { ensureToken, createServer, startEvaluation, isLoopbackHost } from '../capture-server.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 // Isolate every Git subprocess, including production calls inheriting process.env.
 for (const key of Object.keys(process.env)) {
@@ -820,7 +821,7 @@ test('the CLI reports a failed push and exits non-zero, keeping the capture and 
   git('config', `branch.${branch}.merge`, `refs/heads/${branch}`);
 
   const run = captureCli(root, ['--url', 'https://acme.test/jobs/push-fails', '--commit', '--push']);
-  assert.notEqual(run.status, 0, run.stdout);
+  assert.ok(exitedNonZero(run), describeSpawn(run, 'a requested push that failed must fail the run'));
   assert.match(run.stderr, /push-failed/);
   assert.match(run.stderr, /saved/i);
   assert.ok(rowLines(root).some((l) => rowUrl(l) === 'https://acme.test/jobs/push-fails'));
