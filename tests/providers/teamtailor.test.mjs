@@ -387,6 +387,18 @@ try {
     const { out, warnings } = await quietly(() => teamtailor.fetch(acme, mkCtx(async () => pages[n++])));
     if (out.length === 100 && out.truncated?.reason === 'fetch-error' && warnings.length === 1) pass('teamtailor.fetch() marks a non-RSS later page fetch-error instead of ending the walk');
     else fail(`non-RSS page 2: ${out.length} jobs, truncated=${JSON.stringify(out.truncated)}, warnings=${warnings.length}`);
+    // A later page cut off inside its channel is a failed page too; a self-closing
+    // empty channel still ends the walk normally.
+    const cut = [feedOf(0, 100), '<?xml version="1.0"?><rss version="2.0"><channel><title>Acme</title>'];
+    let c = 0;
+    const cutRun = await quietly(() => teamtailor.fetch(acme, mkCtx(async () => cut[c++])));
+    if (cutRun.out.length === 100 && cutRun.out.truncated?.reason === 'fetch-error') pass('teamtailor.fetch() marks a later page cut off before </channel> fetch-error');
+    else fail(`cut-off page 2: ${cutRun.out.length} jobs, truncated=${JSON.stringify(cutRun.out.truncated)}`);
+    const closed = [feedOf(0, 100), '<?xml version="1.0"?><rss version="2.0"><channel/></rss>'];
+    let s = 0;
+    const closedOut = await teamtailor.fetch(acme, mkCtx(async () => closed[s++]));
+    if (closedOut.length === 100 && !closedOut.truncated && s === 2) pass('teamtailor.fetch() ends the walk on a self-closing empty <channel/>');
+    else fail(`self-closing channel: ${closedOut.length} jobs, ${s} requests, truncated=${JSON.stringify(closedOut.truncated)}`);
   }
 
 } catch (e) {

@@ -21,9 +21,9 @@ import { markTruncated } from '../lib/board-truncation.mjs';
 // `per_page` is unknown: a silent clamp would truncate a big board with no
 // short page to reveal it. `offset` keeps every request at the size the feed
 // serves by default, so a short page is a trustworthy end-of-feed signal. A
-// page that is not an RSS `<channel>` at all (an error or maintenance page sent
-// with a 200) is a failed page, not a short one: an error on the first page, a
-// partial board on a later one.
+// page that is not a whole RSS `<channel>` (an error or maintenance page sent
+// with a 200, or a body cut off before `</channel>`) is a failed page, not a
+// short one: an error on the first page, a partial board on a later one.
 //
 // A walk is also bounded by its own wall-clock budget (WALK_BUDGET_MS). The
 // sweep in scan-ats-full.mjs gives one board 5 minutes and, when that fires,
@@ -156,8 +156,8 @@ export default {
       let text;
       try {
         text = await fetchTextWithRetry(ctx, pageUrl, { redirect: 'error' });
-        if (typeof text !== 'string' || !/<channel\b/i.test(text)) {
-          throw new Error(`teamtailor: ${pageUrl} is not an RSS feed (no <channel> in the response)`);
+        if (!isWholeChannel(text)) {
+          throw new Error(`teamtailor: ${pageUrl} is not a complete RSS feed (no closed <channel> in the response)`);
         }
       } catch (err) {
         // The first page failing (or any page during a probe) is a broken
@@ -210,6 +210,14 @@ export default {
     return jobs;
   },
 };
+
+// Whether a feed page is a whole RSS channel: `<channel>…</channel>`, or a
+// self-closing `<channel/>`. The opening and closing tags are tested apart,
+// not with one regex spanning the body, so the check stays linear on a large page.
+function isWholeChannel(xml) {
+  if (typeof xml !== 'string') return false;
+  return /<channel\b[^>]*\/>/i.test(xml) || (/<channel\b/i.test(xml) && /<\/channel\s*>/i.test(xml));
+}
 
 // The raw items of a feed page, one identity string each: the link text, or the
 // whole block when the item has none. Counted before the parser drops anything,
