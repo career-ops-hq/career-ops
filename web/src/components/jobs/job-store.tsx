@@ -5,8 +5,9 @@ import { scoreTone } from "@/lib/format";
 import { resolveCliId } from "@/lib/saved-cli";
 import { createWorkerFeedback } from "@/lib/worker-feedback.mjs";
 import { readJobStream } from "@/lib/job-stream.mjs";
-import { createJobsPersister } from "@/lib/jobs-persist.mjs";
+import { createJobsPersister, restoreStoredJobs, saveJobsAfterOpen } from "@/lib/jobs-persist.mjs";
 import type { EVALUATION_GATE_REASONS } from "@/lib/evaluation-gate.mjs";
+import { createRunSlots, DEFAULT_MAX_PARALLEL_RUNS, MAX_PARALLEL_RUNS_KEY, parseMaxParallelRuns } from "@/lib/run-slots.mjs";
 
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
 export type JobGate = { reason: (typeof EVALUATION_GATE_REASONS)[number]; message: string; confirmationRequired: boolean };
@@ -21,6 +22,10 @@ export type Job = {
   kind?: string;
   format?: string | null;
   evaluationSections?: string[];
+  // A cover run's answers to modes/cover.md Step 6, kept so a failed run still
+  // shows them on its run page and refills the form (#7441). Read through
+  // storedCoverBrief(): a job restored from localStorage may predate this.
+  brief?: Record<string, string>;
   batchId?: string; // groups jobs fired together (e.g. "evaluate all Anthropic")
   status: "running" | "done" | "error" | "gated";
   gate?: JobGate;
@@ -52,6 +57,16 @@ export function useJobs() {
 
 const JOBS_KEY = "career-ops:jobs";
 
+function maxParallelRuns(): number {
+  try {
+    return parseMaxParallelRuns(localStorage.getItem(MAX_PARALLEL_RUNS_KEY));
+  } catch {
+    return DEFAULT_MAX_PARALLEL_RUNS;
+  }
+}
+// One pool per tab, shared by every JobsProvider render.
+const runSlots = createRunSlots(maxParallelRuns);
+
 function parseVerdict(text: string): JobResult {
   const m = text.match(/VERDICT:\s*([\d.]+)\s*\/\s*5\s*[—:|-]+\s*(.+)/i);
   if (m) {
@@ -77,21 +92,20 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     return () => { owner.dispose(); feedback.current = null; };
   }, []);
   const seq = useRef(0);
-  const loaded = useRef(false);
+  // Jobs removed while queued for a run slot; they must never start.
+  const removed = useRef(new Set<string>());
 
-  // restore history
+  // Restore first. setReady in this effect, and save only on a later render
+  // where ready is already true. Saving from a ref flipped in this same
+  // commit still sees the initial empty list and writes it over storage.
   useEffect(() => {
     try {
       const raw = localStorage.getItem(JOBS_KEY);
       const arr = raw ? JSON.parse(raw) : null;
-      if (Array.isArray(arr)) {
-        // anything left "running" from a previous session is stale → mark interrupted
-        setJobs(arr.map((j: Job) => (j.status === "running" ? { ...j, status: "error", steps: [...(j.steps || []), { kind: "status", label: "Interrupted (page reloaded)", ts: Date.now() }] } : j)));
-      }
+      if (Array.isArray(arr)) setJobs(restoreStoredJobs(arr, Date.now()));
     } catch {
       /* ignore */
     }
-    loaded.current = true;
     setReady(true);
   }, []);
 
@@ -121,9 +135,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
   useEffect(() => {
-    if (!loaded.current) return;
-    persister.current?.save(jobs);
-  }, [jobs]);
+    saveJobsAfterOpen(persister.current, ready, jobs);
+  }, [jobs, ready]);
 
   const patch = useCallback((id: string, fn: (j: Job) => Job) => {
     setJobs((js) => js.map((j) => (j.id === id ? fn(j) : j)));
@@ -141,6 +154,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         kind: opts.kind,
         format: opts.format,
         evaluationSections: opts.evaluationSections ? [...opts.evaluationSections] : undefined,
+        brief: opts.brief ? { ...opts.brief } : undefined,
         batchId: opts.batchId,
         status: "running",
         steps: [{ kind: "status", label: "Starting…", ts: Date.now() }],
@@ -153,111 +167,132 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       // sent to /api/runs/save, not only in the live job.
       const steps: JobStep[] = [];
       (async () => {
-        // resolveCliId() validates the saved id against what is installed; a
-        // bare readSavedCliId() here would short-circuit that check and launch
-        // a run against an uninstalled CLI (#4012).
-        // A stale saved id is replaced silently otherwise — name the switch in
-        // the job log so a transient "not installed" can't rewrite the user's
-        // choice without a record.
-        const cliId = await resolveCliId((stale, replacement) => {
-          const label = replacement
-            ? `Saved CLI '${stale}' is not installed — using '${replacement}'`
-            : `Saved CLI '${stale}' is not installed`;
-          const step: JobStep = { kind: "status", label, ts: Date.now() };
+        // Heavy runs wait for a free slot (run-slots.mjs), so a shortlist does
+        // not start every evaluation at once.
+        const release = await runSlots.acquire(opts.kind, (position) => {
+          const step: JobStep = { kind: "status", label: `Queued: ${position} waiting (at most ${maxParallelRuns()} at once)`, ts: Date.now() };
           steps.push(step);
           patch(id, (j) => ({ ...j, steps: [...j.steps, step] }));
         });
-        if (!cliId) {
-          feedback.current?.push({ ...job, status: "error" });
-          patch(id, (j) => ({
-            ...j,
-            status: "error",
-            endedAt: Date.now(),
-            steps: [...j.steps, { kind: "status", label: "No CLI configured — open Config and click Save config", ts: Date.now() }],
-          }));
+        // Removed from the list while it waited: never start it.
+        if (removed.current.has(id)) {
+          removed.current.delete(id);
+          release();
           return;
         }
-        let text = "";
-        let verdictLine = ""; // latched separately so the 8000-char tail can't drop it
-        let doneTokens = 0; // per-run token cost, forwarded on the done event (#6)
-        let doneCostUsd: number | null = null;
-        let doneReportN: number | null = null;
-        let finished = false;
-        const finish = (status: "done" | "error" | "gated", lastLabel?: string, gate?: JobGate) => {
-          if (finished) return;
-          finished = true;
-          feedback.current?.push({ ...job, status });
-          const result = status === "done" ? parseVerdict(verdictLine || text) : undefined;
-          const cost = status !== "error" && doneTokens > 0 ? { tokens: doneTokens, usd: doneCostUsd ?? undefined } : undefined;
-          patch(id, (j) => ({
-            ...j,
-            status,
-            gate,
-            result,
-            cost,
-            reportN: doneReportN,
-            endedAt: Date.now(),
-            steps: lastLabel ? [...j.steps, { kind: "status", label: lastLabel, ts: Date.now() }] : j.steps,
-          }));
-          // persist a readable log file so the CLI/assistant can read past runs
-          if (status === "done" || status === "gated") {
-            fetch("/api/runs/save", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ id, title: opts.title, subtitle: opts.subtitle, page: opts.page, input: opts.input, status, gate, result, cost, steps, output: text }),
-            }).catch(() => {});
-            // Tell server-snapshot surfaces (Today, pipeline) to refetch — the
-            // worker just wrote a real tracker row / report they don't yet see.
-            if (status === "done" && typeof window !== "undefined" && (opts.kind === "evaluate" || opts.kind === "pdf")) {
-              window.dispatchEvent(new CustomEvent("co-job-done", { detail: { kind: opts.kind, input: opts.input } }));
-            }
-          }
-        };
-
         try {
           const res = await fetch("/api/run", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ kind: opts.kind, input: opts.input, cliId, brief: opts.brief, evaluationSections: opts.evaluationSections, format: opts.format }),
+          // resolveCliId() validates the saved id against what is installed; a
+          // bare readSavedCliId() here would short-circuit that check and launch
+          // a run against an uninstalled CLI (#4012).
+          // A stale saved id is replaced silently otherwise — name the switch in
+          // the job log so a transient "not installed" can't rewrite the user's
+          // choice without a record.
+          const cliId = await resolveCliId((stale, replacement) => {
+            const label = replacement
+              ? `Saved CLI '${stale}' is not installed — using '${replacement}'`
+              : `Saved CLI '${stale}' is not installed`;
+            const step: JobStep = { kind: "status", label, ts: Date.now() };
+            steps.push(step);
+            patch(id, (j) => ({ ...j, steps: [...j.steps, step] }));
           });
-          if (!res.ok || !res.body) {
-            const e = await res.json().catch(() => ({}));
-            finish("error", e.error || "Failed to start");
+          if (!cliId) {
+            feedback.current?.push({ ...job, status: "error" });
+            patch(id, (j) => ({
+              ...j,
+              status: "error",
+              endedAt: Date.now(),
+              steps: [...j.steps, { kind: "status", label: "No CLI configured — open Config and click Save config", ts: Date.now() }],
+            }));
             return;
           }
-          const completion = await readJobStream(res.body, (ev) => {
-            if (ev.type === "tool") {
-              steps.push({ kind: "tool", label: ev.name, ts: Date.now() });
-              patch(id, (j) => ({ ...j, steps: [...j.steps, { kind: "tool", label: ev.name, ts: Date.now() }] }));
-            } else if (ev.type === "status") {
-              steps.push({ kind: "status", label: ev.label, ts: Date.now() });
-              patch(id, (j) => ({ ...j, steps: [...j.steps, { kind: "status", label: ev.label, ts: Date.now() }] }));
-            } else if (ev.type === "text") {
-              const full = text + ev.text;
-              const vm = full.match(/VERDICT:[^\n]*/i);
-              if (vm) verdictLine = vm[0];
-              text = full.slice(-8000);
-              patch(id, (j) => ({ ...j, text }));
+          let text = "";
+          let verdictLine = ""; // latched separately so the 8000-char tail can't drop it
+          let doneTokens = 0; // per-run token cost, forwarded on the done event (#6)
+          let doneCostUsd: number | null = null;
+          let doneReportN: number | null = null;
+          let finished = false;
+          const finish = (status: "done" | "error" | "gated", lastLabel?: string, gate?: JobGate) => {
+            if (finished) return;
+            finished = true;
+            feedback.current?.push({ ...job, status });
+            const result = status === "done" ? parseVerdict(verdictLine || text) : undefined;
+            const cost = status !== "error" && doneTokens > 0 ? { tokens: doneTokens, usd: doneCostUsd ?? undefined } : undefined;
+            patch(id, (j) => ({
+              ...j,
+              status,
+              gate,
+              result,
+              cost,
+              reportN: doneReportN,
+              endedAt: Date.now(),
+              steps: lastLabel ? [...j.steps, { kind: "status", label: lastLabel, ts: Date.now() }] : j.steps,
+            }));
+            // persist a readable log file so the CLI/assistant can read past runs
+            if (status === "done" || status === "gated") {
+              fetch("/api/runs/save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id, title: opts.title, subtitle: opts.subtitle, page: opts.page, input: opts.input, status, gate, result, cost, steps, output: text }),
+              }).catch(() => {});
+              // Tell server-snapshot surfaces (Today, pipeline) to refetch — the
+              // worker just wrote a real tracker row / report they don't yet see.
+              if (status === "done" && typeof window !== "undefined" && (opts.kind === "evaluate" || opts.kind === "pdf")) {
+                window.dispatchEvent(new CustomEvent("co-job-done", { detail: { kind: opts.kind, input: opts.input } }));
+              }
             }
-          });
-          if (completion.status === "error") {
-            finish("error", completion.message);
-            return;
-          }
-          doneTokens = completion.tokens ?? 0;
-          doneCostUsd = completion.costUsd ?? null;
-          if (completion.status === "gated") {
-            finish("gated", "Evaluation stopped — review the reason", {
-              reason: completion.reason,
-              message: completion.message,
-              confirmationRequired: completion.confirmationRequired,
+          };
+
+          try {
+            const res = await fetch("/api/run", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ kind: opts.kind, input: opts.input, cliId, brief: opts.brief, evaluationSections: opts.evaluationSections }),
             });
-            return;
+            if (!res.ok || !res.body) {
+              const e = await res.json().catch(() => ({}));
+              finish("error", e.error || "Failed to start");
+              return;
+            }
+            const completion = await readJobStream(res.body, (ev) => {
+              if (ev.type === "tool") {
+                steps.push({ kind: "tool", label: ev.name, ts: Date.now() });
+                patch(id, (j) => ({ ...j, steps: [...j.steps, { kind: "tool", label: ev.name, ts: Date.now() }] }));
+              } else if (ev.type === "status") {
+                steps.push({ kind: "status", label: ev.label, ts: Date.now() });
+                patch(id, (j) => ({ ...j, steps: [...j.steps, { kind: "status", label: ev.label, ts: Date.now() }] }));
+              } else if (ev.type === "text") {
+                const full = text + ev.text;
+                const vm = full.match(/VERDICT:[^\n]*/i);
+                if (vm) verdictLine = vm[0];
+                text = full.slice(-8000);
+                patch(id, (j) => ({ ...j, text }));
+              }
+            });
+            if (completion.status === "error") {
+              finish("error", completion.message);
+              return;
+            }
+            doneTokens = completion.tokens ?? 0;
+            doneCostUsd = completion.costUsd ?? null;
+            if (completion.status === "gated") {
+              finish("gated", "Evaluation stopped — review the reason", {
+                reason: completion.reason,
+                message: completion.message,
+                confirmationRequired: completion.confirmationRequired,
+              });
+              return;
+            }
+            doneReportN = typeof completion.reportN === "number" ? completion.reportN : null;
+            finish("done", "Done");
+          } catch {
+            finish("error", "Connection error");
           }
-          doneReportN = typeof completion.reportN === "number" ? completion.reportN : null;
-          finish("done", "Done");
-        } catch {
-          finish("error", "Connection error");
+        } finally {
+          release();
         }
       })();
 
@@ -266,7 +301,10 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     [patch],
   );
 
-  const removeJob = useCallback((id: string) => setJobs((js) => js.filter((j) => j.id !== id)), []);
+  const removeJob = useCallback((id: string) => {
+    removed.current.add(id);
+    setJobs((js) => js.filter((j) => j.id !== id));
+  }, []);
   const clearFinished = useCallback(() => setJobs((js) => js.filter((j) => j.status === "running")), []);
 
   // A new object only when the list or an action changes, not on every render

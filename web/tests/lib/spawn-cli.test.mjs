@@ -7,6 +7,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { syncBuiltinESMExports } from "node:module";
 import { spawnHeadlessCli } from "../../src/lib/spawn-cli.mjs";
 import { CAPS } from "../../src/lib/worker-capabilities.mjs";
@@ -146,7 +149,221 @@ test("spawnHeadlessCli never lets a child inherit the server's console (windowsH
   assert.equal(calls.length, 2);
   for (const { options } of calls) {
     assert.equal(options.windowsHide, true);
+    assert.equal(options.detached, process.platform !== "win32");
     assert.equal(options.cwd, process.cwd());
     assert.equal(options.env, process.env);
   }
+});
+
+test("spawnHeadlessCli detaches on POSIX even when the caller says not to", () => {
+  const realSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = (command, args, options) => {
+    calls.push(options);
+    return { stdin: { end() {} } };
+  };
+  syncBuiltinESMExports();
+  try {
+    spawnHeadlessCli(
+      process.execPath,
+      ["-e", ""],
+      { cwd: process.cwd(), env: process.env, detached: false },
+      PASSTHROUGH,
+    );
+  } finally {
+    childProcess.spawn = realSpawn;
+    syncBuiltinESMExports();
+  }
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].detached, process.platform !== "win32");
+});
+
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitDead(pid, ms) {
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    if (!pidAlive(pid)) return true;
+    await sleep(100);
+  }
+  return !pidAlive(pid);
+}
+
+// Windows child.kill("SIGTERM") ends the process at once. The handler never
+// runs, so the "still alive after SIGTERM" assertions fail there.
+const skipPosixSignals = process.platform === "win32"
+  ? "Windows kill() ends the process immediately, so a SIGTERM handler never runs"
+  : false;
+
+test("Stop follows SIGTERM with SIGKILL when the CLI ignores it", { timeout: 20_000, skip: skipPosixSignals }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "co-cli-stop-"));
+  const termFile = join(dir, "term");
+  const kidFile = join(dir, "kid");
+  const kidReady = join(dir, "kid-ready");
+  // The ready file is written after the handler. A group SIGTERM before that
+  // kills the child with the default action, and the test would blame Stop.
+  const ignore = [
+    "process.on('SIGTERM', () => {});",
+    `require('node:fs').writeFileSync(${JSON.stringify(kidReady)}, 'ready');`,
+    "setInterval(() => {}, 500);",
+  ].join("");
+  const script = [
+    "const fs = require('node:fs');",
+    "const { spawn } = require('node:child_process');",
+    `process.on('SIGTERM', () => fs.writeFileSync(${JSON.stringify(termFile)}, 'term'));`,
+    `const kid = spawn(process.execPath, ['-e', ${JSON.stringify(ignore)}], { stdio: 'ignore' });`,
+    `fs.writeFileSync(${JSON.stringify(kidFile)}, String(kid.pid));`,
+    "setInterval(() => {}, 500);",
+  ].join("");
+  const child = spawnHeadlessCli(process.execPath, ["-e", script], {
+    cwd: dir,
+    env: process.env,
+    detached: true,
+  }, PASSTHROUGH);
+  const pids = [child.pid];
+  try {
+    const started = Date.now();
+    while (!pidAlive(child.pid) || !existsSync(kidFile) || !existsSync(kidReady)) {
+      if (Date.now() - started > 3000) break;
+      await sleep(50);
+    }
+    const kidPid = Number(readFileSync(kidFile, "utf8"));
+    pids.push(kidPid);
+    child.kill("SIGTERM");
+    await sleep(1000);
+    assert.equal(pidAlive(child.pid), true, "the CLI must still be alive after SIGTERM");
+    assert.equal(pidAlive(kidPid), true, "a child of that CLI must still be alive after SIGTERM");
+    assert.equal(readFileSync(termFile, "utf8"), "term");
+    assert.equal(await waitDead(child.pid, 7000), true, "SIGKILL must follow SIGTERM");
+    assert.equal(await waitDead(kidPid, 2000), true, "SIGKILL must reach the CLI's own children");
+  } finally {
+    for (const pid of pids) {
+      if (pid && pidAlive(pid)) {
+        try { process.kill(-pid, "SIGKILL"); } catch { /* not a group */ }
+        try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+      }
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a detached descendant that ignores SIGTERM still gets the follow-up SIGKILL", { timeout: 20_000, skip: skipPosixSignals }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "co-cli-stop-desc-"));
+  const kidFile = join(dir, "kid");
+  const kidReady = join(dir, "kid-ready");
+  const ignore = [
+    "process.on('SIGTERM', () => {});",
+    `require('node:fs').writeFileSync(${JSON.stringify(kidReady)}, 'ready');`,
+    "setInterval(() => {}, 500);",
+  ].join("");
+  // The CLI itself keeps the default SIGTERM action and dies. Its child does not.
+  const script = [
+    "const fs = require('node:fs');",
+    "const { spawn } = require('node:child_process');",
+    `const kid = spawn(process.execPath, ['-e', ${JSON.stringify(ignore)}], { stdio: 'ignore' });`,
+    `fs.writeFileSync(${JSON.stringify(kidFile)}, String(kid.pid));`,
+    "setInterval(() => {}, 500);",
+  ].join("");
+  const child = spawnHeadlessCli(process.execPath, ["-e", script], {
+    cwd: dir,
+    env: process.env,
+    detached: true,
+  }, PASSTHROUGH);
+  const pids = [child.pid];
+  try {
+    const started = Date.now();
+    while (!pidAlive(child.pid) || !existsSync(kidFile) || !existsSync(kidReady)) {
+      if (Date.now() - started > 3000) break;
+      await sleep(50);
+    }
+    const kidPid = Number(readFileSync(kidFile, "utf8"));
+    pids.push(kidPid);
+    child.kill("SIGTERM");
+    await sleep(1000);
+    assert.equal(pidAlive(child.pid), false, "the CLI should die from SIGTERM");
+    assert.equal(pidAlive(kidPid), true, "a descendant that ignores SIGTERM should still be running");
+    assert.equal(await waitDead(kidPid, 8000), true, "SIGKILL must still reach that descendant");
+  } finally {
+    for (const pid of pids) {
+      if (pid && pidAlive(pid)) {
+        try { process.kill(-pid, "SIGKILL"); } catch { /* not a group */ }
+        try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+      }
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Write a stand-in `pi` that reports `version` to `--version` and, for any other
+ * argv, logs it and prints it back as JSON.
+ */
+function stubPi(t, version) {
+  const dir = mkdtempSync(join(tmpdir(), "spawn-cli-pi-"));
+  const bin = join(dir, "pi-stub.mjs");
+  const runLog = join(dir, "runs.log");
+  writeFileSync(
+    bin,
+    `#!/usr/bin/env node
+import fs from "node:fs";
+const argv = process.argv.slice(2);
+if (argv[0] === "--version") {
+  process.stdout.write(${JSON.stringify(version)});
+} else {
+  fs.appendFileSync(${JSON.stringify(runLog)}, JSON.stringify(argv) + "\\n");
+  process.stdout.write(JSON.stringify(argv));
+}
+`,
+  );
+  chmodSync(bin, 0o755);
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  return { bin, runLog };
+}
+
+const posixOnly = { skip: process.platform === "win32" ? "Windows cannot spawn a shebang script as a binary" : false };
+
+test("spawnHeadlessCli refuses a Pi older than the floor before starting the worker", posixOnly, (t) => {
+  // Given a Pi that reports 0.79.0, one release short of the floor
+  const { bin, runLog } = stubPi(t, "0.79.0\n");
+
+  // Then every worker is refused, writing or not...
+  for (const capabilities of Object.values(CAPS)) {
+    assert.throws(
+      () => spawnHeadlessCli(bin, ["--no-session", "-p", "PROMPT"], { cwd: process.cwd(), env: process.env }, { cliId: "pi", capabilities }),
+      /Pi 0\.79\.0 is too old/,
+    );
+  }
+  // ...and no worker process ever started
+  assert.equal(existsSync(runLog), false);
+});
+
+test("spawnHeadlessCli starts a supported Pi with its fence applied", posixOnly, async (t) => {
+  // Given a current Pi
+  const { bin } = stubPi(t, "1.5.2\n");
+
+  // When the pdf worker's record is spawned
+  const child = spawnHeadlessCli(bin, ["--no-session", "-p", "PROMPT"], { cwd: process.cwd(), env: process.env }, {
+    cliId: "pi",
+    capabilities: CAPS.localReadOnly,
+  });
+  let stdout = "";
+  child.stdout.on("data", (chunk) => (stdout += chunk));
+  await new Promise((resolve) => child.on("close", resolve));
+
+  // Then the worker ran with the fenced argv
+  const argv = JSON.parse(stdout);
+  assert.deepEqual(argv.slice(0, 2), ["--tools", "read,grep,find,ls"]);
+  assert.ok(argv.includes("--no-approve"));
+  assert.deepEqual(argv.slice(-2), ["-p", "PROMPT"]);
 });

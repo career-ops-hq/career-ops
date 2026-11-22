@@ -63,6 +63,7 @@
 import { htmlToText } from './_html-to-text.mjs';
 import { fetchJsonWithRetry, fetchTextWithRetry, sleep } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const SITE_ORIGIN = 'https://www.techinasia.com';
 const SEARCH_PAGE_URL = `${SITE_ORIGIN}/jobs/search`;
@@ -441,6 +442,10 @@ export default {
       out.push(normalized);
     }
 
+    // The cut warned about above marks the result too, so scan.mjs logs the
+    // board partial instead of reachable (lib/board-truncation.mjs). Never while
+    // probing, like the warning.
+    if (truncated && !probing) markTruncated(out, 'page-cap', { fetched: out.length });
     return out;
   },
 };

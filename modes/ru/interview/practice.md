@@ -134,7 +134,7 @@
 
 ### Write Session Transcript
 
-После summary напиши machine-readable transcript в `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` (используй `practice` для slug компании/роли, если это не компания-специфичная сессия). Это структурированная запись раунда для downstream analysis modes; speaker-labelled turns позволяют читать обе стороны без повторного вывода, кто говорил. Полный контракт находится в `interview-prep/sessions/README.md`.
+После summary напиши machine-readable transcript в `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` (используй `practice` для slug компании/роли, если это не компания-специфичная сессия). Если такой файл уже существует, не перезаписывай его: добавь следующий свободный счётчик (`-2`, `-3`, ...) перед `.md`, как описано в разделе "File names" README. Это структурированная запись раунда для downstream analysis modes; speaker-labelled turns позволяют читать обе стороны без повторного вывода, кто говорил. Полный контракт находится в `interview-prep/sessions/README.md`.
 
 Формат:
 

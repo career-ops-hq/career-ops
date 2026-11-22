@@ -3,28 +3,30 @@
 // employers/inbox/ files.
 //
 // The core is parseBoardUrl(), the reverse of the builders in
-// lib/ats-board-url.mjs: every committed row's careers_url must read back to
-// that row's coordinates, each ATS's other URL shapes (job links, legacy hosts,
-// locale prefixes) must read back to their board, and anything else must be
-// rejected with a reason. Then the list reader, the 5,000-line split, and the
-// command from a list to an inbox the validator accepts.
+// lib/ats-board-url.mjs: URLs that name a board must read back to its coordinates.
+// Own-domain rows are checked against the builder. Job links, legacy hosts,
+// and locale prefixes must read back to their board. Unsupported URLs must be
+// rejected with a reason. The CLI tests cover the list reader, the 5,000-line
+// split, and validation of the resulting inbox.
 //
 // Run:  node --test tests/employers-import.test.mjs
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { ROOT } from './helpers.mjs';
+import { ROOT, copyEmployerRegistry, unlistedEmployerBoard, writeOwnDomainInbox } from './helpers.mjs';
 
-import { BOARD_ATS, buildBoardUrl } from '../lib/ats-board-url.mjs';
+import { BOARD_ATS, OWN_DOMAIN_ATS, buildBoardUrl } from '../lib/ats-board-url.mjs';
 import {
   chunkInbox, importList, nameFromBoard, normalizeWebsite, parseBoardUrl, parseCsv, readList,
 } from '../seeds/employers-import.mjs';
-import { inboxCareersUrl } from '../seeds/employers-inbox.mjs';
+import { INBOX_MAX_LINES, inboxCareersUrl } from '../seeds/employers-inbox.mjs';
 import { inboxLineProblems } from '../seeds/employers-validate.mjs';
+import applicantpro from '../providers/applicantpro.mjs';
+import homerun from '../providers/homerun.mjs';
 
 const IMPORTER = join(ROOT, 'seeds', 'employers-import.mjs');
 const VALIDATOR = join(ROOT, 'seeds', 'employers-validate.mjs');
@@ -52,10 +54,14 @@ const coordsOf = (row) => {
 
 // ── parseBoardUrl ────────────────────────────────────────────────────────
 
-test('every committed careers_url reads back to its row, unchanged', () => {
+test('every committed careers_url matches its row', () => {
   const rows = committedRows();
   assert.ok(rows.length >= 50, `expected the committed boards, found ${rows.length}`);
   for (const row of rows) {
+    if (OWN_DOMAIN_ATS.includes(row.ats)) {
+      assert.equal(buildBoardUrl({ ats: row.ats, board: row.board }), row.careers_url, row.careers_url);
+      continue;
+    }
     assert.deepEqual(parseBoardUrl(row.careers_url), { ...coordsOf(row), careers_url: row.careers_url }, row.careers_url);
   }
 });
@@ -75,10 +81,43 @@ test('every ATS, region and Workday host form round-trips through its builder', 
     { ats: 'breezy', board: 'acme' },
     { ats: 'bamboohr', board: 'acme' },
     { ats: 'pinpoint', board: 'acme' },
+    { ats: 'applicantpro', board: 'acme' },
+    { ats: 'hibob', board: 'acme-641e1b39232b' },
+    { ats: 'hirehive', board: 'acme' },
+    { ats: 'homerun', board: 'acme' },
+    { ats: 'jazzhr', board: 'acme' },
+    { ats: 'keka', board: 'acme' },
+    { ats: 'personio', board: 'acme-gmbh' },
+    { ats: 'personio', region: 'com', board: 'acme-gmbh' },
+    { ats: 'prevueaps', board: 'acme' },
+    { ats: 'schoolspring', board: 'acme' },
+    { ats: 'taleez', board: 'acme' },
+    { ats: 'teamtailor', board: 'acme' },
+    { ats: 'trakstar', board: 'acme' },
+    { ats: 'turbohire', board: 'acme' },
+    { ats: 'zoho-recruit', board: 'acme' },
+    { ats: 'zoho-recruit', region: 'au', board: 'acme' },
+    { ats: 'zoho-recruit', region: 'ca', board: 'acme' },
+    { ats: 'zoho-recruit', region: 'cn', board: 'acme' },
+    { ats: 'zoho-recruit', region: 'eu', board: 'acme' },
+    { ats: 'zoho-recruit', region: 'in', board: 'acme' },
+    { ats: 'zoho-recruit', region: 'jp', board: 'acme' },
+    { ats: 'zoho-recruit', region: 'sa', board: 'acme' },
+    { ats: 'avature', board: 'acme' },
+    { ats: 'clearcompany', board: '0f8fad5b-d9cb-469f-a165-70867728950e' },
+    { ats: 'jobvite', board: 'acme' },
+    { ats: 'eightfold', board: 'acme' },
+    { ats: 'adp-myjobs', board: 'AcmeCareerSite' },
+    { ats: 'successfactors-classic', board: 'career5/eu/ACME001' },
+    { ats: 'successfactors-classic', board: 'career8/com/acme-01' },
+    { ats: 'oraclecloud', board: 'acme.fa.em2.oraclecloud.com/CX_2' },
+    { ats: 'oraclecloud', board: 'acme.fa.us2.oraclecloud26.com/WMCareers' },
     { ats: 'workday', board: 'acme/wd5/External_Careers', workday_host: 'jobs' },
     { ats: 'workday', board: 'acme/wd103/Careers', workday_host: 'site' },
   ];
-  assert.deepEqual([...new Set(samples.map((s) => s.ats))].sort(), [...BOARD_ATS].sort(), 'one sample per ATS at least');
+  // A careers site on a company's own domain is never read from a URL: no URL names its system, so those rows are
+  // added as inbox lines by the project's own contributions (OWN_DOMAIN_CONTRIBUTORS), not through the importer.
+  assert.deepEqual([...new Set(samples.map((s) => s.ats))].sort(), BOARD_ATS.filter((a) => !OWN_DOMAIN_ATS.includes(a)).sort(), 'one sample per ATS at least');
   for (const c of samples) {
     const url = buildBoardUrl(c);
     assert.deepEqual(parseBoardUrl(url), { ...c, careers_url: url }, url);
@@ -112,6 +151,41 @@ const VARIANTS = [
   ['https://acme.breezy.hr/p/abc', { ats: 'breezy', board: 'acme' }],
   ['https://acme.bamboohr.com/careers/12', { ats: 'bamboohr', board: 'acme' }],
   ['https://acme.pinpointhq.com/postings/1', { ats: 'pinpoint', board: 'acme' }],
+  ['https://acme.applicantpro.com/jobs/3456789', { ats: 'applicantpro', board: 'acme' }],
+  ['https://www.applicantpro.com/openings/acme/jobs/3456789', { ats: 'applicantpro', board: 'acme' }],
+  ['https://www.applicantpro.com/OPENINGS/Acme/jobs/3456789', { ats: 'applicantpro', board: 'acme' }],
+  ['https://acme-641e1b39232b.careers.hibob.com/jobs/2f9c1d1e-0000-4000-8000-000000000000/apply', { ats: 'hibob', board: 'acme-641e1b39232b' }],
+  ['https://acme.hirehive.com/backend-engineer-x1y2z3', { ats: 'hirehive', board: 'acme' }],
+  ['https://acme.homerun.co/backend-engineer', { ats: 'homerun', board: 'acme' }],
+  ['https://feed.homerun.co/Acme', { ats: 'homerun', board: 'acme' }],
+  ['https://acme.applytojob.com/apply/AbC123/Backend-Engineer', { ats: 'jazzhr', board: 'acme' }],
+  ['https://acme.keka.com/careers/jobdetails/12345', { ats: 'keka', board: 'acme' }],
+  ['https://acme-gmbh.jobs.personio.de/job/123456?language=en', { ats: 'personio', board: 'acme-gmbh' }],
+  ['https://ACME-GMBH.jobs.personio.com/', { ats: 'personio', region: 'com', board: 'acme-gmbh' }],
+  ['https://acme-gmbh.jobs.personio.com/job/123456?language=de', { ats: 'personio', region: 'com', board: 'acme-gmbh' }],
+  ['https://acme.prevueaps.ca/jobs/1234/backend-engineer', { ats: 'prevueaps', board: 'acme' }],
+  ['https://acme.schoolspring.com/job?id=1', { ats: 'schoolspring', board: 'acme' }],
+  ['https://Acme.taleez.com/', { ats: 'taleez', board: 'acme' }],
+  ['https://acme.teamtailor.com/jobs/12345-backend-engineer', { ats: 'teamtailor', board: 'acme' }],
+  ['https://acme.hire.trakstar.com/jobs/fk0abcd', { ats: 'trakstar', board: 'acme' }],
+  ['https://acme.recruiterbox.com/jobs/fk0abcd', { ats: 'trakstar', board: 'acme' }],
+  ['https://acme.turbohire.co/job/publicjobs/abc', { ats: 'turbohire', board: 'acme' }],
+  ['https://acme.zohorecruit.com/jobs/Careers/1234000000001/Backend-Engineer', { ats: 'zoho-recruit', board: 'acme' }],
+  ['https://acme.zohorecruit.eu/jobs/Emplois', { ats: 'zoho-recruit', region: 'eu', board: 'acme' }],
+  ['https://Acme.ZohoRecruit.com.au/recruit/Portal.na', { ats: 'zoho-recruit', region: 'au', board: 'acme' }],
+  ['acme.zohorecruit.in', { ats: 'zoho-recruit', region: 'in', board: 'acme' }],
+  // Avature, ClearCompany and Jobvite
+  ['https://acme.avature.net/en_US/careers/JobDetail/Backend-Engineer/1234', { ats: 'avature', board: 'acme' }],
+  ['https://Acme.Avature.net/careers', { ats: 'avature', board: 'acme' }],
+  ['https://careers-api.clearcompany.com/v1/0F8FAD5B-D9CB-469F-A165-70867728950E', { ats: 'clearcompany', board: '0f8fad5b-d9cb-469f-a165-70867728950e' }],
+  ['https://careers-content.clearcompany.com/js/v1/career-site.js?SiteId=0f8fad5b-d9cb-469f-a165-70867728950e', { ats: 'clearcompany', board: '0f8fad5b-d9cb-469f-a165-70867728950e' }],
+  ['https://jobs.jobvite.com/acme/job/oAbC123', { ats: 'jobvite', board: 'acme' }],
+  ['https://Acme.eightfold.ai/careers?domain=acme.com', { ats: 'eightfold', board: 'acme' }],
+  ['https://myjobs.adp.com/AcmeCareerSite/cx/job-details?rb=CareerSite&reqId=1', { ats: 'adp-myjobs', board: 'AcmeCareerSite' }],
+  ['https://Career5.SuccessFactors.eu/career?company=ACME001&navBarLevel=JOB_SEARCH&lang=en_US', { ats: 'successfactors-classic', board: 'career5/eu/ACME001' }],
+  ['https://career8.successfactors.com/career/?company=acme-01', { ats: 'successfactors-classic', board: 'career8/com/acme-01' }],
+  ['https://Acme.fa.em2.oraclecloud.com/hcmUI/CandidateExperience/no/sites/CX_2/requisitions?keyword=x', { ats: 'oraclecloud', board: 'acme.fa.em2.oraclecloud.com/CX_2' }],
+  ['https://acme.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/12345', { ats: 'oraclecloud', board: 'acme.fa.us2.oraclecloud.com/CX_1001' }],
 ];
 
 for (const [url, coords] of VARIANTS) {
@@ -141,6 +215,44 @@ const REJECTS = [
   ['https://acme.wd5.myworkdayjobs.com/en-US', /is a locale/],
   ['https://wd5.myworkdaysite.com/acme/careers', /recruiting\/<tenant>\/<site>/],
   ['https://jobs.ashbyhq.com/acme%20inc', /characters outside/],
+  ['https://www.teamtailor.com/en', /"www" is a placeholder/],
+  ['https://acme.na.teamtailor.com/jobs/1', /the board is <company>\.teamtailor\.com/],
+  ['https://acme.eu.jobs.personio.de/', /the board is <company>\.jobs\.personio\.de/],
+  ['https://jobs.personio.de/', /not a board host/],
+  ['https://feeds.applicantpro.com/', /"feeds" is one of applicantpro's own subdomains/],
+  ['https://accounts.hirehive.com/login', /"accounts" is one of hirehive's own subdomains/],
+  ['https://feed.homerun.co/', /feed\.homerun\.co\/<company>/],
+  ['https://static.homerun.co/app.js', /"static" is one of homerun's own subdomains/],
+  ['https://mail.keka.com/', /"mail" is one of keka's own subdomains/],
+  // Trakstar's API names the client in a query, but it is the API, not a board
+  // address: only <id>.hire.trakstar.com and <id>.recruiterbox.com are read.
+  ['https://jsapi.recruiterbox.com/v1/openings?client_name=acme', /"jsapi" is one of trakstar's own subdomains/],
+  // The provider reads www.applicantpro.com/openings/…, not the bare domain.
+  ['https://applicantpro.com/openings/acme/jobs/1', /not a board host/],
+  ['https://aide.taleez.com/', /"aide" is one of taleez's own subdomains/],
+  ['https://taleez.com/apply/backend-engineer-abc', /does not name the company/],
+  ['https://app.turbohire.co/', /"app" is one of turbohire's own subdomains/],
+  ['https://www.zohorecruit.com/', /"www" is a placeholder/],
+  ['https://acme.personio.de/', /not a board host/],
+  [`https://${'a'.repeat(64)}.teamtailor.com/`, /at most 63 characters/],
+  ['https://acme.zohorecruit.de/jobs/Careers', /not a board host/],
+  ['https://acme.portal.zohorecruit.eu/', /the board is <company>\.zohorecruit\.eu/],
+  ['https://12345.teamtailor.com/', /numeric-only/],
+  ['https://www.avature.net/', /"www" is a placeholder/],
+  ['https://acme.eu.avature.net/careers', /the board is <company>\.avature\.net/],
+  ['https://careers-api.clearcompany.com/v1/acme', /lowercase GUID/],
+  ['https://careers-api.clearcompany.com/', /careers-api\.clearcompany\.com\/v1\/<siteId>/],
+  ['https://careers-content.clearcompany.com/js/v1/career-site.js', /siteId/],
+  ['https://jobs.jobvite.com/api/jobs', /placeholder/],
+  ['https://myjobs.adp.com/public/staffing/v1/career-site/acme', /own routes/],
+  ['https://acme.eu.eightfold.ai/careers', /the board is <company>\.eightfold\.ai/],
+  ['https://career5.successfactors.eu/career', /\?company=/],
+  ['https://career5.successfactors.eu/careers?company=ACME001', /\/career\?company=<id>/],
+  ['https://career5.successfactors.eu/career?company=AC%20ME', /1 to 64 letters/],
+  ['https://a.b.successfactors.eu/career?company=ACME001', /not a board host/],
+  ['https://acme.fa.us2.oraclecloud.com/hcmUI/CandExpStatic/js/ce-custom.js', /sites\/<site>/],
+  ['https://acme.fa.us2.oraclecloud.com/fscmUI/faces/PrcPosRegisterSupplier', /sites\/<site>/],
+  ['https://acme.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1', /not a board host/],
 ];
 
 for (const [url, why] of REJECTS) {
@@ -148,6 +260,31 @@ for (const [url, why] of REJECTS) {
     const r = parseBoardUrl(url);
     assert.ok('error' in r, JSON.stringify(r));
     assert.match(r.error, why);
+  });
+}
+
+// The aliases are read from the path the way their providers read it: an empty
+// segment is not skipped, so a URL the provider refuses is refused here too.
+const ALIAS_PROVIDERS = { homerun, applicantpro };
+const ALIASES = [
+  ['https://feed.homerun.co/acme', 'homerun', 'acme'],
+  ['https://www.applicantpro.com/openings/acme/jobs/1', 'applicantpro', 'acme'],
+  ['https://www.applicantpro.com/Openings/Acme', 'applicantpro', 'acme'],
+  ['https://feed.homerun.co//acme', 'homerun', null],
+  ['https://www.applicantpro.com//openings/acme/jobs/1', 'applicantpro', null],
+  ['https://www.applicantpro.com/openings//acme/jobs/1', 'applicantpro', null],
+];
+for (const [url, ats, board] of ALIASES) {
+  test(`${url}: ${board ? `board ${board}` : 'refused'}, as the ${ats} provider reads it`, () => {
+    const parsed = parseBoardUrl(url);
+    const detected = ALIAS_PROVIDERS[ats].detect({ name: 'Acme', careers_url: url });
+    if (board) {
+      assert.equal(parsed.board, board, JSON.stringify(parsed));
+      assert.ok(detected, `${ats}.detect() refuses ${url}`);
+    } else {
+      assert.ok('error' in parsed, JSON.stringify(parsed));
+      assert.equal(detected, null, `${ats}.detect() reads ${url}`);
+    }
   });
 }
 
@@ -207,7 +344,7 @@ test('importList: canonical inbox lines, every default written out; duplicates a
     [3, 'the same board as line 2'],
     [5, 'name contains an email address'],
     [6, 'website "not a domain" is not a domain name'],
-    [8, 'indeed.com is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, workday)'],
+    [8, 'indeed.com is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, avature, clearcompany, jobvite, eightfold, adp-myjobs, successfactors-classic, oraclecloud, phenom, successfactors, peoplesoft, workday)'],
   ]);
   assert.equal(r.derivedNames, 1);
   assert.equal(r.rewritten, 2);
@@ -215,6 +352,62 @@ test('importList: canonical inbox lines, every default written out; duplicates a
     assert.deepEqual(inboxLineProblems(line, new Set()), []);
     assert.ok(inboxCareersUrl(line));
   }
+});
+
+test('importList: a Teamtailor timestamp is allowed in the board URL, but a phone number is rejected in the name', () => {
+  const board = 'eyesandmoregmbh-1681220218';
+  const url = `https://${board}.teamtailor.com`;
+  const clean = importList(`url,name\n${url},Eyes and More`, { aggregatorDomains: new Set() });
+  assert.deepEqual(clean.lines, [{ ats: 'teamtailor', board, name: 'Eyes and More' }]);
+  assert.deepEqual(clean.rejected, []);
+
+  const phone = importList(`url,name\n${url},Eyes and More 212-555-0123`, { aggregatorDomains: new Set() });
+  assert.deepEqual(phone.lines, []);
+  assert.equal(phone.rejected.length, 1);
+  assert.match(phone.rejected[0].reason, /^name contains a phone number\b/);
+
+  // Known limitation: with no name given, the name is made from the board id, and its ten digits read as a phone number.
+  const bare = importList(`url,name\n${url},`, { aggregatorDomains: new Set() });
+  assert.deepEqual(bare.lines, []);
+  assert.equal(bare.rejected.length, 1);
+  assert.match(bare.rejected[0].reason, /^name contains a phone number\b/);
+});
+
+test('importList: a Personio or Zoho Recruit region is written only off the default host; an alias host is a duplicate', () => {
+  const r = importList([
+    'https://acme.zohorecruit.com/jobs/Careers',
+    'https://acme.zohorecruit.eu/jobs/Careers',
+    'https://ACME.zohorecruit.com/jobs/Careers/123/Engineer',
+    'https://acme-gmbh.jobs.personio.de/',
+    'https://acme-gmbh.jobs.personio.com/job/1',
+    'https://acme.hire.trakstar.com/',
+    'https://acme.recruiterbox.com/jobs/2',
+    'https://feed.homerun.co/acme',
+    'https://acme.homerun.co/',
+  ].join('\n'), { aggregatorDomains: new Set() });
+  assert.deepEqual(r.lines, [
+    { ats: 'zoho-recruit', board: 'acme', name: 'Acme' },
+    { ats: 'zoho-recruit', region: 'eu', board: 'acme', name: 'Acme' },
+    { ats: 'personio', board: 'acme-gmbh', name: 'Acme Gmbh' },
+    { ats: 'personio', region: 'com', board: 'acme-gmbh', name: 'Acme Gmbh' },
+    { ats: 'trakstar', board: 'acme', name: 'Acme' },
+    { ats: 'homerun', board: 'acme', name: 'Acme' },
+  ]);
+  // Personio's .de and .com hosts are two boards; Trakstar's and Homerun's other addresses are the same board.
+  assert.deepEqual(r.rejected.map((x) => [x.line, x.reason]), [
+    [3, 'the same board as line 1'],
+    [7, 'the same board as line 6'],
+    [9, 'the same board as line 8'],
+  ]);
+  assert.deepEqual(r.lines.map((l) => inboxCareersUrl(l)), [
+    'https://acme.zohorecruit.com/jobs/Careers',
+    'https://acme.zohorecruit.eu/jobs/Careers',
+    'https://acme-gmbh.jobs.personio.de',
+    'https://acme-gmbh.jobs.personio.com',
+    'https://acme.hire.trakstar.com',
+    'https://acme.homerun.co',
+  ]);
+  for (const line of r.lines) assert.deepEqual(inboxLineProblems(line, new Set()), []);
 });
 
 test('chunkInbox: one file up to 5,000 lines, then numbered parts', () => {
@@ -229,28 +422,53 @@ test('chunkInbox: one file up to 5,000 lines, then numbered parts', () => {
 
 function checkout() {
   const dir = mkdtempSync(join(tmpdir(), 'co-employers-import-'));
-  cpSync(join(ROOT, 'employers'), join(dir, 'employers'), { recursive: true });
+  copyEmployerRegistry(dir);
   return dir;
 }
 
-test('CLI: the 53 committed boards and new ones become an inbox the validator accepts, known boards as a warning', () => {
+test('CLI: the committed boards and new ones become an inbox the validator accepts, known boards as a warning', () => {
   const dir = checkout();
   try {
-    const known = committedRows().map((r) => r.careers_url);
-    const list = join(dir, 'list.txt');
-    writeFileSync(list, [...known, 'https://jobs.lever.co/newco-one', 'https://nope.example/jobs', ''].join('\n'));
+    const rows = committedRows();
+    const ownDomain = rows.filter((row) => OWN_DOMAIN_ATS.includes(row.ats));
+    const known = rows.filter((row) => !OWN_DOMAIN_ATS.includes(row.ats))
+      .map(({ careers_url, name }) => `${careers_url},"${name.replaceAll('"', '""')}"`);
+    const list = join(dir, 'list.csv');
+    // newco-one has an empty name cell; newco-two is a bare URL line with no comma, the shape of a plain list of addresses.
+    writeFileSync(list, ['url,name', ...known, `https://jobs.lever.co/${unlistedEmployerBoard('lever', 'newco-one')},`, `https://jobs.lever.co/${unlistedEmployerBoard('lever', 'newco-two')}`, 'https://nope.example/jobs,', ''].join('\n'));
     const r = node(IMPORTER, [list, '--login', 'OctoCat', '--date', '2026-11-10'], dir);
     assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, new RegExp(`wrote ${known.length + 1} board\\(s\\) in 1 file\\(s\\)`));
-    const inbox = join(dir, 'employers', 'inbox', '2026-11-10-octocat.ndjson');
-    assert.equal(readFileSync(inbox, 'utf8').split('\n').filter(Boolean).length, known.length + 1);
+    // The registry no longer fits one inbox file: the contribution is written in as many parts as it needs.
+    const parts = Math.ceil((known.length + 2) / INBOX_MAX_LINES);
+    assert.match(r.stdout, new RegExp(`wrote ${known.length + 2} board\\(s\\) in ${parts} file\\(s\\)`));
+    // Both new boards came without a name, so both names were made from the board id.
+    assert.match(r.stdout, /^2 name\(s\) were made from the board id\b/m);
+    const files = parts === 1
+      ? ['2026-11-10-octocat.ndjson']
+      : Array.from({ length: parts }, (_, i) => `2026-11-10-octocat-${String(i + 1).padStart(3, '0')}.ndjson`);
+    const written = files.map((f) => readFileSync(join(dir, 'employers', 'inbox', f), 'utf8').split('\n').filter(Boolean).length);
+    assert.equal(written.reduce((sum, n) => sum + n, 0), known.length + 2);
     assert.equal(readFileSync(`${list}.rejected.csv`, 'utf8'), 'line,input,reason\n'
-      + '55,https://nope.example/jobs,"nope.example is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, workday)"\n');
+      + `${known.length + 4},https://nope.example/jobs,`
+      + '"nope.example is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, avature, clearcompany, jobvite, eightfold, adp-myjobs, successfactors-classic, oraclecloud, phenom, successfactors, peoplesoft, workday)"\n');
 
+    const ownFiles = writeOwnDomainInbox(dir, ownDomain, '2026-11-10');
+    const fileCount = parts + ownFiles.length + Number(ownFiles.length > 0); // includes the manifest
     const v = node(VALIDATOR, [], dir);
     assert.equal(v.status, 0, v.stderr);
-    assert.match(v.stderr, new RegExp(`warning: employers/inbox/2026-11-10-octocat.ndjson:1: ${known.length} boards are already in the registry`));
-    assert.equal(v.stderr.trim().split('\n').length, 1, 'one warning, nothing else');
+    assert.ok(v.stdout.includes(`inbox: ${rows.length + 2} board(s) in ${fileCount} file(s), ${rows.length} already in the registry`), v.stdout);
+    // Each file with known boards warns at its first line.
+    const warningFiles = [...files.slice(0, Math.ceil(known.length / INBOX_MAX_LINES)), ...ownFiles].sort();
+    const warned = v.stderr.trim().split('\n');
+    assert.equal(warned.length, warningFiles.length, 'one warning for each file with known boards');
+    let already = 0;
+    warned.forEach((line, i) => {
+      const m = /^warning: employers\/inbox\/([^:]+):1: (\d+) boards? (?:is|are) already in the registry/.exec(line);
+      assert.ok(m, line);
+      assert.equal(m[1], warningFiles[i]);
+      already += Number(m[2]);
+    });
+    assert.equal(already, rows.length);
 
     // A second run for the same contribution does not overwrite it.
     const again = node(IMPORTER, [list, '--login', 'octocat', '--date', '2026-11-10'], dir);
@@ -264,7 +482,9 @@ test('CLI: more than 5,000 boards are split into parts that pass the validator',
   try {
     const list = join(dir, 'big.csv');
     const n = 10001;
-    writeFileSync(list, `url,name\n${Array.from({ length: n }, (_, i) => `https://jobs.ashbyhq.com/company${i}x,Company ${i}`).join('\n')}\n`);
+    const boards = Array.from({ length: n }, (_, i) => `company${i}x`);
+    const listed = new Set(committedRows().filter((r) => r.ats === 'ashby').map((r) => r.board.toLowerCase()));
+    writeFileSync(list, `url,name\n${boards.map((b, i) => `https://jobs.ashbyhq.com/${b},Company ${i}`).join('\n')}\n`);
     const r = node(IMPORTER, [list, '--login', 'big-org', '--date', '2026-11-10', '--rejects', join(dir, 'rejects.csv')], dir);
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(readdirSync(join(dir, 'employers', 'inbox')).sort(),
@@ -272,7 +492,7 @@ test('CLI: more than 5,000 boards are split into parts that pass the validator',
     assert.ok(!existsSync(join(dir, 'rejects.csv')), 'no rejects, no file');
     const v = node(VALIDATOR, [], dir);
     assert.equal(v.status, 0, v.stderr);
-    assert.match(v.stdout, new RegExp(`inbox: ${n} board\\(s\\) in 3 file\\(s\\), 0 already in the registry`));
+    assert.match(v.stdout, new RegExp(`inbox: ${n} board\\(s\\) in 3 file\\(s\\), ${boards.filter((b) => listed.has(b)).length} already in the registry`));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

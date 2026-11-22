@@ -52,6 +52,17 @@ try {
     ([bad, good]) => bad === null && good !== null && good.url.includes('ok-123'),
   );
 
+  // goldman.toJob — role URL built from externalSource.sourceId.
+  const { toJob: goldmanToJob } = await load('goldman.mjs');
+  check(
+    'goldman.toJob',
+    () => [
+      goldmanToJob({ jobTitle: 'Bad', externalSource: { sourceId: `${LONE}bad` } }, 'Acme'),
+      goldmanToJob({ jobTitle: 'Good', externalSource: { sourceId: 'g-1' } }, 'Acme'),
+    ],
+    ([bad, good]) => bad === null && good !== null && good.url.endsWith('/roles/g-1'),
+  );
+
   // deel.parseDeelBoard — .map() over the board's jobPostings array.
   const { parseDeelBoard } = await load('deel.mjs');
   const deelPage = (rows) => `<script>self.__next_f.push([1,${JSON.stringify(`2:{"jobPostings":${JSON.stringify(rows)}}\n`)}])</script>`;
@@ -73,6 +84,31 @@ try {
       'X', 'https://x.bamboohr.com',
     ),
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.bamboohr.com/careers/5',
+  );
+
+  // inhire.parseInhireResponse — for…of over jobsPage[]; jobId feeds the posting URL.
+  const { parseInhireResponse } = await load('inhire.mjs');
+  check(
+    'inhire.parseInhireResponse',
+    () => parseInhireResponse(
+      { jobsPage: [
+        { jobId: `${LONE}bad`, displayName: 'Bad Id', status: 'published' },
+        { jobId: 'ok-5', displayName: 'Good Id', status: 'published' },
+      ] },
+      'X', 'x',
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.inhire.app/vagas/ok-5/good-id',
+  );
+
+  // taleez.parseTaleezResponse — for…of over the site's jobs[]; slug feeds the posting URL.
+  const { parseTaleezResponse } = await load('taleez.mjs');
+  check(
+    'taleez.parseTaleezResponse',
+    () => parseTaleezResponse(
+      { jobs: [{ id: 1, label: 'Bad Slug', slug: `${LONE}bad` }, { id: 2, label: 'Good Slug', slug: 'ok-2' }] },
+      'X', 'x',
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://taleez.com/apply/ok-2',
   );
 
   // hibob.parseHibobJobAds — for…of over jobAdDetails; id feeds the posting URL.
@@ -414,6 +450,39 @@ try {
     ).jobs,
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://acme.recruitmentplatform.com/details.html?jobId=101',
   );
+
+  // themuse.parseSearchPage — for…of over the /search cards; the title-link
+  // href feeds the posting URL, so a lone surrogate in it must drop just
+  // that card (the href is validated against a /jobs/{company}/{slug}
+  // shape, and lone surrogates are rejected explicitly).
+  const { parseSearchPage: parseMusePage } = await load('themuse.mjs');
+  const museCard = (href, title) =>
+    `<article class="sr-tile" data-job-id="00000000-0000-0000-0000-000000000000"><div class="sr-tile__body"><h2 class="sr-tile__title"><a href="${href}">${title}</a></h2><div class="sr-tile__details"><p>At <a href="/profiles/acme">Acme</a> - Berlin</p><p>Posted on Nov 10</p></div></div></article>`;
+  check(
+    'themuse.parseSearchPage',
+    () => parseMusePage(
+      `<h1 class="sr-count"><strong>2</strong> jobs</h1>${museCard(`/jobs/acme/${LONE}bad`, 'Bad Id')}${museCard('/jobs/acme/good-id', 'Good Id')}`,
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://www.themuse.com/jobs/acme/good-id',
+  );
+
+  // successfactors-classic.parseSearchReply — for…of over the DWR search
+  // reply's postings; the posting id ends the public detail URL (the dedup key).
+  const { parseSearchReply: parseSfClassicReply } = await load('successfactors-classic.mjs');
+  check(
+    'successfactors-classic.parseSearchReply',
+    () => parseSfClassicReply(
+      [{
+        detailURLPrefix: '/career?career%5fns=job%5flisting&company=ACME001&navBarLevel=JOB%5fSEARCH&rcm%5fsite%5flocale=es%5fES&career_job_req_id=',
+        postingCount: 2,
+        postings: [{ id: `${LONE}9`, title: 'Bad' }, { id: 7, title: 'Good' }],
+      }],
+      { origin: 'https://career5.successfactors.eu', company: 'ACME001' },
+      'Acme',
+      'es',
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url.endsWith('career_job_req_id=7'),
+  );
 } catch (e) {
   fail(`per-provider surrogate tests crashed: ${e.message}`);
 }
@@ -454,6 +523,7 @@ try {
     'feishu-jobs.mjs',
     'garena.mjs',
     'hibob.mjs',
+    'inhire.mjs',
     'jibeapply.mjs',
     'kalibrr.mjs',
     'keka.mjs',
@@ -465,6 +535,7 @@ try {
     'platsbanken.mjs',
     'polymer.mjs',
     'remote-com.mjs',
+    'taleez.mjs',
     'talentlink.mjs',
     'techinasia.mjs',
     'thehub.mjs',

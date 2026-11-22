@@ -138,6 +138,9 @@ try {
     fail(`fetch() shape = ${JSON.stringify(jobs)}`);
   }
 
+  if (jobs.truncated === undefined) pass('fetch() leaves a fully read board unmarked');
+  else fail(`fully read board was marked: ${JSON.stringify(jobs.truncated)}`);
+
   // ── Outage vs. empty board ───────────────────────────────────────────────
   // A board answering every request with a Cloudflare challenge (HTTP 403) must
   // NOT read downstream as a live board with no matching jobs, so a total
@@ -169,6 +172,29 @@ try {
     pass('fetch() tolerates one failed keyword when another answers');
   } else {
     fail(`partial failure = ${JSON.stringify(partial)}`);
+  }
+  // ...but the failed keyword was never read, so the result says the board is
+  // partial: scan.mjs logs it partial instead of reachable.
+  if (partial.truncated?.reason === 'fetch-error' && partial.truncated.fetched === 2) {
+    pass('fetch() marks the board partial (fetch-error) when one keyword fails and another answers');
+  } else {
+    fail(`partial failure truncated = ${JSON.stringify(partial.truncated)}`);
+  }
+
+  // A later page failing keeps the pages already read, and marks the board
+  // partial: the rest of that keyword was never read.
+  const laterPageCtx = {
+    async sleep() {},
+    async fetchText(url) {
+      if (url.includes('-pagina-2')) throw new Error('boom');
+      return FIXTURE;
+    },
+  };
+  const laterPage = await occ.fetch({ name: 'OCC', queries: ['alive'], max_pages: 3 }, laterPageCtx);
+  if (laterPage.length === 2 && laterPage.truncated?.reason === 'fetch-error' && laterPage.truncated.fetched === 2) {
+    pass('fetch() keeps page 1 and marks the board partial when a later page fails');
+  } else {
+    fail(`later-page failure = ${laterPage.length} jobs, truncated ${JSON.stringify(laterPage.truncated)}`);
   }
 
   // ── zero cards: empty search vs. broken scraper ──────────────────────────
@@ -228,6 +254,11 @@ try {
     pass('fetch() tolerates one challenged keyword when another parses');
   } else {
     fail(`mixed challenge/ok = ${JSON.stringify(mixed)}`);
+  }
+  if (mixed.truncated?.reason === 'fetch-error') {
+    pass('fetch() marks the board partial when one keyword is challenged and another parses');
+  } else {
+    fail(`mixed challenge/ok truncated = ${JSON.stringify(mixed.truncated)}`);
   }
 
   // ── queries is required ──────────────────────────────────────────────────

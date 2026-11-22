@@ -1,5 +1,6 @@
 import { pathToFileURL } from "node:url";
 import { buildConversationContext } from "@/lib/assistant-history.mjs";
+import { spillOversizedPrompt } from "@/lib/oversized-prompt.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { cliSubstitutionNotice, cliUnavailableError, resolveCliOrFallback } from "@/lib/clis";
 import { careerOpsRoot, readMemory, doctorState, rootScript } from "@/lib/career-ops";
@@ -98,10 +99,10 @@ export async function POST(req: Request) {
   const isClaude = cliId === "claude";
   // allowedTools must be COMMA-separated; disallowedTools is the hard guardrail
   // so the advisor can read (and WebFetch) but never blind-writes or shells out.
-  const args = isClaude
+  const argsFor = (p: string) => (isClaude
     ? [
         "-p",
-        prompt,
+        p,
         "--output-format",
         "stream-json",
         "--verbose",
@@ -118,20 +119,37 @@ export async function POST(req: Request) {
         "--disallowedTools",
         ADVISOR_SCOPE.disallowed,
       ]
-    : spec.args(prompt);
+    : spec.args(p));
 
   // The advisor reads and fetches but must never write — the same intent the
   // Claude branch spells as Read,WebFetch,Glob,Grep with Bash/Write/Edit denied.
   // networkReadOnly, not localReadOnly, because WebFetch is in that allow list.
   let child;
+  let spill: ReturnType<typeof spillOversizedPrompt> | undefined;
   try {
+    // This prompt is preamble + up to 24 messages / 24,000 characters of history
+    // + 8,000 of earlier excerpts + memory + page context + the message. On a
+    // filled profile that reaches the Windows 32,767-unit command-line cap, so the
+    // spawn failed with an opaque ENAMETOOLONG: this was the one CLI route that
+    // still built its argv from an unbounded prompt (every sibling spills —
+    // /api/run #6743, the apply planner #7150, cv/ingest, explore/ai). A launch
+    // that would not fit gets the prompt in a file under the data root and a
+    // pointer in argv; a prompt that fits is passed as before.
+    spill = spillOversizedPrompt({
+      prompt,
+      buildArgs: argsFor,
+      binPath,
+      fencing: { cliId, capabilities: CAPS.networkReadOnly },
+      root: careerOpsRoot(),
+    });
     child = spawnHeadlessCli(
       binPath,
-      args,
+      spill.args,
       { cwd: careerOpsRoot(), env: process.env },
       { cliId, capabilities: CAPS.networkReadOnly },
     );
   } catch (e) {
+    spill?.cleanup?.();
     // Fencing refuses an argv that contradicts the capability record. Report it
     // in this route's own error shape rather than letting the throw escape POST
     // as an unhandled rejection and an unstructured 500.
@@ -159,6 +177,9 @@ export async function POST(req: Request) {
         if (!closed) {
           closed = true;
           if (killer) clearTimeout(killer);
+          // The spilled prompt file holds the conversation; it must not outlive
+          // the response.
+          spill?.cleanup?.();
           try {
             controller.close();
           } catch {
@@ -233,6 +254,9 @@ export async function POST(req: Request) {
     cancel() {
       closed = true;
       if (killer) clearTimeout(killer);
+      // A client that disconnects never reaches safeClose, so the spilled prompt
+      // is cleaned up here too.
+      spill?.cleanup?.();
       try {
         child.kill("SIGTERM");
       } catch {

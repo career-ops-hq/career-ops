@@ -12,7 +12,8 @@ import os from "node:os";
 import path from "node:path";
 import { prepareCliLaunch } from "./cli-launch.mjs";
 
-const TIMEOUT_MS = 15_000;
+// The CLI takes ~5s to start on a loaded machine; leave room for a slow one.
+const TIMEOUT_MS = 30_000;
 
 /**
  * Parse the text `/usage` prints. Returns null unless a session or week line
@@ -85,12 +86,15 @@ async function run(bin, { exec = execFile } = {}) {
         // otherwise fire on every cache refresh for a command that makes no model turn.
         "--setting-sources", "user", "--settings", '{"disableAllHooks":true}',
       ]);
-      exec(
+      const child = exec(
         launch.command,
         launch.args,
         { timeout: TIMEOUT_MS, maxBuffer: 1 << 20, cwd, windowsHide: true, env: { ...process.env, NO_COLOR: "1" } },
         (err, stdout) => (err ? reject(err) : resolve(stdout)),
       );
+      // execFile leaves stdin an open pipe, and the CLI then waits 3s for piped
+      // input before answering. Nothing is piped here, so close it.
+      child?.stdin?.end();
     });
   } finally {
     await fsPromises.rm(cwd, { recursive: true, force: true }).catch(() => {});

@@ -11,7 +11,7 @@
 
 import { isMainModule } from '../../lib/is-main-module.mjs';
 import { apiBase, fetchWithTimeout, readBoundedText } from './lib/api.mjs';
-import { CONTROL_CHARS, displayClean } from './lib/clean.mjs';
+import { CONTROL_CHARS, cleanForDisplay } from './lib/clean.mjs';
 
 const USER_AGENT = 'career-ops-plugin-h1b-sponsor/1.0';
 const TIMEOUT_MS = 10_000;
@@ -103,7 +103,7 @@ export async function mintToken({ fetchImpl = guardedMintFetch } = {}) {
   } catch (err) {
     const reason = (err && err.name === 'AbortError')
       ? `no response within ${TIMEOUT_MS / 1000}s`
-      : displayClean((err && err.message) ? err.message : err);
+      : cleanForDisplay((err && err.message) ? err.message : err);
     return { ok: false, exitCode: 1, message: `could not reach the key service (${reason})` };
   }
 
@@ -139,7 +139,7 @@ export async function mintToken({ fetchImpl = guardedMintFetch } = {}) {
 
   // Server-controlled text; collapse whitespace so it stays one line and cannot
   // smuggle extra instructions into output the agent may relay.
-  const note = (typeof body.note === 'string') ? displayClean(body.note) : '';
+  const note = (typeof body.note === 'string') ? cleanForDisplay(body.note) : '';
 
   return { ok: true, token, note };
 }
@@ -183,7 +183,7 @@ async function main() {
 // test files in-process, so that turned the whole suite red).
 if (isMainModule(import.meta.url)) {
   main().catch(err => {
-    const message = displayClean((err && err.message) ? err.message : err);
+    const message = cleanForDisplay((err && err.message) ? err.message : err);
     process.stderr.write(`could not issue a key (${message})\n`);
     process.exitCode = 1;
   });

@@ -2,7 +2,7 @@
 // Moved verbatim from test-all.mjs (issue #1440); no framework by design:
 // the suite must run on a fresh clone with only Node.
 import { execFileSync } from 'child_process';
-import { accessSync, constants, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync as _rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
+import { accessSync, constants, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync as _rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { basename, join, dirname, resolve, sep, delimiter } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -11,6 +11,10 @@ import { localToday } from '../lib/local-today.mjs';
 import { getCareerOpsRoot } from '../path-resolver.mjs';
 import { describeDrift, diffSnapshots, snapshotDataRoot } from './data-root-guard.mjs';
 import { REQUIRED_TOOL_ENV, toolRequired } from './required-tools.mjs';
+import { formatManifest, looseManifest } from '../seeds/employers-fold.mjs';
+import { chunkInbox } from '../seeds/employers-import.mjs';
+import { INBOX_DIR } from '../seeds/employers-inbox.mjs';
+import { loadOwnDomainContributors } from '../seeds/employers-validate.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one level down)
@@ -214,7 +218,36 @@ export function isolatedBatchStatePath(additionsDir) {
 // option still wins, and a removal that keeps failing still throws. Same
 // wrapper test-all.mjs applies to its own call sites (#3066), shared so the
 // suites under tests/ cannot drift from it.
-export const rmSync = (target, opts = {}) => _rmSync(target, { maxRetries: 10, retryDelay: 100, ...opts });
+export const rmSync = (target, opts = {}) => {
+  // A junction (or directory symlink) reports itself as a directory, so
+  // _rmSync treats it as a real directory and throws ERR_FS_EISDIR instead of
+  // dropping the link. Match Node's own rmSync semantics: a symbolic link is
+  // removed as the link itself, never recursed into — even with recursive.
+  const targetStat = lstatSync(target, { throwIfNoEntry: false });
+  if (targetStat?.isSymbolicLink()) {
+    // unlinkSync has no retry support of its own, so give the link removal
+    // the same transient-failure policy _rmSync applies below — the very
+    // Windows handle window (EBUSY/EMFILE/ENFILE/ENOTEMPTY/EPERM) this
+    // wrapper exists for — still removing only the link. Node retries with
+    // linear backoff (retry 1 waits retryDelay, retry 2 waits 2×retryDelay,
+    // …), so the wait scales with the attempt; Atomics.wait is the blocking
+    // sleep a synchronous retry loop needs.
+    const maxRetries = opts.maxRetries ?? 10;
+    const retryDelay = opts.retryDelay ?? 100;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        unlinkSync(target);
+        return;
+      } catch (err) {
+        if (attempt >= maxRetries || !TRANSIENT_UNLINK_ERRORS.has(err?.code)) throw err;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, (attempt + 1) * retryDelay);
+      }
+    }
+  }
+  return _rmSync(target, { maxRetries: 10, retryDelay: 100, ...opts });
+};
+
+const TRANSIENT_UNLINK_ERRORS = new Set(['EBUSY', 'EMFILE', 'ENFILE', 'ENOTEMPTY', 'EPERM']);
 
 /**
  * The per-script budget run() applies when a caller does not override it.
@@ -1933,4 +1966,103 @@ export async function withLocalServerAs(publicOrigin, localOrigin, fn) {
     return realFetch(url.startsWith(publicOrigin) ? localOrigin + url.slice(publicOrigin.length) : input, init);
   };
   try { return await fn(); } finally { globalThis.fetch = realFetch; }
+}
+
+/**
+ * Copy the committed employer registry (ROOT/employers) into `destDir/employers`,
+ * leaving out `employers/inbox/`. A contribution PR adds its rows to the inbox,
+ * and the fold, import and inbox tests build their own inbox in the copy and
+ * expect it to hold only what they wrote (#6960): copying the PR's own inbox
+ * file along with the registry turned its CI red with nothing wrong in its data.
+ * @param {string} destDir
+ */
+export function copyEmployerRegistry(destDir) {
+  const src = join(ROOT, 'employers');
+  const inbox = join(src, 'inbox');
+  cpSync(src, join(destDir, 'employers'), { recursive: true, filter: (p) => p !== inbox && !p.startsWith(inbox + sep) });
+}
+
+/** Write the own-domain rows as a separate contribution beside the imported files. */
+export function writeOwnDomainInbox(root, rows, date) {
+  if (rows.length === 0) return [];
+  const [login] = loadOwnDomainContributors(root);
+  if (!login) throw new Error('expected an authorized own-domain contributor');
+  const id = `${date}-${login}`;
+  const inbox = join(root, INBOX_DIR);
+  const lines = rows.map(({ ats, board, name, own_domain_mark }) => ({ ats, board, name, own_domain_mark }));
+  const chunks = chunkInbox(lines, id);
+  for (const chunk of chunks) {
+    writeFileSync(join(inbox, chunk.name), `${chunk.lines.map((line) => JSON.stringify(line)).join('\n')}\n`, { flag: 'wx' });
+  }
+  writeFileSync(join(inbox, `${id}.json`), formatManifest(looseManifest({ id, login, date, rows: lines.length })), { flag: 'wx' });
+  return chunks.map(({ name }) => name);
+}
+
+/** Every row of the committed employer registry, parsed. */
+function employerRegistryRows() {
+  const rows = [];
+  for (const file of trackedFiles(ROOT, (rel) => /^employers\/boards\/[^/]+\/[^/]+\.ndjson$/.test(rel))) {
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      if (line.trim()) rows.push(JSON.parse(line));
+    }
+  }
+  return rows;
+}
+
+/** The ids of the committed contribution manifests. */
+function employerContributionIds() {
+  return trackedFiles(ROOT, (rel) => /^employers\/contributions\/[^/]+\.json$/.test(rel)).map((file) => basename(file, '.json'));
+}
+
+/**
+ * The day the registry tests take as "today" when they validate a copy of the
+ * committed registry: noon UTC of the latest date the registry itself holds (a
+ * row's `added`, a contribution's `date`), and never before `floor`. A fixed day
+ * goes stale the first time a contribution is folded in after it: every row
+ * added later reads as "in the future", with nothing wrong in the data.
+ * It depends on the files only, never on the clock.
+ * @param {string} [floor] A YYYY-MM-DD date the result is never earlier than.
+ */
+export function employerRegistryToday(floor = '2026-11-11') {
+  let latest = floor;
+  const see = (date) => { if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) && date > latest) latest = date; };
+  for (const row of employerRegistryRows()) see(row.added);
+  for (const id of employerContributionIds()) {
+    see(JSON.parse(readFileSync(join(ROOT, 'employers', 'contributions', `${id}.json`), 'utf8')).date);
+  }
+  return new Date(`${latest}T12:00:00Z`);
+}
+
+/**
+ * The latest day before employerRegistryToday() that no committed contribution
+ * is dated, as YYYY-MM-DD: a contribution id a test makes on it is free, so the
+ * fold keeps it as it is instead of adding -2.
+ */
+export function unusedEmployerContributionDay() {
+  const taken = new Set(employerContributionIds().map((id) => id.slice(0, 10)));
+  const day = employerRegistryToday();
+  do day.setUTCDate(day.getUTCDate() - 1); while (taken.has(day.toISOString().slice(0, 10)));
+  return day.toISOString().slice(0, 10);
+}
+
+/**
+ * A board id for `ats` that no committed row has, letter case aside: `board`
+ * itself, or `board` with the first number from 2 up that is free (on the
+ * tenant, for Workday). The registry grows with every fold, so a test that needs
+ * a new board cannot count on the one it names staying unknown. The number goes
+ * at the end, so the board stays in the same <initial>.ndjson file.
+ * @param {string} ats
+ * @param {string} board
+ */
+export function unlistedEmployerBoard(ats, board) {
+  const taken = new Set(employerRegistryRows().filter((r) => r.ats === ats).map((r) => String(r.board).toLowerCase()));
+  const numbered = (n) => {
+    if (n === 1) return board;
+    if (ats !== 'workday') return `${board}${n}`;
+    const [tenant, ...rest] = board.split('/');
+    return [`${tenant}${n}`, ...rest].join('/');
+  };
+  let n = 1;
+  while (taken.has(numbered(n).toLowerCase())) n++;
+  return numbered(n);
 }

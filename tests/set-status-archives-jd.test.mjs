@@ -63,7 +63,7 @@ function fakeArchiveCodeRoot() {
     'tracker-parse.mjs', 'lib/local-today.mjs', 'role-matcher.mjs',
     'session-activity.mjs', 'lib/is-main-module.mjs', 'check-jd-archive.mjs',
     'jd-capture.mjs', 'lib/cli-flags.mjs', 'lib/jd-archive-section.mjs', 'templates/states.yml',
-    'tracker-aliases.json', 'lib/dir-lock.mjs', 'lib/run-bounded.mjs', 'lib/status-hooks.mjs',
+    'tracker-aliases.json', 'lib/dir-lock.mjs', 'lib/lock-path.mjs', 'lib/run-bounded.mjs', 'lib/status-hooks.mjs',
     'lib/yaml-document.mjs', 'funnel-velocity.mjs', 'stats.mjs', 'followup-cadence.mjs', 'funnel-stages.mjs',
     'lib/scan-history-columns.mjs', 'lib/tsv-formula-escape.mjs',
   ]) copyFileSync(join(ROOT, file), join(codeRoot, file));
@@ -101,6 +101,29 @@ test('a plain report path resolves before the embedded-JD check', () => {
     assert.equal(r.jdArchiveTriggered?.attempted, false);
     assert.equal(r.jdArchiveTriggered?.reason, 'already-embedded');
   } finally { cleanup(dir); }
+});
+
+// The `?` placeholder employer has no captureSlug(). Its capture is filed as
+// `unknown`, the name archive-posting gives a company it could not detect, and
+// the hook has to find it there, as outcome.mjs does (#6658).
+test('a `?` employer\'s capture filed as unknown is found, not archived again', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-jd-archive-'));
+  mkdirSync(join(dir, 'data'), { recursive: true });
+  mkdirSync(join(dir, 'reports'), { recursive: true });
+  writeFileSync(join(dir, 'data', 'applications.md'), [
+    '# Applications Tracker', '', HEADER, SEP,
+    '| 7 | 2026-02-01 | ? | Backend Engineer | 4.4/5 | Evaluated | ✅ | [7](../reports/007-unknown-2026-02-01.md) | via agency | https://boards.greenhouse.io/acme/jobs/1 |',
+    '',
+  ].join('\n'));
+  writeFileSync(join(dir, 'reports', '007-unknown-2026-02-01.md'), '# Eval\n\n## Job Description (archived verbatim)\n\nTBD\n');
+  mkdirSync(join(dir, 'jds'), { recursive: true });
+  writeFileSync(join(dir, 'jds', '007-2026-02-01_unknown_backend-engineer_0123456789abcdef.pdf'), 'not a real pdf, existence is all that matters');
+  const codeRoot = fakeArchiveCodeRoot();
+  try {
+    const r = jsonOf(setStatus(dir, ['--row', '7', 'Interview', '--json'], { codeRoot, env: { CAREER_OPS_ROOT: dir } }));
+    assert.equal(r.jdArchiveTriggered?.attempted, false, JSON.stringify(r.jdArchiveTriggered));
+    assert.equal(r.jdArchiveTriggered?.reason, 'already-captured');
+  } finally { cleanup(dir); cleanup(codeRoot); }
 });
 
 test('an already-captured JD (jds/ has a matching file) is never re-archived', () => {

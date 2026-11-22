@@ -62,6 +62,7 @@ export const DEFAULT_CADENCE = {
   responded_initial: 1,
   responded_subsequent: 3,
   interview_thankyou: 1,
+  interview_followups: true,
 };
 
 const PROFILE_CADENCE_KEYS = {
@@ -95,6 +96,9 @@ export function loadProfileCadence(profilePath = PROFILE_FILE) {
   for (const [profileKey, cadenceKey] of Object.entries(PROFILE_CADENCE_KEYS)) {
     const parsed = positiveInteger(source[profileKey]);
     if (parsed !== null) cadence[cadenceKey] = parsed;
+  }
+  if (typeof source.interview_followups === 'boolean') {
+    cadence.interview_followups = source.interview_followups;
   }
   return cadence;
 }
@@ -211,9 +215,8 @@ export function parseDate(dateStr) {
 // exact notes this project generates (#4084). Bounded to 40 chars total and
 // unable to cross a sentence boundary (`.`/`;`/`?`/`!`) or a line break so it
 // cannot reach into a neighbouring sentence or a different requisition's
-// date; isCrossReferencedMention below reuses the same source so its "does
-// the citation already have a date" check stays in sync with what this one
-// actually matches.
+// date; the clause model below reuses the same source, so what counts as a
+// date there cannot drift from what this one actually matches.
 //
 // The {0,39} quantifier, not {0,40}: the mandatory separator right after it
 // is part of the gap too, so the true maximum distance between "applied" and
@@ -226,9 +229,8 @@ export function parseDate(dateStr) {
 //     matched even with the gap itself excluding line terminators -- the
 //     separator character is the one place a line break could still sneak
 //     through.
-const APPLIED_DATE_SOURCE = String.raw`\bapplied\b[^.;?!\r\n\u2028\u2029]{0,39}?[^\S\r\n\u2028\u2029]~?(\d{4}-\d{2}-\d{2})(?![\w-])`;
+const APPLIED_DATE_SOURCE = String.raw`\bapplied\b[^.;?!|\r\n\u2028\u2029]{0,39}?[^\S\r\n\u2028\u2029]~?(\d{4}-\d{2}-\d{2})(?![\w-])`;
 const APPLIED_DATE_RE = new RegExp(APPLIED_DATE_SOURCE, 'gi');
-const APPLIED_DATE_HAS_DATE_RE = new RegExp(APPLIED_DATE_SOURCE, 'i');
 
 // The trailing (?![\w-]) is the mirror of that leading \b: without it a
 // malformed value ("2026-06-091", "2026-06-09-2026-06-10") is truncated to a
@@ -253,28 +255,43 @@ const APPLIED_DATE_HAS_DATE_RE = new RegExp(APPLIED_DATE_SOURCE, 'i');
 //     row must not fail a whole report.
 //
 // @param {string} notes
-// @param {{requireValidCalendarDate?: boolean}} [options]
+// @param {{requireValidCalendarDate?: boolean, requireExactDate?: boolean, requireUnambiguousDate?: boolean}} [options]
 export function parseAppliedDate(notes, options = {}) {
   if (!notes) return null;
   const validateCalendar = options.requireValidCalendarDate === true;
   const text = String(notes);
 
+  // Every SYNTACTIC match, impossible days included. Attribution runs over all
+  // of them and `validateCalendar` applies only to what may be returned, below.
+  // Filtering here instead hid an impossible date from the clause model, which
+  // then read the clause citing it as undated -- so "row 51 applied 2026-02-30;
+  // Applied 2026-06-17" carried row 51's scope into the next clause and
+  // discarded a valid own date, reporting the note as stating no date at all.
+  // A typo in a citation is still the citation's; it must not cost this row its
+  // own measured date.
   const matches = [];
   for (const m of text.matchAll(APPLIED_DATE_RE)) {
-    if (!validateCalendar || isRealCalendarDate(m[1])) matches.push({ date: m[1], index: m.index });
+    matches.push({ date: m[1], index: m.index, end: m.index + m[0].length, approximate: m[0].endsWith(`~${m[1]}`) });
   }
   if (matches.length === 0) return null;
 
   // Drop dates that belong to a DIFFERENT row before choosing. Notes routinely
   // cite a sibling requisition's timeline for context — "#154 is already live
   // in the same ATS (applied 2026-08-04)" — and that citation reads exactly
-  // like this row's own apply date to a positional scan (#2607).
-  const own = matches.filter(m => !isCrossReferencedMention(text, m.index));
+  // like this row's own apply date to a positional scan (#2607). The citation
+  // is as often written in prose ("...(row 51, 4.6/5)"), and it can sit before,
+  // inside or after the match it belongs to, so attribution is decided by the
+  // clause model below rather than by scanning outward from each date (#4953).
+  const cited = citedDateOffsets(text, matches, options.requireUnambiguousDate === true);
+  const own = matches.filter(m => !cited.has(m.index)
+    && (!validateCalendar || isRealCalendarDate(m.date)));
 
   // First-wins is preserved among a row's OWN dates: a later status date must
   // not displace the submission date (see the fixture in test-all.mjs).
   // Cross-reference filtering is orthogonal to that ordering rule.
-  if (own.length > 0) return own[0].date;
+  // Certainty belongs to the selected own mention, not another date in the
+  // note. An estimated first date must not fall through to a later exact one.
+  if (own.length > 0) return options.requireExactDate && own[0].approximate ? null : own[0].date;
 
   // Every apply-date in the note belongs to another row, so this note does not
   // state when THIS row was submitted. Returning null is the honest answer —
@@ -291,11 +308,58 @@ export function parseAppliedDate(notes, options = {}) {
   return null;
 }
 
-// How far back to look for a row reference. Long enough to span a clause like
-// "#154 Sr PM M&A is already live in the same ATS (applied ...)", short enough
-// that an unrelated "#123" earlier in a long note does not reach forward and
-// disqualify a genuine date.
-const CROSS_REF_LOOKBACK = 120;
+// --- Which apply-date belongs to THIS row ---------------------------------
+//
+// Notes routinely cite a SIBLING requisition's timeline for context, and that
+// citation reads exactly like this row's own date to a positional scan (#2607).
+// The job here is attribution: for each "applied YYYY-MM-DD" in a note, decide
+// whether it is this row's or a cited row's.
+//
+// This was first done with a lookback window plus a set of scope rules, then
+// with a lookback, a forward bracket scan, and more scope rules (#4953). Two
+// review rounds found fourteen genuine misattributions between them, because
+// every new rule interacted with the others: a rule about semicolons had to
+// know about brackets, a rule about brackets had to know where a clause ended,
+// and a date could be claimed by a pointer the other direction's rule had
+// already dismissed. Patching that converges slowly, if at all.
+//
+// So attribution is now ONE pass over a single model:
+//
+//   1. The note is split into CLAUSES on a sentence break, `;`, `|` or a line
+//      break -- the separators this Notes column actually uses.
+//   2. Inside a clause, each "applied ... date" match owns a SEGMENT running
+//      from its own "applied" to the next one (or the clause's end).
+//   3. Every row pointer in the clause is attributed to exactly one date (see
+//      pointerOwner below), and that date is the cited row's, not this row's.
+//   4. ONE cross-clause rule: an undated pointer's subject carries into the
+//      next clause, and only across a `;` or `|`.
+//
+// Everything the old scope rules expressed falls out of that, which is the
+// point: there is one place where attribution is decided, so a new case is a
+// new test rather than a new rule.
+//
+// The two failure directions are not symmetric, and the module's original
+// doctrine is that a tie goes to "cited": a false positive degrades to a date
+// LABELLED as not-measured, while a false negative reports another row's date
+// as this row's MEASURED one. That holds for genuinely ambiguous notes. It is
+// not a licence to drop a date a reader would call unambiguous -- see the
+// `pointerOwner` and carry notes for the two places that distinction decides.
+
+// The spellings of a row pointer. `#NNN` was the only one the guard knew, and
+// notes name a sibling in prose at least as often -- "(row 51, 4.6/5)".
+//
+// The WORD is the discriminator for the prose form, and that is what makes it
+// safe: a bare number after a bare word is NOT a pointer, because "Req 1311",
+// "job 88214" and "posting 4001" are this row's own ATS identifier. Requiring
+// the literal word needs no label exemption of the kind `#NNN` needs.
+//
+// `\b` before the word, so "arrow 51" and "narrow 51" cannot match; the digit
+// run is bounded to 4, since a tracker `#` is 1-4 digits; and the trailing
+// guard refuses the YEAR of an ISO date, which `\b` alone accepts -- without it
+// "Data entry 2026-08-05" matched "entry 2026". It rejects only a full date
+// continuation, so "row 51-52" is still a pointer.
+const ROW_WORD_REF = String.raw`\b(?:rows?|entr(?:y|ies))[\s:]*#?\s*\d{1,4}\b(?!-\d{2}-\d{2})`;
+const CROSS_REF_TOKEN_RE = new RegExp(String.raw`(?<![\w-])#\d+\b|${ROW_WORD_REF}`, 'gi');
 
 // A `#NNN` immediately preceded by a req/job/posting/reference label is an ATS
 // identifier for THIS row, not a pointer at another tracker row. Anchored at the
@@ -305,106 +369,252 @@ const CROSS_REF_LOOKBACK = 120;
 // Notes column.
 const REQ_LABELLED_HASH_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?|r_)[\s:_-]*$/i;
 
-/**
- * Whether the apply-date at `index` is being cited ABOUT ANOTHER ROW.
- *
- * Heuristic, and deliberately a narrow one: a `#NNN` row reference shortly
- * before the date, with no sentence boundary between them, means the date is
- * inside that reference's clause. A sentence break ends the reference's scope,
- * so "Sibling #140 was slow. Applied 2026-08-06." is correctly read as this
- * row's own date.
- *
- * A SEMICOLON OR PIPE IS A BOUNDARY ONLY ONCE THE REFERENCE HAS ITS OWN DATE.
- * These are the separators this Notes column actually uses, and they do two
- * different jobs depending on what came before:
- *
- *   "#154 Sr PM (applied 2026-08-04); applied 2026-06-15"
- *        the citation already carries its date, so the second one is a new
- *        subject — this row's own. Reading the whole note as #154's discards a
- *        real measured date, and this is the MORE common shape: two roles live
- *        at one employer, and the note naming the sibling is usually the same
- *        note that records this submission.
- *
- *   "#154 is already live; applied 2026-08-04"
- *        the citation has no date yet, so the one after the separator is still
- *        its own — a semicolon joins independent clauses within a sentence and
- *        the subject carries across it. Treating it as a break here adopts a
- *        foreign date and reports it as MEASURED.
- *
- * Where the reading is genuinely ambiguous the tie goes to "cross-referenced",
- * because the two errors are not symmetric — a false positive degrades to a
- * fallback that is LABELLED as not-measured, while a false negative reports
- * another row's date as this row's measured one.
- *
- * Both failure directions are survivable, which is why a heuristic is
- * acceptable here: a false positive degrades to the evaluation date, labelled
- * as a fallback by both consumers (see the note in parseAppliedDate), and a
- * false negative is just the pre-#2607 behaviour. Neither invents a date.
- *
- * @param {string} text
- * @param {number} index - offset of the "applied" match within `text`
- * @returns {boolean}
- */
-function isCrossReferencedMention(text, index) {
-  const windowStart = Math.max(0, index - CROSS_REF_LOOKBACK);
-  const window = text.slice(windowStart, index);
-  let refEnd = -1;
-  // A `#NNN` glued to a preceding word character or hyphen is an external tag
-  // ("job-search#7", "gh#12"), not a pointer at a tracker row. Reading it as a
-  // row reference discarded the row's own date: "job-search#7; Applied
-  // 2026-09-21" attributed the date to row #7.
-  for (const m of window.matchAll(/(?<![\w-])#\d+\b/g)) {
-    // The lookbehind cannot see past the slice, so a tag whose `#` lands exactly
-    // on the window's first character is checked against the original text.
-    if (m.index === 0 && /[\w-]/.test(text[windowStart - 1] ?? '')) continue;
-    // A `#NNN` tagged as a req/job/posting/reference id is not a row reference:
-    // "Req #1311 - applied 2026-08-06" is this row's own posting id followed by
-    // this row's own date, and reading it as a cross-reference would discard a
-    // genuine date. The label vocabulary is the one merge-tracker.mjs already
-    // recognises in this same Notes column (tracker-parse.mjs REQ_NUMBER_RE), kept in sync by
-    // being written the same way rather than imported — merge-tracker's regex
-    // also captures the id itself, which is not wanted here.
-    if (REQ_LABELLED_HASH_RE.test(window.slice(0, m.index))) continue;
-    refEnd = m.index + m[0].length;
-  }
-  if (refEnd === -1) return false;
+// Clause boundaries. A sentence break needs trailing whitespace, so "4.6/5" and
+// "e.g." are not boundaries; `;` and `|` never appear inside numbers or
+// abbreviations, so they stand alone, and a hand-typed note writes ";applied"
+// as readily as "; applied".
+//
+// `soft` (`;`/`|`) is the only boundary a pointer's subject can carry across --
+// a semicolon joins independent clauses within one sentence, so the subject
+// survives it. A sentence break or a line break is `hard` and always ends it.
+const CLAUSE_SPLIT_RE = /[.!?]\s|[;|]|[\r\n\u2028\u2029]+/g;
 
-  const sinceRef = window.slice(refEnd);
-  // A sentence break always ends the reference's scope.
-  if (/[.!?]\s/.test(sinceRef)) return false;
-
-  // A semicolon or pipe ends it too — but only once the reference has already
-  // been GIVEN a date. Those are the separators this Notes column actually uses,
-  // and they do two different jobs depending on what came before:
-  //
-  //   "#154 Sr PM (applied 2026-08-04); applied 2026-06-15"
-  //        the citation already has its date, so the second one is a new
-  //        subject: this row's own. Reading the whole note as #154's loses a
-  //        real measured date, and that is the more common shape — two roles
-  //        live at one employer, and the note naming the sibling is usually the
-  //        same note recording this submission.
-  //
-  //   "#154 is already live; applied 2026-08-04"
-  //        the citation has NO date yet, so the one after the semicolon is
-  //        still its own: a semicolon joins independent clauses within a
-  //        sentence and the subject carries across it. Treating it as a break
-  //        here adopts a foreign date and reports it as MEASURED, which is the
-  //        failure this whole function exists to prevent.
-  //
-  // "Has the reference already been satisfied?" is what separates them, and it
-  // is checked against the text before the LAST separator so a date belonging
-  // to the citation cannot be read as belonging to a later clause.
-  //
-  // No trailing-whitespace requirement, unlike the sentence rule above. A full
-  // stop needs one to avoid firing on "3.5" or "e.g.", but `;` and `|` do not
-  // appear inside numbers or abbreviations, and a hand-typed note writes
-  // ";applied 2026-06-15" as readily as "; applied 2026-06-15".
-  const lastSeparator = [...sinceRef.matchAll(/[;|]/g)].pop();
-  if (lastSeparator) {
-    const beforeSeparator = sinceRef.slice(0, lastSeparator.index);
-    if (APPLIED_DATE_HAS_DATE_RE.test(beforeSeparator)) return false;
+function splitClauses(text) {
+  const clauses = [];
+  let start = 0;
+  let sepBefore = null;
+  CLAUSE_SPLIT_RE.lastIndex = 0;
+  let m = CLAUSE_SPLIT_RE.exec(text);
+  while (m !== null) {
+    clauses.push({ start, end: m.index, sepBefore });
+    sepBefore = /^[;|]$/.test(m[0]) ? 'soft' : 'hard';
+    start = m.index + m[0].length;
+    m = CLAUSE_SPLIT_RE.exec(text);
   }
-  return true;
+  clauses.push({ start, end: text.length, sepBefore });
+  return clauses;
+}
+
+// Where an UNFINISHED bracket group starts within [from, to), or -1.
+//
+// Everything from there to the end of the clause is ignored when looking for
+// pointers: an unterminated aside is not a citation, so
+// "Applied 2026-11-20 (compare with row 51" keeps its date. Depth-matched, so a
+// nested group does not end the outer one early -- scanning for the first `)`
+// read "(via Ashby (US), row 51)" as closing after "US" and missed the pointer.
+function unclosedGroupStart(text, from, to) {
+  const stack = [];
+  for (let i = from; i < to; i += 1) {
+    const ch = text[i];
+    if (ch === '(' || ch === '[') stack.push(i);
+    else if ((ch === ')' || ch === ']') && stack.length > 0) stack.pop();
+  }
+  return stack.length > 0 ? stack[0] : -1;
+}
+
+// Where the bracket group that `at` sits in ends within [from, to), or -1 when
+// `at` is not inside one. The offset just past the closing bracket, so it can
+// be compared with a date's offset directly.
+//
+// The group rather than the pointer, because direction is a property of the
+// whole aside: "(row 51, row 52) applied 2026-09-20" has two pointers in one
+// group, and measuring from each pointer gave them opposite directions --
+// "row 51" read the comma before "row 52" as the end of an appositive while
+// "row 52" sat against the verb. One group, one reading.
+//
+// The INNERMOST group containing it, which is that same group: an enclosing
+// one is somebody else's punctuation, and reading from it let any wrapper
+// change the answer -- parenthesising a whole note turned
+// "(Applied 2026-09-20 elsewhere (row 51), applied 2026-11-20 here)" into a
+// forward read, so the sibling's September came back as this row's date while
+// the bare note answered November. Pointers that share a group still share
+// their innermost one, so one direction per group survives.
+function bracketGroupEnd(text, from, to, at) {
+  let depth = 0;
+  let depthAt = -1;
+  for (let i = from; i < to; i += 1) {
+    const ch = text[i];
+    if (ch === '(' || ch === '[') {
+      depth += 1;
+    } else if ((ch === ')' || ch === ']') && depth > 0) {
+      if (depth === depthAt) return i + 1;
+      depth -= 1;
+    }
+    if (i === at) {
+      if (depth === 0) return -1;
+      depthAt = depth;
+    }
+  }
+  return -1;
+}
+
+// The row pointers in [from, to), with absolute offsets.
+function pointersIn(text, from, to) {
+  const unclosed = unclosedGroupStart(text, from, to);
+  const limit = unclosed === -1 ? to : unclosed;
+  const scope = text.slice(from, limit);
+  const found = [];
+  for (const m of scope.matchAll(CROSS_REF_TOKEN_RE)) {
+    const at = from + m.index;
+    // The lookbehind cannot see past the slice, so a token on the scope's first
+    // character is checked against the original note. Applies to the word form
+    // too: a scope starting mid-word would let `\b` assert at offset 0 and read
+    // "arrow 51" as "row 51".
+    if (m.index === 0 && /[\w-]/.test(text[from - 1] ?? '')) continue;
+    // Only `#NNN` can be an ATS identifier for this row. "Req #1311 - applied
+    // 2026-08-06" is this row's own posting id followed by this row's own date,
+    // and reading it as a citation would discard a genuine date. The label
+    // vocabulary is the one merge-tracker.mjs already recognises in this same
+    // Notes column, kept in sync by being written the same way rather than
+    // imported -- merge-tracker's regex also captures the id itself.
+    if (m[0].startsWith('#') && REQ_LABELLED_HASH_RE.test(text.slice(from, at))) continue;
+    const groupEnd = bracketGroupEnd(text, from, limit, at);
+    found.push({ index: at, text: m[0], bracketed: groupEnd !== -1, groupEnd });
+  }
+  return found;
+}
+
+// Which date in this clause a pointer is citing, or null if it cites none.
+//
+// An UNBRACKETED pointer is the subject of the "applied" that follows it:
+// "row 51 (other Staff req, applied 2026-09-20)", "#154 Sr PM (applied
+// 2026-08-04)". That also settles a pointer sitting between two dates, which is
+// the reading a comma cannot separate: in "Applied 2026-11-20 and row 51
+// applied 2026-09-20" the pointer is the subject of the second "applied", so
+// November stays this row's. With no date after it, it cites nothing --
+//
+//   "APPLIED 2026-11-13 via the Ashby form (...), same day as #267"
+//        prose commentary COMPARING this submission with a sibling's. The date
+//        is this row's own, and citing it discards a real measured date. Found
+//        on a real tracker row by replaying the model over it.
+//
+// A BRACKETED pointer is an appositive, so it attaches BACKWARD: it cites the
+// segment it sits in or just after, and only a pointer with no segment before
+// it reaches forward ("Applied to their other req (row 51) on 2026-09-20" is
+// inside September's own segment, so backward and forward agree there).
+//
+//   "applied 2026-09-20 to their other Staff req (row 51, 4.6/5)"
+//        the shape the guard exists for: an aside on the clause just read.
+//
+//   "Applied 2026-09-20 elsewhere (row 51), applied 2026-11-20 here"
+//        the same aside with a second application after it. Letting the
+//        following date claim the pointer cited November and returned the
+//        sibling's September as this row's measured date.
+//
+// Direction, not distance, is what the two differ by, so the rule is which way
+// a bracket faces rather than how far a scan may run.
+function pointerOwner(text, pointer, dates) {
+  // Inside an "applied ... date" span, the pointer names what that application
+  // was for, so it owns that date whatever its form or punctuation.
+  const containing = dates.find(d => pointer.index >= d.index && pointer.index < d.end);
+  if (containing) return containing;
+
+  const following = dates.find(d => d.index > pointer.index) ?? null;
+
+  // Past the end of a span, a bracketed appositive attaches backward -- in the
+  // WORD form only. Nobody writes "row 51" for a requisition, but a bare
+  // "(#1311)" after a date routinely IS this row's own posting id, and citing
+  // it discards a real measured date.
+  if (pointer.bracketed && !pointer.text.startsWith('#')) {
+    // Unless its own closing bracket is all that stands between it and the next
+    // application, in which case it is that application's SUBJECT rather than
+    // an aside on the one before: an appositive is closed off by punctuation,
+    // a subject sits against its verb. That is the whole difference between
+    //   "Applied 2026-09-20 elsewhere (row 51), applied 2026-11-20 here"
+    //   "Applied 2026-11-20 and (row 51) applied 2026-09-20"
+    // which read the opposite ways round and are otherwise identical: a
+    // bracketed pointer with a segment on either side of it.
+    // Measured from the end of the GROUP, so every pointer inside one bracket
+    // reads the same way. A date inside the group is the group's own, which is
+    // the subject reading too: "(row 51 applied 2026-09-20)".
+    //
+    // The gap may contain the closing brackets of ENCLOSING groups, since those
+    // are not punctuation this aside chose: "((row 51)) applied 2026-09-20"
+    // leaves a `)` to climb out of before reaching the verb. Nothing else
+    // passes -- a comma, prose, or a further group opening in the gap all mean
+    // the pointer is not sitting against that verb.
+    const subjectOfFollowing = following !== null
+      && (following.index < pointer.groupEnd
+        || /^[)\]\s]*$/.test(text.slice(pointer.groupEnd, following.index)));
+    if (!subjectOfFollowing) {
+      const preceding = dates.filter(d => d.index < pointer.index).pop();
+      if (preceding) return preceding;
+    }
+  }
+
+  return following;
+}
+
+// The apply-dates in `text` that are being cited about ANOTHER row, as a Set of
+// their offsets.
+function citedDateOffsets(text, matches, requireUnambiguousDate = false) {
+  const cited = new Set();
+  const clauses = splitClauses(text).map(c => ({
+    ...c,
+    dates: matches.filter(m => m.index >= c.start && m.index < c.end),
+    pointers: pointersIn(text, c.start, c.end),
+  }));
+
+  for (let i = 0; i < clauses.length; i += 1) {
+    const clause = clauses[i];
+
+    for (const pointer of clause.pointers) {
+      const owner = pointerOwner(text, pointer, clause.dates);
+      if (owner) cited.add(owner.index);
+    }
+
+    if (clause.dates.length === 0) continue;
+
+    // The one cross-clause rule. An UNDATED pointer's subject carries into the
+    // next clause, across a `;` or `|` only:
+    //
+    //   "#154 is already live; applied 2026-08-04"
+    //        the citation has no date yet, so the one after the separator is
+    //        still its own.
+    //
+    //   "#154 Sr PM (applied 2026-08-04); applied 2026-06-15"
+    //        the citation already carries its date, so it is satisfied and the
+    //        second date is a new subject -- this row's own. This is the more
+    //        common shape: two roles live at one employer, and the note naming
+    //        the sibling is the same note recording this submission.
+    //
+    // It reaches exactly one clause. A pointer four clauses back, with
+    // unrelated clauses in between, is not stating when this row was submitted:
+    // a tracker row read "...not row 39 (a different employer); no prior
+    // application there; one-active-application policy unverified; posted:
+    // 2026-10-29; Applied 2026-10-30 via Greenhouse", and carrying that scope
+    // discarded a date no reader would call ambiguous.
+    //
+    // KNOWN LIMIT, and the reason this rule is structural rather than clever:
+    // "Sibling #154 is live; same ATS; applied 2026-08-04 to that sibling" also
+    // stops carrying, so that date is reported as this row's. Telling it apart
+    // from the row above needs the anaphora ("to that sibling") read, and the
+    // attempt to do so by matching such wording produced three fresh
+    // misattributions of its own -- including discarding a real date from
+    // "Applied 2026-08-04 for this role", where the wording names the CURRENT
+    // row. One documented limit in the cheaper direction beats three bugs.
+    // Excluding a reply candidate requires stronger evidence than reporting a
+    // cadence date. In that opt-in path, an undated sibling subject remains
+    // uncertain across undated soft clauses. Stop at a date or sentence break;
+    // do not guess whether prose such as "to that sibling" changes the subject.
+    let previousIndex = i - 1;
+    if (requireUnambiguousDate) {
+      while (previousIndex >= 0 && clauses[previousIndex + 1].sepBefore === 'soft'
+        && clauses[previousIndex].dates.length === 0
+        && clauses[previousIndex].pointers.length === 0) previousIndex -= 1;
+    }
+    const previous = clauses[previousIndex];
+    if (
+      clauses[previousIndex + 1].sepBefore === 'soft'
+      && previous
+      && previous.pointers.length > 0
+      && previous.dates.length === 0
+    ) {
+      for (const d of clause.dates) cited.add(d.index);
+    }
+  }
+
+  return cited;
 }
 
 // True only when YYYY-MM-DD names a day that exists. Round-tripping through a
@@ -839,6 +1049,7 @@ export function computeUrgency(status, daysSinceApp, daysSinceLastFollowup, foll
     return 'waiting';
   }
   if (status === 'interview') {
+    if (CADENCE.interview_followups === false) return 'waiting';
     if (daysSinceLastFollowup !== null) {
       return daysSinceLastFollowup >= CADENCE.responded_subsequent ? 'overdue' : 'waiting';
     }
@@ -860,6 +1071,7 @@ export function computeNextFollowupDate(status, appDate, lastFollowupDate, follo
     return addDays(parseDate(appDate), CADENCE.responded_initial);
   }
   if (status === 'interview') {
+    if (CADENCE.interview_followups === false) return null;
     // After the thank-you is logged, subsequent touches follow the responded
     // cadence (modes/followup.md: "Every 3 days · No limit").
     if (lastFollowupDate) return addDays(parseDate(lastFollowupDate), CADENCE.responded_subsequent);
@@ -928,6 +1140,9 @@ export function analyzeFromContent(trackerContent, followupsContent = '', { enab
   for (const app of apps) {
     const normalized = normalizeStatus(app.status);
     if (!ACTIONABLE_STATUSES.includes(normalized)) continue;
+    // Interview scheduling can be managed separately from follow-up cadence.
+    // Exclude before pins so an old next-date cannot revive a disabled row.
+    if (normalized === 'interview' && CADENCE.interview_followups === false) continue;
 
     // appDateSource travels with the entry so a consumer can tell a measured
     // age from one inferred off the evaluation date.

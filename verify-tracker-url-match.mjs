@@ -97,6 +97,7 @@ export function classifyPair(rowUrlRaw, reportUrlRaw) {
     return { verdict: 'skip', reason: 'aggregator' };
   }
   const relation = postingUrlRelation(rowUrlRaw, reportUrlRaw);
+  if (relation === 'same') return { verdict: 'match', reason: 'same-posting' };
   if (relation === 'distinct') return { verdict: 'mismatch', reason: 'distinct-employer-urls' };
   return { verdict: 'skip', reason: relation };
 }
@@ -168,11 +169,14 @@ export function runCheck() {
       skip(reason);
     }
 
-    if (candidates.length === 0 && agrees) { result.matched++; continue; }
     // A row that agrees with at least one of its reports is internally
     // consistent; a URL difference on ANOTHER report is Check 9's
     // report-to-report question (#5780 re-evaluations), not a row mismatch.
-    if (agrees) { candidates.forEach(() => skip('row-agrees-with-another-report')); continue; }
+    if (agrees) {
+      result.matched++;
+      candidates.forEach(() => skip('row-agrees-with-another-report'));
+      continue;
+    }
     if (candidates.length === 0) continue; // every link was skipped — nothing to judge
     result.mismatches.push(...candidates);
   }

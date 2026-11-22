@@ -60,6 +60,18 @@ test("no hit stays unranked", () => {
   }, targets()), null);
 });
 
+test("a country name does not match a longer place that merely contains those letters", () => {
+  const india = fitTargetsFromProfile({ location: { country: "India" } });
+  assert.equal(scorePosting({ title: "Engineer", location: "Indianapolis, IN" }, india), null);
+  assert.equal(scorePosting({ title: "Engineer", location: "Indiana, PA" }, india), null);
+  assert.equal(scorePosting({ title: "Engineer", location: "Bengaluru, India" }, india)?.reason, "Location matches 'India'");
+  const niger = fitTargetsFromProfile({ location: { country: "Niger" } });
+  assert.equal(scorePosting({ title: "Engineer", location: "Lagos, Nigeria" }, niger), null);
+  assert.equal(scorePosting({ title: "Engineer", location: "Niamey, Niger" }, niger)?.reason, "Location matches 'Niger'");
+  const sao = fitTargetsFromProfile({ location: { city: "São Paulo" } });
+  assert.equal(scorePosting({ title: "Engineer", location: "São Paulo, Brazil" }, sao)?.reason, "Location matches 'São Paulo'");
+});
+
 test("a different currency and a pay range below the floor add no pay clause", () => {
   const euro = scorePosting({ title: "Office Manager", location: "Austin, TX", pay: "\u20ac140k" }, targets());
   assert.equal(euro.reason, "Location matches 'Austin'");

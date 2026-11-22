@@ -64,19 +64,38 @@ export function atsFromUrl(url) {
   const decode = (segment) => { try { return decodeURIComponent(segment); } catch { return segment; } };
   const seg = u.pathname.split('/').filter(Boolean).map(decode);
   if (/(^|\.)greenhouse\.io$/.test(host)) {
+    if (seg[0] === 'v1' && seg[1] === 'boards' && seg[2]) return { ats: 'greenhouse', slug: seg[2].toLowerCase(), host };
     if (seg[0] && !['embed', 'v1'].includes(seg[0])) return { ats: 'greenhouse', slug: seg[0].toLowerCase(), host };
     const forParam = u.searchParams.get('for');
     if (forParam) return { ats: 'greenhouse', slug: forParam.toLowerCase(), host };
   }
-  if (/(^|\.)lever\.co$/.test(host) && seg[0]) return { ats: 'lever', slug: seg[0].toLowerCase(), host };
+  if (/^api\.(?:eu\.)?lever\.co$/.test(host)) {
+    if (seg[0] === 'v0' && seg[1] === 'postings' && seg[2]) return { ats: 'lever', slug: seg[2].toLowerCase(), host };
+  } else if (/(^|\.)lever\.co$/.test(host) && seg[0]) {
+    return { ats: 'lever', slug: seg[0].toLowerCase(), host };
+  }
   if (host === 'jobs.ashbyhq.com' && seg[0]) return { ats: 'ashby', slug: seg[0].toLowerCase(), host };
-  if (host === 'apply.workable.com' && seg[0]) return { ats: 'workable', slug: seg[0].toLowerCase(), host };
+  if (host === 'api.ashbyhq.com' && seg[0] === 'posting-api' && seg[1] === 'job-board' && seg[2]) {
+    return { ats: 'ashby', slug: seg[2].toLowerCase(), host };
+  }
+  if (host === 'apply.workable.com' && seg[0]) {
+    if (seg[0].toLowerCase() === 'j' && seg[1] && seg[1].toLowerCase() !== 'j') return { ats: 'workable', slug: null, host };
+    if (seg[0].toLowerCase() === 'api') {
+      const accIdx = seg.findIndex(s => s.toLowerCase() === 'accounts');
+      if (accIdx > 0 && seg[accIdx + 1]) return { ats: 'workable', slug: seg[accIdx + 1].toLowerCase(), host };
+    } else {
+      return { ats: 'workable', slug: seg[0].toLowerCase(), host };
+    }
+  }
   const wd = host.match(/^([^.]+)\.(wd\d+)\.myworkdayjobs\.com$/);
   if (wd) {
-    // /{locale}/{site}/job/... or /{site}/job/...: the site is the segment before "job".
+    // /wday/cxs/{tenant}/{site}/..., /{locale}/{site}/job/... or /{site}/job/...:
+    const isCxs = seg[0]?.toLowerCase() === 'wday' && seg[1]?.toLowerCase() === 'cxs';
     const jobIdx = seg.indexOf('job');
-    const site = (jobIdx > 0 ? seg[jobIdx - 1] : seg.find(s => !/^[a-z]{2}-[A-Z]{2}$/.test(s))) || '';
-    return { ats: 'workday', slug: `${wd[1]}|${wd[2]}|${site}`.toLowerCase(), host };
+    const site = isCxs
+      ? (seg[3] || '')
+      : ((jobIdx > 0 ? seg[jobIdx - 1] : (seg.length > 1 && /^[a-z]{2}-[a-z]{2}$/i.test(seg[0]) ? seg[1] : seg[0])) || '');
+    if (site) return { ats: 'workday', slug: `${wd[1]}|${wd[2]}|${site}`.toLowerCase(), host };
   }
   const ic = host.match(/^(?:careers-)?([^.]+)\.icims\.com$/);
   if (ic) return { ats: 'icims', slug: ic[1].toLowerCase(), host };
@@ -247,6 +266,9 @@ export function diagnose(posting, ctx) {
         if (better) {
           return { gap: 'tracked-no-provider', evidence, fix: `point "${entry.name}".careers_url at ${better} (the posting lives on ${target.ats})` };
         }
+        if (target.ats === 'workable') {
+          return { gap: 'tracked-no-provider', evidence, fix: `point "${entry.name}".careers_url at https://apply.workable.com/<account> (share link carries no account slug)` };
+        }
         const site = siteVerdict(posting, target, ctx);
         if (site.count) evidence.push(site.count);
         return {
@@ -292,7 +314,10 @@ export function diagnose(posting, ctx) {
   const careersUrl = careersUrlFor(target);
   if (!careersUrl) {
     const site = siteVerdict(posting, target, ctx);
-    evidence.push(target.ats ? `${target.ats} posting on a custom domain, board token unknown` : site.reads || 'no provider reads this URL');
+    const unknownSlugEvidence = target.ats === 'workable'
+      ? 'workable share link, account slug not in URL'
+      : `${target.ats} posting on a custom domain, board token unknown`;
+    evidence.push(target.ats ? unknownSlugEvidence : site.reads || 'no provider reads this URL');
     if (site.count) evidence.push(site.count);
     return {
       gap: 'untracked-unsupported-ats', evidence,

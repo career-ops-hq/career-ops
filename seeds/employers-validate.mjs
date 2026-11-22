@@ -43,14 +43,29 @@ import { appendFileSync, existsSync, lstatSync, readdirSync, readFileSync, write
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  ADP_MYJOBS_RESERVED,
   BOARD_ATS,
+  CLEARCOMPANY_SITE_RE,
+  DNS_LABEL_ATS,
+  OPTIONAL_REGION_BOARD_URL_BUILDERS,
   REGIONAL_BOARD_URL_BUILDERS,
+  ORACLECLOUD_HOST_RE,
+  ORACLECLOUD_SITE_RE,
+  OWN_DOMAIN_ATS,
+  OWN_DOMAIN_MARKS,
+  ownDomainBoardUrl,
   REGIONS,
+  SF_CLASSIC_COMPANY_RE,
+  SF_CLASSIC_DOMAINS,
+  SF_CLASSIC_LABEL_RE,
   SLUG_RE,
+  SUBDOMAIN_ATS,
+  SUBDOMAIN_RESERVED_LABELS,
   WORKDAY_HOSTS,
   WORKDAY_INSTANCE_RE,
   WORKDAY_SEGMENT_RE,
   buildBoardUrl,
+  regionsOf,
 } from '../lib/ats-board-url.mjs';
 import { isMainModule } from '../lib/is-main-module.mjs';
 import {
@@ -68,6 +83,39 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const AGGREGATOR_DOMAINS_PATH = join(HERE, '..', 'data-static', 'aggregator-domains.txt');
 
+/**
+ * The file of GitHub logins whose contributions may add rows on a company's own domain (OWN_DOMAIN_ATS): one login
+ * per line, # for comments. A row of those systems from any other contributor is an error.
+ */
+export const OWN_DOMAIN_CONTRIBUTORS_FILE = 'OWN_DOMAIN_CONTRIBUTORS';
+
+/** The logins of OWN_DOMAIN_CONTRIBUTORS in the registry at `rootDir`; none when the file is missing. */
+export function loadOwnDomainContributors(rootDir) {
+  const out = new Set();
+  let text = '';
+  try { text = readFileSync(join(rootDir, REGISTRY_DIR, OWN_DOMAIN_CONTRIBUTORS_FILE), 'utf8'); } catch { return out; }
+  for (const raw of text.replace(/\r/g, '').split('\n')) {
+    const login = raw.split('#')[0].trim();
+    if (login) out.add(login.toLowerCase());
+  }
+  return out;
+}
+
+/**
+ * Why `mark` is not a valid own_domain_mark for a row of `ats`, or null. `latestDate` is the last date a check may
+ * carry.
+ */
+export function ownDomainMarkProblem(ats, mark, latestDate) {
+  if (!mark || typeof mark !== 'object' || Array.isArray(mark)) return 'own_domain_mark must be {"mark": …, "checked_on": "YYYY-MM-DD"}';
+  for (const k of Object.keys(mark)) if (!['mark', 'checked_on'].includes(k)) return `own_domain_mark has an unknown key ${JSON.stringify(k)}`;
+  const marks = OWN_DOMAIN_MARKS[ats] ?? [];
+  if (!marks.includes(mark.mark)) return `own_domain_mark.mark ${JSON.stringify(mark.mark)} is not one of: ${marks.join(', ')}`;
+  if (typeof mark.checked_on !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(mark.checked_on) || Number.isNaN(Date.parse(`${mark.checked_on}T00:00:00Z`))
+    || new Date(`${mark.checked_on}T00:00:00Z`).toISOString().slice(0, 10) !== mark.checked_on) return 'own_domain_mark.checked_on must be a YYYY-MM-DD calendar date';
+  if (latestDate && mark.checked_on > latestDate) return `own_domain_mark.checked_on ${mark.checked_on} is in the future`;
+  return null;
+}
+
 /** Where the registry lives, relative to the checkout root. */
 export const REGISTRY_DIR = 'employers';
 
@@ -76,7 +124,7 @@ export const REGISTRY_DIR = 'employers';
 export const ROW_REQUIRED = Object.freeze(['ats', 'board', 'careers_url', 'name', 'source', 'contribution', 'added']);
 export const ROW_KEYS = Object.freeze([
   'ats', 'region', 'board', 'workday_host', 'careers_url', 'name', 'website', 'countries', 'tags',
-  'source', 'contribution', 'added', 'retired', 'retired_reason',
+  'source', 'contribution', 'added', 'retired', 'retired_reason', 'own_domain_mark',
 ]);
 export const MANIFEST_REQUIRED = Object.freeze([
   'id', 'contributor', 'signed_by', 'rows', 'source', 'origin', 'no_conflicting_contract', 'personal_data',
@@ -88,12 +136,13 @@ export const MANIFEST_KEYS = Object.freeze([
 ]);
 export const RETIRED_REASONS = Object.freeze(['gone', 'owner_request', 'moved', 'duplicate', 'policy']);
 
-// Where a row's pointer came from. A closed list: three fixed values and two
+// Where a row's pointer came from. A closed list: three fixed values and three
 // parameterised forms.
 export const FIXED_SOURCES = Object.freeze(['community', 'ats-directory', 'vc-portfolio']);
 export const SOURCE_PATTERNS = Object.freeze({
   'employer-list': /^employer-list:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/,
   'prior-mit': /^prior-mit:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{7,40}$/,
+  'web-index': /^web-index:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?@\d{4}-\d{2}-\d{2}$/,
 });
 
 export const LICENSE_ID = 'CC-BY-4.0';
@@ -103,7 +152,9 @@ export const ALSO_PERMITS = Object.freeze(['ODbL-1.0', 'CC0-1.0']);
 // reserved in the format so rows written later do not need a migration.
 export const TAG_VOCABULARY = Object.freeze([]);
 
-export const MANIFEST_ID_RE = /^(\d{4}-\d{2}-\d{2})-([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$/;
+// <YYYY-MM-DD>-<slug>, and for a later contribution of the same day a number
+// after a dot, 2 to 99 with no leading zero: <YYYY-MM-DD>-<slug>.<n>.
+export const MANIFEST_ID_RE = /^(\d{4}-\d{2}-\d{2})-([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)(?:\.([2-9]|[1-9]\d))?$/;
 export const GITHUB_LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -121,12 +172,15 @@ export const BOARDS_WARN_BYTES = 25 * 1024 * 1024;
 const TOP_LEVEL = Object.freeze(['README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'CHANGELOG.md', 'schema.json', 'contributions', 'boards']);
 // inbox/ exists only while contributions wait to be folded in: git keeps no
 // empty directory, so it is gone after each fold.
-const OPTIONAL_TOP_LEVEL = Object.freeze(['inbox']);
+// OWN_DOMAIN_CONTRIBUTORS: the logins whose contributions may add rows on a company's own domain; without it, none may.
+const OPTIONAL_TOP_LEVEL = Object.freeze(['inbox', 'OWN_DOMAIN_CONTRIBUTORS']);
 const TOP_LEVEL_DIRS = new Set(['contributions', 'boards', 'inbox']);
 
-// ATS whose board id is a subdomain label: their providers only match
-// lowercase hosts, so the id is lowercase letters, digits and hyphens.
-const SUBDOMAIN_ATS = new Set(['recruitee', 'breezy', 'bamboohr', 'pinpoint']);
+// ATS whose board id is a subdomain label (SUBDOMAIN_ATS): their providers
+// only match lowercase hosts, so the id is lowercase letters, digits and
+// hyphens. For DNS_LABEL_ATS it is also at most 63 characters and not one of
+// the vendor's own subdomains (SUBDOMAIN_RESERVED_LABELS).
+const SUBDOMAIN_LABEL_MAX = 63;
 
 // Values that turn up where a board id should be but never name a board:
 // URL path words (Greenhouse's /embed/, Workday's /wday/cxs/) and placeholders.
@@ -171,7 +225,33 @@ const show = (/** @type {unknown} */ v) => JSON.stringify(v);
 export function boardProblem(ats, board) {
   if (typeof board !== 'string' || board === '') return 'board must be a non-empty string';
   if (ats === 'workday') return workdayBoardProblem(board);
+  if (ats === 'successfactors-classic') return sfClassicBoardProblem(board);
+  if (ats === 'oraclecloud') return oraclecloudBoardProblem(board);
+  if (OWN_DOMAIN_ATS.includes(ats)) {
+    if (ownDomainBoardUrl(ats, board) === null) {
+      const how = ats === 'phenom' ? 'the site\'s host' : ats === 'successfactors' ? 'the site\'s host, or host/brand' : 'host/site';
+      return `${ats} board ${show(board)} must be ${how}: a lowercase DNS name of the company's own, not local and not on a vendor's domain`;
+    }
+    return null;
+  }
   return slugProblem(ats, board, 'board');
+}
+
+/**
+ * Why `region` is not a region of `ats`, or null when it is.
+ * @param {string} ats
+ * @param {unknown} region
+ * @param {string} what  "rows" or "boards", for the message
+ * @returns {string|null}
+ */
+function regionProblem(ats, region, what) {
+  const regions = regionsOf(ats);
+  if (regions.length === 0) {
+    return `region is only used on ${Object.keys(REGIONAL_BOARD_URL_BUILDERS).join(' and ')} ${what}, and on ${Object.keys(OPTIONAL_REGION_BOARD_URL_BUILDERS).join(' and ')} ${what} off the default host`;
+  }
+  if (typeof region === 'string' && regions.includes(region)) return null;
+  const optional = Object.hasOwn(OPTIONAL_REGION_BOARD_URL_BUILDERS, ats) ? '; leave it out for a board on the default host' : '';
+  return `region ${show(region)} is not one of: ${regions.join(', ')}${optional}`;
 }
 
 /**
@@ -182,17 +262,45 @@ export function boardProblem(ats, board) {
 function slugProblem(ats, slug, label) {
   if (!SLUG_RE.test(slug)) return `${label} ${show(slug)} has characters outside [A-Za-z0-9._-]`;
   if (slug.length < SLUG_MIN) return `${label} ${show(slug)} is too short to be a board id`;
-  if (slug.length > SEGMENT_MAX) return `${label} is ${slug.length} characters long; the limit is ${SEGMENT_MAX}`;
+  if (slug.length > SEGMENT_MAX && !DNS_LABEL_ATS.includes(ats)) return `${label} is ${slug.length} characters long; the limit is ${SEGMENT_MAX}`;
   if (!/^[A-Za-z0-9]/.test(slug) || !/[A-Za-z0-9]$/.test(slug)) return `${label} ${show(slug)} must start and end with a letter or digit`;
   if (slug.includes('..')) return `${label} ${show(slug)} contains ".."`;
   if (/^[0-9]+$/.test(slug)) return `${label} ${show(slug)} is numeric-only; ${ats} boards are named by a slug, not a number`;
   if (PLACEHOLDER_BOARDS.has(slug.toLowerCase())) return `${label} ${show(slug)} is a placeholder or a URL path word, not a board id`;
-  if (SUBDOMAIN_ATS.has(ats)) {
+  if (SUBDOMAIN_ATS.includes(ats)) {
     if (slug !== slug.toLowerCase()) return `${ats} ${label}s are lowercase (the id is a subdomain): use ${show(slug.toLowerCase())}`;
+    if (DNS_LABEL_ATS.includes(ats) && slug.length > SUBDOMAIN_LABEL_MAX) return `${ats} ${label}s are one subdomain label, at most ${SUBDOMAIN_LABEL_MAX} characters; this one has ${slug.length}`;
     if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(slug)) return `${ats} ${label}s are one subdomain label: lowercase letters, digits and hyphens`;
+    if (Object.hasOwn(SUBDOMAIN_RESERVED_LABELS, ats) && SUBDOMAIN_RESERVED_LABELS[ats].includes(slug)) return `${label} ${show(slug)} is one of ${ats}'s own subdomains, not a board`;
   }
   if (ats === 'rippling' && !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(slug)) return `rippling ${label}s are letters, digits and hyphens`;
   if (ats === 'workable' && !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(slug)) return `workable ${label}s are letters, digits, "_" and "-"`;
+  if (ats === 'clearcompany' && !CLEARCOMPANY_SITE_RE.test(slug)) return `clearcompany ${label}s are the career site's id, a lowercase GUID`;
+  if (ats === 'adp-myjobs' && ADP_MYJOBS_RESERVED.includes(slug.toLowerCase())) return `${label} ${show(slug)} is one of myjobs.adp.com's own routes, not a career site`;
+  if (ats === 'adp-myjobs' && !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(slug)) return `adp-myjobs ${label}s are letters, digits, "_" and "-"`;
+  return null;
+}
+
+/** @param {string} board */
+function oraclecloudBoardProblem(board) {
+  const cut = board.indexOf('/');
+  if (cut < 0 || board.indexOf('/', cut + 1) >= 0) return `oraclecloud board is "host/siteNumber", got ${show(board)}`;
+  const host = board.slice(0, cut);
+  const site = board.slice(cut + 1);
+  if (!ORACLECLOUD_HOST_RE.test(host)) return `oraclecloud host ${show(host)} must be a tenant host on Oracle's cloud, in lowercase (<tenant>.fa.[region.][ocs.]oraclecloud[N].com)`;
+  if (!ORACLECLOUD_SITE_RE.test(site)) return `oraclecloud site ${show(site)} must be 1 to 64 letters, digits, "_" or "-"`;
+  return null;
+}
+
+/** @param {string} board */
+function sfClassicBoardProblem(board) {
+  const parts = board.split('/');
+  if (parts.length !== 3) return `successfactors-classic board is "label/eu|com/company", got ${show(board)}`;
+  const [label, domain, company] = parts;
+  if (!SF_CLASSIC_LABEL_RE.test(label)) return `successfactors-classic label ${show(label)} must be one lowercase host label (career5)`;
+  if (!SF_CLASSIC_DOMAINS.includes(domain)) return `successfactors-classic domain ${show(domain)} is not one of: ${SF_CLASSIC_DOMAINS.join(', ')}`;
+  if (!SF_CLASSIC_COMPANY_RE.test(company)) return `successfactors-classic company ${show(company)} must be 1 to 64 letters, digits, "_" or "-"`;
+  if (PLACEHOLDER_BOARDS.has(company.toLowerCase())) return `successfactors-classic company ${show(company)} is a placeholder, not a company id`;
   return null;
 }
 
@@ -251,8 +359,11 @@ export function websiteProblem(website) {
 export function sourceProblem(source) {
   if (typeof source !== 'string') return 'source must be a string';
   if (FIXED_SOURCES.includes(source)) return null;
+  if (SOURCE_PATTERNS['web-index'].test(source)) {
+    return isIsoDate(source.slice(source.lastIndexOf('@') + 1)) ? null : `source ${show(source)} does not end in a real calendar date (YYYY-MM-DD)`;
+  }
   if (Object.values(SOURCE_PATTERNS).some((re) => re.test(source))) return null;
-  return `source ${show(source)} is not one of: ${FIXED_SOURCES.join(', ')}, employer-list:<org>, prior-mit:<owner>/<repo>@<commit>`;
+  return `source ${show(source)} is not one of: ${FIXED_SOURCES.join(', ')}, employer-list:<org>, prior-mit:<owner>/<repo>@<commit>, web-index:<name>@<YYYY-MM-DD>`;
 }
 
 /** @param {unknown} value */
@@ -347,6 +458,23 @@ contribution does not edit this file: maintainers regenerate it on main with
 `;
 
 /**
+ * The order of two contribution ids: by the id without its number, then by
+ * the number (none comes first), so <id>.2 sorts right after <id> and <id>.10
+ * after <id>.9. Two ids without a number compare as plain text.
+ * @param {string} a
+ * @param {string} b
+ */
+export function compareContributionIds(a, b) {
+  const split = (/** @type {string} */ id) => {
+    const m = /^(.*)\.(\d+)$/.exec(id);
+    return m ? [m[1], Number(m[2])] : [id, 1];
+  };
+  const [ab, an] = split(a);
+  const [bb, bn] = split(b);
+  return ab < bb ? -1 : ab > bb ? 1 : an - bn;
+}
+
+/**
  * Render CHANGELOG.md from manifests: one line per contribution, oldest first,
  * crediting it with its own attribution.
  * @param {Array<any>} manifests
@@ -354,7 +482,7 @@ contribution does not edit this file: maintainers regenerate it on main with
 export function renderChangelog(manifests) {
   const usable = manifests
     .filter((m) => m && typeof m === 'object' && typeof m.id === 'string' && typeof m.date === 'string')
-    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : compareContributionIds(a.id, b.id)));
   const lines = usable.map((m) => {
     const rows = Number.isInteger(m.rows) ? `${m.rows} board${m.rows === 1 ? '' : 's'}` : 'boards';
     return `- ${m.date} \`${m.id}\` (${rows}, source \`${m.source}\`): ${m.attribution}`;
@@ -406,7 +534,7 @@ function readRegistry(rootDir, report) {
     const s = lstatOrNull(join(dir, name));
     const rel = `${REGISTRY_DIR}/${name}`;
     if (s?.isSymbolicLink()) err(rel, 0, 'must not be a symlink');
-    else if (s && !s.isDirectory()) err(rel, 0, 'must be a directory');
+    else if (s && s.isDirectory() !== TOP_LEVEL_DIRS.has(name)) err(rel, 0, `must be a ${TOP_LEVEL_DIRS.has(name) ? 'directory' : 'file'}`);
   }
   for (const name of TOP_LEVEL) {
     const s = lstatOrNull(join(dir, name));
@@ -422,7 +550,7 @@ function readRegistry(rootDir, report) {
       if (f === '.DS_Store') continue;
       const rel = `${REGISTRY_DIR}/contributions/${f}`;
       const id = f.endsWith('.json') ? f.slice(0, -5) : '';
-      if (!MANIFEST_ID_RE.test(id)) { err(rel, 0, 'manifests are named <YYYY-MM-DD>-<slug>.json (lowercase slug)'); continue; }
+      if (!MANIFEST_ID_RE.test(id)) { err(rel, 0, 'manifests are named <YYYY-MM-DD>-<slug>.json (lowercase slug), or <YYYY-MM-DD>-<slug>.<n>.json with n from 2 to 99'); continue; }
       if (!lstatOrNull(join(cdir, f))?.isFile()) { err(rel, 0, 'must be a regular file'); continue; }
       const text = readFileSync(join(cdir, f), 'utf8');
       let data = null;
@@ -526,8 +654,9 @@ export function readInbox(rootDir, report) {
 
 /**
  * Problems with one inbox line: {"ats","board","name"} and, optionally,
- * "website", plus "region" (greenhouse, lever) or "workday_host" (workday) when
- * the board is not on the default host. Empty when the line is valid.
+ * "website", plus "region" (greenhouse, lever, personio, zoho-recruit) or
+ * "workday_host" (workday) when the board is not on the default host. Empty
+ * when the line is valid.
  * @param {any} line
  * @param {Set<string>} [aggregatorDomains]
  * @returns {string[]}
@@ -541,8 +670,8 @@ export function inboxLineProblems(line, aggregatorDomains = loadAggregatorDomain
   const atsOk = typeof line.ats === 'string' && BOARD_ATS.includes(line.ats);
   if (hasOwn(line, 'ats') && !atsOk) out.push(`ats ${show(line.ats)} is not one of: ${BOARD_ATS.join(', ')}`);
   if (atsOk && hasOwn(line, 'region')) {
-    if (!hasOwn(REGIONAL_BOARD_URL_BUILDERS, line.ats)) out.push(`region is only used on ${Object.keys(REGIONAL_BOARD_URL_BUILDERS).join(' and ')} boards`);
-    else if (!REGIONS.includes(line.region)) out.push(`region ${show(line.region)} is not one of: ${REGIONS.join(', ')}`);
+    const p = regionProblem(line.ats, line.region, 'boards');
+    if (p) out.push(p);
   }
   if (atsOk && hasOwn(line, 'workday_host')) {
     if (line.ats !== 'workday') out.push('workday_host is only used on workday boards');
@@ -574,6 +703,13 @@ export function inboxLineProblems(line, aggregatorDomains = loadAggregatorDomain
       if (agg) out.push(`website ${show(line.website)} is an aggregator (data-static/aggregator-domains.txt), not the employer's site`);
     }
   }
+  if (atsOk && OWN_DOMAIN_ATS.includes(line.ats)) {
+    if (!hasOwn(line, 'own_domain_mark')) out.push(`own_domain_mark is required on ${line.ats} boards: the ATS's mark seen on the site, and the date`);
+    else {
+      const p = ownDomainMarkProblem(line.ats, line.own_domain_mark, null);
+      if (p) out.push(p);
+    }
+  } else if (atsOk && hasOwn(line, 'own_domain_mark')) out.push(`own_domain_mark is only used on ${OWN_DOMAIN_ATS.join(', ')} boards`);
   return out;
 }
 
@@ -583,14 +719,16 @@ const KNOWN_LINES_SHOWN = 20;
 /**
  * Validate the inbox against the registry it sits in. Errors: a bad name, a
  * bad line, a file over the limit, a board listed twice in the inbox, a
- * manifest that does not fit its boards files. Warning: boards already in
- * boards/ (one warning per file, however many lines), which the fold skips.
+ * manifest that does not fit its boards files, a numbered contribution id
+ * that contributions/ already has. Warning: boards already in boards/ (one
+ * warning per file, however many lines), which the fold skips.
  * @param {Inbox} inbox
  * @param {RowRecord[]} storeRows
+ * @param {Map<string, ManifestRecord>} storeManifests  contributions/, by id
  * @param {{err: (file: string, line: number, message: string) => void, warn: (file: string, line: number, message: string) => void, aggregatorDomains: Set<string>, latestDate: string}} ctx
  * @returns {number} how many inbox lines are already in the registry
  */
-function checkInbox(inbox, storeRows, { err, warn, aggregatorDomains, latestDate }) {
+function checkInbox(inbox, storeRows, storeManifests, { err, warn, aggregatorDomains, latestDate, ownDomainContributors = new Set() }) {
   /** @type {Map<string, RowRecord>} */
   const store = new Map();
   for (const r of storeRows) {
@@ -601,6 +739,8 @@ function checkInbox(inbox, storeRows, { err, warn, aggregatorDomains, latestDate
   /** @type {Map<string, number>} */
   const linesPerId = new Map();
   let knownTotal = 0;
+  /** @type {Set<string>} the inbox ids that hold a board on a company's own domain */
+  const ownDomainIds = new Set();
 
   for (const f of inbox.files) {
     if (f.parsed.date > latestDate) err(f.file, 0, `the date in the file name, ${f.parsed.date}, is in the future`);
@@ -611,6 +751,7 @@ function checkInbox(inbox, storeRows, { err, warn, aggregatorDomains, latestDate
       const problems = inboxLineProblems(row, aggregatorDomains);
       for (const p of problems) err(f.file, line, p);
       if (problems.length) continue;
+      if (OWN_DOMAIN_ATS.includes(row.ats)) ownDomainIds.add(f.parsed.id);
       const identity = boardIdentity({ ...inboxCoords(row), careers_url: inboxCareersUrl(row) });
       const first = seen.get(identity);
       if (first) { err(f.file, line, `the same board as ${first.file}:${first.line}; list a board once`); continue; }
@@ -631,9 +772,28 @@ function checkInbox(inbox, storeRows, { err, warn, aggregatorDomains, latestDate
     const lines = linesPerId.get(id) || 0;
     for (const p of manifestProblems(id, s.data, lines, latestDate, 'line(s) are in its inbox files')) err(s.file, 0, p);
     const c = s.data && typeof s.data === 'object' ? s.data.contributor : undefined;
+    if (ownDomainIds.has(id) && !(typeof c === 'string' && ownDomainContributors.has(c.toLowerCase()))) {
+      err(s.file, 0, `boards on a company's own domain (${OWN_DOMAIN_ATS.join(', ')}) come only from a contributor in ${REGISTRY_DIR}/${OWN_DOMAIN_CONTRIBUTORS_FILE}; ${show(c)} is not in it`);
+    }
     if (typeof c === 'string' && GITHUB_LOGIN_RE.test(c) && c.toLowerCase() !== s.parsed.login) {
       err(s.file, 0, `contributor ${show(c)} is not the login in the file name (${s.parsed.login})`);
     }
+  }
+
+  // A contribution without a number whose id is taken is folded in as
+  // <id>-2, <id>-3, …; a numbered one keeps its id, so a taken one is an error.
+  /** @type {Map<string, string>} id → its first file */
+  const firstFile = new Map();
+  for (const x of [...inbox.files, ...inbox.sheets.values()].sort((a, b) => (a.file < b.file ? -1 : 1))) {
+    if (!firstFile.has(x.parsed.id)) firstFile.set(x.parsed.id, x.file);
+  }
+  for (const [id, file] of firstFile) {
+    if (!id.includes('.') || !storeManifests.has(id)) continue;
+    const base = id.slice(0, id.lastIndexOf('.'));
+    let n = 2;
+    while (n <= 99 && (storeManifests.has(`${base}.${n}`) || firstFile.has(`${base}.${n}`))) n++;
+    const next = n <= 99 ? `; the next free one is ${base}.${n}` : '';
+    err(file, 0, `contribution ${id} is already in the registry (contributions/${id}.json): give this one another number${next}`);
   }
   return knownTotal;
 }
@@ -746,6 +906,9 @@ export function validateRegistry({
   const byIdentity = new Map();
   /** @type {Map<string, RowRecord>} */
   const byWebsite = new Map();
+  /** @type {Map<string, RowRecord>} The host of each row on a company's own domain. */
+  const byOwnHost = new Map();
+  const ownDomainContributors = loadOwnDomainContributors(root);
   /** @type {Map<string, RowRecord>} */
   const previousInFile = new Map();
 
@@ -760,11 +923,11 @@ export function validateRegistry({
     if (hasOwn(row, 'ats') && !atsOk) e(`ats ${show(row.ats)} is not one of: ${BOARD_ATS.join(', ')}`);
     else if (atsOk && row.ats !== rec.dirAts) e(`ats ${show(row.ats)} is filed under boards/${rec.dirAts}/; a row lives under boards/<its ats>/`);
 
-    if (atsOk && hasOwn(REGIONAL_BOARD_URL_BUILDERS, row.ats)) {
-      if (!hasOwn(row, 'region')) e(`region is required on ${row.ats} rows: ${REGIONS.join(' or ')}`);
-      else if (!REGIONS.includes(row.region)) e(`region ${show(row.region)} is not one of: ${REGIONS.join(', ')}`);
+    if (atsOk && hasOwn(REGIONAL_BOARD_URL_BUILDERS, row.ats) && !hasOwn(row, 'region')) {
+      e(`region is required on ${row.ats} rows: ${REGIONS.join(' or ')}`);
     } else if (atsOk && hasOwn(row, 'region')) {
-      e(`region is only used on ${Object.keys(REGIONAL_BOARD_URL_BUILDERS).join(' and ')} rows`);
+      const p = regionProblem(row.ats, row.region, 'rows');
+      if (p) e(p);
     }
 
     if (row.ats === 'workday') {
@@ -846,12 +1009,31 @@ export function validateRegistry({
       if (p) e(p);
     }
 
+    if (atsOk && OWN_DOMAIN_ATS.includes(row.ats)) {
+      if (!hasOwn(row, 'own_domain_mark')) e(`own_domain_mark is required on ${row.ats} rows: the ATS's mark seen on the site, and the date`);
+      else {
+        const p = ownDomainMarkProblem(row.ats, row.own_domain_mark, latestDate);
+        if (p) e(p);
+      }
+      if (boardOk) {
+        const host = String(row.board).split('/')[0];
+        const first = byOwnHost.get(host);
+        if (first) e(`host ${show(host)} is already on ${first.file}:${first.line}; a company's own domain is on one row`);
+        else byOwnHost.set(host, rec);
+      }
+    } else if (atsOk && hasOwn(row, 'own_domain_mark')) {
+      e(`own_domain_mark is only used on ${OWN_DOMAIN_ATS.join(', ')} rows`);
+    }
+
     let manifest = null;
     if (hasOwn(row, 'contribution')) {
       const id = row.contribution;
-      if (typeof id !== 'string' || !MANIFEST_ID_RE.test(id)) e(`contribution ${show(id)} is not a manifest id (<YYYY-MM-DD>-<slug>)`);
+      if (typeof id !== 'string' || !MANIFEST_ID_RE.test(id)) e(`contribution ${show(id)} is not a manifest id (<YYYY-MM-DD>-<slug> or <YYYY-MM-DD>-<slug>.<n>)`);
       else if (!head.manifests.has(id)) e(`contribution ${show(id)} has no manifest at contributions/${id}.json`);
       else manifest = validManifests.get(id) || null;
+    }
+    if (manifest && atsOk && OWN_DOMAIN_ATS.includes(row.ats) && !ownDomainContributors.has(String(manifest.contributor).toLowerCase())) {
+      e(`a ${row.ats} row comes only from a contribution of ${OWN_DOMAIN_CONTRIBUTORS_FILE}; ${show(manifest.contributor)} is not in it`);
     }
     if (manifest && sourceProblem(row.source) === null && row.source !== manifest.source) {
       e(`source ${show(row.source)} differs from its manifest's source ${show(manifest.source)}`);
@@ -899,7 +1081,7 @@ export function validateRegistry({
   }
 
   const inbox = readInbox(root, err);
-  const inboxKnown = checkInbox(inbox, head.rows, { err, warn, aggregatorDomains, latestDate });
+  const inboxKnown = checkInbox(inbox, head.rows, head.manifests, { err, warn, aggregatorDomains, latestDate, ownDomainContributors });
 
   // CHANGELOG.md is not compared with the manifests: a contribution does not
   // touch it, and maintainers regenerate it on main (--write-changelog).

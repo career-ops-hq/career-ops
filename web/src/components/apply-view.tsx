@@ -7,6 +7,7 @@ import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
 import { useApply } from "@/components/apply/apply-provider";
 import { needsLeaveConfirmation, resolveReturnPath } from "@/lib/apply/exit.mjs";
 import { markAppliedEnabled } from "@/lib/apply/mark-applied.mjs";
+import { showPrefilledBanner } from "@/lib/apply/prefilled-banner.mjs";
 import { reopenApplyOptions } from "@/lib/apply/reopen-options.mjs";
 import { checklistHrefFor } from "@/lib/apply/checklist-href.mjs";
 import { resumeFieldNotice } from "@/lib/apply/handoff-gate.mjs";
@@ -111,6 +112,7 @@ export function ApplyView() {
   const prefilling = a.status === "prefilling";
   const filling = a.status === "filling";
   const done = a.status === "done";
+  const prefilled = showPrefilledBanner(a.status, a.issues);
   const busy = opening || driving;
   const phase = busy ? 0 : prefilling ? 1 : 2;
 
@@ -206,6 +208,7 @@ export function ApplyView() {
                   field={f}
                   value={a.answers[f.id] ?? ""}
                   needs={!!a.meta[f.id]?.needsConfirmation}
+                  reason={a.meta[f.id]?.reason}
                   index={i}
                   drafting={prefilling}
                   cvAttached={a.cvAttached}
@@ -258,7 +261,7 @@ export function ApplyView() {
               </div>
             </div>
           )}
-          {done && (
+          {prefilled && (
             <div className="co-rise mt-4 flex items-start gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm backdrop-blur-sm">
               <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-emerald-500" />
               <div>
@@ -585,6 +588,7 @@ function FieldRow({
   field: f,
   value,
   needs,
+  reason,
   index,
   drafting,
   cvAttached,
@@ -593,6 +597,8 @@ function FieldRow({
   field: ApplyField;
   value: string;
   needs: boolean;
+  /** Why the field was left for the user, e.g. an AI-directed question (#7193). */
+  reason?: string;
   index: number;
   drafting: boolean;
   cvAttached: boolean;
@@ -600,12 +606,14 @@ function FieldRow({
 }) {
   const controlId = useId();
   const confirmationId = `${controlId}-confirmation`;
+  const reasonId = `${controlId}-reason`;
+  const describedBy = [needs ? confirmationId : null, reason ? reasonId : null].filter(Boolean).join(" ");
   // Announce the employer's requirement without imposing native validation on
   // this draft editor; the user still reviews/submits the real form separately.
   const controlProps = {
     id: controlId,
     "aria-required": f.required || undefined,
-    "aria-describedby": needs ? confirmationId : undefined,
+    "aria-describedby": describedBy || undefined,
   };
   const labelText = f.label || "Untitled field";
 
@@ -641,6 +649,7 @@ function FieldRow({
         {f.required && <Asterisk aria-hidden="true" className="size-3 text-brand-text" />}
         {needs && <span id={confirmationId} className="ml-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:text-amber-400">you confirm</span>}
       </div>
+      {reason && <p id={reasonId} className="mb-1.5 text-xs text-amber-800 dark:text-amber-400">{reason}</p>}
       {writing ? (
         <div className={cn("co-skel", f.type === "textarea" ? "h-[68px]" : "h-9")} />
       ) : f.type === "textarea" ? (

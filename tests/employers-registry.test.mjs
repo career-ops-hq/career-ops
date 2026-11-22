@@ -8,111 +8,105 @@
 //      and reason, and nothing else.
 //   3. schema.json (for editors) and the validator (the gate) state the same
 //      format.
-//   4. --base: what a pull request may change relative to the base branch, the
-//      size warning, and the generated CHANGELOG.
-//   5. GitHub Actions output: ::error/::warning annotations and the step
+//   4. GitHub Actions output: ::error/::warning annotations and the step
 //      summary, only when GITHUB_ACTIONS is true.
+//
+// What a pull request may change (--base), the subdomain ATS and own-domain
+// careers sites have suites of their own; tests/employers-registry-helpers.mjs
+// says why.
 //
 // Run:  node --test tests/employers-registry.test.mjs
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { ROOT } from './helpers.mjs';
-
-import { BOARD_ATS, REGIONAL_BOARD_URL_BUILDERS, REGIONS, WORKDAY_HOSTS } from '../lib/ats-board-url.mjs';
+import { resolveProvider } from '../providers/_registry.mjs';
+import {
+  BOARD_ATS, DNS_LABEL_ATS, OWN_DOMAIN_ATS, OPTIONAL_REGION_BOARD_URL_BUILDERS, REGIONAL_BOARD_URL_BUILDERS, REGIONS,
+  SUBDOMAIN_LABEL_RE, WORKDAY_HOSTS, buildBoardUrl, regionsOf,
+} from '../lib/ats-board-url.mjs';
 import {
   ALSO_PERMITS, DOMAIN_RE, FIXED_SOURCES, GITHUB_LOGIN_RE, LICENSE_ID, MANIFEST_ID_RE, MANIFEST_KEYS,
-  MANIFEST_REQUIRED, NAME_MAX, RETIRED_REASONS, ROW_KEYS, ROW_REQUIRED, SOURCE_PATTERNS,
-  BOARDS_WARN_BYTES, SUMMARY_MAX_FINDINGS, annotation, compareRows, escapeCommandData, escapeCommandProperty,
-  renderChangelog, renderStepSummary, validateRegistry, writeChangelog,
+  MANIFEST_REQUIRED, NAME_MAX, RETIRED_REASONS, ROW_KEYS, ROW_REQUIRED, SOURCE_PATTERNS, SUMMARY_MAX_FINDINGS,
+  annotation, escapeCommandData, escapeCommandProperty, renderStepSummary, sourceProblem, validateRegistry,
 } from '../seeds/employers-validate.mjs';
+import { GARBAGE, PROVIDERS, REGISTRY, COMMITTED, checkout, readJson, reg, rowsOf, run } from './employers-registry-helpers.mjs';
 
-import greenhouse from '../providers/greenhouse.mjs';
-import ashby from '../providers/ashby.mjs';
-import lever from '../providers/lever.mjs';
-import workable from '../providers/workable.mjs';
-import smartrecruiters from '../providers/smartrecruiters.mjs';
-import rippling from '../providers/rippling.mjs';
-import joinProvider from '../providers/join.mjs';
-import recruitee from '../providers/recruitee.mjs';
-import breezy from '../providers/breezy.mjs';
-import bamboohr from '../providers/bamboohr.mjs';
-import pinpoint from '../providers/pinpoint.mjs';
-import workday from '../providers/workday.mjs';
-
-const PROVIDERS = {
-  greenhouse, ashby, lever, workable, smartrecruiters, rippling, join: joinProvider,
-  recruitee, breezy, bamboohr, pinpoint, workday,
-};
-
-const VALIDATOR = join(ROOT, 'seeds', 'employers-validate.mjs');
-const REGISTRY = join(ROOT, 'employers');
-const GARBAGE = join(ROOT, 'tests', 'fixtures', 'employers-garbage');
-
-// The suite itself runs in GitHub Actions, so the validator's environment is
-// set explicitly: plain output unless a case asks for the Actions one.
-const { GITHUB_ACTIONS: _ga, GITHUB_STEP_SUMMARY: _gss, ...PLAIN_ENV } = process.env;
-const run = (cwd, args = [], env = {}) => spawnSync(process.execPath, [VALIDATOR, ...args], { cwd, encoding: 'utf8', env: { ...PLAIN_ENV, ...env } });
-
-/** Every row in a registry directory, parsed. */
-function rowsOf(dir) {
-  const out = [];
-  for (const ats of readdirSync(join(dir, 'boards'))) {
-    for (const f of readdirSync(join(dir, 'boards', ats))) {
-      for (const line of readFileSync(join(dir, 'boards', ats, f), 'utf8').split('\n').filter(Boolean)) {
-        out.push({ file: `${ats}/${f}`, row: JSON.parse(line) });
-      }
-    }
-  }
-  return out;
-}
-
-/** A scratch checkout holding a copy of the real registry. */
-function checkout() {
-  const dir = mkdtempSync(join(tmpdir(), 'co-employers-'));
-  cpSync(REGISTRY, join(dir, 'employers'), { recursive: true });
-  return dir;
-}
-const reg = (dir, ...p) => join(dir, 'employers', ...p);
-const readJson = (p) => JSON.parse(readFileSync(p, 'utf8'));
-const writeJson = (p, v) => writeFileSync(p, `${JSON.stringify(v, null, 2)}\n`);
-
-/** Replace one row (found by careers_url) in a registry copy. */
-function editRow(dir, careersUrl, edit) {
-  const hit = rowsOf(reg(dir)).find((r) => r.row.careers_url === careersUrl);
-  assert.ok(hit, `row ${careersUrl} not found`);
-  const path = reg(dir, 'boards', hit.file);
-  const lines = readFileSync(path, 'utf8').split('\n').filter(Boolean).map((l) => {
-    const row = JSON.parse(l);
-    if (row.careers_url !== careersUrl) return l;
-    const next = edit(row);
-    return next === null ? null : JSON.stringify(next);
-  }).filter((l) => l !== null);
-  writeFileSync(path, lines.length ? `${lines.join('\n')}\n` : '');
-}
+/** The one warning a contribution waiting in the inbox may bring. */
+const ALREADY_LISTED = /^warning: employers\/inbox\/[^:]+:\d+: \d+ boards? (?:is|are) already in the registry and will be skipped when the inbox is folded in \(lines? [^)]*\)$/;
 
 // ── 1. The real registry ──────────────────────────────────────────────────
 
 test('the committed registry passes the validator', () => {
-  const r = run(ROOT);
+  const r = run(COMMITTED);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /employer registry is valid: \d+ rows/);
   assert.equal(r.stderr, '', 'no warnings either');
 });
 
-test('the committed registry passes against itself as the base (a PR that changes nothing)', () => {
-  const r = run(ROOT, ['--base', '.']);
+test('the tree as it is, inbox included, passes the validator, and warns only of inbox boards the registry already lists', () => {
+  const r = run(ROOT);
   assert.equal(r.status, 0, r.stderr);
+  for (const line of r.stderr.split('\n').filter(Boolean)) assert.match(line, ALREADY_LISTED);
+});
+
+test('a contribution waiting in the inbox with a board the registry already lists: a warning, and the registry still passes', () => {
+  const dir = checkout();
+  try {
+    const { row } = rowsOf(reg(dir))[0];
+    mkdirSync(reg(dir, 'inbox'), { recursive: true });
+    const line = { ats: row.ats, board: row.board, name: row.name };
+    if (row.region) line.region = row.region;
+    writeFileSync(reg(dir, 'inbox', '2026-11-16-octocat.ndjson'), `${JSON.stringify(line)}\n`);
+    const r = run(dir);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /inbox: 1 board\(s\) in 1 file\(s\), 1 already in the registry/);
+    const warnings = r.stderr.split('\n').filter(Boolean);
+    assert.equal(warnings.length, 1, r.stderr);
+    assert.match(warnings[0], ALREADY_LISTED);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the committed registry passes against itself as the base (a PR that changes nothing)', () => {
+  const r = run(COMMITTED, ['--base', '.']);
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test('every admitted ATS has the provider that reads it, and that provider reads its canonical URL', () => {
+  assert.deepEqual(Object.keys(PROVIDERS).sort(), [...BOARD_ATS].sort());
+  for (const ats of BOARD_ATS) {
+    assert.equal(PROVIDERS[ats].id, ats);
+    // A ClearCompany board is its career site's GUID, not a slug.
+    const board = ats === 'workday' ? 'acme/wd5/External' : ats === 'clearcompany' ? '0f8fad5b-d9cb-469f-a165-70867728950e' : ats === 'successfactors-classic' ? 'career5/eu/ACME001' : ats === 'oraclecloud' ? 'acme.fa.us2.oraclecloud.com/CX_1001' : ats === 'peoplesoft' ? 'recruit.acme.example/acme1' : OWN_DOMAIN_ATS.includes(ats) ? 'careers.acme.example' : 'acme';
+    const regions = Object.hasOwn(REGIONAL_BOARD_URL_BUILDERS, ats) ? regionsOf(ats) : [undefined, ...regionsOf(ats)];
+    for (const region of regions) {
+      const url = buildBoardUrl({ ats, region, board, workday_host: ats === 'workday' ? 'jobs' : undefined });
+      assert.ok(url, `${ats} ${region ?? ''}`);
+      // A careers site on a company's own domain is read with `provider:` set: no URL names its system.
+      if (OWN_DOMAIN_ATS.includes(ats)) continue;
+      assert.ok(PROVIDERS[ats].detect({ name: 'Acme', careers_url: url }), `${ats}.detect() rejects ${url}`);
+    }
+  }
 });
 
 test('every committed row is read by its own provider', () => {
   const rows = rowsOf(REGISTRY);
+  const providers = new Map(Object.entries(PROVIDERS));
   assert.ok(rows.length >= 40, `expected the first hand-picked boards, found ${rows.length}`);
   for (const { file, row } of rows) {
+    if (OWN_DOMAIN_ATS.includes(row.ats)) {
+      assert.equal(buildBoardUrl({ ats: row.ats, board: row.board }), row.careers_url, file);
+      const entry = { name: row.name, careers_url: row.careers_url, provider: row.ats };
+      const resolved = resolveProvider(entry, providers);
+      assert.ok(resolved?.provider, file);
+      assert.equal(resolved.provider, PROVIDERS[row.ats], file);
+      continue;
+    }
     const detected = PROVIDERS[row.ats].detect({ name: row.name, careers_url: row.careers_url });
     assert.ok(detected, `${file}: ${row.ats}.detect() rejects ${row.careers_url}`);
   }
@@ -203,13 +197,26 @@ test('schema.json: row keys, required keys and closed lists match the validator'
   assert.deepEqual(sorted(Object.keys(rowSchema.properties)), sorted(ROW_KEYS));
   assert.deepEqual(sorted(rowSchema.required), sorted(ROW_REQUIRED));
   assert.deepEqual(rowSchema.properties.ats.enum, [...BOARD_ATS]);
-  assert.deepEqual(rowSchema.properties.region.enum, [...REGIONS]);
+  const allRegions = [...new Set([...REGIONS, ...Object.values(OPTIONAL_REGION_BOARD_URL_BUILDERS).flatMap((b) => Object.keys(b))])];
+  assert.deepEqual(rowSchema.properties.region.enum, allRegions);
   assert.deepEqual(rowSchema.properties.workday_host.enum, [...WORKDAY_HOSTS]);
   assert.deepEqual(rowSchema.properties.retired_reason.enum, [...RETIRED_REASONS]);
   assert.equal(rowSchema.properties.name.maxLength, NAME_MAX);
   assert.equal(new RegExp(rowSchema.properties.website.pattern).source, DOMAIN_RE.source);
   // The regional ATS (region required) are the ones with regional URL builders.
   assert.deepEqual(sorted(rowSchema.allOf[0].if.properties.ats.enum), sorted(Object.keys(REGIONAL_BOARD_URL_BUILDERS)));
+  assert.deepEqual(rowSchema.allOf[0].then.properties.region.enum, [...REGIONS]);
+  // The ATS with an optional region, and the regions each may name.
+  const optional = rowSchema.allOf[0].else;
+  assert.deepEqual(sorted(optional.if.properties.ats.enum), sorted(Object.keys(OPTIONAL_REGION_BOARD_URL_BUILDERS)));
+  const perAts = optional.then.allOf.map((b) => [b.if.properties.ats.const, b.then.properties.region.enum]);
+  assert.deepEqual(sorted(perAts.map(([ats]) => ats)), sorted(Object.keys(OPTIONAL_REGION_BOARD_URL_BUILDERS)));
+  for (const [ats, regions] of perAts) assert.deepEqual(sorted(regions), sorted(regionsOf(ats)), ats);
+  assert.deepEqual(optional.else, { not: { required: ['region'] } });
+  // Subdomain boards: one DNS label.
+  const label = rowSchema.allOf.find((b) => b.then?.properties?.board?.pattern && b.if.properties.ats.enum);
+  assert.deepEqual(label.if.properties.ats.enum, [...DNS_LABEL_ATS]);
+  assert.equal(new RegExp(label.then.properties.board.pattern).source, SUBDOMAIN_LABEL_RE.source);
 });
 
 test('schema.json: manifest keys, required keys and license terms match the validator', () => {
@@ -229,216 +236,31 @@ test('schema.json: the source list matches the validator', () => {
   assert.deepEqual(sourceSchema.anyOf.slice(1).map((s) => new RegExp(s.pattern).source), Object.values(SOURCE_PATTERNS).map((re) => re.source));
 });
 
+test('sourceProblem: web-index:<name>@<date> needs a lowercase name and a real date', () => {
+  for (const ok of ['web-index:wayback@2026-11-12', 'web-index:a@2026-02-28', 'web-index:a1-b2@2024-02-29']) {
+    assert.equal(sourceProblem(ok), null, ok);
+  }
+  for (const bad of [
+    'web-index:wayback', 'web-index:wayback@', 'web-index:wayback@2026-11', 'web-index:wayback@2026-13-40',
+    'web-index:wayback@2026-02-30', 'web-index:wayback@2025-02-29', 'web-index:Wayback@2026-11-12',
+    'web-index:@2026-11-12', 'web-index:-wayback@2026-11-12', 'web-index:wayback-@2026-11-12',
+    `web-index:${'a'.repeat(65)}@2026-11-12`, 'web-index:way back@2026-11-12', 'web-index:wayback@2026-11-12 ',
+  ]) {
+    assert.match(sourceProblem(bad) ?? '', /^source .* (is not one of|does not end in a real calendar date)/, bad);
+  }
+  assert.match(sourceProblem('scraped'), /web-index:<name>@<YYYY-MM-DD>$/);
+});
+
 test('schema.json: the manifest id pattern accepts and rejects what the validator does', () => {
   const idPatterns = [manifestSchema.properties.id.pattern, rowSchema.properties.contribution.pattern].map((p) => new RegExp(p));
-  const samples = ['2026-11-08-santifer', '2026-11-20-acme', '2026-11-20-a', '2026-11-20-Acme', '2026-11-20-', '2026-11-20-acme-', '26-11-20-acme', '2026-11-20-acme_co'];
+  const samples = ['2026-11-08-santifer', '2026-11-20-acme', '2026-11-20-a', '2026-11-20-Acme', '2026-11-20-', '2026-11-20-acme-', '26-11-20-acme', '2026-11-20-acme_co',
+    '2026-11-20-acme.2', '2026-11-20-acme.9', '2026-11-20-acme.10', '2026-11-20-acme.99', '2026-11-20-acme-2.3',
+    '2026-11-20-acme.1', '2026-11-20-acme.0', '2026-11-20-acme.02', '2026-11-20-acme.100', '2026-11-20-acme.', '2026-11-20-acme.2.3', '2026-11-20-acme.2-2', '2026-11-20-.2'];
   for (const s of samples) {
     for (const re of idPatterns) assert.equal(re.test(s), MANIFEST_ID_RE.test(s), s);
   }
-});
-
-// ── 4. Pull-request rules (--base), the size limit, the CHANGELOG ─────────
-
-const NEW_MANIFEST = {
-  id: '2026-11-09-newcomer', contributor: 'newcomer', signed_by: 'New Comer', rows: 1, source: 'community',
-  origin: 'Typed in by hand from the employer careers page.', no_conflicting_contract: true, personal_data: false,
-  exclusive: false, license: 'CC-BY-4.0', also_permits: ['ODbL-1.0', 'CC0-1.0'], attribution: 'Newcomer', date: '2026-11-09',
-};
-const NEW_ROW = {
-  ats: 'breezy', board: 'fixture-co', careers_url: 'https://fixture-co.breezy.hr', name: 'Fixture Co',
-  source: 'community', contribution: '2026-11-09-newcomer', added: '2026-11-09',
-};
-function addContribution(dir, row = NEW_ROW) {
-  writeJson(reg(dir, 'contributions', `${NEW_MANIFEST.id}.json`), NEW_MANIFEST);
-  mkdirSync(reg(dir, 'boards', 'breezy'), { recursive: true });
-  writeFileSync(reg(dir, 'boards', 'breezy', 'f.ndjson'), `${JSON.stringify(row)}\n`);
-  // No CHANGELOG.md edit: a contribution does not touch it.
-}
-const firstRow = () => rowsOf(REGISTRY)[0].row;
-
-/** Run one PR scenario: base is the real registry, head is a copy changed by `change`. */
-function pr(change) {
-  const head = checkout();
-  try {
-    change(head);
-    return run(head, ['--base', ROOT]);
-  } finally {
-    rmSync(head, { recursive: true, force: true });
-  }
-}
-
-test('--base: a contribution with its own manifest passes, without touching CHANGELOG.md', () => {
-  const r = pr((head) => {
-    addContribution(head);
-    assert.equal(readFileSync(reg(head, 'CHANGELOG.md'), 'utf8'), readFileSync(join(REGISTRY, 'CHANGELOG.md'), 'utf8'));
-  });
-  assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stderr, '', 'no warnings either');
-});
-
-test('--base: a base with no registry (the bootstrap PR) counts every row as new', () => {
-  const empty = mkdtempSync(join(tmpdir(), 'co-employers-base-'));
-  try {
-    const r = run(ROOT, ['--base', empty]);
-    assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /counts as new/);
-  } finally { rmSync(empty, { recursive: true, force: true }); }
-});
-
-test('--base: a deleted row fails; rows are retired, never deleted', () => {
-  const r = pr((head) => {
-    const victim = firstRow();
-    editRow(head, victim.careers_url, () => null);
-    const m = readJson(reg(head, 'contributions', `${victim.contribution}.json`));
-    writeJson(reg(head, 'contributions', `${victim.contribution}.json`), { ...m, rows: m.rows - 1 });
-  });
-  assert.equal(r.status, 1);
-  assert.match(r.stderr, /was removed; rows are retired \(retired: true, retired_reason\), never deleted/);
-});
-
-test('--base: a new row on an already merged manifest fails', () => {
-  const r = pr((head) => {
-    const id = firstRow().contribution;
-    const m = readJson(reg(head, 'contributions', `${id}.json`));
-    writeJson(reg(head, 'contributions', `${id}.json`), { ...m, rows: m.rows + 1 });
-    mkdirSync(reg(head, 'boards', 'breezy'), { recursive: true });
-    writeFileSync(reg(head, 'boards', 'breezy', 'f.ndjson'), `${JSON.stringify({ ...NEW_ROW, contribution: id, added: m.date })}\n`);
-  });
-  assert.equal(r.status, 1);
-  assert.match(r.stderr, /which is already merged; new rows come with their own manifest/);
-  assert.match(r.stderr, /warning: .*edits a manifest that is already merged/);
-});
-
-test('--base: a contribution cannot retire an existing row', () => {
-  const r = pr((head) => {
-    addContribution(head);
-    editRow(head, firstRow().careers_url, (row) => ({ ...row, retired: true, retired_reason: 'gone' }));
-  });
-  assert.equal(r.status, 1);
-  assert.match(r.stderr, /a contribution pull request \(it adds a manifest\) cannot change retired or retired_reason/);
-});
-
-test('--base: a maintainer change that only retires a row passes', () => {
-  const r = pr((head) => editRow(head, firstRow().careers_url, (row) => ({ ...row, retired: true, retired_reason: 'owner_request' })));
-  assert.equal(r.status, 0, r.stderr);
-});
-
-test('--base: a new row cannot arrive retired', () => {
-  const r = pr((head) => addContribution(head, { ...NEW_ROW, retired: true, retired_reason: 'gone' }));
-  assert.equal(r.status, 1);
-  assert.match(r.stderr, /a new row cannot be retired/);
-});
-
-test('--base: the provenance of an existing row is fixed', () => {
-  const r = pr((head) => editRow(head, firstRow().careers_url, (row) => ({ ...row, added: '2026-11-09' })));
-  assert.equal(r.status, 1);
-  assert.match(r.stderr, /changes added of an existing row \(was "\d{4}-\d{2}-\d{2}"\); provenance is fixed once merged/);
-});
-
-// A second spelling of a merged board fails on the newcomer, wherever it sorts.
-// Workday's API answers any letter case, so the registry stores the case of the
-// careers page's canonical link; CrowdStrike's is all lowercase, which makes an
-// uppercase newcomer sort BEFORE the merged row.
-const CROWDSTRIKE = 'https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers';
-const GUIDEWIRE = 'https://wd5.myworkdaysite.com/recruiting/guidewire/external';
-
-/** Add one Workday row under a new manifest and return the file's lines, sorted as the format requires. */
-function addWorkdayVariant(dir, board, workdayHost) {
-  const row = {
-    ats: 'workday', board, workday_host: workdayHost,
-    careers_url: workdayHost === 'jobs'
-      ? `https://${board.split('/')[0]}.${board.split('/')[1]}.myworkdayjobs.com/${board.split('/')[2]}`
-      : `https://${board.split('/')[1]}.myworkdaysite.com/recruiting/${board.split('/')[0]}/${board.split('/')[2]}`,
-    name: 'Variant', source: 'community', contribution: NEW_MANIFEST.id, added: NEW_MANIFEST.date,
-  };
-  writeJson(reg(dir, 'contributions', `${NEW_MANIFEST.id}.json`), NEW_MANIFEST);
-  const path = reg(dir, 'boards', 'workday', `${board[0]}.ndjson`);
-  const rows = [...readFileSync(path, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)), row];
-  rows.sort(compareRows);
-  writeFileSync(path, `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`);
-  return rows.map((r) => r.careers_url);
-}
-
-test('the committed Workday rows keep the case of the careers page canonical link', () => {
-  const workdayRows = rowsOf(REGISTRY).filter((r) => r.row.ats === 'workday').map((r) => r.row);
-  assert.ok(workdayRows.some((r) => r.workday_host === 'jobs') && workdayRows.some((r) => r.workday_host === 'site'), 'both host forms');
-  assert.ok(workdayRows.some((r) => r.board === 'nvidia/wd5/NVIDIAExternalCareerSite'));
-  assert.ok(workdayRows.some((r) => r.careers_url === CROWDSTRIKE));
-});
-
-test('--base: a letter-case variant of a merged board fails on the new row, even when it sorts first', () => {
-  const head = checkout();
-  try {
-    const order = addWorkdayVariant(head, 'crowdstrike/wd5/CrowdStrikeCareers', 'jobs');
-    const newLine = order.indexOf('https://crowdstrike.wd5.myworkdayjobs.com/CrowdStrikeCareers') + 1;
-    const keptLine = order.indexOf(CROWDSTRIKE) + 1;
-    assert.ok(newLine < keptLine, 'the variant sorts before the merged row');
-    const r = run(head, ['--base', ROOT]);
-    assert.equal(r.status, 1);
-    const file = 'employers/boards/workday/c.ndjson';
-    assert.match(r.stderr, new RegExp(`${file}:${newLine}: careers_url differs only in letter case from ${file}:${keptLine}, which is already merged and keeps its spelling`));
-    assert.ok(!r.stderr.includes(`${file}:${keptLine}: `), `the merged row must not be the one reported:\n${r.stderr}`);
-  } finally { rmSync(head, { recursive: true, force: true }); }
-});
-
-test('--base: a merged Workday board added again under the other host form fails on the new row', () => {
-  const head = checkout();
-  try {
-    const order = addWorkdayVariant(head, 'guidewire/wd5/external', 'jobs');
-    const newLine = order.indexOf('https://guidewire.wd5.myworkdayjobs.com/external') + 1;
-    const keptLine = order.indexOf(GUIDEWIRE) + 1;
-    const r = run(head, ['--base', ROOT]);
-    assert.equal(r.status, 1);
-    const file = 'employers/boards/workday/g.ndjson';
-    assert.match(r.stderr, new RegExp(`${file}:${newLine}: the same Workday board as ${file}:${keptLine}, which is already merged and keeps its spelling, under the other host form`));
-    assert.ok(!r.stderr.includes(`${file}:${keptLine}: `), r.stderr);
-  } finally { rmSync(head, { recursive: true, force: true }); }
-});
-
-test('boards/ has no hard size limit: above 25 MB it is a warning, never an error', () => {
-  assert.equal(BOARDS_WARN_BYTES, 25 * 1024 * 1024);
-  const head = checkout();
-  try {
-    // One oversized row: its name is an error of its own, but the size is only a warning.
-    mkdirSync(reg(head, 'boards', 'breezy'), { recursive: true });
-    writeFileSync(reg(head, 'boards', 'breezy', 'f.ndjson'), `${JSON.stringify({ ...NEW_ROW, name: 'x'.repeat(BOARDS_WARN_BYTES) })}\n`);
-    const { errors, warnings } = validateRegistry({ root: head });
-    assert.ok(warnings.some((w) => w.file === 'employers/boards' && /^boards\/ is 25\.\d+ MB, above 25 MB/.test(w.message)), JSON.stringify(warnings));
-    assert.deepEqual(errors.filter((e) => e.file === 'employers/boards'), [], 'the size is never an error');
-  } finally { rmSync(head, { recursive: true, force: true }); }
-});
-
-test('boards/ under the warning size is quiet, and the threshold is the only trigger', () => {
-  const quiet = validateRegistry({ root: ROOT });
-  assert.deepEqual(quiet.warnings, []);
-  const tight = validateRegistry({ root: ROOT, boardsWarnBytes: 1024 });
-  assert.deepEqual(tight.errors, []);
-  assert.deepEqual(tight.warnings.map((w) => w.file), ['employers/boards']);
-});
-
-test('CHANGELOG.md is generated by --write-changelog and not compared with the manifests', () => {
-  const manifests = readdirSync(join(REGISTRY, 'contributions')).map((f) => readJson(join(REGISTRY, 'contributions', f)));
-  for (const m of manifests) assert.ok(renderChangelog(manifests).includes(`\`${m.id}\` (${m.rows} boards, source \`${m.source}\`): ${m.attribution}`));
-
-  const head = checkout();
-  try {
-    writeFileSync(reg(head, 'CHANGELOG.md'), '# edited by hand\n');
-    const stale = run(head);
-    assert.equal(stale.status, 0, stale.stderr);
-    assert.equal(stale.stderr, '', 'a stale CHANGELOG.md is neither an error nor a warning');
-    const r = run(head, ['--write-changelog']);
-    assert.equal(r.status, 0, r.stderr);
-    assert.equal(readFileSync(reg(head, 'CHANGELOG.md'), 'utf8'), renderChangelog(manifests));
-    // writeChangelog() is what --write-changelog calls.
-    writeFileSync(reg(head, 'CHANGELOG.md'), '');
-    writeChangelog(head);
-    assert.equal(readFileSync(reg(head, 'CHANGELOG.md'), 'utf8'), renderChangelog(manifests));
-  } finally { rmSync(head, { recursive: true, force: true }); }
-});
-
-test('the CLI rejects unknown arguments and a missing --base directory with exit 2', () => {
-  assert.equal(run(ROOT, ['--nope']).status, 2);
-  assert.equal(run(ROOT, ['--base', join(tmpdir(), 'co-employers-does-not-exist')]).status, 2);
+  const accepted = samples.filter((s) => MANIFEST_ID_RE.test(s));
+  assert.deepEqual(accepted, ['2026-11-08-santifer', '2026-11-20-acme', '2026-11-20-a', '2026-11-20-acme.2', '2026-11-20-acme.9', '2026-11-20-acme.10', '2026-11-20-acme.99', '2026-11-20-acme-2.3']);
 });
 
 // ── 5. GitHub Actions output ──────────────────────────────────────────────
@@ -470,7 +292,7 @@ test('in GitHub Actions, the garbage fixture fails with one ::error per finding 
     assert.equal(errorCommands.length, EXPECTED.length, r.stdout);
     assert.equal(warningCommands.length, 1, r.stdout);
     assert.ok(errorCommands.includes('::error file=employers/boards/greenhouse/a.ndjson,line=2::duplicate careers_url, already at employers/boards/greenhouse/a.ndjson:1'), r.stdout);
-    assert.ok(errorCommands.includes('::error file=employers/notes.txt::unexpected entry; the registry holds only README.md, LICENSE, THIRD_PARTY_NOTICES.md, CHANGELOG.md, schema.json, contributions, boards, inbox'), r.stdout);
+    assert.ok(errorCommands.includes('::error file=employers/notes.txt::unexpected entry; the registry holds only README.md, LICENSE, THIRD_PARTY_NOTICES.md, CHANGELOG.md, schema.json, contributions, boards, inbox, OWN_DOMAIN_CONTRIBUTORS'), r.stdout);
     assert.match(warningCommands[0], /^::warning file=employers\/boards\/lever\/e\.ndjson,line=2::website "euco\.example" is also on /);
     // The plain per-finding lines are not repeated; the closing count stays.
     assert.ok(!r.stderr.split('\n').some((l) => l.startsWith('employers/') || l.startsWith('warning: ')), r.stderr);
@@ -490,12 +312,13 @@ test('in GitHub Actions, a valid registry passes with no ::error and a summary o
   const summary = join(tmp, 'summary.md');
   try {
     writeFileSync(summary, '# an earlier step\n');
-    const r = run(ROOT, [], { GITHUB_ACTIONS: 'true', GITHUB_STEP_SUMMARY: summary });
+    const r = run(COMMITTED, [], { GITHUB_ACTIONS: 'true', GITHUB_STEP_SUMMARY: summary });
     assert.equal(r.status, 0, r.stderr);
     assert.ok(!r.stdout.includes('::error') && !r.stdout.includes('::warning'), r.stdout);
     const md = readFileSync(summary, 'utf8');
     assert.ok(md.startsWith('# an earlier step\n## Employer registry\n'), 'the summary is appended, not overwritten');
-    assert.match(md, /\*\*Valid\*\*: \d+ rows in \d+ files, 1 contribution; 0 errors, 0 warnings\./);
+    const n = readdirSync(join(REGISTRY, 'contributions')).filter((f) => f.endsWith('.json')).length;
+    assert.match(md, new RegExp(`\\*\\*Valid\\*\\*: \\d+ rows in \\d+ files, ${n} contribution${n === 1 ? '' : 's'}; 0 errors, 0 warnings\\.`));
     assert.ok(!md.includes('| Level |'), 'no table without findings');
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });

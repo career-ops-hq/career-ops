@@ -11,6 +11,8 @@
  */
 
 import { buildWorkplacePolicy } from './providers/_country.mjs';
+import { parseEmploymentTypeFilterConfig } from './providers/_employment-type.mjs';
+import { normalizeWorkplaceType } from './providers/_workplace-type.mjs';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { tmpdir } from 'os';
@@ -222,10 +224,14 @@ export const PORTAL_TOP_LEVEL_KEYS = [
   'preferred_languages',
   'interamt_searches',
   'topdev_searches',
+  'seek_searches',
+  'hn_hiring',
   'dayforce_boards',
   'location_filter',
   'country_eligibility_filter',
   'salary_filter',
+  'employment_type_filter',
+  'workplace_filter',
   'experience_filter',
   'portal_prune_quiet_days',
   'max_posting_age_days',
@@ -493,6 +499,16 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     }
   }
 
+  // One parser for scan.mjs and this check, so a block one accepts the other
+  // cannot reject (providers/_employment-type.mjs).
+  if (config.employment_type_filter !== undefined) {
+    try {
+      parseEmploymentTypeFilterConfig(config.employment_type_filter);
+    } catch (err) {
+      add(errors, 'employment_type_filter', err.message);
+    }
+  }
+
   if (config.experience_filter !== undefined) {
     const ef = config.experience_filter;
     if (!isObject(ef)) {
@@ -511,6 +527,31 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       }
       if (ef.concurrency !== undefined && (!Number.isInteger(ef.concurrency) || ef.concurrency < 1 || ef.concurrency > 16)) {
         add(errors, 'experience_filter.concurrency', 'must be an integer from 1 to 16 when set');
+      }
+    }
+  }
+
+  if (config.workplace_filter !== undefined) {
+    if (!isObject(config.workplace_filter)) {
+      add(errors, 'workplace_filter', 'workplace_filter must be an object');
+    } else {
+      const wf = config.workplace_filter;
+      rejectUnknownFields(wf, 'workplace_filter', ['allow', 'include_unknown'], errors);
+      if (wf.include_unknown !== undefined && typeof wf.include_unknown !== 'boolean') {
+        add(errors, 'workplace_filter.include_unknown', 'must be a boolean when set');
+      }
+      if (wf.allow !== undefined) {
+        if (!Array.isArray(wf.allow)) {
+          add(errors, 'workplace_filter.allow', 'workplace_filter.allow must be an array');
+        } else {
+          for (let i = 0; i < wf.allow.length; i++) {
+            const v = wf.allow[i];
+            const norm = typeof v === 'string' ? normalizeWorkplaceType(v) : undefined;
+            if (!norm) {
+              add(errors, `workplace_filter.allow[${i}]`, `invalid workplace type "${v}" — must be one of: remote, hybrid, onsite`);
+            }
+          }
+        }
       }
     }
   }
@@ -603,6 +644,19 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
           if (name !== 'title' && !isObject(block)) {
             add(errors, `${base}.filter_on`, `filter_on "${name}" has no field_filters.${name} block`);
           }
+        }
+      }
+
+      // #7244. Per-entry title_filter replaces top-level title_filter for this entry.
+      if (entry.title_filter !== undefined) {
+        if (!isObject(entry.title_filter)) {
+          add(errors, `${base}.title_filter`, 'title_filter must be an object');
+        } else {
+          rejectUnknownFields(entry.title_filter, `${base}.title_filter`, TITLE_FILTER_FIELDS, errors);
+          warnBareStringKeywords(entry.title_filter, `${base}.title_filter`, warnings);
+          validateKeywordList(entry.title_filter.positive, `${base}.title_filter.positive`, errors);
+          validateKeywordList(entry.title_filter.negative, `${base}.title_filter.negative`, errors);
+          validateKeywordList(entry.title_filter.seniority_boost, `${base}.title_filter.seniority_boost`, errors);
         }
       }
 

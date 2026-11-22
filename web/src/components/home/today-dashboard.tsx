@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Bell, CircleHelp, Sparkles, ArrowRight, Undo2, X } from "lucide-react";
 import { instrumentSerif } from "@/lib/fonts";
-import { HeroGlow } from "@/components/hero-glow";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { DiscoveryCard } from "@/components/explore/discovery-card";
@@ -36,6 +35,7 @@ export function TodayDashboard({
   legitimacy,
   inbox,
   applyFacts = {},
+  applyDay,
 }: {
   applications: Application[];
   reasons: Record<string, CardReason>;
@@ -44,6 +44,8 @@ export function TodayDashboard({
   inbox: Pick<InboxJob, "url" | "done">[];
   inBetween: boolean;
   applyFacts?: Record<string, { pdfOnDisk: boolean; postingUrl: string }>;
+  /** Server calendar day. Apply next does not read the browser clock. */
+  applyDay: string;
 }) {
   const [followups, setFollowups] = useState<FollowUp[]>([]);
   const [overdue, setOverdue] = useState(0);
@@ -148,8 +150,9 @@ export function TodayDashboard({
       scoreNum,
       (row) => reasons[row.n]?.decision ?? "",
       (row) => legitimacy[row.n],
+      applyDay,
     ),
-    [applications, reasons, legitimacy],
+    [applications, reasons, legitimacy, applyDay],
   );
   const awaiting = useMemo(() => includeApplyTarget(ranked, applyTarget), [ranked, applyTarget]);
   // With the legitimacy, a flagged posting is grouped as the report page
@@ -191,10 +194,7 @@ export function TodayDashboard({
   return (
     <div className="mx-auto max-w-5xl px-6 py-10 max-sm:pb-24">
       <section className="dot-bg relative overflow-hidden rounded-2xl border border-border bg-surface/40 px-7 py-10 md:px-10 md:py-12">
-        <HeroGlow />
-        {/* Readability scrim between the animated glow (z-0) and the copy (z-10). */}
-        <div aria-hidden className="pointer-events-none absolute inset-0 z-[1] bg-surface/55 backdrop-blur-[2px] dark:bg-background/45" />
-        <div className="relative z-10">
+        <div>
           <p className="font-mono text-xs uppercase tracking-[0.2em] text-muted">
             <span className="text-faint">//</span> today · <span className="tabular-nums">{dateLabel}</span>
           </p>

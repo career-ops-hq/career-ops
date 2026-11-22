@@ -28,22 +28,47 @@ import { join, basename, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
-import { getCareerOpsRoot, resolveBatchStatePaths } from './path-resolver.mjs';
+import { getCareerOpsRoot, resolveBatchStatePaths, resolveTrackerPathForWrite, canonicalizeTrackerPath } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { parsePdfIndex, livePdfIndex, normNum } from './find.mjs';
 import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, isUnsetUrlCell, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, parseScore, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE, extractReqNumber, extractCellUrl, parseMarkdownLinks } from './tracker-parse.mjs';
 // The ATS vendor table shared with analyze-patterns.mjs and the scanners, so
 // the URL cell's label and the per-vendor analysis name a board identically.
 import { atsVendorOf } from './ats-vendor.mjs';
-import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, companiesMatchIgnoringCorporateForm, cell, loadCanonicalStates, findDeadReportLink, rebuildRow, trackerLinkDirsFor, containedReportTarget, containedReportFile, reportUrlToken } from './tracker-utils.mjs';
+import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, backupFileAtomically, normalizeCompany, companiesMatchIgnoringCorporateForm, cell, loadCanonicalStates, findDeadReportLink, rebuildRow, trackerLinkDirsFor, containedReportTarget, containedReportFile, reportUrlToken, resolveCanonicalStateId, stripStatusDecoration } from './tracker-utils.mjs';
 // Canonical posting-URL key and URL comparison, shared with the other tracker
 // scripts and scan.mjs so the definitions cannot drift apart.
 import { normalizeUrl, isAggregatorUrl, aggregatorPostingId, postingUrlRelation } from './url-key.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { loadYaml } from './lib/yaml-document.mjs';
+import { machineSummarySection } from './lib/machine-summary-section.mjs';
 import { syncTrackerPdfFlags } from './sync-pdf-flags.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { occupiedTrackerNumbersFromLedgers } from './reserve-report-num.mjs';
+
+/**
+ * The line index a new tracker row is inserted at.
+ *
+ * Directly after the separator that belongs to the TRACKER header, not after the
+ * first separator in the file. `applications.md` is a user-authored document, so
+ * a preamble table above the applications table is legitimate, and inserting at
+ * the first separator put the new row above that table's header, where no reader
+ * parses it, while the run still printed "➕ Add #N" and archived the TSV.
+ *
+ * The index is the line AFTER the separator, because the caller inserts with
+ * `splice(index, 0, ...)`, which places the row before `index`: returning the
+ * separator's own index would splice the row between the header and the `|---|`
+ * line and malform the table.
+ *
+ * @param {string[]} lines - applications.md split into lines.
+ * @returns {number} Insert index, or -1 when there is no readable tracker table.
+ */
+export function mergeInsertIndex(lines) {
+  const headerIdx = lines.findIndex((line) => isHeaderRow(line));
+  if (headerIdx < 0) return -1;
+  return SEPARATOR_ROW_RE.test(lines[headerIdx + 1] || '') ? headerIdx + 2 : -1;
+}
 
 const MERGE_TRACKER_USAGE = `Usage: node merge-tracker.mjs [options]
 
@@ -58,6 +83,22 @@ Options:
                       (refused by default: score/status order is ambiguous)
   -h, --help       Show this help and exit`;
 const MERGE_TRACKER_KNOWN_FLAGS = ['--dry-run', '--verify', '--migrate', '--migrate-via', '--migrate-urls', '--backfill-urls', '--allow-headerless', '--help', '-h'];
+
+// applications.md is gitignored. A rewrite that changes bytes keeps the
+// previous file beside it, so a bad merge can be put back. An unchanged
+// rewrite leaves any existing backup where it is.
+function writeTrackerReplacing(file, nextText) {
+  let backedUp = false;
+  if (existsSync(file)) {
+    const prev = readFileSync(file, 'utf-8');
+    if (prev !== nextText) {
+      backupFileAtomically(file);
+      backedUp = true;
+    }
+  }
+  writeFileAtomic(file, nextText);
+  return backedUp;
+}
 
 // Executable hooks live beside this script even when user data is redirected
 // through CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / .career-ops-data.
@@ -396,8 +437,8 @@ export async function mergeTracker(options = {}) {
     ? join(_CODE_ROOT, 'templates/states.yml')
     : join(_CODE_ROOT, 'states.yml');
   // A missing or unreadable states file is a broken install, not a reason to abort
-  // the merge on a raw ENOENT. Say so once, then merge each status as written:
-  // validateStatus() only rewrites to "Evaluated" when it has states to check.
+  // the merge on a raw ENOENT. Say so once, then merge each status as written.
+  // When the state list did load, an unknown status is refused, not stored as Evaluated.
   let _canonicalStates = [];
   try {
     _canonicalStates = loadCanonicalStates(_STATES_FILE);
@@ -407,6 +448,19 @@ export async function mergeTracker(options = {}) {
   const _aliasMap = Object.fromEntries(
     _canonicalStates.flatMap(s => s.aliases.map(a => [a.toLowerCase(), s.label]))
   );
+  // Applied and everything after it in the funnel. Rejected, Discarded, and
+  // SKIP are not in this set: this guard is about a posting already submitted.
+  const SUBMITTED_STATUS_IDS = new Set(['applied', 'responded', 'assessment', 'interview', 'offer', 'hired']);
+  const submittedStatus = (status) => {
+    // No states file: resolveCanonicalStateId cannot name an id, so every
+    // status would look unsubmitted and an Applied row could be retargeted.
+    // These English labels are still readable on the row. Aliases need the file.
+    if (!_canonicalStates.length) {
+      return SUBMITTED_STATUS_IDS.has(stripStatusDecoration(status).toLowerCase());
+    }
+    const id = resolveCanonicalStateId(status, _canonicalStates);
+    return id !== null && SUBMITTED_STATUS_IDS.has(id);
+  };
 
   /**
    * Convert raw addition status text into one canonical tracker state.
@@ -417,7 +471,8 @@ export async function mergeTracker(options = {}) {
    * templates/states.yml.
    *
    * @param {string} status - Raw status string from a TSV or pipe-delimited row.
-   * @returns {string} Canonical tracker status.
+   * @returns {string|null} Canonical tracker status, or null when the list is
+   *   loaded and this text is not on it. Callers leave that addition pending.
    */
   function validateStatus(status) {
     const clean = status.replace(/\*\*/g, '').replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
@@ -438,8 +493,17 @@ export async function mergeTracker(options = {}) {
     // an "Evaluated" it never claimed.
     if (!_canonicalStates.length && clean) return clean;
 
-    console.warn(`⚠️  Non-canonical status "${status}" → defaulting to "Evaluated"`);
-    return 'Evaluated';
+    // A dash is the Discarded sentinel. states.yml does not list it, and it is
+    // also the empty score. An unknown word such as "Phone screen" still
+    // stays pending.
+    if (clean === '—' || clean === '–' || clean === '-') return 'Discarded';
+
+    return null;
+  }
+
+  function refuseUnknownStatus(filename, status) {
+    console.warn(`⚠️  Skipping ${filename}: status "${status}" is not a tracker state. The addition was left pending.`);
+    return null;
   }
 
   // normalizeVia (Unicode-aware Via/agency key, #1596/#1603) lives in
@@ -524,6 +588,33 @@ export async function mergeTracker(options = {}) {
     // the same key.
     const raw = reportUrlToken(reportPath);
     return normalizeUrl(raw) ? { url: raw, reason: 'ok' } : { url: '', reason: 'no-url' };
+  }
+
+  /**
+   * The work location the linked report records in its Machine Summary
+   * (`posting_location`, the JD's own words), or '' when there is no report,
+   * no summary, or the value is null (remote, or no location stated).
+   *
+   * Evaluations write this field but not the TSV `location` field, so without
+   * this read a new row never carries its city, and the dashboard's LOCATION
+   * column shows only the work mode.
+   *
+   * @param {string} reportField - Report cell, e.g. `[42](reports/042-acme.md)`.
+   * @returns {string}
+   */
+  function reportPostingLocation(reportField) {
+    const reportPath = resolveReportPath(reportField);
+    if (!reportPath) return '';
+    const fence = machineSummarySection(readFileSync(reportPath, 'utf-8'))
+      .match(/^##\s*Machine Summary\s*\n+```(?:yaml|yml)?\s*\n([\s\S]*?)\n```/i);
+    if (!fence) return '';
+    try {
+      const location = loadYaml(fence[1])?.posting_location;
+      return typeof location === 'string' ? location.trim() : '';
+    } catch {
+      // A malformed optional summary should not prevent the tracker merge.
+      return '';
+    }
   }
 
   // A row's posting URL for the URL guards: its URL cell, else the URL its
@@ -623,6 +714,9 @@ export async function mergeTracker(options = {}) {
     const isRepeat = incoming !== '' && prev.split(/\.\s+/).map(clause)
       .some(c => c === incomingClause || c.endsWith(`: ${incomingClause}`));
     const tail = incoming && !isRepeat ? `${marker}: ${incoming}` : marker;
+    // The dashboard reads a Location label through the next semicolon.
+    // Preserve the entire place name, including punctuation such as "D.C.".
+    if (/\blocation:[^;]*$/i.test(prevRaw)) return `${prevRaw}; ${tail}`;
     return prev ? `${prev}. ${tail}` : tail;
   }
 
@@ -900,7 +994,8 @@ export async function mergeTracker(options = {}) {
     put('company', cell(o.company));
     put('via', cell(o.via) || '—');
     put('role', cell(o.role));
-    put('location', cell(o.location) || '—');
+    const location = cell(o.location);
+    const locationWritten = put('location', location || '—');
     put('score', o.score);
     put('status', o.status);
     put('pdf', o.pdf);
@@ -919,6 +1014,13 @@ export async function mergeTracker(options = {}) {
       const link = String(o.report).trim();
       if (notes && !notes.includes(link)) notes = `${notes.replace(/\s*$/, '')} Report: ${link}.`;
       else if (!notes) notes = `Report: ${link}.`;
+    }
+    // Same for a layout with no Location column: the value goes into Notes as a
+    // `Location:` segment, the label the dashboard already reads there. It goes
+    // last and unterminated, since the dashboard's reader takes everything up to
+    // the next `;` or the end of the cell.
+    if (!locationWritten && location && location !== '—' && !/\blocation:/i.test(notes)) {
+      notes = notes ? `${notes.replace(/[\s;]*$/, '')}; Location: ${location}` : `Location: ${location}`;
     }
     put('notes', notes);
 
@@ -1146,8 +1248,7 @@ export async function mergeTracker(options = {}) {
     // the value, and blank is never the way to say "none" here: every required
     // field has a documented value, and the "no data" cases have sentinels
     // (`—` / `N/A` for score, `—` for report, `❌` for pdf). Left unchecked, an
-    // empty status reaches validateStatus(''), which warns and returns
-    // "Evaluated" — recording a real evaluation state the row never claimed.
+    // empty status is not a state. Refuse it here rather than storing Evaluated.
     const blankRequiredCells = TSV_REQUIRED_FIELDS.filter(k => at(k) === '');
     if (blankRequiredCells.length) {
       console.warn(`⚠️  Skipping ${filename}: required cell(s) present but empty: ${blankRequiredCells.join(', ')} — use the documented sentinel (— / N/A) rather than a blank cell`);
@@ -1187,12 +1288,15 @@ export async function mergeTracker(options = {}) {
       return null;
     }
 
+    const status = validateStatus(at('status'));
+    if (status == null) return refuseUnknownStatus(filename, at('status'));
+
     return {
       num: parseTrackerNum(at('num')),
       date: at('date'),
       company: at('company'),
       role: at('role'),
-      status: validateStatus(at('status')),
+      status,
       score,
       pdf: at('pdf'),
       report: at('report'),
@@ -1287,6 +1391,8 @@ export async function mergeTracker(options = {}) {
         console.warn(`⚠️  Skipping ${filename}: cannot tell score from status in columns 5–6 ("${parts[4]}" | "${parts[5]}") — refusing to merge a possible column swap`);
         return null;
       }
+      const status = validateStatus(resolved.status);
+      if (status == null) return refuseUnknownStatus(filename, resolved.status);
       addition = {
         num: parseTrackerNum(parts[0]),
         date: parts[1],
@@ -1295,7 +1401,7 @@ export async function mergeTracker(options = {}) {
         // Write-canonical: the tracker stores scores unbolded (verify-pipeline
         // rejects bold scores), so strip any markdown bold from the incoming cell.
         score: resolved.score.replace(/\*\*/g, '').trim(),
-        status: validateStatus(resolved.status),
+        status,
         pdf: parts[6],
         report: parts[7],
         notes: parts[8] || '',
@@ -1320,13 +1426,15 @@ export async function mergeTracker(options = {}) {
         console.warn(`⚠️  Skipping ${filename}: cannot tell score from status in columns 5–6 ("${parts[4].trim()}" | "${parts[5].trim()}") — refusing to merge a possible column swap`);
         return null;
       }
+      const status = validateStatus(resolved.status);
+      if (status == null) return refuseUnknownStatus(filename, resolved.status);
 
       addition = {
         num: parseTrackerNum(parts[0]),
         date: parts[1],
         company: parts[2],
         role: parts[3],
-        status: validateStatus(resolved.status),
+        status,
         // Write-canonical: strip any markdown bold so the stored score stays
         // unbolded (verify-pipeline rejects bold scores).
         score: resolved.score.replace(/\*\*/g, '').trim(),
@@ -1374,13 +1482,45 @@ export async function mergeTracker(options = {}) {
 
   // ---- Main ----
 
-  async function mergeUnderLock() {
-    // Read applications.md
-    if (!existsSync(APPS_FILE)) {
-      console.log('No applications.md found. Nothing to merge into.');
-      return 0;
+  /**
+   * First-run tracker: the header from AGENTS.md onboarding step 4, plus the URL
+   * column so posting-URL dedup is active from the first merge. Returns the new
+   * content (written unless --dry-run), or null when nothing is pending.
+   */
+  function createMissingTracker() {
+    const pending = existsSync(ADDITIONS_DIR)
+      ? readdirSync(ADDITIONS_DIR).filter(f => f.endsWith('.tsv')).length
+      : 0;
+    if (pending === 0) {
+      console.log('No applications.md found and no pending additions. Nothing to merge.');
+      return null;
     }
-    const appContent = readFileSync(APPS_FILE, 'utf-8');
+    const content = [
+      '# Applications Tracker',
+      '',
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |',
+      '|---|------|---------|------|-------|--------|-----|--------|-------|-----|',
+      '',
+    ].join('\n');
+    if (DRY_RUN) {
+      console.log(`🔎 Dry-run: no tracker yet; would create ${APPS_FILE} for ${pending} pending addition(s).`);
+      return content;
+    }
+    mkdirSync(dirname(APPS_FILE), { recursive: true });
+    writeFileAtomic(APPS_FILE, content);
+    console.log(`🆕 Created ${APPS_FILE} (no tracker existed; ${pending} pending addition(s)).`);
+    return content;
+  }
+
+  async function mergeUnderLock() {
+    // Read applications.md, creating it on the first merge. A missing tracker
+    // with pending additions used to exit 0 having merged nothing, which callers
+    // such as the web evaluate flow read as success: the score showed and the
+    // Pipeline tab stayed empty. With nothing pending, no file is created.
+    const appContent = existsSync(APPS_FILE)
+      ? readFileSync(APPS_FILE, 'utf-8')
+      : createMissingTracker();
+    if (appContent === null) return 0;
     // Test-only synchronization hook: the concurrent merge test waits for the
     // first worker to read the tracker while still holding the lock, then starts a
     // second worker to prove the lock prevents the old lost-update race.
@@ -1403,7 +1543,7 @@ export async function mergeTracker(options = {}) {
       if (DRY_RUN) {
         console.log(`🔎 Migration (dry-run): ${changed} row(s) would be rewritten in ${basename(APPS_FILE)}`);
       } else {
-        writeFileAtomic(APPS_FILE, migrated.join('\n'));
+        writeTrackerReplacing(APPS_FILE, migrated.join('\n'));
         console.log(`✅ Migration: rewrote ${changed} report link(s) in ${basename(APPS_FILE)} relative to ${TRACKER_DIR === DATA_ROOT ? 'repo root' : 'data/'}`);
       }
       return 0;
@@ -1446,7 +1586,7 @@ export async function mergeTracker(options = {}) {
       if (DRY_RUN) {
         console.log(`🔎 Migration (dry-run): Via column would be inserted after Company (${changed} table line(s) rewritten)`);
       } else {
-        writeFileAtomic(APPS_FILE, migrated.join('\n'));
+        writeTrackerReplacing(APPS_FILE, migrated.join('\n'));
         console.log(`✅ Migration: inserted Via column after Company (${changed} table line(s) rewritten). Direct applications are marked —.`);
       }
       return 0;
@@ -1509,7 +1649,7 @@ export async function mergeTracker(options = {}) {
       if (DRY_RUN) {
         console.log(`🔎 Migration (dry-run): ${changed} URL cell(s) would be rendered as markdown links in ${basename(APPS_FILE)}.${skippedNote}`);
       } else {
-        writeFileAtomic(APPS_FILE, migrated.join('\n'));
+        writeTrackerReplacing(APPS_FILE, migrated.join('\n'));
         console.log(`✅ Migration: rendered ${changed} URL cell(s) as markdown links in ${basename(APPS_FILE)}. Every row's dedup key is unchanged (verified per cell).${skippedNote}`);
       }
       return 0;
@@ -1707,7 +1847,7 @@ export async function mergeTracker(options = {}) {
           : `would fill ${filled} row(s)`;
         console.log(`🔎 Backfill URLs (dry-run): ${action}. (${summary})`);
       } else {
-        writeFileAtomic(APPS_FILE, backfilled.join('\n'));
+        writeTrackerReplacing(APPS_FILE, backfilled.join('\n'));
         console.log(`✅ Backfill URLs: ${urlColumnAdded ? 'added the URL column; ' : ''}${summary}.`);
       }
       trackerLock.release();
@@ -1762,7 +1902,7 @@ export async function mergeTracker(options = {}) {
       // time rather than at insert time.
       const moved = DRY_RUN ? 0 : sortTrackerRowsInPlace(appLines);
       if (moved > 0) console.log(`🔢 Sorted tracker by # ascending (${moved} row(s) repositioned).`);
-      if ((pdfSynced > 0 || moved > 0) && !DRY_RUN) writeFileAtomic(APPS_FILE, appLines.join('\n'));
+      if ((pdfSynced > 0 || moved > 0) && !DRY_RUN) writeTrackerReplacing(APPS_FILE, appLines.join('\n'));
       if (DRY_RUN) console.log('(dry-run — no changes written)');
       trackerLock.release();
       return 0;
@@ -1776,7 +1916,7 @@ export async function mergeTracker(options = {}) {
       // time rather than at insert time.
       const moved = DRY_RUN ? 0 : sortTrackerRowsInPlace(appLines);
       if (moved > 0) console.log(`🔢 Sorted tracker by # ascending (${moved} row(s) repositioned).`);
-      if ((pdfSynced > 0 || moved > 0) && !DRY_RUN) writeFileAtomic(APPS_FILE, appLines.join('\n'));
+      if ((pdfSynced > 0 || moved > 0) && !DRY_RUN) writeTrackerReplacing(APPS_FILE, appLines.join('\n'));
       if (DRY_RUN) console.log('(dry-run — no changes written)');
       trackerLock.release();
       return 0;
@@ -2057,6 +2197,38 @@ export async function mergeTracker(options = {}) {
         if (duplicate) reportNumMatched = true;
       }
 
+      // True when this match would point a submitted row at a posting the URLs
+      // do not show is the same one. Exact URL, same report, same aggregator
+      // id, and an aggregator sighting of an employer URL are not retargets.
+      const wouldRetargetSubmittedRow = (row) => {
+        if (dupReason === 'url' || dupReason === 'report-file' || reportNumMatched) return false;
+        if (!addUrl) return false;
+        const rowUrl = postingUrl(row);
+        // A placeholder, a local:jds pointer, or a report that names no posting
+        // is not a URL this guard can compare. The title match still decides.
+        if (!normalizeUrl(rowUrl)) return false;
+        if (normalizeUrl(rowUrl) === addUrl) return false;
+        if (isAggregatorUrl(rowUrl) && isAggregatorUrl(addition.url)) {
+          const rowId = aggregatorPostingId(rowUrl);
+          const addId = aggregatorPostingId(addition.url);
+          if (rowId && addId && rowId.domain === addId.domain && rowId.id === addId.id) return false;
+        }
+        if (normalizeUrl(rowUrl) && !isAggregatorUrl(rowUrl) && isAggregatorUrl(addition.url)) return false;
+        if (!isAggregatorUrl(rowUrl) && !isAggregatorUrl(addition.url)
+            && postingUrlRelation(rowUrl, addition.url) === 'same') return false;
+        return true;
+      };
+
+      // Remember the first submitted row this posting must not retarget.
+      // Entry number and the fuzzy title search both skip it, then the search
+      // continues. Warn once, after those tiers, and only when nothing else matched.
+      let protectedSubmitted = null;
+      const skipProtectedSubmitted = (app) => {
+        if (!(submittedStatus(app.status) && wouldRetargetSubmittedRow(app))) return false;
+        if (!protectedSubmitted) protectedSubmitted = app;
+        return true;
+      };
+
       if (!duplicate) {
         // Exact entry number match — but only when the company also matches.
         // The TSV `num` doubles as the tracker row id, yet report-file numbering
@@ -2076,6 +2248,7 @@ export async function mergeTracker(options = {}) {
           // cross-run semantics. For rows already on disk, num remains the
           // tracker row id and behavior is unchanged.
           && (!app.addedThisRun || roleFuzzyMatch(addition.role, app.role))
+          && !skipProtectedSubmitted(app)
         );
       }
 
@@ -2171,12 +2344,33 @@ export async function mergeTracker(options = {}) {
           if (additionReqNum && !appReqNum) return false;
           return true;
         };
-        duplicate = existingApps.find(app => fuzzyTierMatch(app, false))
-          || existingApps.find(app => fuzzyTierMatch(app, true));
+        // Skip a submitted row this posting must not retarget and keep looking,
+        // same as the entry-number tier above.
+        const fuzzyCandidate = (app, widenToCorporateForm) => {
+          if (!fuzzyTierMatch(app, widenToCorporateForm)) return false;
+          return !skipProtectedSubmitted(app);
+        };
+        duplicate = existingApps.find(app => fuzzyCandidate(app, false))
+          || existingApps.find(app => fuzzyCandidate(app, true));
+      }
+
+      if (!duplicate && protectedSubmitted) {
+        console.warn(
+          `⚠️  ${file}: #${protectedSubmitted.num} is ${protectedSubmitted.status} and this posting is not the same URL. Left that row unchanged and added a new one.`,
+        );
+      }
+
+      // A protected match that still got selected is cleared here. The tiers
+      // above already skipped those rows, so this does not warn twice.
+      if (duplicate && submittedStatus(duplicate.status) && wouldRetargetSubmittedRow(duplicate)) {
+        console.warn(
+          `⚠️  ${file}: #${duplicate.num} is ${duplicate.status} and this posting is not the same URL. Left that row unchanged and added a new one.`,
+        );
+        duplicate = null;
       }
 
       if (duplicate) {
-        // An unscoreable re-eval (N/A/—/-) carries no score to write through. Its
+        // An unscoreable re-evaluation (N/A/—/-) carries no score to write through. Its
         // score parses to 0, so the downgrade path below would read it as a genuine
         // zero and overwrite a real score with the sentinel — unrecoverably, since
         // the tracker is gitignored and no .bak is written (#2803). A failed fetch is
@@ -2284,7 +2478,11 @@ export async function mergeTracker(options = {}) {
           // the existing role, since there the pairing is only a guess.
           role: (reportNumMatched || dupReason === 'url') ? addition.role : duplicate.role,
           via: addition.via || duplicate.via || '—',
-          location: addition.location || duplicate.location || '—',
+          // A value already on the row (typed by hand, or an earlier merge) wins
+          // over the report's; the report only fills a row that has none.
+          location: addition.location
+            || (duplicate.location && duplicate.location !== '—' ? duplicate.location : '')
+            || reportPostingLocation(addition.report) || '—',
           score: addition.score, status: duplicate.status, pdf,
           report: addition.report,
           notes: updatedNotes,
@@ -2347,7 +2545,7 @@ export async function mergeTracker(options = {}) {
         const newLine = buildRow({
           num: entryNum, date: addition.date, company: addition.company, role: addition.role,
           via: addition.via || '—',
-          location: addition.location || '—',
+          location: addition.location || reportPostingLocation(addition.report) || '—',
           score: addition.score, status: addition.status, pdf,
           report: addition.report, notes: addition.notes,
           // Write the key on the way in. Backfill is the one-time EXPAND phase for
@@ -2379,18 +2577,10 @@ export async function mergeTracker(options = {}) {
       }
     }
 
-    // Insert new lines after the header (line index of first data row)
+    // Insert new lines after the tracker header's separator (see mergeInsertIndex:
+    // the row's own table decides, so a preamble table cannot swallow the batch).
     if (newLines.length > 0) {
-      // Find header separator (|---|...) and insert after it. Match the row's
-      // structure rather than a bare `---` substring, so a data row carrying three
-      // hyphens in its free text can never be mistaken for the separator.
-      let insertIdx = -1;
-      for (let i = 0; i < appLines.length; i++) {
-        if (SEPARATOR_ROW_RE.test(appLines[i])) {
-          insertIdx = i + 1;
-          break;
-        }
-      }
+      const insertIdx = mergeInsertIndex(appLines);
       if (insertIdx < 0) {
         // #2394: no separator row means no insert point. The old code left
         // insertIdx at -1, skipped the splice with no else, then carried on to
@@ -2417,16 +2607,22 @@ export async function mergeTracker(options = {}) {
       appLines.splice(insertIdx, 0, ...newLines);
     }
 
-    // Write back
+    // Write back. keptEarlierBackup tells the PDF sync below not to replace
+    // a backup this write just saved, but only while the locked tracker still
+    // matches postMergeText. Another merge can replace both between the
+    // unlock here and the sync's own lock.
+    let keptEarlierBackup = false;
+    let postMergeText = null;
     if (!DRY_RUN) {
       const moved = sortTrackerRowsInPlace(appLines);
       if (moved > 0) console.log(`\n🔢 Sorted tracker by # ascending (${moved} row(s) repositioned).`);
-      writeFileAtomic(APPS_FILE, appLines.join('\n'));
+      postMergeText = appLines.join('\n');
+      keptEarlierBackup = writeTrackerReplacing(APPS_FILE, postMergeText);
 
       // Move processed files to merged/ — but only the ones actually applied.
       // Archiving a TSV whose row never reached the tracker is what turns a bug
-      // into permanent data loss, since applications.md is gitignored and no backup
-      // is written.
+      // into permanent data loss. The .bak beside the tracker is the previous
+      // file, so it does not contain that row either.
       if (!existsSync(MERGED_DIR)) mkdirSync(MERGED_DIR, { recursive: true });
       const archivable = tsvFiles.filter(f => !failedAdditions.includes(f) && !refusedAdditions.includes(f));
       for (const file of archivable) {
@@ -2460,6 +2656,8 @@ export async function mergeTracker(options = {}) {
           lockDir: TRACKER_LOCK_DIR,
           lock: options.lock,
           logger: console,
+          keepExistingBackup: keptEarlierBackup,
+          expectedText: postMergeText,
         });
         if (code !== 0) console.warn(`⚠️  Failed to sync PDF flags: sync-pdf-flags exited with ${code}`);
       } catch (e) {
@@ -2510,7 +2708,14 @@ if (isMainModule(import.meta.url)) {
   // (original). CAREER_OPS_TRACKER overrides the path (used by tests and
   // non-standard layouts). Resolution lives in tracker-utils.mjs so every tracker
   // writer agrees on the same canonical path (and therefore the same lock).
-  const appsFile = resolveTrackerPath(DATA_ROOT);
+  // When no tracker exists yet, the read path falls back to the legacy
+  // root-level applications.md; a first merge creates the tracker, so it must
+  // target the canonical write path instead (AGENTS.md: first-run creation
+  // goes to {DATA_ROOT}/data/applications.md).
+  const readPath = resolveTrackerPath(DATA_ROOT);
+  const appsFile = existsSync(readPath)
+    ? readPath
+    : canonicalizeTrackerPath(resolveTrackerPathForWrite(DATA_ROOT));
   const code = await mergeTracker({
     appsFile,
     dataRoot: DATA_ROOT,

@@ -64,6 +64,17 @@ test('a saved email with a quoted-printable line break still yields the job', ()
   assert.deepEqual(jobs, [{ id: E, url: `https://www.linkedin.com/jobs/view/${E}` }]);
 });
 
+test('a quoted-printable equals sign in currentJobId still yields the job', () => {
+  const id = '4392837462';
+  const jobs = linkedInJobsFromText(`https://www.linkedin.com/jobs/search/?currentJobId=3D${id}`);
+  assert.deepEqual(jobs, [{ id, url: `https://www.linkedin.com/jobs/view/${id}` }]);
+});
+
+test('a quoted-printable id split by a soft break still yields the job', () => {
+  const jobs = linkedInJobsFromText('https://www.linkedin.com/jobs/search/?currentJobId=3D4392=\n837462');
+  assert.deepEqual(jobs, [{ id: '4392837462', url: 'https://www.linkedin.com/jobs/view/4392837462' }]);
+});
+
 test('bare and full links keep the order they appear in', () => {
   const text = `linkedin.com/jobs/view/${A}\nhttps://www.linkedin.com/jobs/view/${B}\nwww.linkedin.com/jobs/view/${C}`;
   assert.deepEqual(linkedInJobsFromText(text).map((job) => job.id), [A, B, C]);
@@ -105,6 +116,28 @@ test('a title above the link is kept, and a slug fills in when the paste has no 
   assert.equal(offers[1].title, 'Staff Analyst Quill');
   assert.equal(offers[1].company, 'LinkedIn');
   assert.equal(offers[1].url, `https://www.linkedin.com/jobs/view/${B}`);
+});
+
+test('a tracking number on the link line does not take that posting\'s title', () => {
+  const own = '4400001234';
+  const other = '4400005678';
+  const text = [
+    'Analyst',
+    'Northwind',
+    `https://www.linkedin.com/comm/jobs/view/${own}?trk=eml-${other}`,
+    'Shift lead',
+    'Sundial Pharmacy',
+    `https://www.linkedin.com/jobs/view/${other}`,
+  ].join('\n');
+  const offers = linkedInOffers(linkedInJobsFromText(text), text);
+  assert.deepEqual(offers.map((offer) => offer.url), [
+    `https://www.linkedin.com/jobs/view/${own}`,
+    `https://www.linkedin.com/jobs/view/${other}`,
+  ]);
+  assert.equal(offers[0].title, 'Analyst');
+  assert.equal(offers[0].company, 'Northwind');
+  assert.equal(offers[1].title, 'Shift lead');
+  assert.equal(offers[1].company, 'Sundial Pharmacy');
 });
 
 test('a pasted title or company longer than the bound is cut, and one at the bound is kept', () => {

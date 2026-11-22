@@ -70,7 +70,7 @@ export default {
 
 /** @param {string} s */
 const text = (s) =>
-  decodeEntities(String(s).replace(/<[^>]+>/g, ' '))
+  decodeEntities(String(s).replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag)))
     .replace(/�/g, '')
     .replace(/\s+/g, ' ')
     .trim();

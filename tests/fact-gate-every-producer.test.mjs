@@ -30,7 +30,7 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 // A step that builds or writes a CV. `--preview` and `--test` produce nothing
 // to send.
-const PRODUCER_RE = /node (?:build-cv-html|build-cv-latex|patch-latex-content)\.mjs (?!--preview|--test)|Write to `output\/cv-/;
+const PRODUCER_RE = /node (?:build-cv-html|build-cv-latex|patch-latex-content)\.mjs (?!--preview|--test)|Write to `output\/(?:cv-|\{cv-stem\})/;
 // The gate itself, or a renderer that runs it before writing its output.
 const GATE_RE = /node (?:verify-cv-facts|generate-pdf|generate-latex)\.mjs/;
 // Renderers that run the gate in code. Asserted below, so this list cannot

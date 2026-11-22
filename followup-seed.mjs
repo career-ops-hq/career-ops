@@ -328,6 +328,7 @@ function appendPins(existingContent, pinLines) {
  * @param {number} appNum
  * @param {object} [options]
  * @param {string} [options.date] - Explicit apply date (YYYY-MM-DD), already validated.
+ * @param {string} [options.authoredNotes] - Notes to read for an apply date instead of the row. Set-status passes the text the user wrote, plus --note, because the row also holds status text it moved in.
  * @param {string} [options.statusChangeDate] - The day the row moved to Applied, see resolveAppliedDate.
  * @param {boolean} [options.force] - Bypass idempotency guard and the Applied-status guard.
  * @param {boolean} [options.assumeApplied] - Relax the Applied-status guard ONLY, keeping
@@ -503,7 +504,8 @@ export async function seedFollowup(appNum, options = {}) {
   // appDateSource travels with the result so a caller can tell a measured apply
   // date from a proxy or a guess — the same contract followup-cadence.mjs and
   // company-history.mjs already expose.
-  const { appliedDate, appDateSource } = resolveAppliedDate(row, options.date, options.statusChangeDate);
+  const datedRow = options.authoredNotes != null ? { ...row, notes: options.authoredNotes } : row;
+  const { appliedDate, appDateSource } = resolveAppliedDate(datedRow, options.date, options.statusChangeDate);
   const cadence = resolveCadenceConfig({ profilePath: options.profilePath });
   const nextDate = addDays(parseDate(appliedDate), cadence.applied_first);
   const setDate = todayStr();

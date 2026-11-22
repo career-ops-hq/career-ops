@@ -5,13 +5,20 @@
  * The discard log (data/discard.log, or batch/logs/discard.log for batch runs)
  * is the only record of what the filters threw away and why. This script reads
  * it and produces a summary of rejection reasons, domains, and daily volume,
- * plus the most frequent title_mismatch URLs for the candidate to review.
+ * plus the most-discarded URLs for the candidate to review by hand.
  *
  * Read-only: never modifies the log.
  *
- * The top title_mismatch section is deliberately dumb — it lists the URLs and
- * lets the candidate judge whether a keyword is costing them real roles. It
- * never infers which keyword to add; that is a guess wearing a number.
+ * The reasons are whatever the writers put there: batch-runner.sh writes
+ * `dealbreaker: "{rule}"` and `below-min-score`, and the interactive pipeline
+ * gate writes a free-text reason. No reason vocabulary is assumed. Title
+ * keyword tuning belongs to filter-audit.mjs: title filtering happens in
+ * scan.mjs and is recorded in data/scan-history.tsv, not in this log.
+ *
+ * The most-discarded section is deliberately dumb — it lists the URLs with
+ * their latest reason and lets the candidate judge whether the gate is
+ * costing them real roles. It never infers a rule change; that is a guess
+ * wearing a number. Combine it with --reason to review one reason's URLs.
  *
  * Run: node discard-analytics.mjs [--log <path>] [--reason <pattern>] [--top N] [--since YYYY-MM-DD]
  *
@@ -24,6 +31,7 @@ import { join } from 'path';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { parseDate } from './lib/parse-date.mjs';
 
 /**
  * Parse a discard log's contents into entries.
@@ -53,6 +61,22 @@ export function parseDiscardLog(text) {
 }
 
 /**
+ * Order two log timestamps as instants. ISO8601 strings do not sort as text
+ * (`10:00:00.500Z` sorts before `10:00:00Z`, and offsets differ), so both are
+ * parsed; an unparseable one falls back to text order.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {number} negative, zero or positive, like a sort comparator.
+ */
+function compareTimestamps(a, b) {
+  const ta = Date.parse(a);
+  const tb = Date.parse(b);
+  if (!Number.isNaN(ta) && !Number.isNaN(tb)) return ta - tb;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
  * Aggregate parsed entries into sorted reason/domain/day counts.
  *
  * @param {Array<{timestamp:string, url:string, reason:string}>} entries
@@ -61,14 +85,14 @@ export function parseDiscardLog(text) {
  *   byReason: Array<[string, number]>,
  *   byDomain: Array<[string, number]>,
  *   byDay: Array<[string, number]>,
- *   titleMismatch: Array<[string, number]>
+ *   byUrl: Array<{url: string, count: number, lastReason: string}>
  * }}
  */
 export function aggregateDiscards(entries) {
   const reasonCounts = {};
   const domainCounts = {};
   const dayCounts = {};
-  const titleMismatchCounts = {};
+  const urlStats = new Map();
 
   for (const e of entries) {
     reasonCounts[e.reason] = (reasonCounts[e.reason] || 0) + 1;
@@ -78,17 +102,23 @@ export function aggregateDiscards(entries) {
     } catch { /* malformed URL */ }
     const day = e.timestamp.slice(0, 10);
     dayCounts[day] = (dayCounts[day] || 0) + 1;
-    if (e.reason.includes('title_mismatch')) {
-      titleMismatchCounts[e.url] = (titleMismatchCounts[e.url] || 0) + 1;
+    const stat = urlStats.get(e.url) || { url: e.url, count: 0, lastReason: '', lastTimestamp: '' };
+    stat.count += 1;
+    if (stat.count === 1 || compareTimestamps(e.timestamp, stat.lastTimestamp) >= 0) {
+      stat.lastTimestamp = e.timestamp;
+      stat.lastReason = e.reason;
     }
+    urlStats.set(e.url, stat);
   }
 
   const byReason = Object.entries(reasonCounts).sort((a, b) => b[1] - a[1]);
   const byDomain = Object.entries(domainCounts).sort((a, b) => b[1] - a[1]);
   const byDay = Object.entries(dayCounts).sort((a, b) => a[0].localeCompare(b[0]));
-  const titleMismatch = Object.entries(titleMismatchCounts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const byUrl = [...urlStats.values()]
+    .sort((a, b) => b.count - a.count || a.url.localeCompare(b.url))
+    .map(({ url, count, lastReason }) => ({ url, count, lastReason }));
 
-  return { total: entries.length, byReason, byDomain, byDay, titleMismatch };
+  return { total: entries.length, byReason, byDomain, byDay, byUrl };
 }
 
 /**
@@ -127,10 +157,10 @@ export function renderSummary(agg, topN, firstDate, lastDate) {
   }
   lines.push('');
 
-  if (agg.titleMismatch.length > 0) {
-    lines.push(`Top title_mismatch URLs (review for keyword tuning):`);
-    for (const [url, count] of agg.titleMismatch.slice(0, topN)) {
-      lines.push(`  ${count}. ${url}`);
+  if (agg.byUrl.length > 0) {
+    lines.push(`Most-discarded URLs (top ${topN}, check by hand for wrong rejections):`);
+    for (const { url, count, lastReason } of agg.byUrl.slice(0, topN)) {
+      lines.push(`  ${pad(count, 5)} ${url}  (${lastReason})`);
     }
     lines.push('');
   }
@@ -164,7 +194,15 @@ if (isMainModule(import.meta.url)) {
   const filterReason = argValue('--reason');
   const parsedTopN = Number(argValue('--top') || '10');
   const topN = Number.isInteger(parsedTopN) && parsedTopN > 0 ? parsedTopN : 10;
-  const sinceDate = argValue('--since');
+  const sinceArg = argValue('--since');
+  // The filter compares --since with each ISO timestamp as text, so a value that
+  // is not a real YYYY-MM-DD date filtered silently wrong: "2026-11-1" dropped
+  // November 1-9, "2026/11/01" dropped every entry and "11/01/2026" kept them all.
+  if (sinceArg !== null && !parseDate(sinceArg)) {
+    console.error(`Error: --since expects a date as YYYY-MM-DD, got "${sinceArg}"\n${USAGE}`);
+    process.exit(1);
+  }
+  const sinceDate = sinceArg?.trim() ?? null;
   const customLog = argValue('--log');
 
   const logFile = customLog || join(getCareerOpsRoot(), 'data/discard.log');

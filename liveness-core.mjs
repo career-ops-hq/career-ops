@@ -70,7 +70,10 @@ const HARD_EXPIRED_PATTERNS = [
   // on the subject "the job you are looking for" plus a closed verb, so prose
   // that merely contains the word "closed" never matches.
   /\bthe job you(?:'re| are) (?:looking|searching) for (?:may |might |could )?(?:have |has )?closed\b/i,
-  /applications?\s+(?:(?:have|are|is)\s+)?closed/i,
+  // A trailing "?" makes it a question, not a statement about this posting:
+  // Phenom career sites (Truist) put "Applications closed? Don't see what you're
+  // looking for?" on every search page, so the question form is boilerplate.
+  /applications?\s+(?:(?:have|are|is)\s+)?closed(?!\s*\?)/i,
   // "Was closed on 15 December" is a closure. "Will be closed on", "is to be
   // closed on" and "may be closed on" give a date still ahead, on a posting
   // that is open until then.
@@ -214,6 +217,12 @@ const APPLY_PATTERNS = [
   // Spanish (HiringRoom): "Postularse". The label, not the verb: every HiringRoom
   // posting also links a help article, "¿Cómo me postulo?" ("how do I apply?").
   /\bpostularse\b/i,
+  // Spanish (Computrabajo): "Postularme". Only at the start of the label, like the
+  // Bulgarian noun below: a help link such as "¿Cómo postularme?" is not Apply.
+  // Without it every live Computrabajo posting read no_apply_control and
+  // scan --verify dropped it (16 of 83 on 2026-11-18, most of them infrastructure
+  // roles in Argentina).
+  /^postularme\b/i,
   // Chinese MokaHR and Feishu Jobs detail pages use these exact control texts.
   // Keep them narrow: bare “申请” appears in descriptive prose, while longer
   // labels containing “投递” can be status/history controls rather than Apply.

@@ -15,6 +15,7 @@
 // protocol's helpers are re-exported so existing importers keep working.
 
 import { acquireDirLock, releaseOrWarn } from './lib/dir-lock.mjs';
+import { canonicalLockPath } from './lib/lock-path.mjs';
 
 export {
   OWNERLESS_GRACE_MS,
@@ -41,8 +42,19 @@ export class LockTimeoutError extends Error {
   }
 }
 
+/**
+ * The real file a pipeline path names, so two spellings of one file share a lock.
+ *
+ * The resolution itself lives in lib/lock-path.mjs, because every lock in the
+ * core needs it: `lib/dir-lock.mjs` holds the protocol, and this holds the path
+ * rule. A lock file beside the link instead of beside the file is a lock that
+ * serializes nothing (see that module's header for the incident).
+ *
+ * @param {string} pipelinePath
+ * @returns {string}
+ */
 export function lockDirFor(pipelinePath) {
-  return `${pipelinePath}.lock`;
+  return `${canonicalLockPath(pipelinePath)}.lock`;
 }
 
 /**

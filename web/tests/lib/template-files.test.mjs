@@ -397,7 +397,15 @@ function linkedPack(s, name = "linked-pack") {
   fs.mkdirSync(path.join(target, "sections"));
   fs.writeFileSync(path.join(target, "sections", "experience.html"), "<section>mine</section>");
   fs.mkdirSync(s.userDir, { recursive: true });
-  fs.symlinkSync(target, path.join(s.userDir, name), "dir");
+  try {
+    fs.symlinkSync(target, path.join(s.userDir, name), "dir");
+  } catch (err) {
+    // Windows refuses a symlink to an account without SeCreateSymbolicLinkPrivilege.
+    // A junction needs no privilege, and lstat reports it as a symbolic link and
+    // realpath resolves it, so the cases below still run.
+    if (process.platform !== "win32" || err.code !== "EPERM") throw err;
+    fs.symlinkSync(target, path.join(s.userDir, name), "junction");
+  }
   return { target, file, partial: path.join(target, "sections", "experience.html") };
 }
 
