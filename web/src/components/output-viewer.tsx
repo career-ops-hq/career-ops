@@ -113,23 +113,32 @@ export function OutputViewer() {
   }, []);
   // Writes run one after another, each sending the latest state, so an older
   // request can never land after a newer one.
-  const mutate = (fn: (p: Progress) => Progress): boolean => {
-    if (!canSave.current) return false;
+  // Resolves true only once the server has accepted the save, so a caller can keep what the
+  // user typed when it fails.
+  const mutate = (fn: (p: Progress) => Progress): Promise<boolean> => {
+    if (!canSave.current) return Promise.resolve(false);
     const next = fn(progRef.current);
     progRef.current = next;
     setProg(next);
-    chain.current = chain.current.then(() =>
+    const saved = chain.current.then(() =>
       fetch("/api/prep-progress", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(next) })
-        .then((r) => setProgError(r.ok ? "" : "Could not save your progress."))
-        .catch(() => setProgError("Could not save your progress.")),
+        .then((r) => {
+          setProgError(r.ok ? "" : "Could not save your progress.");
+          return r.ok;
+        })
+        .catch(() => {
+          setProgError("Could not save your progress.");
+          return false;
+        }),
     );
-    return true;
+    chain.current = saved;
+    return saved;
   };
   const isDone = (file: string, t: string, mark: boolean) => prog.ticks[tickKey(file, t)] ?? mark;
   const toggleTick = (file: string, t: string, to: boolean) => mutate((p) => ({ ...p, ticks: { ...p.ticks, [tickKey(file, t)]: to } }));
   const own = company && Object.hasOwn(prog.tasks, company) ? prog.tasks[company] : null;
   const myTasks = Array.isArray(own) ? own : [];
-  const setTasks = (list: Task[]): boolean => !!company && mutate((p) => ({ ...p, tasks: { ...p.tasks, [company]: list } }));
+  const setTasks = (list: Task[]): Promise<boolean> => (company ? mutate((p) => ({ ...p, tasks: { ...p.tasks, [company]: list } })) : Promise.resolve(false));
   const items = parseTaskItems(text);
   const itemsDone = sel ? countDone(sel, items, prog.ticks) : 0;
 
@@ -187,7 +196,14 @@ export function OutputViewer() {
             </label>
           ))}
           {!!myTasks.length && <p className="mt-1 text-xs text-faint">{myTasks.filter((t) => t.done).length}/{myTasks.length} done</p>}
-          <form className="mt-1 flex gap-1" onSubmit={(e) => { e.preventDefault(); if (newTask.trim() && setTasks([...myTasks, { id: String(Date.now()), text: newTask.trim(), done: false }])) setNewTask(""); }}>
+          <form className="mt-1 flex gap-1" onSubmit={async (e) => {
+            e.preventDefault();
+            const text = newTask.trim();
+            if (!text) return;
+            const saved = await setTasks([...myTasks, { id: String(Date.now()), text, done: false }]);
+            // Clear the box only after the save worked, and only if nothing newer was typed meanwhile.
+            if (saved) setNewTask((cur) => (cur.trim() === text ? "" : cur));
+          }}>
             <input value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a task…" aria-label="New prep task" maxLength={MAX_TASK_TEXT} disabled={!canEdit}
               className="min-w-0 flex-1 rounded border border-border bg-transparent px-2 py-1 text-xs" />
             <button type="submit" className="rounded border border-border px-1.5 text-muted hover:text-foreground" title="Add" aria-label="Add task" disabled={!canEdit}><Plus className="size-3.5" /></button>
