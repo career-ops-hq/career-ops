@@ -114,6 +114,22 @@ try {
     pass('remoteok.fetch() omits description when it is absent, empty, whitespace, non-string or markup-only');
   else fail(`remoteok.fetch() description presence = ${JSON.stringify(described.map((j) => j.description))}`);
 
+  const misread = (text) => Buffer.from(text, 'utf8').toString('latin1');
+  const [repaired, plain, invalid] = await remoteok.fetch({}, { fetchJson: async () => [
+    { ...row('mojibake', misread('<p>Join our team as a\u00a0<strong>Data Engineer</strong> today.</p>')),
+      position: misread('Engineer – Platform'), company: misread('ŌURA'), location: misread('München') },
+    row('plain', '<p>Already correct: München, café, 東京.</p>'),
+    row('invalid', '<p>Keep Â§ in this café.</p>'),
+  ] });
+  if (repaired?.description === 'Join our team as a Data Engineer today.'
+      && repaired.title === 'Engineer – Platform' && repaired.company === 'ŌURA' && repaired.location === 'München')
+    pass('remoteok repairs Latin-1 misread feed text before stripping HTML');
+  else fail(`remoteok encoding repair: ${JSON.stringify(repaired)}`);
+  if (plain?.description === 'Already correct: München, café, 東京.'
+      && invalid?.description === 'Keep Â§ in this café.')
+    pass('remoteok preserves correct Unicode and values that fail strict UTF-8 decoding');
+  else fail(`remoteok corrupted untouched text: ${JSON.stringify([plain, invalid])}`);
+
   // company default when both the row's company and entry.name are missing → 'RemoteOK'.
   const noName = await remoteok.fetch(
     {},
