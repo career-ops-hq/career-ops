@@ -22,9 +22,29 @@
 //     location: Germany
 //     posted: 30
 //     enabled: true
+//
+// Availability note: Cloudflare challenges this provider's requests
+// (measured 2026-11-15). The scanner's DEFAULT_USER_AGENT got HTTP 200 on
+// 2026-11-12 (#6887). On 2026-11-15, from a US egress and a Canadian VPN
+// egress (several Cloudflare POPs between them), every page (/, /search,
+// /jobs, a location-scoped /search) answered HTTP 403 with
+// `cf-mitigated: challenge` and a "Just a moment..." managed-challenge page.
+// Only /robots.txt still answered 200. It is not known whether a
+// residential egress outside North America is challenged too.
+//
+// career-ops does not solve or route around a challenge (CONTRIBUTING,
+// Source Indexing Policy rule 6), so a challenged page 1 THROWS with an
+// error that names the challenge. It never returns [], which would read
+// downstream as a healthy board with no jobs. The error keeps the HTTP
+// status, so verify-portals still classifies it from the status code. Its
+// message must not contain "network", in its own words or in the entry's
+// search terms, so the request URL stays out of it: classifyFetchError
+// matches that word before it reads the status (pinned in
+// tests/providers/themuse.test.mjs).
 
 import { sleep, fetchTextWithRetry } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
+import { stripHtmlComments } from './_html-to-text.mjs';
 import { markTruncated } from '../lib/board-truncation.mjs';
 
 const SEARCH_BASE = 'https://www.themuse.com/search';
@@ -55,6 +75,11 @@ const RETRY_POLICY = { retries: 3, baseDelayMs: 500, maxDelayMs: 8_000 };
 // Delay between successive pages so a 100-page walk doesn't fire as a burst
 // against the same host (mirrors workday.mjs / oraclecloud.mjs).
 const INTER_PAGE_DELAY_MS = 250;
+
+// Markers only a Cloudflare challenge page carries, for a response whose
+// `cf-mitigated` header was not seen (a test stub, a cached error). Seen
+// live 2026-11-15: <title>Just a moment...</title> and window._cf_chl_opt.
+const CHALLENGE_BODY_RE = /<title[^>]*>\s*Just a moment\.\.\.|_cf_chl_opt|cf-browser-verification/i;
 
 const POSTED_VALUES = new Set([1, 7, 30]);
 // The site's category values are slugs (e.g. software-engineering).
@@ -106,8 +131,10 @@ function assertMuseUrl(url) {
  * @param {string} s
  */
 function cleanText(s) {
+  // stripHtmlComments, not /<!--[\s\S]*?-->/: the lazy regex rescans the rest
+  // of the text from every `<!--` that has no `-->`.
   return decodeEntities(
-    String(s).replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^>]*>/g, ' '),
+    stripHtmlComments(String(s)).replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag)),
   ).replace(/\s+/g, ' ').trim();
 }
 
@@ -311,6 +338,49 @@ function buildSearchUrl(params, page) {
   return q ? `${SEARCH_BASE}?${q}` : SEARCH_BASE;
 }
 
+/**
+ * Fetch one /search page. A Cloudflare challenge is rethrown as an error that
+ * names it, because the bare "HTTP 403" fetchInContext throws says nothing
+ * about the cause. The challenge is
+ * recognised from the response's `cf-mitigated: challenge` header (read
+ * through opts.onResponse, which fires before the non-2xx throw), or else
+ * from the challenge page's own markers in err.body. Any other error is
+ * rethrown as is, so a probe's own rejection still propagates by identity.
+ *
+ * @param {any} ctx
+ * @param {string} url
+ * @param {object} retryPolicy
+ * @returns {Promise<string>}
+ */
+async function fetchSearchPage(ctx, url, retryPolicy) {
+  /** @type {string|null} */
+  let cfMitigated = null;
+  try {
+    return await fetchTextWithRetry(ctx, url, {
+      // redirect:'error' prevents SSRF via server-side redirects
+      redirect: 'error',
+      onResponse: (res) => { cfMitigated = res?.headers?.get?.('cf-mitigated') ?? null; },
+    }, retryPolicy);
+  } catch (err) {
+    const status = err?.status;
+    if (typeof status !== 'number') throw err;
+    const byHeader = /\bchallenge\b/i.test(cfMitigated ?? '');
+    const byBody = CHALLENGE_BODY_RE.test(typeof err.body === 'string' ? err.body : '');
+    if (!byHeader && !byBody) throw err;
+    const signal = byHeader ? `cf-mitigated: ${cfMitigated}` : 'challenge page';
+    const named = new Error(
+      `themuse: Cloudflare challenge (HTTP ${status}, ${signal}) on the /search page. The Muse is challenging non-browser requests from this IP address, and career-ops does not solve challenges. See the availability note for The Muse in docs/SUPPORTED_JOB_BOARDS.md.`,
+      { cause: err },
+    );
+    // The URL goes on its own field, not in the message: it carries the
+    // entry's search terms, and a query such as "network engineer" would make
+    // classifyFetchError read the message as a network failure.
+    Object.assign(named, { status, challenge: true, url });
+    if (Number.isInteger(err.attempts)) Object.assign(named, { attempts: err.attempts });
+    throw named;
+  }
+}
+
 /** @type {Provider} */
 export default {
   id: 'themuse',
@@ -329,9 +399,10 @@ export default {
     // from a healthy "0 jobs today" result -- scan.mjs's consecutive-failure
     // detector resets its streak on any non-throwing fetch, so a themuse
     // outage would silently reset the very detector meant to catch it.
+    // A Cloudflare challenge on page 1 throws with the challenge named (see
+    // fetchSearchPage and the availability note at the top of this file).
     const firstUrl = assertMuseUrl(buildSearchUrl(params, 1));
-    // redirect:'error' prevents SSRF via server-side redirects
-    const firstHtml = await fetchTextWithRetry(ctx, firstUrl, { redirect: 'error' }, retryPolicy);
+    const firstHtml = await fetchSearchPage(ctx, firstUrl, retryPolicy);
     const first = parseSearchPage(firstHtml, { location });
     if (first.layoutError) throw new Error(first.layoutError);
     const jobs = [...first.jobs];
@@ -352,7 +423,7 @@ export default {
       const url = assertMuseUrl(buildSearchUrl(params, page));
       let html;
       try {
-        html = await fetchTextWithRetry(ctx, url, { redirect: 'error' }, retryPolicy);
+        html = await fetchSearchPage(ctx, url, retryPolicy);
       } catch (err) {
         if (probing) throw err;
         const attempts = Number.isInteger(err?.attempts) ? err.attempts : 1;

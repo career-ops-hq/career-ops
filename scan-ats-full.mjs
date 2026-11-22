@@ -185,15 +185,50 @@ function validCheckpointCurrent(cur) {
     && (cur.retries === undefined || validIndexList(cur.retries));
 }
 
+// Explains specifically what settings differed between an existing checkpoint and
+// the current run options. Returns null when the settings are compatible.
+export function checkpointMismatch(cp, opts) {
+  if (!cp) return 'missing checkpoint';
+  const reasons = [];
+
+  if (opts?.shuffle) {
+    reasons.push('--shuffle is set (order is not reproducible)');
+  }
+
+  const cpAts = Array.isArray(cp.ats) ? cp.ats : [];
+  const optAts = Array.isArray(opts?.ats) ? opts.ats : [];
+  const added = optAts.filter((s) => !cpAts.includes(s));
+  const removed = cpAts.filter((s) => !optAts.includes(s));
+  if (added.length > 0 && removed.length > 0) {
+    reasons.push(`ATS sources differ (added: ${added.join(', ')}, removed: ${removed.join(', ')})`);
+  } else if (added.length > 0) {
+    reasons.push(`ATS sources differ (added: ${added.join(', ')})`);
+  } else if (removed.length > 0) {
+    reasons.push(`ATS sources differ (removed: ${removed.join(', ')})`);
+  } else if (JSON.stringify(cpAts) !== JSON.stringify(optAts)) {
+    reasons.push(`ATS sources order differed (was [${cpAts.join(', ')}], now [${optAts.join(', ')}])`);
+  }
+
+  const cpLimit = cp.limit ?? null;
+  const optLimit = (opts?.limit === Infinity || opts?.limit === undefined) ? null : opts.limit;
+  if (cpLimit !== optLimit) {
+    reasons.push(`limit changed (was ${cpLimit ?? 'none'}, now ${optLimit ?? 'none'})`);
+  }
+
+  const cpUndated = Boolean(cp.includeUndated);
+  const optUndated = Boolean(opts?.includeUndated);
+  if (cpUndated !== optUndated) {
+    reasons.push(`includeUndated changed (was ${cpUndated}, now ${optUndated})`);
+  }
+
+  return reasons.length > 0 ? reasons.join('; ') : null;
+}
+
 // A checkpoint written under different scan settings must not be resumed —
 // silently mixing sources, caps, or undated policy would corrupt the run's
 // semantics. --shuffle is never resumable: the sampled order isn't reproducible.
 export function checkpointCompatible(cp, opts) {
-  return Boolean(cp)
-    && !opts.shuffle
-    && JSON.stringify(cp.ats) === JSON.stringify(opts.ats)
-    && (cp.limit ?? null) === (opts.limit === Infinity ? null : opts.limit)
-    && cp.includeUndated === opts.includeUndated;
+  return Boolean(cp) && checkpointMismatch(cp, opts) === null;
 }
 
 // Flags are not the only settings a resume can mix. The portals.yml filters
@@ -647,6 +682,20 @@ export function parseArgs(argv) {
   // CodeRabbit flagged on #2745/#2746).
   validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
 
+  const consumed = new Set();
+  args.forEach((token, idx) => {
+    if (!VALUE_FLAGS.includes(token)) return;
+    const next = args[idx + 1];
+    if (typeof next === 'string' && !next.startsWith('-')) consumed.add(idx + 1);
+  });
+  const unexpected = args.find((token, idx) => !consumed.has(idx) && typeof token === 'string' && !token.startsWith('-'));
+  // "" is a present argument. A truthiness check treated it as absent and the
+  // run selected every source.
+  if (unexpected !== undefined) {
+    console.error(`Error: unexpected argument "${unexpected}". Pass a source with --ats, for example --ats ${unexpected}.`);
+    process.exit(1);
+  }
+
   const valueOf = (flag) => {
     const idx = args.indexOf(flag);
     if (idx !== -1 && args[idx + 1] && !args[idx + 1].startsWith('--')) return args[idx + 1];
@@ -691,10 +740,22 @@ export function parseArgs(argv) {
     limit = Number(raw);
   }
   const atsArg = valueOf('--ats');
+  if (hasFlag(args, '--ats')) {
+    const listed = String(atsArg ?? '').split(',').map(s => s.trim()).filter(Boolean);
+    if (listed.length === 0) {
+      const valid = [...new Set([...Object.keys(SOURCES), ...KNOWN_ATS_VENDORS])].join(', ');
+      console.error(`Error: --ats needs a source, for example --ats greenhouse. Valid: ${valid}`);
+      process.exit(1);
+    }
+  }
   // --seeds: optional comma-separated VC portfolio sources (e.g. yc,a16z).
   // When set, the seed companies are fetched and probed via the ATS providers
   // instead of (or in addition to) the regular ATS directory walk.
   const seedsArg = valueOf('--seeds');
+  if (hasFlag(args, '--seeds') && !String(seedsArg ?? '').split(',').some(s => s.trim())) {
+    console.error(`Error: --seeds needs a source, for example --seeds yc. Valid: ${Object.keys(SEED_SOURCES).join(', ')}`);
+    process.exit(1);
+  }
   const seeds = seedsArg
     ? seedsArg.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
     : [];
@@ -1630,7 +1691,7 @@ export async function parallelEach(items, limit, fn, onItemDone = null, shouldSt
 async function filterLive(offers) {
   let chromium, checkUrlLiveness, newLivenessPage;
   try {
-    ({ chromium } = await import('playwright'));
+    ({ chromium } = await import('./lib/hardened-chromium.mjs'));
     ({ checkUrlLiveness, newLivenessPage } = await import('./liveness-browser.mjs'));
   } catch (err) {
     throw new Error(
@@ -1671,21 +1732,24 @@ function isoDay(v) {
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 }
 
-function resumeRejected(cp, opts, filters, { freshOnMismatch = false } = {}) {
+export function resumeRejected(cp, opts, filters, { freshOnMismatch = false } = {}) {
   const changed = changedFilterKeys(cp, filters);
-  const settingsDiffer = !checkpointCompatible(cp, opts);
-  if (!settingsDiffer && changed.length === 0) return false;
+  const mismatch = checkpointMismatch(cp, opts);
+  if (!mismatch && changed.length === 0) return false;
+  const parts = [];
+  if (mismatch) parts.push(mismatch);
+  if (changed.length > 0) parts.push(`portals.yml ${changed.join(', ')}`);
+  const why = parts.join('; ');
   if (freshOnMismatch) {
-    const why = settingsDiffer
-      ? 'different settings (--ats, --limit, --include-undated, or --shuffle)'
-      : `portals.yml ${changed.join(', ')}`;
     console.error(`⚠️  Checkpoint at ${CHECKPOINT_PATH} does not match this run (${why}). Starting a fresh sweep. The checkpoint will be overwritten.`);
     return true;
   }
-  if (settingsDiffer) {
-    console.error('Error: checkpoint was written with different settings (--ats/--limit/--include-undated, or --shuffle is set) — rerun with the original flags, or delete the checkpoint to start fresh.');
+  if (mismatch && changed.length > 0) {
+    console.error(`Error: checkpoint was written with different settings (${mismatch}; portals.yml ${changed.join(', ')} changed) — rerun with matching flags and filters, pass --resume-if-compatible to start fresh on mismatch, or delete ${CHECKPOINT_PATH} to start fresh.`);
+  } else if (mismatch) {
+    console.error(`Error: checkpoint was written with different settings (${mismatch}) — rerun with the original flags, pass --resume-if-compatible to start fresh on mismatch, or delete ${CHECKPOINT_PATH} to start fresh.`);
   } else {
-    console.error(`Error: portals.yml ${changed.join(', ')} changed since the checkpoint was written — the boards already swept were filtered under the old settings. Restore them to finish this sweep, or delete ${CHECKPOINT_PATH} to start fresh.`);
+    console.error(`Error: portals.yml ${changed.join(', ')} changed since the checkpoint was written — the boards already swept were filtered under the old settings. Restore them to finish this sweep, pass --resume-if-compatible to start fresh on mismatch, or delete ${CHECKPOINT_PATH} to start fresh.`);
   }
   return true;
 }

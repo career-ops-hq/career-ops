@@ -11,6 +11,7 @@
  */
 
 import { buildWorkplacePolicy } from './providers/_country.mjs';
+import { parseEmploymentTypeFilterConfig } from './providers/_employment-type.mjs';
 import { normalizeWorkplaceType } from './providers/_workplace-type.mjs';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { join, dirname, resolve } from 'path';
@@ -229,6 +230,7 @@ export const PORTAL_TOP_LEVEL_KEYS = [
   'location_filter',
   'country_eligibility_filter',
   'salary_filter',
+  'employment_type_filter',
   'workplace_filter',
   'experience_filter',
   'portal_prune_quiet_days',
@@ -497,6 +499,16 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     }
   }
 
+  // One parser for scan.mjs and this check, so a block one accepts the other
+  // cannot reject (providers/_employment-type.mjs).
+  if (config.employment_type_filter !== undefined) {
+    try {
+      parseEmploymentTypeFilterConfig(config.employment_type_filter);
+    } catch (err) {
+      add(errors, 'employment_type_filter', err.message);
+    }
+  }
+
   if (config.experience_filter !== undefined) {
     const ef = config.experience_filter;
     if (!isObject(ef)) {
@@ -632,6 +644,19 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
           if (name !== 'title' && !isObject(block)) {
             add(errors, `${base}.filter_on`, `filter_on "${name}" has no field_filters.${name} block`);
           }
+        }
+      }
+
+      // #7244. Per-entry title_filter replaces top-level title_filter for this entry.
+      if (entry.title_filter !== undefined) {
+        if (!isObject(entry.title_filter)) {
+          add(errors, `${base}.title_filter`, 'title_filter must be an object');
+        } else {
+          rejectUnknownFields(entry.title_filter, `${base}.title_filter`, TITLE_FILTER_FIELDS, errors);
+          warnBareStringKeywords(entry.title_filter, `${base}.title_filter`, warnings);
+          validateKeywordList(entry.title_filter.positive, `${base}.title_filter.positive`, errors);
+          validateKeywordList(entry.title_filter.negative, `${base}.title_filter.negative`, errors);
+          validateKeywordList(entry.title_filter.seniority_boost, `${base}.title_filter.seniority_boost`, errors);
         }
       }
 

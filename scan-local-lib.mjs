@@ -47,7 +47,7 @@ export function slugify(text) {
 /** Decode the handful of HTML entities job cards use, and collapse whitespace. */
 export function decodeHtml(text) {
   return String(text ?? '')
-    .replace(/<[^>]+>/g, ' ')
+    .replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag))
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')

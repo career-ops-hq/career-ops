@@ -123,6 +123,23 @@ const SAME = [
     ],
     'https://apply.workable.com/j/81b46579fe',
   ],
+  [
+    'workday posting with and without a locale before the site',
+    [
+      'https://acme.wd5.myworkdayjobs.com/External/job/Remote-USA/Data-Engineer_R123',
+      'https://acme.wd5.myworkdayjobs.com/en-US/External/job/Remote-USA/Data-Engineer_R123',
+      'https://acme.wd5.myworkdayjobs.com/fr-FR/External/job/Remote-USA/Data-Engineer_R123/',
+    ],
+    'https://acme.wd5.myworkdayjobs.com/external/job/remote-usa/data-engineer_r123',
+  ],
+  [
+    'myworkdaysite posting with and without a locale before /recruiting',
+    [
+      'https://wd5.myworkdaysite.com/recruiting/guidewire/external/job/India---Bangalore/Eng_JR_15441',
+      'https://wd5.myworkdaysite.com/en-US/recruiting/Guidewire/external/job/India---Bangalore/Eng_JR_15441/',
+    ],
+    'https://wd5.myworkdaysite.com/recruiting/guidewire/external/job/india---bangalore/eng_jr_15441',
+  ],
 ];
 
 const DIFFERENT = [
@@ -147,6 +164,10 @@ const DIFFERENT = [
   ['https://apply.workable.com/acme/j/81B46579FE/', 'https://apply.workable.com/acme/j/19A136F8E2/'],
   ['https://apply.workable.com/acme/j/81B46579FE/apply', 'https://apply.workable.com/j/19A136F8E2'],
   ['https://careers.example.com/acme/j/81B46579FE', 'https://careers.example.com/j/81B46579FE'],
+  ['https://acme.wd5.myworkdayjobs.com/en-US/External/job/Remote-USA/Data-Engineer_R123', 'https://acme.wd5.myworkdayjobs.com/External/job/Remote-USA/Data-Engineer_R124'],
+  ['https://acme.wd5.myworkdayjobs.com/hr-ca/job/Remote/Analyst_R1', 'https://acme.wd5.myworkdayjobs.com/job/Remote/Analyst_R1'],
+  ['https://careers.example.com/en-US/External/job/Remote/Analyst_R1', 'https://careers.example.com/External/job/Remote/Analyst_R1'],
+  ['https://wd5.myworkdaysite.com/en-US/recruiting/guidewire/external/job/Remote/Eng_R1', 'https://wd5.myworkdaysite.com/recruiting/guidewire/external/job/Remote/Eng_R2'],
 ];
 
 test('variants of one posting share one key, on the CLI and the web copy', () => {
@@ -164,6 +185,26 @@ test('two postings do not share a key', () => {
     assertWeb(a, canonicalJobKey(a), a);
     assertWeb(b, canonicalJobKey(b), b);
   }
+});
+
+test('a LinkedIn title that ends in a year is not a job id', () => {
+  if (!webKey) return;
+  const year = 'https://www.linkedin.com/jobs/view/data-scientist-2024';
+  const other = 'https://www.linkedin.com/jobs/view/engineer-2024';
+  assert.equal(webKey(year), 'https://www.linkedin.com/jobs/view/data-scientist-2024');
+  assert.equal(webKey(other), 'https://www.linkedin.com/jobs/view/engineer-2024');
+  assert.notEqual(webKey(year), webKey(other));
+  assert.equal(webKey('https://www.linkedin.com/jobs/view/2024'), 'linkedin.com:2024');
+  assert.equal(webKey('https://www.linkedin.com/jobs/view/data-scientist-1234567'), 'linkedin.com:1234567');
+  assert.notEqual(webKey('https://www.linkedin.com/comm/jobs/view/data-scientist-1234567'), 'linkedin.com:1234567');
+  const withQuery = 'https://www.linkedin.com/jobs/view/data-scientist-2024?currentJobId=4402976479';
+  const sameQuery = 'https://www.linkedin.com/jobs/view/engineer-2024?currentJobId=4402976479';
+  assert.equal(webKey(withQuery), 'linkedin.com:4402976479');
+  assert.equal(webKey(sameQuery), webKey(withQuery));
+  assert.equal(
+    webKey('https://www.linkedin.com/jobs/view/data-scientist-1234567?currentJobId=111'),
+    'linkedin.com:1234567',
+  );
 });
 
 test('a missing posting is not a key, and a repeated call on a URL is stable', () => {

@@ -99,7 +99,7 @@ export function resolveFactorialOrigin(raw) {
 
 /** @param {string} html */
 function text(html) {
-  return decodeEntities(html.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(html.replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 }
 
 /**

@@ -104,14 +104,85 @@ export function consumeReexecMarker() {
 
 const BACKUP_BRANCH_RE = /^backup-pre-update-\d+\.\d+\.\d+-\d{8}T\d{6}Z$/;
 
+/**
+ * Claim `.update-lock` atomically. `flag: 'wx'` is O_EXCL, so the kernel picks
+ * one winner when two `apply` runs start together; a check-then-write let both
+ * observe no lock and both proceed to mutate the same checkout.
+ * @param {string} root
+ * @returns {boolean} true when this run now holds the lock
+ */
+export function claimUpdateLock(root) {
+  try {
+    writeFileSync(join(root, '.update-lock'), new Date().toISOString(), { flag: 'wx' });
+    return true;
+  } catch (err) {
+    if (/** @type {NodeJS.ErrnoException} */ (err).code === 'EEXIST') return false;
+    throw err;
+  }
+}
+
+/**
+ * Release `.update-lock`, tolerating one that is already gone.
+ * @param {string} root
+ */
+export function releaseUpdateLock(root) {
+  try {
+    unlinkSync(join(root, '.update-lock'));
+  } catch (err) {
+    if (/** @type {NodeJS.ErrnoException} */ (err).code !== 'ENOENT') throw err;
+  }
+}
+
+/**
+ * How recent `.update-lock` has to be to count as a live parent.
+ *
+ * Generous on purpose: an apply that installs a dependency set can run for
+ * minutes, and the point is to exclude a lock left behind by a crashed update
+ * hours or days ago, not to time a healthy one.
+ */
+const LEGACY_REEXEC_MAX_LOCK_AGE_MS = 30 * 60_000;
+/** Clock skew tolerated on a lock stamped slightly in the future. */
+const LEGACY_REEXEC_FUTURE_SKEW_MS = 60_000;
+
+/**
+ * Does this `.update-lock` content belong to an update that could still be
+ * running? The file holds the ISO timestamp the claimer wrote.
+ *
+ * Unreadable content answers no: a lock this function cannot date is not
+ * evidence of a live parent, and the caller falls back to asking for
+ * confirmation.
+ *
+ * @param {string} lockText
+ * @param {number} [now]
+ * @returns {boolean}
+ */
+export function legacyLockLooksLive(lockText, now = Date.now()) {
+  const started = Date.parse(String(lockText ?? '').trim());
+  if (!Number.isFinite(started)) return false;
+  const age = now - started;
+  return age >= -LEGACY_REEXEC_FUTURE_SKEW_MS && age <= LEGACY_REEXEC_MAX_LOCK_AGE_MS;
+}
+
 function isLegacyReexec() {
   if (process.env.CAREER_OPS_UPDATE_REEXEC !== '1') {
     return false;
   }
   // A matching backup branch is durable state, not proof that a parent updater
-  // is currently running. Legacy children have no authenticated marker, so
-  // the parent's active update lock is the remaining proof of a real reexec.
-  if (!existsSync(join(ROOT, '.update-lock'))) {
+  // is currently running. Legacy children have no authenticated marker, so the
+  // parent's update lock is the remaining proof — and the lock has to look live.
+  //
+  // Merely existing is not enough: the lock survives a crash (one exit path even
+  // leaks it, see the note in apply()), so a stale file plus any old backup
+  // branch armed this path, after which CAREER_OPS_UPDATE_REEXEC=1 alone skipped
+  // --confirm, created no backup branch, and trusted the _TARGET_REF/_SHA in the
+  // environment without the identity check.
+  let lockText;
+  try {
+    lockText = readFileSync(join(ROOT, '.update-lock'), 'utf8');
+  } catch {
+    return false;
+  }
+  if (!legacyLockLooksLive(lockText)) {
     return false;
   }
   const backupBranch = process.env.CAREER_OPS_UPDATE_BACKUP_BRANCH || '';
@@ -4158,11 +4229,12 @@ async function checkMainChannel(local, marker, runCurlGet, localSha, runGitProbe
   //
   // VERSION is release metadata, not a complete description of the system
   // tree. Compare the installed commit with main as well, so same-version
-  // manifest/file drift is visible (#2630). A failed commit lookup is
-  // deliberately conservative: version checks still work offline/behind a
-  // restricted git transport. The main-ref lookup runs alongside the version
-  // sources, not after them: sequentially, a black-holed network paid the curl
-  // budget twice before the git fallback even started.
+  // manifest/file drift is visible (#2630). A failed commit lookup in a git
+  // checkout reports update-available (reason main-commit-unresolved), never
+  // up-to-date (#7095): the user asked for main, and an unknown main commit is
+  // not proof the install matches it. The main-ref lookup runs alongside the
+  // version sources, not after them: sequentially, a black-holed network paid
+  // the curl budget twice before the git fallback even started.
   const [rawVersion, releaseRaw, remoteCommit] = await Promise.all([
     runCurlGet(RAW_VERSION_URL, [], (reason) => { failed.version = reason; }),
     runCurlGet(RELEASES_API, [
@@ -4187,9 +4259,10 @@ async function checkMainChannel(local, marker, runCurlGet, localSha, runGitProbe
     try {
       const release = JSON.parse(releaseRaw);
       changelog = release.body || '';
-      const rawTag = String(release.tag_name || '').trim();
-      const match = rawTag.match(SEMVER_RE);
-      releaseVersion = match ? match[1] : '';
+      // Only a career-ops release counts, the same test apply() and the release
+      // channel's latestRelease() use. SEMVER_RE alone takes any `-v<semver>`
+      // tag, so a sibling `web-v2.0.0` release read as career-ops 2.0.0 (#7329).
+      releaseVersion = releaseTagVersion(release.tag_name);
     } catch {
       // Unparseable body; treat as no release source
     }
@@ -4274,7 +4347,14 @@ async function checkMainChannel(local, marker, runCurlGet, localSha, runGitProbe
     }
   }
 
-  if (compareVersions(local, remote) >= 0 && !systemTreeDrift) {
+  // In a git checkout, a failed main-ref lookup (rate limit, filtered API host)
+  // leaves drift unknown (#7095). Saying up-to-date would end the update flow
+  // before the main preview the user asked for, so report the conservative
+  // answer instead. With no checkout (localCommit empty) there is no drift
+  // check to run, and the version comparison alone decides, as before.
+  const mainCommitUnresolved = Boolean(localCommit) && !remoteCommit;
+
+  if (compareVersions(local, remote) >= 0 && !systemTreeDrift && !mainCommitUnresolved) {
     return { status: 'up-to-date', local, remote, local_commit: localCommit || undefined, ...(localSha ? { local_sha: localSha } : {}), remote_commit: remoteCommit || undefined };
   }
 
@@ -4287,7 +4367,9 @@ async function checkMainChannel(local, marker, runCurlGet, localSha, runGitProbe
     status: 'update-available',
     local,
     remote,
-    reason: systemTreeDrift ? 'system-files-changed' : 'version-changed',
+    reason: systemTreeDrift
+      ? 'system-files-changed'
+      : (compareVersions(local, remote) < 0 ? 'version-changed' : 'main-commit-unresolved'),
     local_commit: localCommit || undefined,
     ...(localSha ? { local_sha: localSha } : {}),
     remote_commit: remoteCommit || undefined,
@@ -4810,16 +4892,10 @@ async function apply() {
     return;
   }
 
-  // Check for lock
-  const lockFile = join(ROOT, '.update-lock');
-  if (existsSync(lockFile) && !isReexec) {
+  // Claim the lock atomically: two concurrent applies must not both win.
+  if (!isReexec && !claimUpdateLock(ROOT)) {
     console.error('Update already in progress (.update-lock exists). If stuck, delete it manually.');
     process.exit(1);
-  }
-
-  // Create lock
-  if (!isReexec) {
-    writeFileSync(lockFile, new Date().toISOString());
   }
 
   try {
@@ -5668,7 +5744,7 @@ async function apply() {
 
   } finally {
     // Remove lock
-    if (!isReexec && existsSync(lockFile)) unlinkSync(lockFile);
+    if (!isReexec) releaseUpdateLock(ROOT);
   }
 }
 

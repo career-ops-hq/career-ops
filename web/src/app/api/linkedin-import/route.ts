@@ -46,24 +46,60 @@ function runImport(text: string): Promise<ImportPayload> {
     child.stderr.on("data", (chunk: Buffer) => {
       err += chunk.toString();
     });
-    const killer = setTimeout(() => child.kill("SIGTERM"), 30_000);
-    child.on("error", () => {
-      clearTimeout(killer);
-      resolve({ ...FAILED, error: "spawn" });
+    // A child that ignores SIGTERM used to leave this promise open, so the
+    // paste button never came back. The give-up timer id is not proof we
+    // timed out: a script can still exit 0 in the grace window.
+    const requested = Number(process.env.CAREER_OPS_CHILD_TIMEOUT_MS);
+    const timeout = Number.isFinite(requested) && requested > 0 ? requested : 30_000;
+    const grace = 2_000;
+    let killer: ReturnType<typeof setTimeout> | undefined;
+    let hardKill: ReturnType<typeof setTimeout> | undefined;
+    let giveUp: ReturnType<typeof setTimeout> | undefined;
+    let stopping = false;
+    let gaveUp = false;
+    let settled = false;
+    const finish = (value: ImportPayload) => {
+      if (settled) return;
+      settled = true;
+      if (killer) clearTimeout(killer);
+      if (hardKill) clearTimeout(hardKill);
+      if (giveUp) clearTimeout(giveUp);
+      resolve(value);
+    };
+    const timedOut = (): ImportPayload => ({
+      ...UNCERTAIN,
+      message: "The import timed out after 30 seconds and was stopped. Check Pipeline before pasting again.",
+      error: "timeout",
     });
-    child.stdin.on("error", () => resolve({ ...FAILED, error: "stdin" }));
+    killer = setTimeout(() => {
+      stopping = true;
+      try { child.kill("SIGTERM"); } catch { /* already gone */ }
+      hardKill = setTimeout(() => {
+        try { child.kill("SIGKILL"); } catch { /* already gone */ }
+      }, grace);
+      giveUp = setTimeout(() => {
+        gaveUp = true;
+        finish(timedOut());
+      }, grace + 1_000);
+    }, timeout);
+    child.on("error", () => finish({ ...FAILED, error: "spawn" }));
+    child.stdin.on("error", () => finish({ ...FAILED, error: "stdin" }));
     child.on("close", (code) => {
-      clearTimeout(killer);
+      if (gaveUp) return;
+      if (stopping && code == null) {
+        finish(timedOut());
+        return;
+      }
       try {
         const parsed = JSON.parse(out.trim().split("\n").pop() || "") as ImportPayload;
-        if (code !== 0 && !parsed.message) resolve({ ...FAILED, error: err || `exit ${code}` });
-        else resolve(parsed);
+        if (code !== 0 && !parsed.message) finish({ ...FAILED, error: err || `exit ${code}` });
+        else finish(parsed);
       } catch {
         // A crash after the pipeline write has no JSON. "Nothing was saved" is
         // only true when the script itself said so, before it wrote anything.
         const detail = err.trim();
-        if (/Nothing was saved/i.test(detail)) resolve({ ...FAILED, error: detail || `exit ${code}` });
-        else resolve({ ...UNCERTAIN, error: detail || `exit ${code}` });
+        if (/Nothing was saved/i.test(detail)) finish({ ...FAILED, error: detail || `exit ${code}` });
+        else finish({ ...UNCERTAIN, error: detail || `exit ${code}` });
       }
     });
     child.stdin.write(text);

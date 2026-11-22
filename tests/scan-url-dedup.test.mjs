@@ -199,3 +199,29 @@ try {
 } catch (err) {
   fail(`scan.mjs collectSeenUrls tests crashed: ${err && err.message}`);
 }
+
+console.log('\nscan.mjs — one Microsoft requisition, one dedup key in either URL shape');
+try {
+  const { normalizeUrlForDedup, seenJobKey } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const job = 'https://apply.careers.microsoft.com/careers/job/1970000000000001';
+  const pid = 'https://apply.careers.microsoft.com/careers?pid=1970000000000001&domain=microsoft.com&hl=en';
+  const other = 'https://apply.careers.microsoft.com/careers?pid=1970000000000002&domain=microsoft.com';
+  if (normalizeUrlForDedup(job) === normalizeUrlForDedup(pid) && seenJobKey(job) === seenJobKey(pid)) {
+    pass('the job-path and pid shapes share one scan dedup key');
+  } else fail(`Microsoft keys differ: ${JSON.stringify({ a: seenJobKey(job), b: seenJobKey(pid) })}`);
+  const dotted = 'https://apply.careers.microsoft.com./careers/job/1970000000000001';
+  if (normalizeUrlForDedup(dotted) === normalizeUrlForDedup(pid) && seenJobKey(dotted) === seenJobKey(pid)) {
+    pass('a trailing-dot Microsoft host gets the same scan dedup key');
+  } else fail(`trailing-dot Microsoft host keys differ: ${JSON.stringify({ a: normalizeUrlForDedup(dotted), b: normalizeUrlForDedup(pid) })}`);
+  const tagged = 'https://apply.careers.microsoft.com/careers/job/1970000000000001?gh_jid=42';
+  if (seenJobKey(tagged) === seenJobKey(pid)) pass('a Microsoft link carrying a gh_jid keeps the pid scan key');
+  else fail(`gh_jid Microsoft link keys differ: ${JSON.stringify({ a: seenJobKey(tagged), b: seenJobKey(pid) })}`);
+  if (seenJobKey(pid) !== seenJobKey(other) && normalizeUrlForDedup(pid) !== normalizeUrlForDedup(other)) {
+    pass('a different Microsoft pid is a different posting');
+  } else fail('two Microsoft pids collapsed onto one key');
+  const { seen } = collectSeenUrls({ pipelineText: `- [x] ${job} | Microsoft | Software Engineer II\n` });
+  if (seen.has(seenJobKey(pid))) pass('a pipeline.md row in the job-path shape recognises the feed shape');
+  else fail('feed-shape Microsoft URL not recognised against a job-path row in pipeline.md');
+} catch (err) {
+  fail(`scan.mjs Microsoft dedup tests crashed: ${err && err.message}`);
+}

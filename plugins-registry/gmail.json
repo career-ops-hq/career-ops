@@ -1,0 +1,25 @@
+{
+  "name": "career-ops-plugin-gmail",
+  "id": "gmail",
+  "repo": "https://github.com/luochen211/career-ops-plugin-gmail",
+  "author": "luochen211",
+  "hooks": [
+    "ingest"
+  ],
+  "description": "Read Gmail job leads and surface employer replies for human review.",
+  "requiredEnv": [
+    "GMAIL_CLIENT_ID",
+    "GMAIL_CLIENT_SECRET",
+    "GMAIL_REFRESH_TOKEN"
+  ],
+  "allowedHosts": [
+    "oauth2.googleapis.com",
+    "gmail.googleapis.com"
+  ],
+  "skill": true,
+  "license": "MIT",
+  "version": "1.2.0",
+  "sha": "cf4f76784f42edc638d1b96bcbcc64d0641673ec",
+  "supersedesBundled": true,
+  "registrationIssue": "https://github.com/career-ops-hq/career-ops/issues/1583"
+}

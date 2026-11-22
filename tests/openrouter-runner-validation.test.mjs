@@ -439,11 +439,10 @@ test('cmdPipeline with { one: true } processes exactly one job without running s
         };
       }
       if (u.includes('jobs.test/job-')) {
-        return {
-          ok: true,
-          status: 200,
-          url: u,
-          text: async () => [
+        // A real Response: the job-page fallback reads it through
+        // providers/_http.mjs, which checks the dialled address and caps the
+        // body, so it needs headers and a body stream, not just text().
+        return new Response([
             '# Backend Engineer at Acme Corp',
             'About the Role:',
             'We are seeking an experienced Senior Backend Engineer to design, build, and scale our core infrastructure services.',
@@ -456,8 +455,7 @@ test('cmdPipeline with { one: true } processes exactly one job without running s
             '- Demonstrated track record of optimizing database queries and high-concurrency microservices.',
             'Location: Remote (Worldwide overlap). Competitive salary range: $140,000 - $180,000 USD plus equity.',
             'Apply Now: Submit your application to join our engineering team.',
-          ].join('\n'),
-        };
+        ].join('\n'), { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } });
       }
       if (u.endsWith('/chat/completions')) {
         completionsCalls++;

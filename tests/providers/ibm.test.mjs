@@ -148,6 +148,24 @@ try {
   if (probe.calls === 1 && probed.result.length === 30 && probed.lines.length === 0) pass('ctx.maxPages: 1 makes exactly one list request and warns nothing');
   else fail(`probe made ${probe.calls} calls, ${probed.result.length} jobs, stderr ${JSON.stringify(probed.lines)}`);
 
+  // max_pages: 1 on the entry: the probe's one page is also the entry's last.
+  // It is still a probe, so nothing warns and nothing is marked (#7180).
+  const probeAtCap = fullBoard({ maxPages: 1 });
+  const probedAtCap = await captureStderr(() => ibm.fetch({ name: 'IBM', max_pages: 1 }, probeAtCap.ctx));
+  if (probeAtCap.calls === 1 && probedAtCap.result.length === 30 && probedAtCap.lines.length === 0 && probedAtCap.result.truncated === undefined) {
+    pass('a probe on a max_pages: 1 entry warns nothing and leaves the board unmarked');
+  } else {
+    fail(`probe at max_pages: 1 made ${probeAtCap.calls} calls, truncated=${JSON.stringify(probedAtCap.result.truncated)}, stderr ${JSON.stringify(probedAtCap.lines)}`);
+  }
+  // The same entry in a real scan is still cut by its own cap.
+  const scanAtCap = fullBoard();
+  const scannedAtCap = await captureStderr(() => ibm.fetch({ name: 'IBM', max_pages: 1 }, scanAtCap.ctx));
+  if (scannedAtCap.result.truncated?.reason === 'page-cap' && scannedAtCap.lines.some((l) => /raise max_pages/.test(l))) {
+    pass('a real scan of a max_pages: 1 entry still warns and marks page-cap');
+  } else {
+    fail(`scan at max_pages: 1: truncated=${JSON.stringify(scannedAtCap.result.truncated)}, stderr ${JSON.stringify(scannedAtCap.lines)}`);
+  }
+
   // The entry's own cap on a full board: stops there and says to raise it.
   const capped = fullBoard();
   const cappedRun = await captureStderr(() => ibm.fetch({ name: 'IBM', max_pages: 3 }, capped.ctx));
@@ -156,6 +174,9 @@ try {
   } else {
     fail(`capped run made ${capped.calls} calls, ${cappedRun.result.length} jobs, stderr ${JSON.stringify(cappedRun.lines)}`);
   }
+  // Each warned stop is also marked, so scan.mjs logs the board partial, not reachable.
+  if (cappedRun.result.truncated?.reason === 'page-cap' && cappedRun.result.truncated.fetched === 90) pass('a full board cut at max_pages is marked page-cap');
+  else fail(`capped run: truncated = ${JSON.stringify(cappedRun.result.truncated)}`);
 
   // A board that ends exactly at the cap with a short page is complete.
   let shortCalls = 0;
@@ -168,6 +189,8 @@ try {
   }));
   if (shortCalls === 2 && shortAtCap.result.length === 35 && shortAtCap.lines.length === 0) pass('a short page at the cap is a complete board, not a truncation');
   else fail(`short-at-cap made ${shortCalls} calls, stderr ${JSON.stringify(shortAtCap.lines)}`);
+  if (shortAtCap.result.truncated === undefined) pass('a board ending on a short page at the cap is left unmarked');
+  else fail(`short-at-cap was marked: ${JSON.stringify(shortAtCap.result.truncated)}`);
 
   // A transient 503 is retried, not fatal.
   const flaky = fullBoard({ failOn: { 0: 503 } });
@@ -183,6 +206,8 @@ try {
   } else {
     fail(`later-failure run returned ${laterRun.result.length} jobs, stderr ${JSON.stringify(laterRun.lines)}`);
   }
+  if (laterRun.result.truncated?.reason === 'fetch-error' && laterRun.result.truncated.fetched === 30) pass('a failed later page marks the board partial');
+  else fail(`later-failure run: truncated = ${JSON.stringify(laterRun.result.truncated)}`);
 
   // A failed first page throws: an empty list would read as "no postings".
   let firstThrew = false;

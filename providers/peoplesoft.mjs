@@ -323,7 +323,7 @@ export function extractById(html, id) {
 export function extractTextById(html, id) {
   const raw = extractById(html, id);
   if (raw === null) return null;
-  return decodeEntities(raw.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(raw.replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 }
 
 /**

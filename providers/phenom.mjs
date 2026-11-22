@@ -117,7 +117,7 @@ export function parsePhenomDate(raw) {
 // and collapses whitespace.
 /** @param {any} job @returns {string} */
 export function jobLocation(job) {
-  const direct = decodeEntities(String(job?.location || job?.cityStateCountry || job?.cityState || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  const direct = decodeEntities(String(job?.location || job?.cityStateCountry || job?.cityState || '').replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
   if (direct) return direct;
   const parts = [job?.city, job?.state, job?.country].map((p) => String(p || '').trim()).filter(Boolean);
   return [...new Set(parts)].join(', ');
@@ -136,7 +136,7 @@ export function parseRefineSearch(json, cfg) {
   for (const job of list) {
     if (!job || typeof job !== 'object') continue;
     const id = job.jobId != null ? String(job.jobId) : '';
-    const title = decodeEntities(String(job.title || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+    const title = decodeEntities(String(job.title || '').replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
     if (!id || !title) continue;
     // A lone surrogate in id throws URIError out of encodeURIComponent and
     // aborts this loop; id is also the dedup key. Drop just this one.
@@ -257,7 +257,9 @@ export default {
       if (fresh === 0) break; // server ignored `from` (or we've looped)
       if (total !== null && (page + 1) * PAGE_SIZE >= total) break;
     }
-    if (stopReason === 'complete' && page === maxPages) stopReason = 'cap';
+    // Never during a probe: on a max_pages: 1 entry the probe's one page is also
+    // the entry's last, so page === maxPages alone cannot tell them apart (#7180).
+    if (stopReason === 'complete' && page === maxPages && ctxCap === Infinity) stopReason = 'cap';
 
     // The cap is a safety net, not a working limit — silent by design, but a
     // tenant that actually hits it needs to be surfaced (mirrors

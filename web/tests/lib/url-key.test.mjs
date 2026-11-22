@@ -145,6 +145,8 @@ test("web postingLanguageKey matches core: the language param leaves the key", (
     "https://acme.recruitee.com/o/qa-lead?lang=de",
     "https://acme.jobs.personio.de/job/1?language=en-GB&utm_source=x",
     "https://jobs.example.com/j/1?Locale=fr_CA&id=7",
+    "https://jobs.example.com/careers#/jobs/123?lang=en",
+    "https://jobs.example.com/careers?lang=en#/jobs/123",
     "https://acme.recruitee.com/o/a?lang=zh-Hant",
     "https://acme.recruitee.com/o/a?lang=English%20(US)",
     "",
@@ -180,11 +182,50 @@ test("web postingUrlRelation matches core on every relation", () => {
     [U("de"), U("en"), "distinct"],
     [U("en-GB"), U("en"), "same"],
     ["http://acme.recruitee.com/o/a/?utm_source=x", R, "same"],
+    ["https://boards.greenhouse.io/acme/jobs/4001", "https://job-boards.greenhouse.io/acme/jobs/4001", "same"],
+    ["https://boards.greenhouse.io/acme/jobs/4001", "https://careers.acme.example/jobs?gh_jid=4001", "same"],
+    ["https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902", "https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902/apply", "same"],
+    ["https://boards.greenhouse.io/acme/jobs/4001", "https://job-boards.greenhouse.io/acme/jobs/4002", "distinct"],
+    ["https://careers.acme.example/job?ref=1", "https://careers.acme.example/job?ref=2", "distinct"],
+    ["https://careers.acme.example/openings/AbC", "https://careers.acme.example/openings/abc", "distinct"],
+    ["https://careers.acme.example/openings/123//", "https://careers.acme.example/openings/123", "distinct"],
+    ["https://boards.greenhouse.io/acme/jobs/4001?ref=1", "https://boards.greenhouse.io/acme/jobs/4001?ref=2", "same"],
+    ["https://acme.wd5.myworkdayjobs.com/External/job/Remote/Analyst_R1", "https://acme.wd5.myworkdayjobs.com/en-US/External/job/Remote/Analyst_R1", "same"],
+    ["https://acme.wd5.myworkdayjobs.com/en-US/External/job/Remote/Analyst_R1", "https://acme.wd5.myworkdayjobs.com/en-US/External/job/Remote/Analyst_R2", "distinct"],
   ];
   for (const [a, b, expected] of CASES) {
     assert.equal(webRelation(a, b), expected, `web: ${a} vs ${b}`);
     assert.equal(webRelation(a, b), coreRelation(a, b), `parity: ${a} vs ${b}`);
   }
+});
+
+test("a trailing slash does not collapse two fragment jobs", () => {
+  assert.notEqual(
+    webKey("https://jobs.example.com/careers#/job/111/"),
+    webKey("https://jobs.example.com/careers#/job/222/"),
+  );
+  assert.equal(
+    webKey("https://jobs.example.com/careers#/job/111/"),
+    "https://jobs.example.com/careers?_career_ops_fragment_job_id=111",
+  );
+});
+
+test("a hashbang does not collapse two fragment jobs", () => {
+  assert.notEqual(
+    webKey("https://jobs.example.com/careers#!/job/111"),
+    webKey("https://jobs.example.com/careers#!/job/222"),
+  );
+  assert.equal(
+    webKey("https://jobs.example.com/careers#!/job/111"),
+    "https://jobs.example.com/careers?_career_ops_fragment_job_id=111",
+  );
+});
+
+test("a language query inside the fragment keeps two versions apart", () => {
+  assert.equal(webRelation(
+    "https://jobs.example.com/careers#/jobs/123?lang=en",
+    "https://jobs.example.com/careers#/jobs/123?lang=de",
+  ), "distinct");
 });
 
 test("web canonicalJobKey matches the CLI on Greenhouse, LinkedIn, and tracking variants", () => {
@@ -210,4 +251,25 @@ test("web canonicalJobKey matches the CLI on Greenhouse, LinkedIn, and tracking 
     webCanonical("https://boards.greenhouse.io/acme/jobs/1"),
     webCanonical("https://boards.greenhouse.io/acme/jobs/2"),
   );
+});
+
+// The core's Microsoft cases (#7292): one requisition in both URL shapes is one
+// posting, so the web reads a tracked Microsoft role as evaluated whichever
+// shape the scan or the tracker carries.
+test("web mirror keys one Microsoft requisition the same in both URL shapes, as core does", () => {
+  const job = "https://apply.careers.microsoft.com/careers/job/1970000000000001";
+  const pid = "https://apply.careers.microsoft.com/careers?pid=1970000000000001&domain=microsoft.com&hl=en&start=20";
+  const other = "https://apply.careers.microsoft.com/careers/job/1970000000000002";
+  const tagged = "https://apply.careers.microsoft.com/careers/job/1970000000000001?gh_jid=42";
+  const results = "https://apply.careers.microsoft.com/careers?start=0&sort_by=timestamp";
+  const lookalike = "https://careers.example.com/careers/job/42";
+  for (const url of [job, pid, other, tagged, results, lookalike, "https://apply.careers.microsoft.com./careers/job/1970000000000001"]) {
+    assert.equal(webKey(url), coreKey(url), `normalizeUrl parity: ${url}`);
+    assert.equal(webCanonical(url), coreCanonical(url), `canonicalJobKey parity: ${url}`);
+  }
+  assert.equal(webKey(job), webKey(pid));
+  assert.equal(webRelation(job, pid), "same");
+  assert.equal(webRelation(job, pid), coreRelation(job, pid));
+  assert.equal(webRelation(pid, other), "distinct");
+  assert.notEqual(webCanonical(tagged), "greenhouse:42");
 });

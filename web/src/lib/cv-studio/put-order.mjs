@@ -99,6 +99,18 @@ export function editSaveStatus(saved, current, saving, posting, uncertain = fals
 }
 
 /**
+ * Save for apply and Reset both finish after they start. Each start takes the
+ * next number. Only that number may change the notice. An earlier save still
+ * records the edits it wrote.
+ *
+ * @param {number} epoch - The number this action took when it started.
+ * @param {number} current - The number held by the action that started last.
+ */
+export function ownsStatus(epoch, current) {
+  return epoch === current;
+}
+
+/**
  * The studio file is the edits plus an optional failed-export flag.
  * `next` undefined keeps a stored failure (autosave). null clears it after
  * a PDF is written. An object records the render error.

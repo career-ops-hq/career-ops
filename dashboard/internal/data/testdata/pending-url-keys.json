@@ -1,0 +1,66 @@
+[
+  {
+    "url": "https://jobs.example.com/listing?location=Zürich",
+    "href": "https://jobs.example.com/listing?location=Z%C3%BCrich"
+  },
+  {
+    "url": "https://jobs.example.com/listing?q=a b",
+    "href": "https://jobs.example.com/listing?q=a%20b"
+  },
+  {
+    "url": "https://jobs.example.com/jobs/ingénieur-logiciel",
+    "href": "https://jobs.example.com/jobs/ing%C3%A9nieur-logiciel"
+  },
+  {
+    "url": "https://jobs.example.com/jobs/data engineer",
+    "href": "https://jobs.example.com/jobs/data%20engineer"
+  },
+  {
+    "url": "https://karriere.example.de/stellen/München?ort=München&typ=Vollzeit",
+    "href": "https://karriere.example.de/stellen/M%C3%BCnchen?ort=M%C3%BCnchen&typ=Vollzeit"
+  },
+  {
+    "url": "https://jobs.example.jp/求人?場所=東京",
+    "href": "https://jobs.example.jp/%E6%B1%82%E4%BA%BA?%E5%A0%B4%E6%89%80=%E6%9D%B1%E4%BA%AC"
+  },
+  {
+    "url": "https://jobs.example.fr/offres?location=L'Haÿ-les-Roses",
+    "href": "https://jobs.example.fr/offres?location=L%27Ha%C3%BF-les-Roses"
+  },
+  {
+    "url": "https://jobs.example.com/search?q=\"customer success\"&level=<senior>",
+    "href": "https://jobs.example.com/search?q=%22customer%20success%22&level=%3Csenior%3E"
+  },
+  {
+    "url": "https://jobs.example.com/plain/1",
+    "href": "https://jobs.example.com/plain/1"
+  },
+  {
+    "url": "https://Jobs.Example.com",
+    "href": "https://jobs.example.com/"
+  },
+  {
+    "url": "HTTPS://jobs.example.com:443/a",
+    "href": "https://jobs.example.com/a"
+  },
+  {
+    "url": "http://jobs.example.com:80/a?b=1",
+    "href": "http://jobs.example.com/a?b=1"
+  },
+  {
+    "url": "https://jobs.example.com:8443/a",
+    "href": "https://jobs.example.com:8443/a"
+  },
+  {
+    "url": "https://jobs.example.com/a%20b",
+    "href": "https://jobs.example.com/a%20b"
+  },
+  {
+    "url": "https://jobs.example.com/?q=%c3%a9",
+    "href": "https://jobs.example.com/?q=%c3%a9"
+  },
+  {
+    "url": "https://jobs.example.com/#/job/123",
+    "href": "https://jobs.example.com/#/job/123"
+  }
+]

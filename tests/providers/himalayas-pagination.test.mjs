@@ -30,6 +30,7 @@ await check('Himalayas follows opaque nextCursor and includes jobs beyond the fi
   assert.equal(calls.length, 2);
   assert.equal(jobs.length, 21);
   assert.equal(jobs.at(-1).title, 'Engineer 20');
+  assert.equal(jobs.truncated, undefined, 'a board read to its last cursor stays unmarked');
   assert.deepEqual(delays, [200]);
   for (const { url, options } of calls) {
     assert.equal(url.origin, 'https://himalayas.app');
@@ -60,6 +61,7 @@ await check('Himalayas honors the health probe page cap without requesting more 
   });
   assert.equal(calls, 1);
   assert.equal(jobs.length, 1);
+  assert.equal(jobs.truncated, undefined, 'the probe reads one page by design and stays unmarked');
 });
 
 await check('Himalayas health probe does not retry a status-less failure', async () => {
@@ -89,6 +91,8 @@ await check('Himalayas enforces the configured page budget and its absolute ceil
       });
       assert.equal(calls, expectedCalls);
       assert.equal(jobs.length, expectedCalls);
+      // The warned cut is also marked, so scan.mjs logs the board partial, not reachable.
+      assert.deepEqual(jobs.truncated, { fetched: expectedCalls, reason: 'page-cap' });
     }
     assert.equal(warnings.length, 2);
     assert.match(warnings[0], /truncated/);

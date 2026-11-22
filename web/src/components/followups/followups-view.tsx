@@ -307,7 +307,9 @@ export function FollowupsView() {
                     </th>
                   );
                 })}
-                <th className="px-2.5 py-2.5 font-medium">Action</th>
+                <th className="sticky right-0 z-10 bg-background px-2.5 py-2.5 font-medium shadow-[-10px_0_12px_-10px_rgb(28_25_23/0.25)]">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border" aria-busy={!data || isPending}>
@@ -470,7 +472,7 @@ function FollowupRow({
         <td className={cn("px-2.5 py-3 tabular-nums", daysHeatClass(e.daysSinceLastFollowup))}>
           {e.daysSinceLastFollowup == null ? <span className="text-faint">—</span> : e.daysSinceLastFollowup}
         </td>
-        <td className="whitespace-nowrap px-2.5 py-3">
+        <td className="sticky right-0 z-10 whitespace-nowrap bg-background px-2.5 py-3 shadow-[-10px_0_12px_-10px_rgb(28_25_23/0.25)]">
           <span className="inline-flex items-center gap-0.5">
             <button
               type="button"
@@ -487,12 +489,12 @@ function FollowupRow({
               aria-label={`Next date for ${e.company}`}
               title={e.nextOverride ? `Next date pinned to ${e.nextOverride} — change or clear` : "Pin a custom next follow-up date"}
               className={cn(
-                "rounded-md p-1 transition-colors hover:bg-brand-soft hover:text-brand-text",
-                e.nextOverride ? "text-brand-text" : "text-faint",
+                "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors hover:bg-brand-soft hover:text-brand-text",
+                e.nextOverride ? "text-brand-text" : "text-muted",
               )}
             >
               <CalendarClock className="size-3.5" />
-              <span className="hidden xl:inline">Next date</span>
+              Next date
             </button>
           </span>
         </td>

@@ -74,7 +74,7 @@ import { loadYaml } from './lib/yaml-document.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { machineSummarySection } from './lib/machine-summary-section.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
-import { parseAmount, compensationPeriod } from './providers/_salary-text.mjs';
+import { parseAmount, compensationPeriod, isCurrencyCode } from './providers/_salary-text.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 const OBS_PATH = join(CAREER_OPS, 'data/salary-observations.tsv');
@@ -215,19 +215,21 @@ export function reportToObservation(content, num, date) {
   // comparison (see computeRelocationAdjustment below). null when the JD
   // states no location, same no-invented-data posture as advertised_comp.
   const postingLocation = yamlStr(body, 'posting_location');
-  // Currency = first standalone UPPERCASE 3-letter token, case-SENSITIVE on
+  // Currency = the one ISO-4217 code the value names, upper-case only on
   // purpose: lowercase 3-letter English words in sloppy values ("per", "and")
   // must not register as currencies. Tradeoff: a lowercase "100k eur" yields
   // UNKNOWN (excluded from gap math, surfaced in currencyMismatches) — acceptable;
   // a corrective TSV observation with an explicit currency overrides it.
+  // Only real codes count, so a label in front ("OTE: 100k USD") is not one.
   // 人民币 and RMB both name CNY. A bare 元 or ¥ names no single currency
-  // (CNY, TWD, HKD, JPY), so it stays UNKNOWN like a bare $. A code that
-  // contradicts 人民币 ("USD 60-80 万人民币") is UNKNOWN too.
-  const code = adv?.match(/\b[A-Z]{3}\b/)?.[0]?.replace(/^RMB$/, 'CNY');
-  const zhCode = adv && /人民[币幣]/.test(adv) ? 'CNY' : undefined;
-  const currencyGuess = adv
-    ? (code && zhCode && code !== zhCode ? 'UNKNOWN' : code ?? zhCode ?? 'UNKNOWN')
-    : null;
+  // (CNY, TWD, HKD, JPY), so it stays UNKNOWN like a bare $. Two different
+  // codes ("USD equivalent: 100k CAD", "USD 60-80 万人民币") are UNKNOWN too:
+  // which one the parsed amount is in cannot be told from the text.
+  const codes = new Set([
+    ...(adv?.match(/\b[A-Z]{3}\b/g) ?? []).map((c) => (c === 'RMB' ? 'CNY' : c)).filter(isCurrencyCode),
+    ...(adv && /人民[币幣]/.test(adv) ? ['CNY'] : []),
+  ]);
+  const currencyGuess = adv ? (codes.size === 1 ? [...codes][0] : 'UNKNOWN') : null;
   return {
     company, role, postingLocation,
     observation: adv === null ? null : {

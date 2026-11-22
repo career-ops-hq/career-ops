@@ -3,7 +3,7 @@ name: career-ops
 description: "Open-source AI job search agent -- evaluate offers, generate CVs, scan portals, track applications. Use when the user pastes a job URL or JD, asks to scan portals, generate a CV/PDF, track applications, prepare for interviews, draft outreach/emails, or run any career-ops mode."
 arguments: mode
 user-invocable: true
-argument-hint: "[scan | discover | deep | pdf | ats | text | latex | latex-tex | cover | email | add | expand | eu-swe | oferta | ofertas | apply | triage | batch | tracker | agent-inbox | pipeline | contacto | training | project | interview-prep | interview | master-profile | intake | retro | interview/plan | interview/practice | interview/debrief | interview-redflag | patterns | calibrate | offer-prep | titles | upskill | followup | reply-watch | outcome | update]"
+argument-hint: "[scan | discover | deep | pdf | ats | text | latex | latex-tex | cover | email | proposal | add | expand | eu-swe | oferta | ofertas | apply | triage | batch | tracker | agent-inbox | pipeline | contacto | gambit | training | project | interview-prep | interview | master-profile | intake | retro | interview/plan | interview/practice | interview/debrief | interview-redflag | patterns | calibrate | offer-prep | titles | upskill | followup | reply-watch | outcome | update]"
 license: MIT
 ---
 
@@ -34,7 +34,7 @@ When `PROJECT_ROOT` is a plugin install copy, the session's working folder is no
 
 - CLIs with slash-command registration can expose this router as `/career-ops`.
 - In Cursor, this skill lives at `.agents/skills/career-ops/` and is auto-discovered; ask for a mode by name, or paste a JD/URL to trigger auto-pipeline.
-- In Pi, this skill is auto-discovered from `.agents/skills/career-ops/` and exposed as `/skill:career-ops`; `AGENTS.md` loads from the repo root as project context, so there is no wrapper file. Headless Pi workers use `pi -a -p "prompt"`. Project skill discovery follows Pi's per-folder trust decision: `/trust` applies to future Pi processes, so restart `pi` before invoking `/skill:career-ops` (`-a` trusts a single run and needs no restart).
+- In Pi, this skill is auto-discovered from `.agents/skills/career-ops/` and exposed as `/skill:career-ops`; `AGENTS.md` loads from the repo root as project context, so there is no wrapper file. Headless Pi workers use `pi -p --no-approve --no-skills --skill .agents/skills/career-ops "/skill:career-ops <request>"` on Pi 0.79.1 or later: `--skill` registers this router, the `/skill:career-ops` prefix puts all of it in the prompt, `--no-approve` keeps the checkout's project extensions out of the run, and a worker never gets `-a`. Pi never asks before a tool call, so never run an evaluation (`oferta`, `auto-pipeline`, batch), research, a cover letter or a CV PDF headless under Pi: the web runs those workers without the write tools and Bash that Pi would give them. Project skill discovery follows Pi's per-folder trust decision: `/trust` applies to future Pi processes, so restart `pi` before invoking `/skill:career-ops`.
 - In Oh My Pi (omp), this skill is auto-discovered from `.agents/skills/career-ops/` and exposed as `/skill:career-ops`; `.omp/AGENTS.md` imports `AGENTS.md` so the root contract loads. Headless OMP workers use `omp -p "prompt"`.
 - Interactive Codex sessions use `codex` in the repo root. Slash commands are not guaranteed in Codex, so ask Codex to run the same mode by name if `/career-ops` is unavailable.
 - Headless Codex workers use `codex exec "prompt"`.
@@ -61,6 +61,7 @@ Determine the mode from `$mode`:
 | `oferta` | `oferta` |
 | `ofertas` | `ofertas` |
 | `contacto` | `contacto` |
+| `gambit` | `gambit` |
 | `deep` | `deep` |
 | `interview-prep` | `interview-prep` |
 | `interview` | `interview` |
@@ -77,6 +78,7 @@ Determine the mode from `$mode`:
 | `latex` | `latex` |
 | `latex-tex` | `latex-tex` |
 | `email` | `email` |
+| `proposal` | `proposal` |
 | `add` | `add` |
 | `expand` | `expand` |
 | `training` | `training` |
@@ -171,6 +173,7 @@ Available commands:
   /career-ops oferta    → Evaluation only: blocks A-G always, Block H at or above 4.5 (no auto PDF)
   /career-ops ofertas   → Compare and rank multiple offers
   /career-ops contacto  → LinkedIn power move: find contacts + draft message
+  /career-ops gambit {company} → CREATE-A-ROLE: research + role thesis + CV + cover letter + pitch package
   /career-ops deep      → Deep research prompt about company
   /career-ops interview-prep → Generate company-specific interview prep doc
   /career-ops interview    → Interactive profile/CV onboarding interview
@@ -189,6 +192,7 @@ Available commands:
   /career-ops latex-tex → Tailor your own resume.tex in place (opt-in; cv.md stays default)
   /career-ops cover     → Cover letter: standalone JD paste or /career-ops cover {slug}
   /career-ops email     → Formal application email draft (draft-only; never sends, submits, or clicks)
+  /career-ops proposal  → Draft a job/Upwork proposal as markdown (draft-only; never submits)
   /career-ops add       → Add a project/paper/role to your CV (fetch + preview + confirm)
   /career-ops expand    → Auto-discover and add missing competencies from profile links
   /career-ops training  → Evaluate course/cert against North Star
@@ -228,13 +232,15 @@ Resolve `language.modes_dir` before applying the path shorthand below. With no s
 
 Read the resolved shared context (default `modes/_shared.md`) + `modes/_profile.md` (if exists) + `modes/_custom.md` (if exists) + the resolved selected mode file (default `modes/{mode}.md`). For an A-F evaluation, that selected file is the primary directory's evaluation mode; do not also load an evaluation file from a secondary directory.
 
-Applies to: `auto-pipeline`, `oferta`, `ofertas`, `pdf`, `text`, `contacto`, `apply`, `pipeline`, `scan`, `batch`
+Applies to: `auto-pipeline`, `oferta`, `ofertas`, `pdf`, `text`, `contacto`, `gambit`, `apply`, `pipeline`, `scan`, `batch`
+
+Run `gambit` here, in the interactive session, never in a worker, even though its research is heavy: its Step 3 checkpoint shows the candidate the role theses and waits for their choice before any document is generated, and a worker cannot ask the candidate anything.
 
 ### Standalone modes with profile and custom context
 
 Read `modes/_profile.md` (if exists) + `modes/_custom.md` (if exists) + `modes/{mode}.md`
 
-Applies to: `tracker`, `agent-inbox`, `deep`, `interview-prep`, `interview`, `master-profile`, `regional/eu-swe`, `interview/plan`, `interview/practice`, `interview/debrief`, `latex`, `latex-tex`, `training`, `project`, `patterns`, `titles`, `upskill`, `followup`, `reply-watch`, `outcome`, `cover`, `email`, `add`, `offer-prep`, `discover`, `intake`, `ats`, `calibrate`, `retro`, `expand`, `interview-redflag`, `update`
+Applies to: `tracker`, `agent-inbox`, `deep`, `interview-prep`, `interview`, `master-profile`, `regional/eu-swe`, `interview/plan`, `interview/practice`, `interview/debrief`, `latex`, `latex-tex`, `training`, `project`, `patterns`, `titles`, `upskill`, `followup`, `reply-watch`, `outcome`, `cover`, `email`, `proposal`, `add`, `offer-prep`, `discover`, `intake`, `ats`, `calibrate`, `retro`, `expand`, `interview-redflag`, `update`
 
 ### Modes that load only their mode file
 
