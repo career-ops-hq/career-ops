@@ -727,7 +727,7 @@ Lưu bản đánh giá đầy đủ vào `reports/{###}-{company-slug}-{YYYY-MM-
 (danh sách 15-20 từ khóa từ JD để tối ưu ATS)
 
 ## Keyword Coverage
-(tự tạo bởi `keyword-match.mjs` (1b) — coverage %, present, thin, missing)
+(tự tạo bởi `keyword-match.mjs` (1b) — coverage %, present, missing)
 
 ## Job Description (archived verbatim)
 (toàn văn tin tuyển dụng, dán nguyên văn — xem yêu cầu bên dưới)
