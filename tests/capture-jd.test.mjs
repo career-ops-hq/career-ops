@@ -38,6 +38,8 @@ function scratch({ pipeline = '# Pipeline\n\n## Pending\n\n## Processed\n' } = {
 
 const readPipeline = (root) => readFileSync(path.join(root, 'data', 'pipeline.md'), 'utf-8');
 const rowLines = (root) => readPipeline(root).split(/\r?\n/).filter((l) => /^\s*-\s*\[[ xX!]\]/.test(l));
+// The URL cell of a pipeline row, compared whole (never as a substring).
+const rowUrl = (line) => /^\s*-\s*\[[ xX!]\]\s+(\S+)/.exec(line)?.[1];
 
 // --- labels ---------------------------------------------------------------
 
@@ -794,7 +796,7 @@ test('a Pending row lands before the next heading even when it uses a tab after 
   const root = scratch({ pipeline: '# Pipeline\n\n## Pending\n\n##\tProcessed\n\n- [x] https://acme.test/jobs/old | Acme | Old\n' });
   await captureJd({ url: 'https://acme.test/jobs/tab', dataRoot: root, commit: false });
   const lines = readPipeline(root).split('\n');
-  const row = lines.findIndex((l) => l.includes('https://acme.test/jobs/tab'));
+  const row = lines.findIndex((l) => rowUrl(l) === 'https://acme.test/jobs/tab');
   const processed = lines.indexOf('##\tProcessed');
   assert.ok(row !== -1 && row < processed, readPipeline(root));
 });
@@ -821,7 +823,7 @@ test('the CLI reports a failed push and exits non-zero, keeping the capture and 
   assert.notEqual(run.status, 0, run.stdout);
   assert.match(run.stderr, /push-failed/);
   assert.match(run.stderr, /saved/i);
-  assert.ok(rowLines(root).some((l) => l.includes('https://acme.test/jobs/push-fails')));
+  assert.ok(rowLines(root).some((l) => rowUrl(l) === 'https://acme.test/jobs/push-fails'));
   assert.match(git('log', '-1', '--format=%s').stdout, /chore\(capture\)/);
 
   const localOnly = captureCli(root, ['--url', 'https://acme.test/jobs/local-only', '--commit']);
