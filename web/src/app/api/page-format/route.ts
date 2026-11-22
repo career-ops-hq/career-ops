@@ -77,7 +77,7 @@ export async function POST(req: Request) {
       source = fs.readFileSync(file, "utf8");
       parsed = yaml.load(source);
     } catch {
-      return Response.json({ error: "config/profile.yml exists but is not valid YAML — refusing to overwrite it." }, { status: 409 });
+      return Response.json({ error: "config/profile.yml exists but is not valid YAML. Refusing to overwrite it." }, { status: 409 });
     }
     if (!isMapping(parsed)) {
       return Response.json({ error: "config/profile.yml must contain named settings, not a list or single value. Refusing to overwrite it." }, { status: 409 });

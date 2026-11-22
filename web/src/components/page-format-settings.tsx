@@ -6,7 +6,7 @@ import { cn } from "@/lib/cn";
 
 // Page format → config/profile.yml (page_format). Server-persisted (unlike the
 // localStorage engine prefs on this page) because lib/page-format.mjs reads the
-// same key — the CLI and the web must render the same paper size. A profile can
+// same key, so the CLI and the web must render the same paper size. A profile can
 // also say `auto` (the sheet follows the employer's country). That is shown, not
 // guessed away, and nothing is rewritten until the user picks something else.
 
@@ -14,8 +14,8 @@ type State = { formats: string[]; default: string; override: string | null };
 
 const LABELS: Record<string, string> = { a4: "A4", letter: "US Letter" };
 const HINTS: Record<string, string> = {
-  a4: "210 × 297 mm — Europe, most of the world",
-  letter: "8.5 × 11 in — US and Canada",
+  a4: "210 × 297 mm, Europe and most of the world",
+  letter: "8.5 × 11 in, US and Canada",
 };
 
 export function PageFormatSettings() {
@@ -87,14 +87,14 @@ export function PageFormatSettings() {
       <div className="rounded-xl border border-border bg-surface/50 p-4">
         <p className="text-xs leading-relaxed text-faint">
           Paper size for your CV and cover-letter PDFs. Saved to{" "}
-          <span className="font-mono text-muted">config/profile.yml</span> — the CLI uses the same
+          <span className="font-mono text-muted">config/profile.yml</span>. The CLI uses the same
           value, and a <span className="font-mono text-muted">--format</span> flag still wins for a
           single render.
         </p>
         {loadError ? (
           <div className="mt-3 text-sm text-muted">
             <p className="text-red-500">
-              Couldn&apos;t read your current page format — not guessing, to avoid writing a
+              Couldn&apos;t read your current page format. Not guessing, to avoid writing a
               preference you never chose into <span className="font-mono">config/profile.yml</span>.
             </p>
             <button
