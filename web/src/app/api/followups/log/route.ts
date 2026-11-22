@@ -4,6 +4,7 @@ import { atomicWrite } from "@/lib/core/safe-write";
 import { CHANNELS, isRealISODate, localISODate } from "@/lib/followups";
 import { parseFollowupId } from "@/lib/followup-id.mjs";
 import { followupsLogPath, withFollowupsWrite, followupsWriteError } from "@/lib/followups-server";
+import { readJsonObject } from "@/lib/json-body";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,7 +29,7 @@ function cell(v: unknown, max?: number): string {
 const TABLE_HEADER = "| num | appNum | date | company | role | channel | contact | notes |\n|---|---|---|---|---|---|---|---|\n";
 
 export async function POST(req: Request) {
-  let body: {
+  const body = await readJsonObject<{
     appNum?: string | number;
     num?: string | number; // legacy alias for appNum (old home-card payload)
     company?: string;
@@ -38,12 +39,8 @@ export async function POST(req: Request) {
     contact?: string;
     notes?: string;
     note?: string; // legacy alias for notes
-  };
-  try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    return Response.json({ error: "bad json" }, { status: 400 });
-  }
+  }>(req);
+  if (!body) return Response.json({ error: "bad json" }, { status: 400 });
 
   const appNum = parseFollowupId(body.appNum ?? body.num);
   if (appNum === null) {
@@ -110,12 +107,8 @@ export async function POST(req: Request) {
 // byte of the file (header, other rows, legacy bullets) is preserved. Legacy
 // bullets carry no num and cannot be deleted here.
 export async function DELETE(req: Request) {
-  let body: { num?: string | number };
-  try {
-    body = (await req.json()) as { num?: string | number };
-  } catch {
-    return Response.json({ error: "bad json" }, { status: 400 });
-  }
+  const body = await readJsonObject<{ num?: string | number }>(req);
+  if (!body) return Response.json({ error: "bad json" }, { status: 400 });
   const num = parseFollowupId(body.num);
   if (num === null) return Response.json({ error: "num required" }, { status: 400 });
 

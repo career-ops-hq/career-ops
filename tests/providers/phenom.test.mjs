@@ -107,6 +107,8 @@ try {
   } else {
     fail(`phenom fetch-error stop should log a truncation warning: ${JSON.stringify(partialWarnings)}`);
   }
+  if (partialJobs.phenomTruncated === true) pass('phenom.fetch() tags a fetch-error-truncated board phenomTruncated');
+  else fail(`phenom fetch-error board should carry phenomTruncated, got ${partialJobs.phenomTruncated}`);
 
   // fetch — a page that fails once (transient) then succeeds is recovered by
   // fetchJsonWithRetry: no truncation, no warning, full board returned.
@@ -179,6 +181,26 @@ try {
     pass('phenom.fetch() warns (console.error) when the cap truncates real results');
   } else {
     fail(`phenom fetch cap: expected a truncation warning, got ${JSON.stringify(hugeWarnings)}`);
+  }
+
+  // max_pages: 1 on the entry: a probe's one page is also the entry's last. It
+  // is still a probe, so nothing warns and the board is not tagged (#7180). A
+  // real scan of the same entry is still cut by its own cap.
+  const fullPhenomPage = async () => ({ refineSearch: { status: 200, totalHits: 1_000_000, data: { jobs: Array.from({ length: 100 }, (_, i) => mkJob(`p-${i}`)) } } });
+  const oneEntry = { name: 'OneCo', api: 'https://careers.oneco.com', max_pages: 1 };
+  const { result: probedAtCap, errors: probeAtCapWarnings } = await captureConsoleErrors(() =>
+    phenom.fetch(oneEntry, { maxPages: 1, sleep: async () => {}, fetchJson: fullPhenomPage }));
+  if (!probeAtCapWarnings.some(w => /raise max_pages/.test(w)) && probedAtCap.phenomTruncated === undefined) {
+    pass('phenom.fetch() warns nothing and tags nothing for a probe on a max_pages: 1 entry');
+  } else {
+    fail(`phenom probe at max_pages: 1: phenomTruncated=${probedAtCap.phenomTruncated}, warnings ${JSON.stringify(probeAtCapWarnings)}`);
+  }
+  const { result: scannedAtCap, errors: scanAtCapWarnings } = await captureConsoleErrors(() =>
+    phenom.fetch(oneEntry, { sleep: async () => {}, fetchJson: fullPhenomPage }));
+  if (scanAtCapWarnings.some(w => /raise max_pages/.test(w)) && scannedAtCap.phenomTruncated === true) {
+    pass('phenom.fetch() still warns and tags a real scan of a max_pages: 1 entry');
+  } else {
+    fail(`phenom scan at max_pages: 1: phenomTruncated=${scannedAtCap.phenomTruncated}, warnings ${JSON.stringify(scanAtCapWarnings)}`);
   }
 
   // fetch() pagination cap — entry.max_pages raises the cap for a genuinely

@@ -10,12 +10,15 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'path';
 import { createInterface } from 'readline';
 import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
+import { validateProfile, loadValidatedProfile } from './lib/career-profile.mjs';
+import { prepareCvSelection, verifyCvSelection } from './lib/profile-cv-selection.mjs';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
 const root = getCareerOpsRoot();
 const profilePath = join(root, 'data', 'career-profile.yml');
-const STATUS = new Set(['needs_review', 'verified']);
 const HELP = `Master Career Profile
 
   node career-profile.mjs import [cv.md] [--review]
@@ -24,6 +27,14 @@ const HELP = `Master Career Profile
 
   node career-profile.mjs validate [profile.yml]
     Check the profile structure and source evidence.
+
+  node career-profile.mjs prepare-cv --payload base.json --selection selection.json
+    Print {payload, mapping} as JSON. Uses data/career-profile.yml by default.
+
+  node career-profile.mjs verify-cv --payload base.json --selection selection.json --prepared prepared.json
+    Recheck against the current profile and original inputs. Both commands
+    accept --profile profile.yml; all paths resolve from the Data Root.
+    Neither command renders a CV or replaces the existing CV fact gates.
 `;
 
 function normalizeKey(value) {
@@ -62,6 +73,12 @@ function parseCv(text, source) {
   const result = { candidate: {}, summary: [], experiences: [], projects: [], education: [], certifications: [], skills: [] };
   let section = null;
   let entity = null;
+  // How the current entry was opened: 'heading' (a ### line), 'line' (a
+  // non-bullet line with no heading above it) or 'bullet' (a leading bullet).
+  let entityOrigin = null;
+  // Indentation of the bullet that opened the current entry, so a deeper
+  // sub-bullet stays a fact of it instead of opening an entry of its own.
+  let entityIndent = 0;
   const addFact = (collection, value, line) => {
     const fact = { id: stableId(collection, value, source, entity?.label ?? ''), text: value,
       evidence: { source, line, quote: lines[line - 1].trim() }, review_status: 'needs_review' };
@@ -82,27 +99,46 @@ function parseCv(text, source) {
     if (heading) {
       const title = heading[2].trim();
       const found = classifyHeading(title);
-      if (found) { section = found; entity = null; return; }
+      if (found) { section = found; entity = null; entityOrigin = null; return; }
       if (section && ['experiences', 'projects', 'education'].includes(section)) {
         entity = { id: stableId(section, title, source), label: title,
           evidence: { source, line: lineNo, quote: raw.trim() }, facts: [] };
         result[section].push(entity);
+        entityOrigin = 'heading';
       }
       return;
     }
     if (!section) return;
-    const value = line.replace(/^\s*(?:[-*+]\s+|\d+[.)]\s+)/, '').replace(/^\*\*(.+?)\*\*:?\s*/, '$1: ').trim();
+    const unbulleted = line.replace(/^\s*(?:[-*+]\s+|\d+[.)]\s+)/, '');
+    // A line that is one bold span from end to end (`**Senior ML Engineer**`) is
+    // a title, not a `**Label:** value` pair, so it gets no trailing colon. A
+    // line with a second bold span (`**Team**: **Data**`) is not one span.
+    const wholeBold = unbulleted.match(/^\*\*((?:(?!\*\*).)+)\*\*$/);
+    const value = (wholeBold ? wholeBold[1] : unbulleted.replace(/^\*\*(.+?)\*\*:?\s*/, '$1: ')).trim();
     if (!value) return;
     if (section === 'summary') addFact(section, value, lineNo);
     else if (section === 'skills') {
       for (const skill of value.split(/[,;|]/).map((s) => s.trim()).filter(Boolean)) addFact(section, skill, lineNo);
     } else if (section === 'certifications') addFact(section, value, lineNo);
     else if (['experiences', 'projects', 'education'].includes(section)) {
-      if (/^\s*(?:[-*+]\s+|\d+[.)]\s+)/.test(raw) && entity) addFact(section, value, lineNo);
+      const isBullet = /^\s*(?:[-*+]\s+|\d+[.)]\s+)/.test(raw);
+      // Indentation in columns, with a tab advancing to the next 4-column stop
+      // as in CommonMark, so `\t- Detail` sits deeper than `  - Project A`.
+      const indent = [...raw.match(/^[ \t]*/)[0]].reduce((col, ch) => (ch === '\t' ? col + 4 - (col % 4) : col + 1), 0);
+      // An entry opened by a heading owns every line under it: the title and
+      // dates lines become its facts, not entries of their own (#6782). A
+      // bullet never adopts the bullets after it, so a section with no entry
+      // headings reads one entry per top-level bullet.
+      const attach = isBullet
+        ? entity && (entityOrigin !== 'bullet' || indent > entityIndent)
+        : entity && entityOrigin === 'heading';
+      if (attach) addFact(section, value, lineNo);
       else {
         entity = { id: stableId(section, value, source), label: value,
           evidence: { source, line: lineNo, quote: raw.trim() }, facts: [] };
         result[section].push(entity);
+        entityOrigin = isBullet ? 'bullet' : 'line';
+        entityIndent = indent;
       }
     }
   });
@@ -147,45 +183,9 @@ function parseCv(text, source) {
   return result;
 }
 
-function validateProfile(profile) {
-  const errors = [];
-  if (!profile || typeof profile !== 'object' || profile.schema_version !== 1) errors.push('schema_version must be 1');
-  if (!profile?.candidate || typeof profile.candidate !== 'object') errors.push('candidate must be a mapping');
-  const ids = new Set();
-  const checkFact = (fact, path) => {
-    if (!fact || typeof fact !== 'object') { errors.push(`${path} must be a mapping`); return; }
-    if (typeof fact.id !== 'string' || !fact.id.trim()) errors.push(`${path}.id is required`);
-    else if (ids.has(fact.id)) errors.push(`duplicate id: ${fact.id}`);
-    else ids.add(fact.id);
-    if (typeof fact.text !== 'string' || !fact.text.trim()) errors.push(`${path}.text is required`);
-    if (!STATUS.has(fact.review_status)) errors.push(`${path}.review_status must be needs_review or verified`);
-    if (!fact.evidence || typeof fact.evidence.source !== 'string' || !fact.evidence.source.trim() ||
-        !Number.isInteger(fact.evidence.line) || fact.evidence.line < 1 ||
-        typeof fact.evidence.quote !== 'string' || !fact.evidence.quote.trim()) errors.push(`${path}.evidence requires source, positive line, and quote`);
-  };
-  const arrays = ['summary', 'experiences', 'projects', 'education', 'certifications', 'skills'];
-  for (const key of arrays) if (!Array.isArray(profile?.[key])) errors.push(`${key} must be a list`);
-  for (const key of ['summary', 'certifications', 'skills']) {
-    (Array.isArray(profile?.[key]) ? profile[key] : []).forEach((fact, i) => checkFact(fact, `${key}[${i}]`));
-  }
-  for (const key of ['experiences', 'projects', 'education']) {
-    (Array.isArray(profile?.[key]) ? profile[key] : []).forEach((entry, i) => {
-      const path = `${key}[${i}]`;
-      if (!entry || typeof entry.label !== 'string' || !entry.label.trim()) errors.push(`${path}.label is required`);
-      checkFact({ ...entry, text: entry?.label, review_status: entry?.review_status ?? 'verified' }, path);
-      if (!Array.isArray(entry?.facts)) errors.push(`${path}.facts must be a list`);
-      else entry.facts.forEach((fact, j) => checkFact(fact, `${path}.facts[${j}]`));
-    });
-  }
-  return errors;
-}
-
 function readProfile(file) {
   if (!existsSync(file)) return { schema_version: 1, candidate: {}, summary: [], experiences: [], projects: [], education: [], certifications: [], skills: [] };
-  const parsed = yaml.load(readFileSync(file, 'utf8'));
-  const errors = validateProfile(parsed);
-  if (errors.length) throw new Error(`Existing profile is invalid:\n- ${errors.join('\n- ')}`);
-  return parsed;
+  return loadValidatedProfile({ file });
 }
 
 async function ask(lines, question) {
@@ -335,9 +335,33 @@ function doValidate(args) {
   const pathArg = args.find((arg) => !arg.startsWith('--'));
   const file = pathArg ? resolve(root, pathArg) : profilePath;
   if (!existsSync(file)) throw new Error(`Profile not found: ${file}`);
-  const errors = validateProfile(yaml.load(readFileSync(file, 'utf8')));
+  const errors = validateProfile(loadYaml(readFileSync(file, 'utf8')));
   if (errors.length) { process.stderr.write(`Invalid profile:\n- ${errors.join('\n- ')}\n`); process.exitCode = 1; }
   else process.stdout.write(`Valid Master Career Profile: ${file}\n`);
+}
+
+function doCvSelection(command, args) {
+  const flags = ['--payload', '--selection', '--profile', ...(command === 'verify-cv' ? ['--prepared'] : [])];
+  validateFlags(args, [...flags, '--help', '-h'], HELP, { valueFlags: flags, requireOperand: true });
+  // Refuse ambiguous duplicate flags or stray positional arguments.
+  const seen = new Set();
+  for (let i = 0; i < args.length; i++) {
+    const flag = args[i].split('=')[0];
+    if (!flags.includes(flag) || seen.has(flag)) throw new Error(`Unexpected or repeated argument: ${args[i]}`);
+    seen.add(flag);
+    if (!args[i].includes('=')) i++;
+  }
+  const required = ['--payload', '--selection', ...(command === 'verify-cv' ? ['--prepared'] : [])];
+  for (const flag of required) if (!seen.has(flag)) throw new Error(`${flag} is required`);
+  const fileFor = flag => resolve(root, flagValue(args, flag));
+  const readJson = flag => JSON.parse(readFileSync(fileFor(flag), 'utf8'));
+  const profile = loadValidatedProfile({ dataRoot: root, ...(seen.has('--profile') ? { file: fileFor('--profile') } : {}) });
+  const inputs = { profile, basePayload: readJson('--payload'), selection: readJson('--selection') };
+  if (command === 'prepare-cv') process.stdout.write(`${JSON.stringify(prepareCvSelection(inputs), null, 2)}\n`);
+  else {
+    verifyCvSelection(inputs, readJson('--prepared'));
+    process.stdout.write('Valid Profile CV selection; existing CV checks are still required before rendering.\n');
+  }
 }
 
 const [command, ...args] = process.argv.slice(2);
@@ -345,8 +369,12 @@ try {
   if (!command || command === '--help' || command === '-h') process.stdout.write(HELP);
   else if (command === 'import') await doImport(args);
   else if (command === 'validate') doValidate(args);
+  else if (command === 'prepare-cv' || command === 'verify-cv') doCvSelection(command, args);
   else throw new Error(`Unknown command: ${command}\n\n${HELP}`);
 } catch (error) {
-  process.stderr.write(`${error.message}\n`);
+  const context = ['profile_entry_id', 'fact_id', 'experience_index']
+    .filter(key => error[key] !== undefined)
+    .map(key => `${key}=${JSON.stringify(error[key])}`);
+  process.stderr.write(`${error.code ? `[${error.code}] ` : ''}${error.message}${context.length ? ` (${context.join(', ')})` : ''}\n`);
   process.exitCode = 1;
 }

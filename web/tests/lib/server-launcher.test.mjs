@@ -20,10 +20,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import os, { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -266,6 +267,18 @@ test("a terminated child returns a non-zero platform-native status", () => {
   assert.notEqual(run.status, 1, "a killed server must not look like a failed launch");
 });
 
+test("next is started with its usage telemetry off", () => {
+  // Given a next that reports the telemetry switch instead of its argv, and a
+  // caller whose environment does not set it
+  const body = "console.log(JSON.stringify([process.env.NEXT_TELEMETRY_DISABLED ?? null]));\n";
+  for (const command of ["dev", "start"]) {
+    // When the launcher starts it
+    const run = launch({ args: [command], body });
+    // Then next sees the switch, so it records and sends nothing
+    assert.deepEqual(run.argv, ["1"], `${command}: NEXT_TELEMETRY_DISABLED must reach next`);
+  }
+});
+
 test("an unknown command prints usage and exits 1 without starting next", () => {
   // Given argv naming no next subcommand
   // When the launcher runs
@@ -274,6 +287,86 @@ test("an unknown command prints usage and exits 1 without starting next", () => 
   assert.equal(run.status, 1);
   assert.equal(run.argv, null, "next must not run for an unknown command");
   assert.ok(run.stderr.includes("Usage: node server.mjs"), "usage should be printed");
+});
+
+test("starting the dashboard starts the PDF painter from the repo root and does not wait for it", async () => {
+  const root = mkdtempSync(join(tmpdir(), "career-ops-launcher-"));
+  const web = join(root, "web");
+  const marker = join(root, "painter.pid");
+  let pid = 0;
+  let painterCwd = "";
+  try {
+    mkdirSync(join(web, "src"), { recursive: true });
+    cpSync(join(WEB_ROOT, "server.mjs"), join(web, "server.mjs"));
+    cpSync(join(WEB_ROOT, "src", "lib"), join(web, "src", "lib"), { recursive: true });
+    const nextDir = join(web, "node_modules", "next", "dist", "bin");
+    mkdirSync(nextDir, { recursive: true });
+    writeFileSync(
+      join(web, "node_modules", "next", "package.json"),
+      JSON.stringify({ name: "next", version: "0.0.0-stub", bin: { next: "./dist/bin/next.js" } }),
+    );
+    writeFileSync(join(nextDir, "next.js"), "console.log(JSON.stringify(process.argv.slice(2)));\n");
+    writeFileSync(
+      join(root, "generate-pdf.mjs"),
+      `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, process.pid + "\\n" + process.cwd());\nsetInterval(() => {}, 1e9);\n`,
+    );
+    const started = Date.now();
+    const result = spawnSync(process.execPath, [join(web, "server.mjs"), "dev"], {
+      encoding: "utf8",
+      timeout: 15_000,
+      env: { PATH: process.env.PATH },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout.trim()), ["dev", "-H", "127.0.0.1"]);
+    assert.ok(Date.now() - started < 10_000, "the launcher waited for the painter");
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline) {
+      try {
+        const [first, cwd] = readFileSync(marker, "utf8").split("\n");
+        if (!cwd) throw new Error("not written yet");
+        pid = Number(first);
+        painterCwd = cwd;
+        break;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    }
+    assert.ok(pid > 0, "the painter did not start");
+    process.kill(pid, 0);
+    assert.equal(realpathSync(painterCwd), realpathSync(root), "the painter runs from the repo root, like the export child");
+  } finally {
+    // An assertion above can fail before the marker loop assigns pid. The
+    // painter is already detached, so read the marker here and stop it.
+    if (!(pid > 0)) {
+      const deadline = Date.now() + 2_000;
+      while (Date.now() < deadline && !(pid > 0)) {
+        try {
+          const [first, cwd] = readFileSync(marker, "utf8").split("\n");
+          if (cwd && Number(first) > 0) pid = Number(first);
+        } catch { /* not written yet */ }
+        if (!(pid > 0)) await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    }
+    if (pid > 0) {
+      try { process.kill(pid, "SIGTERM"); } catch {}
+      // The painter's cwd is the temp root now, and Windows will not remove a
+      // directory a live process is sitting in. Wait for it to exit first.
+      const gone = Date.now() + 5_000;
+      while (Date.now() < gone) {
+        try {
+          process.kill(pid, 0);
+        } catch {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    }
+    // On Windows the directory can stay busy for a moment after the painter
+    // is gone. fs.promises.rm retries that; rmSync throws on the first try
+    // although it is given maxRetries, which failed this test and left the
+    // whole copy behind in the temp folder.
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
 });
 
 // --- the scripts that reach it --------------------------------------------
@@ -302,6 +395,22 @@ test("no script starts next on its own", () => {
   // Then none bypasses the bind decision — this catches a re-added `"dev": "next dev"`
   // and equally a new `"dev:lan": "next dev -H 0.0.0.0"` nobody thought to review
   assert.deepEqual(offenders, []);
+});
+
+test("the build script, which skips the launcher, still turns telemetry off", () => {
+  // Given `next build`, which npm runs directly rather than through server.mjs
+  assert.ok(/(^|\s)next\s+build\b/.test(scripts.build ?? ""), `build script was: ${scripts.build}`);
+  // When next loads the config it reads before recording anything
+  const config = join(WEB_ROOT, "next.config.mjs");
+  const result = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", `await import(${JSON.stringify(pathToFileURL(config).href)});
+console.log(process.env.NEXT_TELEMETRY_DISABLED ?? "");`],
+    { encoding: "utf8", timeout: 30_000, env: { PATH: process.env.PATH } },
+  );
+  // Then the config has switched telemetry off for the rest of the build
+  assert.equal(result.status, 0, `importing next.config.mjs failed: ${result.stderr}`);
+  assert.equal(result.stdout.trim(), "1");
 });
 
 test("the bypass check actually fires", () => {

@@ -28,8 +28,9 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'f
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { resolveAndValidate } from './_net.mjs';
-import { normalizeUrl } from '../url-key.mjs';
-import { readLock, writeLockEntry, diffPlugin, describeDrift, hashPluginTree, consentSurface } from './_lock.mjs';
+import { normalizeUrl, aggregatorPostingId } from '../url-key.mjs';
+import { getCareerOpsRoot } from '../path-resolver.mjs';
+import { readLock, readLockForUpdate, writeLockEntry, diffPlugin, describeDrift, hashPluginTree, consentSurface } from './_lock.mjs';
 import { loadRegistry } from './_registry.mjs';
 
 /** The complete, closed set of hook kinds. Anything else (apply/submit/…) is rejected. */
@@ -51,9 +52,66 @@ export const RESERVED_ENV = new Set([
   'PATH', 'HOME', 'NODE_OPTIONS', 'LD_PRELOAD', 'NODE_EXTRA_CA_CERTS',
 ]);
 
-const ID_RE = /^[a-z0-9][a-z0-9-]*$/;
+export const ID_RE = /^[a-z0-9][a-z0-9-]*$/;
 const DEFAULT_HOOK_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 5;
+// Same ceiling as the scanner's DEFAULT_MAX_BODY_BYTES (providers/_http.mjs):
+// one hostile or broken endpoint must not be able to pin the process's memory
+// with a single endless response. Not imported from there so this engine keeps
+// its small dependency surface. A plugin that really needs more asks per call
+// with `opts.maxBytes`. An error body is only a snippet, so it gets less.
+const MAX_PLUGIN_BODY_BYTES = 10 * 1024 * 1024;
+const MAX_PLUGIN_ERROR_BODY_BYTES = 256 * 1024;
+
+function bodyTooLarge(maxBytes, declared) {
+  const err = new Error(`plugin response exceeded maxBytes of ${maxBytes}${declared != null ? ` (content-length ${declared})` : ''}`);
+  // @ts-ignore
+  err.code = 'response_too_large';
+  return err;
+}
+
+/**
+ * Return `res` with its body capped at `maxBytes`: a declared content-length
+ * over the cap is refused before a byte is read, and a stream that grows past it
+ * errors the read (the source is cancelled, so the socket is released). Works for
+ * every way a plugin consumes the Response (.json(), .text(), .body).
+ * @param {Response} res
+ * @param {number} maxBytes
+ * @returns {Response}
+ */
+function capResponseBody(res, maxBytes, release = () => {}) {
+  // No body (HEAD, 204, 304): nothing to cap, and a HEAD's content-length describes
+  // the resource a GET would send, not bytes we would read.
+  if (!res.body) { release(); return res; }
+  const declared = Number(res.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    res.body.cancel?.().catch(() => {});
+    release();
+    throw bodyTooLarge(maxBytes, declared);
+  }
+  let total = 0;
+  const limiter = new TransformStream({
+    transform(chunk, controller) {
+      total += chunk.byteLength;
+      if (total > maxBytes) { release(); controller.error(bodyTooLarge(maxBytes, null)); }
+      else controller.enqueue(chunk);
+    },
+    flush: release,   // body fully read: the request timeout has done its job
+    cancel: release,  // reader gave up early
+  });
+  const capped = new Response(res.body.pipeThrough(limiter), { status: res.status, statusText: res.statusText, headers: res.headers });
+  // A new Response has no url: keep the original's, so a plugin resolving relative
+  // links against res.url keeps working.
+  Object.defineProperty(capped, 'url', { value: res.url, enumerable: true });
+  Object.defineProperty(capped, 'redirected', { value: res.redirected, enumerable: true });
+  return capped;
+}
+
+/** A caller's `maxBytes` when it is a positive finite number, else the default. */
+function resolveBodyCap(value) {
+  const n = typeof value === 'number' ? Math.floor(value) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : MAX_PLUGIN_BODY_BYTES;
+}
 
 function isReservedEnv(name) {
   return RESERVED_ENV.has(name) || /^AWS_/.test(name);
@@ -111,13 +169,8 @@ export async function loadPluginConfig(root) {
   const file = pluginsConfigPath(root);
   if (!existsSync(file)) return {};
   try {
-    // Named, not `.default`: js-yaml 5 ships a native ESM build with no default
-    // export, so `.default` is undefined there and `yaml.load` throws straight
-    // into the catch below. That catch fails OPEN — it returns {}, so every
-    // configured plugin silently stops loading and the only trace is one ⚠️ line
-    // that reads like a malformed config. The named form resolves on 4.x and 5.x.
-    const { load } = await import('js-yaml');
-    const parsed = load(readFileSync(file, 'utf8'));
+    const { loadYaml } = await import('../lib/yaml-document.mjs');
+    const parsed = loadYaml(readFileSync(file, 'utf8'));
     return parsed && typeof parsed === 'object' ? parsed : {};
   } catch (err) {
     warnSkip('config/plugins.yml', `unreadable, ignoring — ${err.message}`);
@@ -222,6 +275,13 @@ export function validateManifest(m, dir, dirName) {
     if (isLoopback && !allowsLocalhost) { warnSkip(label, `allowedHosts contains a loopback host without allowsLocalhost: ${h}`); return null; }
   }
 
+  // Optional: the plugin's ingest/search results are job postings, so they get
+  // the scanner's discovery filters (data/blacklist.md, title_filter,
+  // location_filter) and a scan-history row. Absent means the results may be
+  // something else — an interview event, an enrichment record — and only the
+  // tracker/pipeline/scan-history dedup applies (#5478).
+  if (m.jobPostings !== undefined && typeof m.jobPostings !== 'boolean') { warnSkip(label, 'jobPostings must be true or false'); return null; }
+
   const entry = typeof m.entry === 'string' && m.entry.trim() ? m.entry : 'index.mjs';
   if (!entry.endsWith('.mjs')) { warnSkip(label, `entry "${entry}" must be a .mjs file`); return null; }
   const entryAbs = path.resolve(dir, entry);
@@ -252,6 +312,7 @@ export function validateManifest(m, dir, dirName) {
     entry,
     skill,
     humanInTheLoop: true,
+    jobPostings: m.jobPostings === true,
     name: typeof m.name === 'string' ? m.name : undefined,
     version: typeof m.version === 'string' ? m.version : undefined,
     homepage: typeof m.homepage === 'string' ? m.homepage : undefined,
@@ -430,6 +491,7 @@ function makeGuardedFetch(allowedHosts, { allowsLocalhost = false } = {}) {
   };
   return async function guardedFetch(url, opts = {}) {
     const { timeoutMs = 10_000, headers = {}, method = 'GET', body = null } = opts;
+    const bodyCap = resolveBodyCap(opts.maxBytes);
     let current = new URL(url);
     hostOk(current);
     // SSRF: reject a host that resolves to a private/loopback/metadata address
@@ -438,16 +500,24 @@ function makeGuardedFetch(allowedHosts, { allowsLocalhost = false } = {}) {
     let reqHeaders = { ...headers };
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       const controller = new AbortController();
+      // The timeout covers the whole exchange, body included: a host that sends
+      // headers and then drips (or stalls) is cut off like one that never answers.
+      // It is released once the body is read, cancelled or refused.
       const timer = setTimeout(() => controller.abort(), timeoutMs);
+      timer.unref?.();
+      const release = () => clearTimeout(timer);
       let res;
       try {
         res = await fetch(current.href, {
           method, headers: reqHeaders, body, redirect: 'manual', signal: controller.signal,
         });
-      } finally {
-        clearTimeout(timer);
+      } catch (err) {
+        release();
+        throw err;
       }
       if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
+        release();
+        res.body?.cancel?.().catch(() => {});
         const next = new URL(res.headers.get('location'), current);
         hostOk(next); // re-validate the redirect target before following it
         await resolveAndValidate(next.hostname, { allowsLocalhost });
@@ -460,13 +530,17 @@ function makeGuardedFetch(allowedHosts, { allowsLocalhost = false } = {}) {
         continue;
       }
       if (!res.ok) {
-        const snippet = (await res.text().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 300);
+        // Capped like any other body: an error page is a diagnostic snippet, and a
+        // refused (over-cap) one just loses the snippet, never the status.
+        let errText = '';
+        try { errText = await capResponseBody(res, MAX_PLUGIN_ERROR_BODY_BYTES, release).text(); } catch { /* over the cap or timed out: the status is the answer */ } finally { release(); }
+        const snippet = errText.replace(/\s+/g, ' ').trim().slice(0, 300);
         const err = new Error(snippet ? `HTTP ${res.status}: ${snippet}` : `HTTP ${res.status}`);
         // @ts-ignore
         err.status = res.status;
         throw err;
       }
-      return res;
+      return capResponseBody(res, bodyCap, release);
     }
     throw new Error(`too many redirects (>${MAX_REDIRECTS}) for ${url}`);
   };
@@ -477,7 +551,7 @@ function makeGuardedFetch(allowedHosts, { allowsLocalhost = false } = {}) {
  * CONVENIENCE (process.env is still globally reachable from any module) — the
  * real boundary is code review + trust.
  * @param {PluginManifestNormalized} manifest
- * @param {{ dryRun?: boolean, settings?: object }} [opts]
+ * @param {{ dryRun?: boolean, settings?: object, dataRoot?: string }} [opts]
  * @returns {PluginContext}
  */
 export function buildCtx(manifest, opts = {}) {
@@ -512,11 +586,22 @@ export function buildCtx(manifest, opts = {}) {
     settings: Object.freeze({ ...(opts.settings || {}) }),
     log,
     dryRun: opts.dryRun === true,
+    // Where the user layer lives. A plugin that keeps a file of its own (a
+    // cursor, a JD capture) resolves it from here: a bare relative path lands in
+    // the working directory, which is the data root only when the two coincide.
+    // The engine's callers pass the root they resolved; a ctx built without one
+    // gets the same answer from the resolver they use.
+    dataRoot: path.resolve(opts.dataRoot ?? getCareerOpsRoot()),
     // The canonical posting-URL key, so a plugin can deduplicate the postings it
     // returns the way the tracker and scanner do. Reaching it through ctx keeps
     // plugin and core callers equivalent without a repository-relative import or
     // a copied body, which is the whole point of the capability (#4218).
     normalizePostingUrl: normalizeUrl,
+    // The requisition id an aggregator URL carries (LinkedIn's job id, Indeed's
+    // `jk`). normalizePostingUrl keeps the path, so two spellings of one posting
+    // on an aggregator — a `/comm/` tracking link and the canonical view — key
+    // apart; the id is what they share. Same function the tracker's merge uses.
+    aggregatorPostingId,
   });
 }
 
@@ -598,12 +683,18 @@ function pluginSource(manifest, root) {
 /**
  * Integrity gate run on an ENABLED plugin before importing it (the rug-pull
  * defense). Returns { load }. Re-pins the lock on the benign cases (silent).
- * Fail-open on the engine itself (a lock-read error never blocks).
+ * An absent lock is a first pin. A damaged lock is not an empty one: loading
+ * would skip the drift check, so the plugin stays unloaded until the file is repaired.
  */
 export function lockGate(manifest, root) {
   const source = pluginSource(manifest, root);
   let lock;
-  try { lock = readLock(root); } catch { return { load: true }; }
+  try {
+    lock = readLockForUpdate(root);
+  } catch (err) {
+    warnSkip(manifest.id, `plugins.lock is damaged, so this plugin will not load until it is repaired — ${err.message}`);
+    return { load: false };
+  }
   const entry = lock.plugins?.[manifest.id];
   let d;
   try { d = diffPlugin(manifest, entry); }
@@ -644,7 +735,7 @@ export async function loadPlugins(kind, { root, dataRoot = root, dryRun = false,
     if (!lockGate(manifest, root).load) continue;
     const hook = await importHook(manifest, kind);
     if (!hook) continue;
-    out.push({ id: manifest.id, manifest, hook, ctx: buildCtx(manifest, { dryRun, settings: pluginSettings(manifest.id, cfg) }) });
+    out.push({ id: manifest.id, manifest, hook, ctx: buildCtx(manifest, { dryRun, dataRoot, settings: pluginSettings(manifest.id, cfg) }) });
   }
   return out;
 }
@@ -737,6 +828,9 @@ export function filterResultsForId(results, id) {
 function inactiveProviderStub(id, reason) {
   return {
     id,
+    // Read by tools that diagnose without fetching (coverage-check.mjs), so
+    // they can say why the board is never scanned instead of calling it live.
+    inactiveReason: reason,
     detect: () => null,
     fetch: async () => { throw new Error(`plugin "${id}" inactive: ${reason}. Run \`node doctor.mjs\` for setup.`); },
   };
@@ -781,7 +875,7 @@ export async function mergeProviderPlugins(providersMap, { root, dataRoot = root
         providersMap.set(manifest.id, inactiveProviderStub(manifest.id, 'failed to load — see ⚠️ above'));
         continue;
       }
-      const ctx = buildCtx(manifest, { settings: pluginSettings(manifest.id, cfg) });
+      const ctx = buildCtx(manifest, { dataRoot, settings: pluginSettings(manifest.id, cfg) });
       providersMap.set(manifest.id, {
         id: manifest.id,
         detect: () => null, // (4) keyed providers never auto-detect

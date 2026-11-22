@@ -7,7 +7,7 @@
 // Assertions run against rendered HTML rather than source patterns: the reorder
 // has to survive nested markup, comments, absent optional sections and a second
 // application, and none of that is observable from the source text.
-import { pass, fail, linkRepoPackage, ROOT, NODE } from './helpers.mjs';
+import { pass, fail, linkRepoPackage, ownRootEnv, ROOT, NODE, SANDBOX_DATA_ROOT } from './helpers.mjs';
 import { spawnSync } from 'child_process';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
@@ -503,17 +503,18 @@ try {
   // entry for it, so a CV rendered with titles outside that table produces
   // blocks that are real and movable but can never match a configured name.
   // Without a warning that is indistinguishable, from the user's side, from a
-  // setting that does nothing — the failure this feature exists to remove.
+  // setting that does nothing — the failure this feature exists to remove. The
+  // titles are Finnish: no Finnish market set ships, so none is in the table.
   const unknownTitles = `<html><body><div class="cv">
   <!-- EDUCATION -->
-  <div class="section"><div class="section-title">Ausbildung</div><div>Uni</div></div>
+  <div class="section"><div class="section-title">Koulutus</div><div>Uni</div></div>
 
   <!-- SKILLS -->
-  <div class="section"><div class="section-title">Kenntnisse</div><div>Node.js</div></div>
+  <div class="section"><div class="section-title">Taidot</div><div>Node.js</div></div>
 </div></body></html>`;
   const unknownRun = captureWarnings(() => reorderCvSections(unknownTitles, ['skills', 'education']));
   if (unknownRun.value === unknownTitles
-      && unknownRun.warnings.some(w => w.includes('Ausbildung') && w.includes('Kenntnisse'))) {
+      && unknownRun.warnings.some(w => w.includes('Koulutus') && w.includes('Taidot'))) {
     pass('a CV whose titles are outside the alias table says so, instead of quietly doing nothing');
   } else {
     fail(`unrecognized rendered titles went unreported: ${JSON.stringify(unknownRun.warnings)}`);
@@ -529,11 +530,11 @@ try {
   <!-- EDUCATION -->
   <div class="section"><div class="section-title">Education</div><div>E</div></div>
   <!-- SKILLS -->
-  <div class="section"><div class="section-title">Kenntnisse</div><div>K</div></div>
+  <div class="section"><div class="section-title">Taidot</div><div>K</div></div>
 </div></body></html>`;
   const partialRun = captureWarnings(() => reorderCvSections(partial, ['skills', 'projects', 'education']));
   if (partialRun.value === partial
-      && partialRun.warnings.some(w => w.includes('"skills"') && w.includes('Kenntnisse'))) {
+      && partialRun.warnings.some(w => w.includes('"skills"') && w.includes('Taidot'))) {
     pass('a partly-resolving order that changes nothing still names what it could not resolve');
   } else {
     fail(`partial resolution went unreported: ${JSON.stringify(partialRun.warnings)}`);
@@ -544,8 +545,8 @@ try {
   // and an unbounded title would bury the warning it belongs to.
   const ESC = String.fromCharCode(27);
   const hostileTitle = unknownTitles
-    .replace('Ausbildung', `${ESC}[31mFAKE ERROR${ESC}[0m`)
-    .replace('Kenntnisse', 'X'.repeat(500));
+    .replace('Koulutus', `${ESC}[31mFAKE ERROR${ESC}[0m`)
+    .replace('Taidot', 'X'.repeat(500));
   const hostileRun = captureWarnings(() => reorderCvSections(hostileTitle, ['skills', 'education']));
   const emitted = hostileRun.warnings.join('\n');
   if (emitted.includes(ESC)) {
@@ -562,8 +563,8 @@ try {
   // half, emitting a lone surrogate into the log.
   const RTL_OVERRIDE = '‮';
   const bidiAndAstral = unknownTitles
-    .replace('Ausbildung', `${RTL_OVERRIDE}gnudlibsuA`)
-    .replace('Kenntnisse', '😀'.repeat(80));
+    .replace('Koulutus', `${RTL_OVERRIDE}sutuluoK`)
+    .replace('Taidot', '😀'.repeat(80));
   const bidiRun = captureWarnings(() => reorderCvSections(bidiAndAstral, ['skills', 'education']));
   const bidiText = bidiRun.warnings.join('\n');
   const hasLoneSurrogate = [...bidiText].some(ch => {
@@ -619,10 +620,10 @@ try {
   // Nor when the reorder worked. A custom heading elsewhere in the CV is the
   // user's business; the warning is about the setting failing, not about the
   // alias table being incomplete in the abstract.
-  const mixed = FIXTURE.replace('>Certifications<', '>Auszeichnungen<');
+  const mixed = FIXTURE.replace('>Certifications<', '>Sertifikaatit<');
   const mixedRun = captureWarnings(() => reorderCvSections(mixed, ['skills', 'education']));
   if (JSON.stringify(renderedTitles(mixedRun.value)) === JSON.stringify(
-        ['Professional Summary', 'Work Experience', 'Projects', 'Skills', 'Auszeichnungen', 'Education'])
+        ['Professional Summary', 'Work Experience', 'Projects', 'Skills', 'Sertifikaatit', 'Education'])
       && mixedRun.warnings.length === 0) {
     pass('an unrecognized title elsewhere is silent when the configured sections did resolve');
   } else {
@@ -989,7 +990,10 @@ ${sections.join('\n')}</div>
 //    shape tests/generate-pdf-batch.test.mjs uses), so the assertion reads the
 //    order that was actually about to be PRINTED, not the order of the input file.
 {
-  const outputRoot = join(ROOT, 'output');
+  // Under the suite's own data root, not the checkout's output/: that
+  // directory is the developer's, and an interrupted run left this fixture in
+  // it (#5113).
+  const outputRoot = join(SANDBOX_DATA_ROOT, 'output');
   mkdirSync(outputRoot, { recursive: true });
   // realpathSync: see tests/generate-pdf-page-budget.test.mjs -- argv[1] keeps the
   // caller's spelling while import.meta.url is realpathed, so a symlinked
@@ -1015,6 +1019,12 @@ ${sections.join('\n')}</div>
     // lib/page-format.mjs owns the paper size generate-pdf.mjs imports at
     // module scope, so the copy needs it for the same reason.
     copyFileSync(join(ROOT, 'lib', 'page-format.mjs'), join(sandbox, 'lib', 'page-format.mjs'));
+    copyFileSync(join(ROOT, 'lib', 'browser-launch.mjs'), join(sandbox, 'lib', 'browser-launch.mjs'));
+    // pipeline-lock.mjs runs the shared lock protocol from lib/dir-lock.mjs (#5358).
+    copyFileSync(join(ROOT, 'lib', 'dir-lock.mjs'), join(sandbox, 'lib', 'dir-lock.mjs'));
+    copyFileSync(join(ROOT, 'lib', 'yaml-document.mjs'), join(sandbox, 'lib', 'yaml-document.mjs'));
+    // generate-pdf.mjs dates its PDF index row with lib/local-today.mjs.
+    copyFileSync(join(ROOT, 'lib', 'local-today.mjs'), join(sandbox, 'lib', 'local-today.mjs'));
 
     // theme-style.mjs and tracker-utils.mjs both `import * as yaml from
     // 'js-yaml'`, resolved by walking up into the repo's node_modules -- from
@@ -1084,7 +1094,7 @@ export const chromium = {
     writeFileSync(manifest, JSON.stringify([{ input: 'in.html', output: 'out/in.pdf' }]), 'utf-8');
 
     const run = spawnSync(NODE, [script, `--batch=${manifest}`], {
-      cwd: sandbox, encoding: 'utf-8', timeout: 60_000,
+      cwd: sandbox, encoding: 'utf-8', timeout: 60_000, env: ownRootEnv(),
     });
     const outPdf = join(sandbox, 'out', 'in.pdf');
 
@@ -1130,7 +1140,10 @@ export const chromium = {
 //    The fixture puts the profile ONLY in the external workspace, so an
 //    __dirname-anchored read finds nothing and silently applies no order.
 {
-  const outputRoot = join(ROOT, 'output');
+  // Under the suite's own data root, not the checkout's output/: that
+  // directory is the developer's, and an interrupted run left this fixture in
+  // it (#5113).
+  const outputRoot = join(SANDBOX_DATA_ROOT, 'output');
   mkdirSync(outputRoot, { recursive: true });
   // realpathSync: see tests/generate-pdf-page-budget.test.mjs -- argv[1] keeps the
   // caller's spelling while import.meta.url is realpathed, so a symlinked
@@ -1156,6 +1169,12 @@ export const chromium = {
     // lib/page-format.mjs owns the paper size generate-pdf.mjs imports at
     // module scope, so the copy needs it for the same reason.
     copyFileSync(join(ROOT, 'lib', 'page-format.mjs'), join(sandbox, 'lib', 'page-format.mjs'));
+    copyFileSync(join(ROOT, 'lib', 'browser-launch.mjs'), join(sandbox, 'lib', 'browser-launch.mjs'));
+    // pipeline-lock.mjs runs the shared lock protocol from lib/dir-lock.mjs (#5358).
+    copyFileSync(join(ROOT, 'lib', 'dir-lock.mjs'), join(sandbox, 'lib', 'dir-lock.mjs'));
+    copyFileSync(join(ROOT, 'lib', 'yaml-document.mjs'), join(sandbox, 'lib', 'yaml-document.mjs'));
+    // generate-pdf.mjs dates its PDF index row with lib/local-today.mjs.
+    copyFileSync(join(ROOT, 'lib', 'local-today.mjs'), join(sandbox, 'lib', 'local-today.mjs'));
 
     // theme-style.mjs and tracker-utils.mjs both `import * as yaml from
     // 'js-yaml'`, resolved by walking up into the repo's node_modules -- from
@@ -1230,7 +1249,7 @@ export const chromium = {
       cwd: sandbox,
       encoding: 'utf-8',
       timeout: 60_000,
-      env: { ...process.env, CAREER_OPS_TRACKER: join(ws, 'data', 'applications.md') },
+      env: ownRootEnv({ CAREER_OPS_TRACKER: join(ws, 'data', 'applications.md') }),
     });
     const outPdf = join(ws, 'out', 'in.pdf');
 

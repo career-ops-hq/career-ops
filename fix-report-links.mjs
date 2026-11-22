@@ -21,24 +21,20 @@
  */
 
 import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { dirname } from 'path';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
-import { openTrackerTransaction, findDeadReportLink } from './tracker-utils.mjs';
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { openTrackerTransaction, findDeadReportLink, trackerLinkDirsFor } from './tracker-utils.mjs';
+import { resolveColumns, parseTrackerRow, firstLinkTarget, soleMarkdownLink } from './tracker-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 const NO_REPORT = '—';
-
-// A Report cell that is exactly one markdown link, nothing else around it.
-const SINGLE_LINK_RE = /^\[[^\]]*\]\([^)]+\)$/;
 
 /**
  * Scan tracker lines and rewrite dead single-link Report cells to `—`.
  * Pure: touches no files. Exported so tests can call it directly.
  *
  * @param {string[]} lines - Tracker content split on '\n' (a CR stays on its line).
- * @param {string} trackerDir - Directory containing the tracker file.
+ * @param {string|string[]} trackerDir - Directory (or directories, see trackerLinkDirsFor) containing the tracker file.
  * @param {string} dataRoot - Data root.
  * @param {{stat?: Function}} [options] - Test seam for filesystem inspection.
  * @returns {{lines: string[], changed: object[], skipped: object[], inspectionErrors: object[], hasReportColumn: boolean}}
@@ -55,11 +51,11 @@ export function fixReportLinks(lines, trackerDir, dataRoot, options = {}) {
     const row = parseTrackerRow(lines[i], COLS);
     if (!row) continue; // header, separator, non-row, or a row missing cells
 
-    const firstLink = String(row.report).match(/\]\(([^)]+)\)/)?.[1] ?? null;
+    const firstLink = firstLinkTarget(row.report);
     // Any Report cell that contains a link but is not exactly one bare link is
     // ambiguous by contract. Surface it for manual review before inspecting the
     // first target: otherwise a live first link hides a dead later link.
-    if (firstLink !== null && !SINGLE_LINK_RE.test(row.report)) {
+    if (firstLink !== null && !soleMarkdownLink(row.report)) {
       skipped.push({
         num: row.num, company: row.company, role: row.role,
         link: firstLink, cell: row.report, line: i + 1,
@@ -142,7 +138,7 @@ if (!DRY_RUN) {
 }
 try {
 const content = trackerTransaction ? trackerTransaction.read() : readFileSync(APPS_FILE, 'utf-8');
-const result = fixReportLinks(content.split('\n'), dirname(APPS_FILE), CAREER_OPS);
+const result = fixReportLinks(content.split('\n'), trackerLinkDirsFor(CAREER_OPS), CAREER_OPS);
 
 if (!result.hasReportColumn) {
   console.log('The tracker has no Report column. Nothing to fix.');

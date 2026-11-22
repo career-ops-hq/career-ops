@@ -191,6 +191,36 @@ try {
     }
   }
 
+  for (const next of ['-h', '-v', '-o=notes.txt']) {
+    const opts = { valueFlags: ['--since', '-o'], requireOperand: true };
+    const r = runValidate(['--since', next], ['--since', '--help', '-h', '-v', '-o'], 'USAGE-TEXT', opts);
+    if (r.status === 1 && /--since requires a value/.test(r.stderr || '') && !/USAGE-TEXT|REACHED-END/.test(r.stdout || '')) {
+      pass(`requireOperand: recognized short flag ${next} cannot supply an operand`);
+    } else {
+      fail(`requireOperand short-flag case ${next} => status=${r.status} stdout=${r.stdout} stderr=${r.stderr}`);
+    }
+  }
+
+  {
+    const opts = { valueFlags: ['--since'], requireOperand: true };
+    const r = runValidate(['--since', '-h=1'], ['--since', '--help', '-h'], 'USAGE-TEXT', opts);
+    if (r.status === 1 && /unrecognized flag\(s\): -h=1/.test(r.stderr || '') && !/USAGE-TEXT|REACHED-END/.test(r.stdout || '')) {
+      pass('a malformed short boolean flag is still rejected before missing-operand validation');
+    } else {
+      fail(`short boolean equals case => status=${r.status} stdout=${r.stdout} stderr=${r.stderr}`);
+    }
+  }
+
+  for (const args of [['--since', '-notes.txt'], ['--since=-h']]) {
+    const opts = { valueFlags: ['--since'], requireOperand: true };
+    const r = runValidate(args, ['--since', '--help', '-h'], 'USAGE-TEXT', opts);
+    if (r.status === 0 && /REACHED-END/.test(r.stdout || '') && !/USAGE-TEXT/.test(r.stdout || '')) {
+      pass(`requireOperand: literal dash-prefixed value survives (${args.join(' ')})`);
+    } else {
+      fail(`literal dash-prefixed value case => status=${r.status} stdout=${r.stdout} stderr=${r.stderr}`);
+    }
+  }
+
   {
     // The guard that keeps this OPT-IN: without requireOperand the behaviour is
     // unchanged, so callers with richer validation of their own (scan.mjs tells
@@ -235,6 +265,24 @@ try {
       pass('requireOperand: --since=7 --help shows help, the equals form is complete');
     } else {
       fail(`requireOperand equals-then-help case => status=${r.status} stdout=${r.stdout} stderr=${r.stderr}`);
+    }
+  }
+
+  {
+    // An empty value in equals form is a missing operand (#5127).
+    const opts = { valueFlags: ['--since'], requireOperand: true };
+    const rEmpty = runValidate(['--since='], ['--since', '--help', '-h'], 'USAGE-TEXT', opts);
+    if (rEmpty.status === 1 && /--since requires a value/.test(rEmpty.stderr || '')) {
+      pass('requireOperand: --since= (empty value) is rejected as a missing operand (#5127)');
+    } else {
+      fail(`requireOperand empty equals case => status=${rEmpty.status} stdout=${rEmpty.stdout} stderr=${rEmpty.stderr}`);
+    }
+
+    const rValid = runValidate(['--since=2026-01-01'], ['--since', '--help', '-h'], 'USAGE-TEXT', opts);
+    if (rValid.status === 0 && /REACHED-END/.test(rValid.stdout || '')) {
+      pass('requireOperand: --since=2026-01-01 passes with non-empty operand (#5127)');
+    } else {
+      fail(`requireOperand valid equals case => status=${rValid.status} stdout=${rValid.stdout} stderr=${rValid.stderr}`);
     }
   }
 

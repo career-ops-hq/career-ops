@@ -64,9 +64,11 @@
 // in the payload (`external_id` / `original_id` were null throughout), so
 // `requisitionId` and `language` are left unset rather than guessed.
 
+import { closesAtIso } from '../lib/posting-close.mjs';
 import { fetchJsonWithRetry, BROWSER_LIKE_USER_AGENT, sleep } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
 import { resolveProfileKeywords } from './_profile-keywords.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const SEARCH_URL = 'https://jobsearch.api.jobtechdev.se/search';
 
@@ -155,14 +157,25 @@ function toEpochMs(value) {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
-/** `city` → `municipality` → `region` → country, whichever the ad carries. */
+/**
+ * `{place}, {region}, {country}` from whichever parts the ad carries, where
+ * place is `city`, else `municipality`. The region and country are kept, not
+ * just the most specific part: a bare town ("Västerås") matches no
+ * `location_filter` entry for Sweden, so with a non-empty `allow` list every
+ * ad from an unlisted town was dropped as out of region. Repeated parts
+ * (a city named like its municipality or region) are written once.
+ */
 function formatLocation(address) {
   if (!address || typeof address !== 'object') return '';
-  for (const field of ['city', 'municipality', 'region', 'country']) {
-    const value = address[field];
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  return '';
+  const text = (field) => (typeof address[field] === 'string' ? address[field].trim() : '');
+  const parts = [text('city') || text('municipality'), text('region'), text('country')].filter(Boolean);
+  const seen = new Set();
+  return parts.filter((part) => {
+    const key = part.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).join(', ');
 }
 
 /**
@@ -188,7 +201,7 @@ export function rawHitCount(json) {
  *   - one malformed row (no id / no headline)                   → skipped
  *
  * @param {any} json
- * @returns {{title: string, url: string, company: string, location: string, description?: string, postedAt?: number, externalId?: string}[]}
+ * @returns {{title: string, url: string, company: string, location: string, description?: string, postedAt?: number, closesAt?: string, externalId?: string}[]}
  */
 export function parsePlatsbankenResponse(json) {
   const rows = json && Array.isArray(json.hits) ? json.hits : null;
@@ -211,6 +224,7 @@ export function parsePlatsbankenResponse(json) {
     const description = row.description && typeof row.description === 'object' ? row.description : null;
     const descriptionText = description && typeof description.text === 'string' ? description.text.trim() : '';
     const postedAt = toEpochMs(row.publication_date);
+    const closesAt = closesAtIso(row.application_deadline);
     const externalId = row.id === null || row.id === undefined ? '' : String(row.id).trim();
 
     jobs.push({
@@ -220,6 +234,7 @@ export function parsePlatsbankenResponse(json) {
       location: formatLocation(row.workplace_address),
       ...(descriptionText ? { description: descriptionText } : {}),
       ...(postedAt === undefined ? {} : { postedAt }),
+      ...(closesAt ? { closesAt } : {}),
       ...(externalId ? { externalId } : {}),
     });
   }
@@ -289,6 +304,11 @@ export default {
     const byUrl = new Map();
     const errors = [];
     let succeeded = 0;
+    // Why the walk stopped short of a keyword's own end, if it did: the
+    // returned array says so (`jobs.truncated`) so scan.mjs logs the board
+    // `partial` instead of `reachable`. The first cause seen wins.
+    /** @type {'page-cap'|'source-cap'|'fetch-error'|null} */
+    let truncatedReason = null;
 
     for (const keyword of keywords) {
       let keywordFailed = false;
@@ -314,9 +334,16 @@ export default {
           if (page === 1) {
             keywordFailed = true;
             errors.push(`"${keyword}": ${(err && /** @type {Error} */ (err).message) || err}`);
+            // This keyword's share of the board was never read. When another
+            // keyword answered, the board is partial (#6820); when none did,
+            // the outage check below throws before this is used.
+            truncatedReason ??= 'fetch-error';
+          } else {
+            // A later page failing keeps the pages already collected: recall-first,
+            // the same trade arbeitsagentur.mjs and jobbankca.mjs make. The board
+            // is then only partly read.
+            truncatedReason ??= 'fetch-error';
           }
-          // A later page failing keeps the pages already collected: recall-first,
-          // the same trade arbeitsagentur.mjs and jobbankca.mjs make.
           break;
         }
 
@@ -334,13 +361,9 @@ export default {
           // ceiling, not on the source. Which ceiling decides which advice is
           // useful — raising max_pages cannot buy a page the source does not
           // serve.
-          warnTruncated(
-            keyword,
-            maxPages,
-            keywordRows,
-            maxPages >= MAX_PAGES_CAP ? 'source' : 'entry',
-            entryName,
-          );
+          const ceiling = maxPages >= MAX_PAGES_CAP ? 'source' : 'entry';
+          warnTruncated(keyword, maxPages, keywordRows, ceiling, entryName);
+          truncatedReason ??= ceiling === 'source' ? 'source-cap' : 'page-cap';
         }
       }
       if (!keywordFailed) succeeded++;
@@ -352,7 +375,15 @@ export default {
     if (succeeded === 0 && errors.length) {
       throw new Error(`platsbanken: all ${keywords.length} keyword request(s) failed — ${errors[0]}`);
     }
+    // Some keywords answered and some did not. The fetch-error marker below only
+    // reaches scan.mjs, so name the unread keywords for the person scanning too,
+    // as arbeitsagentur.mjs does.
+    if (errors.length) {
+      console.error(`⚠️  platsbanken: "${entryName}" returned partial results — ${errors.join('; ')}`);
+    }
 
-    return [...byUrl.values()];
+    const jobs = [...byUrl.values()];
+    if (truncatedReason) markTruncated(jobs, truncatedReason, { fetched: jobs.length });
+    return jobs;
   },
 };

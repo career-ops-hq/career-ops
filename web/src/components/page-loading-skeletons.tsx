@@ -1,3 +1,4 @@
+import { pageFrameWidthClass } from "@/components/page-frame";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export function FollowupsDueSectionSkeleton({ rows = 3 }: { rows?: number }) {
@@ -35,6 +36,7 @@ export function PipelineTableRowsSkeleton({ rows = 8, trackerColumn = false }: {
     <>
       {Array.from({ length: rows }).map((_, i) => (
         <tr key={i}>
+          {trackerColumn && <td className="w-8 px-3 py-3"><Skeleton className="size-4" /></td>}
           {trackerColumn && <td className="px-4 py-3"><Skeleton className="h-4 w-8" /></td>}
           <td className="px-4 py-3">
             <div className="flex items-center gap-2.5">
@@ -51,6 +53,7 @@ export function PipelineTableRowsSkeleton({ rows = 8, trackerColumn = false }: {
             </div>
           </td>
           <td className={`whitespace-nowrap px-4 py-3${trackerColumn ? " hidden lg:table-cell" : ""}`}><Skeleton className="h-4 w-20" /></td>
+          {trackerColumn && <td className="px-4 py-3"><Skeleton className="h-4 w-10" /></td>}
         </tr>
       ))}
     </>
@@ -59,7 +62,7 @@ export function PipelineTableRowsSkeleton({ rows = 8, trackerColumn = false }: {
 
 export function PipelinePageSkeleton() {
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 max-sm:pb-24" aria-label="Loading pipeline">
+    <div className={`mx-auto px-4 py-6 sm:px-6 sm:py-8 max-sm:pb-24 ${pageFrameWidthClass.wide}`} aria-label="Loading pipeline">
       <div className="flex items-end justify-between gap-4">
         <div>
           <Skeleton className="h-8 w-36" />
@@ -154,7 +157,7 @@ export function FollowupsPageSkeleton() {
 
 export function AnalyticsPageSkeleton() {
   return (
-    <div className="mx-auto max-w-4xl px-6 py-10" aria-label="Loading analytics">
+    <div className={`mx-auto px-4 py-6 sm:px-6 sm:py-8 max-sm:pb-24 ${pageFrameWidthClass.wide}`} aria-label="Loading analytics">
       <Skeleton className="h-8 w-32" />
       <Skeleton className="mt-2 h-4 w-64" />
 
@@ -181,6 +184,34 @@ export function AnalyticsPageSkeleton() {
           </div>
         </section>
       ))}
+    </div>
+  );
+}
+
+export function DocumentsPageSkeleton() {
+  return (
+    <div className={`mx-auto space-y-6 px-6 py-8 ${pageFrameWidthClass.wide}`}>
+      <div>
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="mt-2 h-4 w-64" />
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="flex flex-col rounded-2xl border border-border bg-surface/50 p-5">
+            <div className="flex items-center space-x-2">
+              <Skeleton className="h-8 w-8 rounded" />
+              <Skeleton className="h-5 w-40" />
+            </div>
+            <div className="mt-4 flex gap-2">
+              <Skeleton className="h-5 w-12 rounded-md" />
+              <Skeleton className="h-5 w-24 rounded-md" />
+            </div>
+            <div className="mt-6 pt-4 border-t border-border">
+              <Skeleton className="h-9 w-full rounded-md" />
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

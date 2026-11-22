@@ -4,6 +4,10 @@ import { useState } from "react";
 import { X, Ban, Clock, MapPin, ChevronDown, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { ATS_LABEL, ATS_SOURCES, cleanChips, type AtsSource, type ExploreFilters } from "@/lib/explore";
+import { commitsOnPaste, commitsOnType, splitChipText } from "@/lib/chip-text.mjs";
+
+import { CHINA_PRESET, CHINA_SOURCES, EMPLOYER_LABEL } from "@/lib/employer-preset.mjs";
+import type { EmployerSource } from "@/lib/explore";
 
 const RECENCY = [
   { label: "24h", days: 1 },
@@ -42,9 +46,9 @@ function KeywordField({
   // Split only on UNAMBIGUOUS item separators (comma / newline / semicolon) — never
   // bare spaces, which are legitimate inside multi-word entries ("AI platform",
   // "New York", "Costa Rica"). A space-only paste stays one chip on purpose (#1147).
+  // An entry in double quotes keeps its separators: "Portland, OR" is one chip (#7424).
   const commit = (text: string) => {
-    const parts = text.split(/[,\n;\t\r]+/);
-    const next = cleanChips([...values, ...parts]);
+    const next = cleanChips([...values, ...splitChipText(text)]);
     onChange(next);
     setDraft("");
   };
@@ -64,7 +68,7 @@ function KeywordField({
         value={draft}
         onChange={(e) => {
           const val = e.target.value;
-          if (/[,\n;\t\r]$/.test(val)) commit(val);
+          if (commitsOnType(val)) commit(val);
           else setDraft(val);
         }}
         onKeyDown={(e) => {
@@ -79,10 +83,10 @@ function KeywordField({
           e.preventDefault();
           const text = e.clipboardData.getData("text");
           const merged = draft + text;
-          // Only commit to chips when the paste contains item separators.
-          // A plain-text paste (e.g. pasting "-EMEA" after typing "Remote")
-          // stays in the input field so the user can keep editing.
-          if (/[,;\n\t\r]/.test(text)) commit(merged);
+          // Only commit to chips when the paste contains item separators
+          // outside quotes. A plain-text paste (e.g. pasting "-EMEA" after
+          // typing "Remote") stays in the input field so the user can keep editing.
+          if (commitsOnPaste(merged)) commit(merged);
           else setDraft(merged);
         }}
         onBlur={() => draft.trim() && commit(draft)}
@@ -105,11 +109,14 @@ export function FilterBuilder({
   filters,
   onChange,
   seededFrom = [],
+  disabled = false,
 }: {
   filters: ExploreFilters;
   onChange: (f: ExploreFilters) => void;
   seededFrom?: string[];
+  disabled?: boolean;
 }) {
+  const employer = filters.preset === CHINA_PRESET;
   const [advanced, setAdvanced] = useState(false);
   const set = (patch: Partial<ExploreFilters>) => onChange({ ...filters, ...patch });
   const toggleAts = (a: AtsSource) => {
@@ -119,21 +126,36 @@ export function FilterBuilder({
   };
 
   return (
-    <div className="space-y-4">
+    <fieldset disabled={disabled} className="space-y-4">
       <style>{STYLE}</style>
+      <fieldset>
+        <legend className="mb-1.5 text-[13px] font-medium">Discovery sources</legend>
+        <div className="flex flex-wrap gap-4 text-sm">
+          <label className="inline-flex items-center gap-2"><input type="radio" name="explore-preset" checked={!employer} onChange={() => set({ preset: undefined })} />Public ATS network</label>
+          <label className="inline-flex items-center gap-2"><input type="radio" name="explore-preset" checked={employer} onChange={() => set({ preset: CHINA_PRESET, employers: [...CHINA_SOURCES] as EmployerSource[] })} />China employer preset</label>
+        </div>
+      </fieldset>
+      {employer && <fieldset aria-describedby="employer-scope employer-selection">
+        <legend className="mb-2 text-[13px] font-medium">Employers</legend>
+        <div className="flex flex-wrap gap-4">{CHINA_SOURCES.map(id => <label key={id} className="inline-flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={filters.employers?.includes(id as EmployerSource) ?? false} onChange={e => set({ employers: e.target.checked ? [...(filters.employers ?? []), id as EmployerSource] : (filters.employers ?? []).filter(x => x !== id) })} />{EMPLOYER_LABEL[id as keyof typeof EMPLOYER_LABEL]}
+        </label>)}</div>
+        <p id="employer-selection" className="mt-2 text-xs text-muted">{filters.employers?.length ? "Only selected employers will be scanned." : "Select at least one employer to start a scan."}</p>
+        <p id="employer-scope" className="mt-2 text-xs text-muted">Employer selection does not guarantee mainland-China, technical or experienced-hire eligibility. Check the original JD. Role and location terms are optional; unknown locations may remain, and remote titles may match. Locations are term filters, not eligibility checks. No posting-date cutoff applies. Other ATS filters are inactive for this preset. Coverage is limited to 10 pages per employer; limits or source problems are reported as incomplete.</p>
+      </fieldset>}
 
       <div>
-        <Label hint={filters.positive.length === 0 ? "empty = every fresh posting" : undefined}>Roles to find</Label>
-        <KeywordField values={filters.positive} tone="inc" placeholder="AI platform, ML infrastructure, staff engineer…" onChange={(v) => set({ positive: v })} />
-        {seededFrom.length > 0 && filters.positive.length > 0 && (
+        <Label hint={filters.positive.length === 0 ? (employer ? "empty = all titles" : "empty = every fresh posting") : undefined}>Roles to find</Label>
+        <KeywordField ariaLabel="Roles to find" values={filters.positive} tone="inc" placeholder="AI platform, ML infrastructure, staff engineer…" onChange={(v) => set({ positive: v })} />
+        {!employer && seededFrom.length > 0 && filters.positive.length > 0 && (
           <p className="mt-1 text-[11px] text-faint">Seeded from your {seededFrom.join(" + ")} — edit freely.</p>
         )}
       </div>
 
-      <div>
+      {!employer && <div>
         <Label>Exclude</Label>
-        <KeywordField values={filters.negative} tone="exc" placeholder="manager, sales, contract…" onChange={(v) => set({ negative: v })} />
-      </div>
+        <KeywordField ariaLabel="Exclude" values={filters.negative} tone="exc" placeholder="manager, sales, contract…" onChange={(v) => set({ negative: v })} />
+      </div>}
 
       <div>
         <Label hint="matches any city, region, country, or Remote">
@@ -144,13 +166,13 @@ export function FilterBuilder({
         <KeywordField
           values={filters.allow}
           tone="inc"
-          placeholder="Toronto, New York, Remote…"
+          placeholder='Toronto, "Portland, OR", Remote…'
           ariaLabel="City or location"
           onChange={(v) => set({ allow: v })}
         />
       </div>
 
-      <div className="flex flex-wrap items-end gap-x-8 gap-y-4">
+      {!employer && <div className="flex flex-wrap items-end gap-x-8 gap-y-4">
         <div className="min-w-[18rem]">
           <Label hint="postings published in this window">
             <span className="inline-flex items-center gap-1.5">
@@ -165,7 +187,7 @@ export function FilterBuilder({
                 onClick={() => set({ sinceDays: r.days })}
                 className={cn(
                   "rounded-md px-2.5 py-1 text-xs font-medium transition-colors max-sm:min-h-[44px]",
-                  filters.sinceDays === r.days ? "bg-brand-soft text-brand" : "text-muted hover:text-foreground",
+                  filters.sinceDays === r.days ? "bg-brand-soft text-brand-text" : "text-muted hover:text-foreground",
                 )}
               >
                 {r.label}
@@ -186,7 +208,7 @@ export function FilterBuilder({
                   onClick={() => toggleAts(a)}
                   className={cn(
                     "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors max-sm:min-h-[44px]",
-                    on ? "border-brand/40 bg-brand-soft text-brand" : "border-border text-muted hover:text-foreground",
+                    on ? "border-brand/40 bg-brand-soft text-brand-text" : "border-border text-muted hover:text-foreground",
                   )}
                 >
                   {ATS_LABEL[a]}
@@ -195,9 +217,9 @@ export function FilterBuilder({
             })}
           </div>
         </div>
-      </div>
+      </div>}
 
-      <button
+      {!employer && <button
         type="button"
         onClick={() => setAdvanced((v) => !v)}
         className="inline-flex items-center gap-1.5 text-[12px] text-muted hover:text-foreground transition-colors max-sm:min-h-[44px]"
@@ -205,23 +227,23 @@ export function FilterBuilder({
         <SlidersHorizontal className="size-3.5" />
         More location controls &amp; scan depth
         <ChevronDown className={cn("size-3.5 transition-transform", advanced && "rotate-180")} />
-      </button>
+      </button>}
 
-      {advanced && (
+      {!employer && advanced && (
         <div className="space-y-3 rounded-xl border border-border bg-surface/30 p-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <Label hint="rescues a multi-location posting">Always include</Label>
-              <KeywordField values={filters.alwaysAllow} tone="inc" placeholder="Toronto…" onChange={(v) => set({ alwaysAllow: v })} />
+              <KeywordField ariaLabel="Always include" values={filters.alwaysAllow} tone="inc" placeholder="Toronto…" onChange={(v) => set({ alwaysAllow: v })} />
             </div>
             <div>
               <Label hint="unless Always include also matches">Exclude locations</Label>
-              <KeywordField values={filters.block} tone="exc" placeholder="India…" onChange={(v) => set({ block: v })} />
+              <KeywordField ariaLabel="Exclude locations" values={filters.block} tone="exc" placeholder="India…" onChange={(v) => set({ block: v })} />
             </div>
           </div>
           <div>
             <Label hint="hard reject — overrides Always include">Never include</Label>
-            <KeywordField values={filters.blockHard} tone="exc" placeholder="USA, Brazil…" onChange={(v) => set({ blockHard: v })} />
+            <KeywordField ariaLabel="Never include" values={filters.blockHard} tone="exc" placeholder="USA, Brazil…" onChange={(v) => set({ blockHard: v })} />
           </div>
           <div>
             <Label hint={`${filters.limitPerAts} companies / source`}>Scan depth</Label>
@@ -231,12 +253,13 @@ export function FilterBuilder({
               max={500}
               step={50}
               value={filters.limitPerAts}
+              aria-label="Scan depth"
               onChange={(e) => set({ limitPerAts: Number(e.target.value) })}
               className="w-full accent-brand"
             />
           </div>
         </div>
       )}
-    </div>
+    </fieldset>
   );
 }

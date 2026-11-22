@@ -25,9 +25,11 @@ import {
 } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { pass, fail, linkRepoPackage, ROOT, NODE } from './helpers.mjs';
+import { pass, fail, linkRepoPackage, ownRootEnv, ROOT, NODE, SANDBOX_DATA_ROOT } from './helpers.mjs';
 
-const outputRoot = join(ROOT, 'output');
+// Under the suite's own data root, not the checkout's output/: that directory
+// is the developer's, and an interrupted run left this fixture in it (#5113).
+const outputRoot = join(SANDBOX_DATA_ROOT, 'output');
 mkdirSync(outputRoot, { recursive: true });
 // realpathSync, not the raw mkdtemp path: Node resolves both `import.meta.url`
 // and a module's node_modules walk from a file's REALPATH, while
@@ -63,6 +65,12 @@ copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(sandbox, 'lib', 'is-m
 // lib/page-format.mjs owns the paper size generate-pdf.mjs imports at module
 // scope, so the copy needs it for the same reason.
 copyFileSync(join(ROOT, 'lib', 'page-format.mjs'), join(sandbox, 'lib', 'page-format.mjs'));
+copyFileSync(join(ROOT, 'lib', 'browser-launch.mjs'), join(sandbox, 'lib', 'browser-launch.mjs'));
+// pipeline-lock.mjs runs the shared lock protocol from lib/dir-lock.mjs (#5358).
+copyFileSync(join(ROOT, 'lib', 'dir-lock.mjs'), join(sandbox, 'lib', 'dir-lock.mjs'));
+copyFileSync(join(ROOT, 'lib', 'yaml-document.mjs'), join(sandbox, 'lib', 'yaml-document.mjs'));
+// generate-pdf.mjs dates its PDF index row with lib/local-today.mjs.
+copyFileSync(join(ROOT, 'lib', 'local-today.mjs'), join(sandbox, 'lib', 'local-today.mjs'));
 
 // theme-style.mjs and tracker-utils.mjs both `import * as yaml from 'js-yaml'`,
 // which resolves by walking up into the repo's node_modules -- from the
@@ -165,7 +173,7 @@ function run(args, { env, cwd } = {}) {
     cwd: cwd || sandbox,
     encoding: 'utf-8',
     timeout: 30_000,
-    env: env ? { ...process.env, ...env } : process.env,
+    env: ownRootEnv(env),
   });
   return { ...result, output: `${result.stdout || ''}${result.stderr || ''}` };
 }
@@ -289,7 +297,7 @@ await renderHtmlToPdf(${JSON.stringify(htmlDoc('Solo CV'))}, outputPath, {
     const result = spawnSync(NODE, [directRunner, join(sandbox, 'out', outputName), sandbox,
       ...(tokens === undefined ? [] : [JSON.stringify(tokens)])], {
       cwd: otherCwd, encoding: 'utf-8', timeout: 30_000,
-      env: { ...process.env, ...themedEnv },
+      env: ownRootEnv(themedEnv),
     });
     if (result.status === 0 && accepts(renderedHtml(outputName))) {
       pass(`imported PDF rendering honors ${label} theme selection from a different working directory`);
@@ -315,6 +323,81 @@ await renderHtmlToPdf(${JSON.stringify(htmlDoc('Solo CV'))}, outputPath, {
     pass('generate-pdf --batch exits 0 when every document renders');
   } else {
     fail(`all-success batch did not exit clean: status=${okBatch.status}\n${okBatch.output.trim()}`);
+  }
+
+  // --- Test 3b (#6325): cv.max_pages / cv.strict_pages reach batch CV entries,
+  // the path batch workers use, and leave a cover letter on the default budget.
+  // The stub renders every document at 2 pages.
+  const budgetProfile = join(sandbox, 'budget-profile.yml');
+  writeFileSync(budgetProfile, 'name: Test Candidate\ncv:\n  max_pages: 1\n  strict_pages: true\n', 'utf-8');
+  const budgetManifest = join(sandbox, 'budget-batch.json');
+  writeFileSync(budgetManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/budget-cv.pdf', kind: 'cv' },
+    { input: 'c.html', output: 'out/budget-cover.pdf', kind: 'cover' },
+  ]), 'utf-8');
+  const budgetBatch = run([`--batch=${budgetManifest}`], { env: { CAREER_OPS_PROFILE: budgetProfile } });
+  let budgetResults = null;
+  try { budgetResults = JSON.parse(readFileSync(`${budgetManifest}.results.json`, 'utf-8')); } catch { /* asserted below */ }
+  if (
+    budgetBatch.status === 1 &&
+    Array.isArray(budgetResults) && budgetResults.length === 2 &&
+    budgetResults[0].ok === false && /allowed maximum is 1 page/.test(budgetResults[0].error || '') &&
+    budgetResults[1].ok === true &&
+    budgetBatch.output.includes('1 ok, 1 failed')
+  ) {
+    pass('a batch CV entry takes the profile page budget and a cover letter keeps the default');
+  } else {
+    fail(`profile page budget did not reach the batch path as expected: status=${budgetBatch.status}\n${budgetBatch.output.trim()}`);
+  }
+
+  // --- Test 3b' (#6377): a warn-only overflow in a batch is still ok, but the
+  // entry's PDF is the sibling draft and nothing lands at its output path.
+  const warnProfile = join(sandbox, 'warn-profile.yml');
+  writeFileSync(warnProfile, 'name: Test Candidate\ncv:\n  max_pages: 1\n', 'utf-8');
+  const warnManifest = join(sandbox, 'warn-batch.json');
+  writeFileSync(warnManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/warn-cv.pdf', kind: 'cv' },
+  ]), 'utf-8');
+  const warnBatch = run([`--batch=${warnManifest}`], { env: { CAREER_OPS_PROFILE: warnProfile } });
+  let warnResults = null;
+  try { warnResults = JSON.parse(readFileSync(`${warnManifest}.results.json`, 'utf-8')); } catch { /* asserted below */ }
+  const warnDraft = join(sandbox, 'out', 'warn-cv.overflow.pdf');
+  if (
+    warnBatch.status === 0 &&
+    Array.isArray(warnResults) && warnResults.length === 1 &&
+    warnResults[0].ok === true &&
+    warnResults[0].draftPath === warnDraft &&
+    !existsSync(join(sandbox, 'out', 'warn-cv.pdf')) &&
+    existsSync(warnDraft) &&
+    warnBatch.output.includes('1 ok, 0 failed')
+  ) {
+    pass('a batch CV entry over a warn-only budget is ok with its PDF at the draft, never at the output path');
+  } else {
+    fail(`a warn-only batch overflow did not stay off the output path: status=${warnBatch.status}\n${JSON.stringify(warnResults)}\n${warnBatch.output.trim()}`);
+  }
+
+  // --- Test 3c (#6325): an unusable profile budget fails only the CV entries;
+  // the cover letter in the same batch, which never reads cv.*, still renders.
+  const badBudgetProfile = join(sandbox, 'bad-budget-profile.yml');
+  writeFileSync(badBudgetProfile, 'name: Test Candidate\ncv:\n  max_pages: none\n', 'utf-8');
+  const badBudgetManifest = join(sandbox, 'bad-budget-batch.json');
+  writeFileSync(badBudgetManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/bad-budget-cv.pdf', kind: 'cv' },
+    { input: 'c.html', output: 'out/bad-budget-cover.pdf', kind: 'cover' },
+  ]), 'utf-8');
+  const badBudgetBatch = run([`--batch=${badBudgetManifest}`], { env: { CAREER_OPS_PROFILE: badBudgetProfile } });
+  let badBudgetResults = null;
+  try { badBudgetResults = JSON.parse(readFileSync(`${badBudgetManifest}.results.json`, 'utf-8')); } catch { /* asserted below */ }
+  if (
+    badBudgetBatch.status === 1 &&
+    Array.isArray(badBudgetResults) && badBudgetResults.length === 2 &&
+    badBudgetResults[0].ok === false && /Invalid page budget in config\/profile\.yml: cv\.max_pages "none"/.test(badBudgetResults[0].error || '') &&
+    !existsSync(join(sandbox, 'out', 'bad-budget-cv.pdf')) &&
+    badBudgetResults[1].ok === true
+  ) {
+    pass('an unusable profile page budget fails the batch CV entry and leaves the cover letter');
+  } else {
+    fail(`an invalid profile page budget was not scoped to batch CV entries: status=${badBudgetBatch.status}\n${badBudgetBatch.output.trim()}`);
   }
 
   // --- Test 4: a shared-browser launch failure yields a complete failed
@@ -472,6 +555,38 @@ await renderHtmlToPdf(${JSON.stringify(htmlDoc('Solo CV'))}, outputPath, {
   } else {
     fail(`--allow-nonchronological did not reach the batch path: status=${allowedOrder.status}\n${allowedOrder.output.trim()}`);
   }
+
+  // --- Test 10: locked sections are enforced in batch mode too. A CV modifying
+  // a locked section fails its own entry while valid entries still render. ---
+  mkdirSync(join(sandbox, 'config'), { recursive: true });
+  writeFileSync(join(sandbox, 'config', 'profile.yml'), 'cv:\n  locked_sections:\n    - Education\n', 'utf-8');
+  writeFileSync(join(sandbox, 'cv.md'), '# Education\n* Bachelor of Science\n\n# Work Experience\n* Software Engineer\n', 'utf-8');
+  writeFileSync(join(sandbox, 'locked-valid.html'), htmlDoc(
+    '<h2 class="section-title">Education</h2><p>Bachelor of Science</p><h2 class="section-title">Work Experience</h2><p>Software Engineer</p>',
+  ), 'utf-8');
+  writeFileSync(join(sandbox, 'locked-modified.html'), htmlDoc(
+    '<h2 class="section-title">Education</h2><p>B.S. altered</p><h2 class="section-title">Work Experience</h2><p>Software Engineer</p>',
+  ), 'utf-8');
+  const lockedBatchManifest = join(sandbox, 'locked-batch.json');
+  writeFileSync(lockedBatchManifest, JSON.stringify([
+    { input: 'locked-valid.html', output: 'out/locked-valid.pdf' },
+    { input: 'locked-modified.html', output: 'out/locked-modified.pdf' },
+  ]), 'utf-8');
+  const lockedBatchRes = run([`--batch=${lockedBatchManifest}`, '--skip-fact-check']);
+  const modifiedLeftNoPdf = !existsSync(join(sandbox, 'out', 'locked-modified.pdf'));
+  if (
+    lockedBatchRes.status === 1 &&
+    modifiedLeftNoPdf &&
+    existsSync(join(sandbox, 'out', 'locked-valid.pdf')) &&
+    /Locked section 'education' was modified during tailoring/.test(lockedBatchRes.output) &&
+    lockedBatchRes.output.includes('1 ok, 1 failed')
+  ) {
+    pass('generate-pdf --batch fails an entry whose locked section was modified and renders the rest');
+  } else {
+    fail(`batch skipped the locked-sections guard: status=${lockedBatchRes.status} pdfWritten=${!modifiedLeftNoPdf}\n${lockedBatchRes.output.trim()}`);
+  }
+  rmSync(join(sandbox, 'config', 'profile.yml'), { force: true });
+  rmSync(join(sandbox, 'cv.md'), { force: true });
 
   // ── A global flag the batch path drops must be refused, not ignored ────────
   //

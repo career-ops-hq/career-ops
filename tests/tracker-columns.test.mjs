@@ -141,7 +141,10 @@ async function merge(sb, flags = {}) {
     additionsDir: sb.additions,
     batchStateFile: sb.batchState,
     lockDir: sb.lock,
-    flags,
+    // This suite exercises column-mapping behaviour using headerless fixtures;
+    // every merge here opts into that legacy path. Callers can pass
+    // allowHeaderless: false to exercise the new refusal path.
+    flags: { allowHeaderless: true, ...flags },
     logger,
   });
   return { code, stdout: text() };
@@ -252,7 +255,7 @@ describe('merge-tracker CLI: 10-column tracker', () => {
   let sb, res, cells;
   before(async () => {
     sb = makeSandbox(HEADER_10, { '2-globex.tsv': TSV_WITH_LOCATION });
-    res = await runScript('merge-tracker.mjs', [], sb);
+    res = await runScript('merge-tracker.mjs', ['--allow-headerless'], sb);
     // cells: ['', num, date, company, role, location, score, status, pdf, report, notes, '']
     cells = cellsOf(dataRows(sb.tracker).find(l => l.includes('Globex')));
   });
@@ -1174,41 +1177,38 @@ describe('headed additions: what optional-cell leniency must not accept', () => 
   });
 });
 
-// ── the web's run prompt is a TSV writer too (#3517) ───────────────────────
-// web/src/lib/run-prompts.mjs dictates the addition row to the agent, so the
-// prompt is an emitter of this format even though it emits no bytes itself. A
-// header it spells differently than tracker-aliases.json knows would not go
-// red anywhere: merge-tracker would read the row as headerless and fall back to
-// content sniffing — the exact path that cannot order a `—` / `—` row. Assert
-// the prompt's own example lines against the real ingest, not against a copy of
-// the labels.
-describe('web run prompt: TSV header matches the ingest contract', WEB, () => {
-  let tabLines, header;
+// The evaluate prompt no longer embeds a tracker row. The agent does not
+// write the addition. report-persist.trackerTsvLine is the web emitter, and
+// persist-evaluation-report.mjs writes those same bytes. A header spelled
+// differently than tracker-aliases.json knows would not go red anywhere:
+// merge-tracker would read the row as headerless and fall back to content
+// sniffing, the path that cannot order two dash sentinels. Assert the
+// emitter's own lines against the real ingest.
+describe('web persist emitter: TSV header matches the ingest contract', WEB, () => {
+  let header, dataLine;
   before(async () => {
-    const { buildPrompt } = await import('../web/src/lib/run-prompts.mjs');
-    const prompt = buildPrompt({ kind: 'evaluate', input: 'https://example.com/jobs/2', memory: '', today: '2026-02-02' });
-    tabLines = prompt.split('\n').filter(l => l.includes('\t'));
-    assert.equal(tabLines.length, 2, 'web run prompt shows a header line and one data line');
-    header = tabLines[0].trim().split('\t');
+    const { trackerTsvLine } = await import('../web/src/lib/report-persist.mjs');
+    const tsv = trackerTsvLine({
+      num: '2', today: '2026-02-02', company: 'Globex', role: 'Manager',
+      score: '4.5/5', reportFile: '2-globex-2026-02-02.md',
+      notes: 'row as the web persist emitter writes it', via: null,
+      url: 'https://example.com/jobs/2',
+    });
+    const lines = tsv.replace(/\n$/, '').split('\n');
+    assert.equal(lines.length, 2, 'web persist emitter writes a header line and one data line');
+    header = lines[0].split('\t');
+    dataLine = lines[1];
   });
 
-  test('web run prompt: every header label resolves through tracker-aliases.json', () => {
+  test('web persist emitter: every header label resolves through tracker-aliases.json', () => {
     const { missing, duplicates, unknown } = resolveTsvColumns(header);
     assert.deepEqual({ missing, duplicates, unknown }, { missing: [], duplicates: [], unknown: [] });
   });
-  // Fill the prompt's own template with real values, by NAME, and merge it.
-  test('web run prompt: the row it dictates merges into the right columns', async () => {
-    const VALUES = {
-      num: '2', date: '2026-02-02', company: 'Globex', role: 'Manager',
-      status: 'Applied', score: '4.5/5', pdf: '❌', report: '—',
-      notes: 'row as the web dictates it', url: 'https://example.com/jobs/2',
-    };
-    const dataWidth = tabLines[1].trim().split('\t').length;
-    assert.equal(dataWidth, header.length, `header labels ${header.length} columns but the data row shows ${dataWidth}`);
-    const row = header.map(h => VALUES[h.trim().toLowerCase()] ?? '').join('\t');
-    const res = await mergeOne(`${header.join('\t')}\n${row}\n`);
+  test('web persist emitter: the row it writes merges into the right columns', async () => {
+    assert.equal(dataLine.split('\t').length, header.length, `header labels ${header.length} columns but the data row shows ${dataLine.split('\t').length}`);
+    const res = await mergeOne(`${header.join('\t')}\n${dataLine}\n`);
     assert.equal(res.merge.code, 0, res.merge.stdout);
-    assert.deepEqual([res.cells[5], res.cells[6]], ['4.5/5', 'Applied'], res.merge.stdout);
+    assert.deepEqual([res.cells[3], res.cells[4], res.cells[5], res.cells[6]], ['Globex', 'Manager', '4.5/5', 'Evaluated'], res.merge.stdout);
   });
 });
 

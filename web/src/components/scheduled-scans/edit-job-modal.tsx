@@ -5,8 +5,9 @@ import { Edit3, Loader2, X } from "lucide-react";
 import type { ScheduledJob, ScanEngine } from "@/lib/scheduled-jobs";
 import { DEFAULT_FILTERS, type ExploreFilters } from "@/lib/explore";
 import { FilterBuilder } from "@/components/explore/filter-builder";
-import { ScheduledOverlay } from "./scheduled-overlay";
+import { Modal } from "@/components/ui/modal";
 import { cadenceMinimum, cadenceValueForUnit, updateScheduledJobRequest } from "@/lib/scheduled-job-client.mjs";
+import { scanEngineLabel } from "@/lib/schedule-label.mjs";
 
 export function EditJobModal({
   job,
@@ -75,10 +76,10 @@ export function EditJobModal({
   };
 
   return (
-    <ScheduledOverlay isOpen={isOpen} onClose={onClose} titleId="edit-scheduled-scan-title" initialFocusRef={nameRef} panelClassName="max-w-2xl">
+    <Modal isOpen={isOpen} onClose={onClose} labelledBy="edit-scheduled-scan-title" initialFocusRef={nameRef} panelClassName="max-w-2xl">
         <div className="flex items-center justify-between border-b border-border pb-4">
           <div className="flex items-center gap-2.5">
-            <div className="grid size-9 place-items-center rounded-xl bg-brand-soft text-brand">
+            <div className="grid size-9 place-items-center rounded-xl bg-brand-soft text-brand-text">
               <Edit3 className="size-5" />
             </div>
             <div>
@@ -114,14 +115,14 @@ export function EditJobModal({
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-[13px] font-medium text-foreground">Scan Engine</label>
+              <label className="mb-1 block text-[13px] font-medium text-foreground">Where to check</label>
               <select
                 value={engine}
                 onChange={(e) => setEngine(e.target.value as ScanEngine)}
                 className="w-full rounded-xl border border-border bg-surface-hover/60 px-3.5 py-2 text-sm text-foreground outline-none focus:border-brand/60"
               >
-                <option value="full">Full ATS Dataset Sweep</option>
-                <option value="portals">Zero-Token Portals.yml</option>
+                <option value="full">{scanEngineLabel("full")}</option>
+                <option value="portals">{scanEngineLabel("portals")}</option>
               </select>
             </div>
 
@@ -176,6 +177,6 @@ export function EditJobModal({
             </button>
           </div>
         </form>
-    </ScheduledOverlay>
+    </Modal>
   );
 }

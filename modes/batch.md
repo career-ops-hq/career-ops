@@ -29,7 +29,7 @@ Read `spend_tier` from `config/profile.yml` (see `modes/_shared.md` -- Spend Tie
 - **`economy` tier:** No gate. The tier is already the cheapest available -- running a pre-screen on top of it adds latency without saving spend. Every job goes straight to the full evaluation.
 - This gate only applies to batch/pipeline processing. It never applies to a single interactive evaluation (the user already decided the JD is worth a look by pasting/sharing it).
 
-**Discard log (auditable):** Every posting the gate filters out MUST be logged with a one-line reason so pre-filtering is never a silent black box. Append one line to `batch/logs/discard.log` (create the file/dir if absent) in the format `{ISO8601 timestamp}\t{job id}\t{url}\t{reason}`, in addition to the `skipped` row already written to `batch-state.tsv`. This log is the visible, auditable record of what the gate discarded and why -- review it periodically to tune the North Star archetypes if the gate is too aggressive or too lax.
+**Discard log (auditable):** Every posting filtered out MUST be logged with a one-line reason so pre-filtering is never a silent black box. One line goes to `batch/logs/discard.log` (file/dir created if absent) in the format `{ISO8601 timestamp}\t{job id}\t{url}\t{reason}`, in addition to the `skipped` row already written to `batch-state.tsv`. `batch-runner.sh` writes it itself (`log_discard`) for every `skipped` state: a dealbreaker hit (`dealbreaker: "{rule}"`) and a score under `--min-score` (`below-min-score`; the score is in the state row). A JD that could not be fetched is not a filter decision and is not logged here. A conductor that applies the pre-screen gate above itself appends the same line. This log is the visible, auditable record of what the gate discarded and why -- review it periodically to tune the North Star archetypes if the gate is too aggressive or too lax. `node discard-analytics.mjs --log batch/logs/discard.log` summarizes it: counts by reason, domain and day, plus the most-discarded URLs with their latest reason, to check by hand.
 
 ## Files
 
@@ -100,12 +100,13 @@ batch/batch-runner.sh [OPTIONS]
 ```
 
 Options:
+- `--cli NAME` — worker CLI: `claude` (default), `opencode`, `gemini`, `qwen` or `grok`. Only `claude` runs jobs in parallel. Claude and `grok` retry a rate limit. The others run one job at a time, one attempt each (a later run still retries a failed job, up to `--max-retries`)
 - `--dry-run` — list pending jobs without executing
 - `--retry-failed` — retry only failed jobs
-- `--resume-paused` — resume jobs paused after a Claude session/rate limit
+- `--resume-paused` — resume jobs paused after a session or rate limit
 - `--start-from N` — start from ID N
 - `--limit N` — max number of jobs to process in this run (positive integer; `0` is rejected, omit the flag for no limit)
-- `--parallel N` — N workers in parallel
+- `--parallel N` — N workers in parallel (`claude` only; other CLIs always use one worker)
 - `--max-retries N` — attempts per job (default: 2)
 - `--rate-limit-sleep N` — seconds to wait before retrying a transient rate-limited worker (default: 300; use 0 to pause the batch immediately)
 

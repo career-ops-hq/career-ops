@@ -4,7 +4,7 @@
 
 ## İş Akışı
 
-1. **Oku** `data/pipeline.md` → "Bekleyenler" bölümündeki `- [ ]` satırlarını bul
+1. **Oku** `data/pipeline.md` (`grep -n -m 20 '^- \[ \] ' data/pipeline.md` ile ara, her gruptan sonra yalnızca bu çalıştırmada Bekleyenler içinde bıraktığın satırlar kalana kadar aramayı tekrarla, dosyanın tamamını okuma) → "Bekleyenler" bölümündeki `- [ ]` satırlarını bul
 2. **Her bekleyen URL için:**
    a. Sıradaki `REPORT_NUM` değerini atomik olarak rezerve etmek üzere `node reserve-report-num.mjs` komutunu çalıştır (ve rapor yazıldıktan sonra `node reserve-report-num.mjs --release <num>` çalıştırarak sentineli serbest bırak)
    b. **İlan içeriğini çek:** Playwright (browser_navigate + browser_snapshot) → WebFetch → WebSearch. **Playwright kullanılmadıysa** (toplu/headless mod veya yedek yola düşüldüyse) rapor başlığına `**Doğrulama:** doğrulanmamış (toplu mod)` etiketini ekle.

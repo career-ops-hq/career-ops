@@ -28,7 +28,7 @@ const MAX_JOBS = 1000; // cap postings taken from one widget page
 
 /** @param {string} s */
 function clean(s) {
-  return decodeEntities(s.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(s.replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 }
 
 /** Resolve the widget URL: explicit /widgets/jobs URLs pass through, any other
@@ -42,6 +42,10 @@ export function resolveWidgetUrl(entry) {
     return null;
   }
   if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+  // An `http:` entry is upgraded, not fetched in the clear: this page is what the
+  // whole board is read from, and every sibling adapter treats its board URL as
+  // https. The origin we build the widget and posting URLs from follows.
+  u.protocol = 'https:';
   const host = u.host.toLowerCase();
   if (host !== 'softgarden.io' && !host.endsWith('.softgarden.io')) return null;
   if (/\/widgets\/jobs\/?$/.test(u.pathname)) return `${u.origin}${u.pathname.replace(/\/$/, '')}`;
@@ -72,7 +76,7 @@ export function parseSoftgardenDate(raw) {
   if (y < 100) y += 2000;
   if (month < 1 || month > 12 || day < 1 || day > 31) return undefined;
   const ms = Date.UTC(y, month - 1, day);
-  return Number.isFinite(ms) ? ms : undefined;
+  return new Date(ms).getUTCDate() === day ? ms : undefined;
 }
 
 /**
@@ -94,7 +98,13 @@ export function parseWidget(html, widgetUrl) {
     let url;
     try {
       // hrefs are relative to the /{lang}/widgets/ path ("../../job/…").
-      url = new URL(decodeEntities(linkM[1]), widgetUrl).href;
+      const resolved = new URL(decodeEntities(linkM[1]), widgetUrl);
+      // The href comes from the page, and resolving it keeps an absolute scheme
+      // rather than prefixing the widget origin: `javascript:alert(1)//job/42`
+      // satisfies the /job/ match above and would become the posting URL. Only
+      // http(s) may reach the tracker.
+      if (resolved.protocol !== 'https:' && resolved.protocol !== 'http:') continue;
+      url = resolved.href;
     } catch {
       continue;
     }

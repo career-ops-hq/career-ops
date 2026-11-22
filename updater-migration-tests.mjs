@@ -10,7 +10,12 @@
 import { readFileSync, existsSync, rmSync, realpathSync } from 'fs';
 import { execFileSync, spawnSync } from 'child_process';
 import { dirname, join, sep } from 'path';
-import { createReexecMarker, consumeReexecMarker } from './update-system.mjs';
+import {
+  MANIFEST_USER_PATH_OVERLAPS,
+  createReexecMarker,
+  consumeReexecMarker,
+  isSafeManifestPath,
+} from './update-system.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -113,8 +118,18 @@ try {
   fail(`migration fixture git setup: ${error.message}`);
 }
 
-function extractArray(name) {
-  const match = source.match(new RegExp(`const\\s+${name}\\s*=\\s*\\[([\\s\\S]*?)\\];`));
+// The system list moved to lib/update-manifest.mjs (#5554); the user and
+// bootstrap lists are still in update-system.mjs.
+let manifestSource = '';
+try {
+  manifestSource = readFileSync('lib/update-manifest.mjs', 'utf-8');
+  pass('lib/update-manifest.mjs is readable');
+} catch (error) {
+  fail(`lib/update-manifest.mjs is readable: ${error.message}`);
+}
+
+function extractArray(name, from = source) {
+  const match = from.match(new RegExp(`const\\s+${name}\\s*=\\s*\\[([\\s\\S]*?)\\];`));
   if (!match) {
     fail(`${name} array exists`);
     return [];
@@ -123,7 +138,7 @@ function extractArray(name) {
   return Array.from(match[1].matchAll(/['"]([^'"]+)['"]/g), (entry) => entry[1]);
 }
 
-const systemPaths = extractArray('SYSTEM_PATHS');
+const systemPaths = extractArray('SYSTEM_PATHS', manifestSource);
 const userPaths = extractArray('USER_PATHS');
 const bootstrapPaths = extractArray('BOOTSTRAP_PATHS');
 
@@ -399,8 +414,20 @@ const twoPassManifestChecks = [
     pattern: /resolveReexecCheckout\(targetCommit,\s*'update-system\.mjs'\)/,
   },
   {
-    name: 'apply checks out the resolved re-exec files from the pinned target (#1245, #3052)',
-    pattern: /git\('checkout',\s*targetCommit,\s*'--',\s*\.\.\.reexecFiles\)/,
+    name: 'apply checks out the resolved re-exec files literally from the pinned target (#1245, #3052)',
+    pattern: /git\('--literal-pathspecs',\s*'checkout',\s*targetCommit,\s*'--',\s*\.\.\.reexecFiles\)/,
+  },
+  {
+    name: 'apply validates the canonical form of the self-bootstrap import closure',
+    pattern: /const reexecFiles = assertCanonicalManifestPaths\([\s\S]{0,240}?resolveReexecCheckout\(targetCommit,\s*'update-system\.mjs'\)[\s\S]{0,240}?'Target updater import closure'/,
+  },
+  {
+    name: 'apply gives the self-bootstrap import closure the same user-layer decision as the manifest',
+    pattern: /const \{ refused: refusedReexecFiles \} = rejectUserLayerPaths\(\s*reexecFiles,\s*manifestUserPaths,\s*manifestProbes\(/,
+  },
+  {
+    name: 'apply rejects self-bootstrap files outside the validated merged manifest',
+    pattern: /uncoveredReexecFiles = reexecFiles\.filter\([\s\S]{0,200}?pathMatchesManifest\(file, path\)[\s\S]{0,240}?uncoveredReexecFiles\.length > 0/,
   },
   {
     name: 're-exec fallback still covers the skill-entrypoints import (#1245)',
@@ -412,15 +439,19 @@ const twoPassManifestChecks = [
   },
   {
     name: 'apply carries the original backup branch across re-exec',
-    pattern: /CAREER_OPS_UPDATE_BACKUP_BRANCH/,
+    pattern: /CAREER_OPS_UPDATE_BACKUP_BRANCH:\s*backupBranch/,
+  },
+  {
+    name: 'authenticated re-exec consumes the inherited backup branch instead of generating another',
+    pattern: /const inheritedBackupBranch = process\.env\.CAREER_OPS_UPDATE_BACKUP_BRANCH[^;]*;[\s\S]{0,160}?const backupBranch = isReexec \? inheritedBackupBranch : updateBackupBranchName\(local\)/,
   },
   {
     name: 'apply reads the target updater manifest from the pinned target (#3052)',
     pattern: /git\('show',\s*`\$\{targetCommit\}:update-system\.mjs`\)/,
   },
   {
-    name: 'apply extracts SYSTEM_PATHS from the target updater',
-    pattern: /extractArrayFromSource\([^,]+,\s*'SYSTEM_PATHS'\)/,
+    name: 'apply reads SYSTEM_PATHS from the pinned target, module first (#5554)',
+    pattern: /manifestSystemPathsAt\(targetCommit\)/,
   },
   {
     name: 'apply merges local and target system manifests',
@@ -479,11 +510,26 @@ const twoPassManifestChecks = [
   },
   {
     name: 'apply commit is scoped to expanded update files, not directories (#3504)',
-    pattern: /git\('commit',\s*'-m',[^)]+'--',\s*\.\.\.expandedPathsToStage\)/,
+    // Through commitPathspecs, which keeps the list off argv (#5103).
+    pattern: /commitPathspecs\(`chore: auto-update system files to v\$\{remote\}`,\s*expandedPathsToStage\)/,
   },
   {
-    name: 'rollback commit is scoped to expanded backup files, not directories (#3504)',
-    pattern: /git\('commit',\s*'-m',[^)]+'--',\s*\.\.\.expandedRollbackPaths\)/,
+    name: 'rollback expands backup and target manifests to safe concrete tree files',
+    pattern: /const backupFiles = manifestTreeFiles\(restoreCandidates, latest,[\s\S]{0,1400}?targetFiles = manifestTreeFiles\(safeTargetPaths, targetRef/,
+  },
+  {
+    name: 'rollback restores and stages only concrete backup files',
+    pattern: /if \(restored\.length > 0\) addPaths\(restored\)/,
+  },
+  {
+    name: 'rollback removes only concrete target files absent from the complete backup tree',
+    pattern: /const backupTreeFiles = targetPairAvailable[\s\S]{0,800}?gitRaw\([^)]*'ls-tree'[^)]*latest[\s\S]{0,3000}?const conflict = backupTreeConflict\(file\);[\s\S]{0,300}?removalCandidates\.push\(file\)/,
+  },
+  {
+    name: 'rollback commit is scoped to concrete restore/removal files under literal pathspecs (#3504)',
+    // An index commit only when nothing unrelated is staged; otherwise scoped
+    // to the staged rollback paths, read from a file. Never a path list on argv.
+    pattern: /const scoped = stagedPathsOutside\(concreteRollbackPaths\)\.length > 0;[\s\S]{0,40}if \(!scoped\)\s*\{\s*git\('commit',\s*'-m',\s*message\);\s*\}\s*else\s*\{\s*commitPathspecs\(message,\s*stagedRollbackPaths,\s*\{\s*literal:\s*true\s*\}\)/,
   },
   {
     name: 'apply captures uncommitted work via git stash create before branching (#915)',
@@ -497,8 +543,9 @@ const twoPassManifestChecks = [
     // The TARGET manifest is what must be verified — verifying the local one
     // would re-introduce #1998, since a client whose manifest predates the
     // target's is exactly the case this check exists for. Which entries are
-    // subtracted before the comparison is pinned separately below.
-    pattern: /missingFromTargetManifest\(\s*remoteSystemPaths/,
+    // subtracted before the comparison is pinned separately below; the tree it
+    // is compared against must be the pinned target, not FETCH_HEAD.
+    pattern: /missingFromTargetManifest\(\s*remoteSystemPaths[\s\S]{0,160}?,\s*targetCommit,?\s*\)/,
   },
   {
     name: 'an incomplete apply exits non-zero instead of reporting success (#1998)',
@@ -524,10 +571,11 @@ const twoPassManifestChecks = [
     // earlier self-bootstrap overwrite (#3207); pin the normal call site here.
     pattern: /backupSystemFiles\(atRisk\)/,
   },
-  {
-    name: 'overwriting a locally edited system file requires --force (#2337)',
-    pattern: /updateForce[\s\S]{0,400}?preservedPaths\.push\(\.\.\.atRisk\)/,
-  },
+  // "Overwriting a locally edited system file requires --force" (#2337) is not
+  // pinned here. A regex over the source matched the inverted branch just as
+  // well; `upgrade-tests.mjs --local-edit` runs a real apply, with and without
+  // --force, against a committed local edit, and `--local-edit-canary` proves
+  // that leg goes red on the inverted branch (#5759).
   {
     // Excluded paths must stay out of the scoped commit too, or the
     // "auto-update" commit records the very edit the user kept (#2337).
@@ -553,8 +601,10 @@ const twoPassManifestChecks = [
     // thrown probe, a timeout or a permission error must rethrow, not report
     // success (#1998). The catch must NOT set `absentUpstream` any other way:
     // an inline `catch { absentUpstream = true }` is exactly the regression.
+    // The rethrow sits in a block because the paths already checked out are
+    // restored first; the branch must still end in `throw err`.
     name: 'the checkout catch derives absentUpstream only from probeAbsentUpstream (#1998, #3824)',
-    pattern: /const absentUpstream = probeAbsentUpstream\(spec, targetCommit\);\s*if \(!checkoutErrorIsBenign\(err, \{ absentUpstream, preservedState \}\)\) throw err;/,
+    pattern: /const absentUpstream = probeAbsentUpstream\(spec, targetCommit\);\s*if \(!checkoutErrorIsBenign\(err, \{ absentUpstream, preservedState \}\)\) \{[\s\S]{0,1200}?\n\s*throw err;\s*\n\s*\}/,
   },
   {
     name: 'the checkout catch never assigns absentUpstream = true directly (#1998 regression)',
@@ -581,8 +631,10 @@ const twoPassManifestChecks = [
     pattern: /if \(protectedPaths\.has\(file\)\) continue;/,
   },
   {
-    name: 'revertPaths receives the pre-update snapshot at its call sites (#2015)',
-    pattern: /revertPaths\(updated, initialStatusPaths\)/,
+    // The preserved files ride along: a bare `git checkout HEAD -- <dir>` would
+    // reset an uncommitted edit the update had kept out of its checkout (#2337).
+    name: 'revertPaths receives the pre-update snapshot and the preserved files at its call sites (#2015)',
+    pattern: /revertPaths\(updated, initialStatusPaths, \{ exclude: preservedPaths \}\)/,
   },
   {
     // -z output is NUL-delimited/unquoted, so a path with spaces or newlines is
@@ -605,6 +657,106 @@ for (const check of twoPassManifestChecks) {
   else fail(check.name);
 }
 
+function appearsInOrder(text, tokens) {
+  let cursor = 0;
+  for (const token of tokens) {
+    const index = text.indexOf(token, cursor);
+    if (index === -1) return false;
+    cursor = index + token.length;
+  }
+  return true;
+}
+
+const applyStart = source.indexOf('async function apply()');
+const rollbackMarker = source.indexOf('// ── ROLLBACK', applyStart);
+const rollbackStart = source.indexOf('function rollback()', rollbackMarker);
+const dismissMarker = source.indexOf('// ── DISMISS', rollbackStart);
+const applySectionValid = applyStart >= 0 && rollbackMarker > applyStart;
+const rollbackSectionValid = applySectionValid
+  && rollbackStart > rollbackMarker
+  && dismissMarker > rollbackStart;
+
+if (applySectionValid) pass('apply source section boundaries are present');
+else fail('apply source section boundaries are present');
+
+if (rollbackSectionValid) pass('rollback source section boundaries are present');
+else fail('rollback source section boundaries are present');
+
+const applySource = applySectionValid
+  ? source.slice(applyStart, rollbackMarker)
+  : '';
+const rollbackSource = rollbackSectionValid
+  ? source.slice(rollbackStart, dismissMarker)
+  : '';
+
+// The pair must name the commit apply() pinned (#3052), and be written as soon
+// as that commit is known: nothing else may touch git between the pin and it.
+const fetchCall = "git('fetch', '--no-tags', CANONICAL_REPO, targetRefspec);";
+const pinCall = ": pinRefToCommit('FETCH_HEAD');";
+const pairCall = "git('update-ref', pairedTargetRef, targetCommit);";
+const pinAt = applySource.indexOf(pinCall, applySource.indexOf(fetchCall));
+const pairAt = applySource.indexOf(pairCall, pinAt + pinCall.length);
+const gitBetweenPinAndPair = pinAt >= 0 && pairAt >= 0
+  ? /\b(?:git|gitQuiet|gitShowRaw|runGit|gitIn|gitRawIn)\(/.test(
+      applySource.slice(pinAt + pinCall.length, pairAt),
+    )
+  : true;
+if (appearsInOrder(applySource, [
+  fetchCall,
+  pinCall,
+  pairCall,
+]) && !gitBetweenPinAndPair) {
+  pass('apply pairs the backup with the pinned target commit immediately after pinning it');
+} else {
+  fail('apply does not pair the backup with the pinned target before another git operation');
+}
+
+const targetRefDeclaration = 'const pairedTargetRef = targetRefForBackup(backupBranch);';
+const branchCreation = "git('branch', backupBranch);";
+if (applySource.indexOf(targetRefDeclaration) >= 0
+  && applySource.indexOf(branchCreation) > applySource.indexOf(targetRefDeclaration)) {
+  pass('apply validates the paired target-ref name before creating its backup branch');
+} else {
+  fail('apply can create a backup branch before validating its paired target-ref name');
+}
+
+if (appearsInOrder(applySource, [pairCall, 'pruneStaleTargetRefs();'])) {
+  pass('apply prunes stale paired target refs after creating the new pair');
+} else {
+  fail('apply does not prune stale paired target refs after creating the new pair');
+}
+
+if (appearsInOrder(applySource, [
+  pairCall,
+  "git('show', `${targetCommit}:update-system.mjs`);",
+  'manifestSystemPathsAt(targetCommit)',
+  "remoteSystemPaths = assertCanonicalManifestPaths(remoteSystemPaths, `Target SYSTEM_PATHS (${remoteManifestFile})`);",
+  'const validatedManifestPaths = assertCanonicalManifestPaths(',
+  "'Merged updater manifest',",
+  "resolveReexecCheckout(targetCommit, 'update-system.mjs')",
+  "'Target updater import closure',",
+  'uncoveredReexecFiles.length > 0',
+  'const { refused: refusedReexecFiles } = rejectUserLayerPaths(',
+  'refusedReexecFiles.length > 0',
+  "git('--literal-pathspecs', 'checkout', targetCommit, '--', ...reexecFiles)",
+])) {
+  pass('apply validates target and merged manifests before any self-bootstrap checkout');
+} else {
+  fail('apply does not validate target and merged manifests before self-bootstrap checkout');
+}
+
+if (appearsInOrder(rollbackSource, [
+  'targetRef = targetRefForBackup(latest);',
+  "git('show-ref', '--verify', '--quiet', targetRef);",
+  "git('show', `${targetRef}:update-system.mjs`);",
+  'manifestSystemPathsAt(targetRef)',
+  'manifestTreeFiles(safeTargetPaths, targetRef, userPaths,',
+]) && !/\b(?:git|gitQuiet|gitShowRaw)\([^)]*\bFETCH_HEAD\b[^)]*\)/s.test(rollbackSource)) {
+  pass('rollback derives target removals only from the durable backup-paired ref, never FETCH_HEAD');
+} else {
+  fail('rollback can derive target removals from a mutable or unpaired ref');
+}
+
 // #1706: update-system.mjs must be self-loading — no static (top-level) relative
 // imports. A pre-#1245 client's apply() self-reexec checks out ONLY
 // update-system.mjs before re-execing it, so any top-level `import ... from
@@ -623,38 +775,20 @@ for (const userPath of ['cv.md', 'config/profile.yml', 'modes/_profile.md', 'por
   else fail(`USER_PATHS missing ${userPath}`);
 }
 
-const allowedSystemUserOverlap = new Set([
-  'writing-samples/README.md',
-  // System-owned scaffold inside the user-layer interview-prep/ dir (#1242):
-  // the updater ships these two, but never the real session files alongside them.
-  'interview-prep/sessions/.gitkeep',
-  'interview-prep/sessions/README.md',
-  // Same pattern for the user-layer documents/ intake dir (#1723): the
-  // updater ships the scaffold, never the user's source documents.
-  'documents/.gitkeep',
-  'documents/README.md',
-  // Exact empty placeholders may ship inside user directories, while the
-  // updater continues to protect every other file below those paths (#4708).
-  'data/.gitkeep',
-  'data/offers/.gitkeep',
-  'data/parser-output/.gitkeep',
-  'jds/.gitkeep',
-  'output/.gitkeep',
-  'reports/.gitkeep',
-]);
-let hasSystemUserCollision = false;
+for (const overlap of MANIFEST_USER_PATH_OVERLAPS) {
+  if (systemPaths.includes(overlap)) pass(`SYSTEM_PATHS includes documented user-layer scaffold ${overlap}`);
+  else fail(`SYSTEM_PATHS missing documented user-layer scaffold ${overlap}`);
+}
+
+let hasUnsafeSystemPath = false;
 for (const systemPath of systemPaths) {
-  const overlapsUserPath = userPaths.some((userPath) => {
-    if (allowedSystemUserOverlap.has(systemPath)) return false;
-    return systemPath === userPath || systemPath.startsWith(userPath);
-  });
-  if (overlapsUserPath) {
-    hasSystemUserCollision = true;
-    fail(`SYSTEM_PATHS must not update user path ${systemPath}`);
+  if (!isSafeManifestPath(systemPath, userPaths)) {
+    hasUnsafeSystemPath = true;
+    fail(`SYSTEM_PATHS must not update unsafe or protected path ${systemPath}`);
   }
 }
-if (!hasSystemUserCollision) {
-  pass('SYSTEM_PATHS does not collide with USER_PATHS');
+if (!hasUnsafeSystemPath) {
+  pass('SYSTEM_PATHS passes the production canonical path policy');
 }
 
 if (failed > 0) {

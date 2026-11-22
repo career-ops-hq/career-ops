@@ -7,12 +7,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SCRIPT = join(ROOT, 'analyze-patterns.mjs');
 const VALID_FLAGS = [
   '--min-threshold',
   '--min-vendor-n',
+  '--min-family-n',
   '--self-test',
   '--summary',
   '--help',
@@ -52,7 +54,7 @@ function runAnalyze(...args) {
 test('analyze-patterns rejects an unrecognized flag and lists the valid flags', () => {
   const result = runAnalyze('--no-such-flag');
 
-  assert.equal(result.status, 1, `exited ${result.status}, want 1`);
+  assert.equal(result.status, 1, describeSpawn(result, `exited ${result.status}, want 1`));
   assert.match(result.all, /unrecognized flag\(s\): --no-such-flag/i);
   for (const flag of VALID_FLAGS) {
     assert.ok(result.all.includes(flag), `valid flag ${flag} was not listed`);
@@ -63,7 +65,7 @@ test('analyze-patterns help exits before reading application data', () => {
   for (const flag of ['--help', '-h']) {
     const result = runAnalyze(flag);
 
-    assert.equal(result.status, 0, `${flag} exited ${result.status}, want 0`);
+    assert.equal(result.status, 0, describeSpawn(result, `${flag} exited ${result.status}, want 0`));
     assert.match(result.stdout, /Usage:/i, `${flag} printed no usage block`);
     assert.match(result.stdout, /node analyze-patterns\.mjs/, `${flag} did not identify the command`);
     assert.doesNotMatch(result.all, /Not enough data/i, `${flag} continued into application analysis`);
@@ -73,7 +75,7 @@ test('analyze-patterns help exits before reading application data', () => {
 test('analyze-patterns rejects an unrecognized flag before handling help', () => {
   const result = runAnalyze('--help', '--no-such-flag');
 
-  assert.equal(result.status, 1, `exited ${result.status}, want 1`);
+  assert.equal(result.status, 1, describeSpawn(result, `exited ${result.status}, want 1`));
   assert.match(result.all, /unrecognized flag\(s\): --no-such-flag/i);
   assert.doesNotMatch(result.stdout, /Usage:/i, 'help hid the unrecognized flag error');
 });
@@ -82,11 +84,29 @@ test('analyze-patterns preserves valid value flags in spaced and equals forms', 
   const spaced = runAnalyze('--min-threshold', '1', '--min-vendor-n', '12');
   const equals = runAnalyze('--min-threshold=1', '--min-vendor-n=12');
 
-  assert.equal(spaced.status, 0, `spaced flags exited ${spaced.status}, want 0: ${spaced.all}`);
-  assert.equal(equals.status, 0, `equals flags exited ${equals.status}, want 0: ${equals.all}`);
+  assert.equal(spaced.status, 0, describeSpawn(spaced, `spaced flags exited ${spaced.status}, want 0`));
+  assert.equal(equals.status, 0, describeSpawn(equals, `equals flags exited ${equals.status}, want 0`));
 
   const spacedResult = JSON.parse(spaced.stdout);
   const equalsResult = JSON.parse(equals.stdout);
   assert.equal(spacedResult.vendorAnalysis.minSampleForClaim, 12);
   assert.equal(equalsResult.vendorAnalysis.minSampleForClaim, 12);
+});
+
+test('analyze-patterns accepts --min-family-n in spaced and equals forms', () => {
+  const spaced = runAnalyze('--min-threshold', '1', '--min-family-n', '5');
+  const equals = runAnalyze('--min-threshold=1', '--min-family-n=20');
+
+  assert.equal(spaced.status, 0, describeSpawn(spaced, `spaced exited ${spaced.status}, want 0`));
+  assert.equal(equals.status, 0, describeSpawn(equals, `equals exited ${equals.status}, want 0`));
+  assert.equal(JSON.parse(spaced.stdout).roleFamilyInterviewRate.minFamilyN, 5);
+  assert.equal(JSON.parse(equals.stdout).roleFamilyInterviewRate.minFamilyN, 20);
+});
+
+test('analyze-patterns rejects a non-numeric or zero --min-family-n', () => {
+  for (const bad of ['abc', '0', 'd']) {
+    const r = runAnalyze('--min-threshold', '1', '--min-family-n', bad);
+    assert.equal(r.status, 1, describeSpawn(r, `${bad} exited ${r.status}, want 1`));
+    assert.match(r.all, /--min-family-n requires a positive integer/);
+  }
 });

@@ -244,12 +244,12 @@ if (!existsSync(TIER_PATH)) {
   }
 }
 
-// ---------- lib/clean.mjs: CONTROL_CHARS, displayClean ----------
+// ---------- lib/clean.mjs: CONTROL_CHARS, cleanForDisplay ----------
 if (!existsSync(CLEAN_PATH)) {
   fail('lib/clean.mjs missing: the plugin ships it');
 } else {
   try {
-    const { CONTROL_CHARS, displayClean } = await import(pathToFileURL(CLEAN_PATH).href);
+    const { CONTROL_CHARS, cleanForDisplay, displayClean } = await import(pathToFileURL(CLEAN_PATH).href);
 
     if (CONTROL_CHARS instanceof RegExp) {
       pass('lib/clean.mjs: CONTROL_CHARS is a RegExp');
@@ -257,33 +257,39 @@ if (!existsSync(CLEAN_PATH)) {
       fail('lib/clean.mjs: CONTROL_CHARS is not a RegExp');
     }
 
-    if (typeof displayClean === 'function') {
-      pass('lib/clean.mjs: displayClean is a function');
+    if (typeof cleanForDisplay === 'function') {
+      pass('lib/clean.mjs: cleanForDisplay is a function');
     } else {
-      fail('lib/clean.mjs: displayClean is not a function');
+      fail('lib/clean.mjs: cleanForDisplay is not a function');
+    }
+
+    if (displayClean === cleanForDisplay) {
+      pass('lib/clean.mjs: displayClean is an alias for cleanForDisplay');
+    } else {
+      fail('lib/clean.mjs: displayClean is not an alias for cleanForDisplay');
     }
 
     // null / undefined / empty string handling
-    if (displayClean(null) === '' && displayClean(undefined) === '' && displayClean('') === '') {
-      pass('displayClean: handles null, undefined, and empty string');
+    if (cleanForDisplay(null) === '' && cleanForDisplay(undefined) === '' && cleanForDisplay('') === '') {
+      pass('cleanForDisplay: handles null, undefined, and empty string');
     } else {
-      fail(`displayClean null/empty handling failed: null="${displayClean(null)}" undef="${displayClean(undefined)}"`);
+      fail(`cleanForDisplay null/empty handling failed: null="${cleanForDisplay(null)}" undef="${cleanForDisplay(undefined)}"`);
     }
 
     // whitespace collapse and trim
-    if (displayClean('  hello   world  \t\n  again  ') === 'hello world again') {
-      pass('displayClean: collapses internal whitespace and trims ends');
+    if (cleanForDisplay('  hello   world  \t\n  again  ') === 'hello world again') {
+      pass('cleanForDisplay: collapses internal whitespace and trims ends');
     } else {
-      fail(`displayClean whitespace collapse failed: "${displayClean('  hello   world  \t\n  again  ')}"`);
+      fail(`cleanForDisplay whitespace collapse failed: "${cleanForDisplay('  hello   world  \t\n  again  ')}"`);
     }
 
     // control character stripping (C0, DEL, C1)
     const withControls = `foo${ESC}[31mbar${BEL}${CRLF}baz\x7fqux\x80\x9f`;
-    const cleaned = displayClean(withControls);
+    const cleaned = cleanForDisplay(withControls);
     if (!/[\u0000-\u001f\u007f-\u009f]/.test(cleaned) && cleaned === 'foo[31mbar bazqux') {
-      pass('displayClean: strips C0, DEL, and C1 control characters');
+      pass('cleanForDisplay: strips C0, DEL, and C1 control characters');
     } else {
-      fail(`displayClean control character strip failed: got "${cleaned}"`);
+      fail(`cleanForDisplay control character strip failed: got "${cleaned}"`);
     }
   } catch (e) {
     fail(`lib/clean.mjs crashed: ${e.message}`);

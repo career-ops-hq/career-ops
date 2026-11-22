@@ -14,7 +14,7 @@
  * nothing could see was being graded as source.
  */
 
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, symlinkSync, utimesSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, symlinkSync, utimesSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, relative, sep } from 'path';
 import { pass, fail, warn, ROOT } from './helpers.mjs';
@@ -24,6 +24,7 @@ import {
 } from '../lib/scratch-dirs.mjs';
 import { collectMjsFiles } from '../lib/mjs-files.mjs';
 import { execFileSync } from 'child_process';
+import { fileURLToPath } from 'url';
 
 console.log('\nscratch dirs — an interrupted run leaves no trap for the next one');
 
@@ -383,5 +384,44 @@ const age = (dir, ms = MIN_SCRATCH_AGE_MS * 2) => {
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 13. Test code keeps its repository-root fixtures under the prefix ─
+//
+// The inline sections of test-all.mjs and the discovered suites run at the
+// same time (#5146). A fixture directory either of them creates in the
+// repository root is in every walk the other makes while it exists, unless it
+// carries the scratch prefix: section 1 has read a suite's copied scripts as
+// source files, and a `git status` taken meanwhile lists the directory.
+//
+// A static check, of the one spelling this has kept arriving in:
+// `mkdtempSync(join(ROOT, '<name>'))`. A path built any other way is not seen.
+// The three-argument form is left alone on purpose: a fixture that has to sit
+// in a subdirectory (tests/mjs-files.test.mjs parks a fake checkout under
+// tests/) is there because a walker is meant to find it.
+{
+  // Not this file, which spells the call out to describe it.
+  const self = fileURLToPath(import.meta.url);
+  const sources = [join(ROOT, 'test-all.mjs'), ...collectMjsFiles(join(ROOT, 'tests')).filter((f) => f !== self)];
+  const CALL = /mkdtempSync\(\s*join\(\s*(?:REPO_)?ROOT\s*,\s*([^,()]+?)\s*\)\s*\)/g;
+  const underPrefix = (arg) => arg === 'SCRATCH_PREFIX'
+    || arg.startsWith('`${SCRATCH_PREFIX}')
+    || arg.startsWith(`'${SCRATCH_PREFIX}`)
+    || arg.startsWith(`"${SCRATCH_PREFIX}`);
+  let calls = 0;
+  const outside = [];
+  for (const file of sources) {
+    for (const m of readFileSync(file, 'utf-8').matchAll(CALL)) {
+      calls++;
+      if (!underPrefix(m[1])) outside.push(`${relative(ROOT, file).split(sep).join('/')}: ${m[0]}`);
+    }
+  }
+  if (calls === 0) {
+    fail('found no mkdtempSync(join(ROOT, …)) call in test-all.mjs or tests/ — this check has lost its subject');
+  } else if (outside.length === 0) {
+    pass(`every temp directory test code creates in the repository root carries the scratch prefix (${calls} calls)`);
+  } else {
+    fail(`temp directory in the repository root without the scratch prefix — use SCRATCH_PREFIX from lib/scratch-dirs.mjs, or tmpdir():\n    ${outside.join('\n    ')}`);
   }
 }

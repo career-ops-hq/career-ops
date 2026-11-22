@@ -124,6 +124,15 @@ export function foldAccents(s) {
   return String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
+// Lowercase, fold accents and collapse whitespace runs. Boards ship titles
+// with no-break spaces and doubled spaces ("Product\u00a0Manager"), and a
+// multi-word keyword is a substring test, so without the collapse the
+// positive "product manager" missed and the negative "sales engineer" let
+// the posting through.
+export function foldTitle(s) {
+  return foldAccents(String(s ?? '').toLowerCase()).replace(/\s+/g, ' ');
+}
+
 export function compileKeyword(kw) {
   const prefixed = compilePrefixedKeyword(kw);
   if (prefixed) return prefixed;
@@ -160,6 +169,52 @@ export function compileKeyword(kw) {
  */
 export function compileContentKeyword(kw) {
   return compilePrefixedKeyword(kw) ?? ((lower) => lower.includes(kw));
+}
+
+// content_filter trait matching (#6020): see the "Trait matching" header in
+// scan.mjs for the semantics. Kept here so validate-portals.mjs can count
+// distinct traits without importing scan.mjs, which imports it.
+//
+// JD text spells hyphenated words with typographic hyphens and soft hyphens,
+// which foldTitle leaves in place. The en dash (U+2013) is left alone: in JD
+// prose it separates ranges and clauses, not compound words.
+export function foldContentText(text) {
+  return foldTitle(String(text ?? '').replace(/[\u2010-\u2012]/g, '-').replace(/\u00AD/g, ''));
+}
+
+const TRAIT_ALTERNATIVE_SEPARATOR = /\s+\|\s+/;
+
+// A bare `word:` or `stem:` compiles to a matcher that never matches (see
+// compilePrefixedKeyword). In an any-one list that is a harmless no-op, but a
+// trait counts toward min_match, so an unmatchable one would make every
+// posting fail. Such an alternative is dropped instead, and a trait left with
+// none is not counted, so the min_match range check reports the typo.
+const isBarePrefix = (folded) => [WORD_PREFIX, STEM_PREFIX]
+  .some(prefix => folded.startsWith(prefix) && !folded.slice(prefix.length).trim());
+
+// Compile a trait list: trimmed, case-insensitively deduplicated (first
+// spelling kept), each entry split into its " | " alternatives. Returns
+// [{ original, match(foldedText) }]. Tolerates a bare string like
+// normalizeKeywordList does; non-string and empty entries are dropped.
+export function compileContentTraits(value) {
+  if (value == null) return [];
+  const list = Array.isArray(value) ? value : [value];
+  const seen = new Set();
+  const traits = [];
+  for (const entry of list) {
+    if (typeof entry !== 'string' || !entry.trim()) continue;
+    const original = entry.trim();
+    const key = foldContentText(original);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const alternatives = original.split(TRAIT_ALTERNATIVE_SEPARATOR)
+      .map(part => foldContentText(part).trim())
+      .filter(part => part && !isBarePrefix(part))
+      .map(compileContentKeyword);
+    if (alternatives.length === 0) continue;
+    traits.push({ original, match: (folded) => alternatives.some(m => m(folded)) });
+  }
+  return traits;
 }
 
 // An AND-group: " + " (whitespace-delimited) between terms means EVERY term
@@ -226,7 +281,7 @@ function compileAndGroup(keyword, compileTerm) {
 function normalizeKeywords(arr, compile) {
   return (Array.isArray(arr) ? arr : [])
     .filter(k => typeof k === 'string')
-    .map(k => foldAccents(k.trim().toLowerCase()))
+    .map(k => foldTitle(k).trim())
     .filter(k => k.length > 0)
     .map(compile);
 }
@@ -323,7 +378,7 @@ export function buildDomainFilter(domainKeywords) {
   if (matchers.length === 0) return null;
   return (title) => {
     // Folded like the keywords, so an accented posting still matches (#4458).
-    const lower = foldAccents(String(title ?? '').toLowerCase());
+    const lower = foldTitle(title);
     return matchers.some(m => m(lower));
   };
 }
@@ -355,7 +410,7 @@ export function buildTitleFilter(titleFilter) {
     // non-string. Consolidating on scan.mjs's version would have carried that
     // throw onto a path that never had it, where it aborts jobs.filter and
     // drops a whole company's results for one malformed title.
-    const lower = foldAccents(String(title ?? '').toLowerCase());
+    const lower = foldTitle(title);
     // An empty positive list is "no positive constraint", not "match nothing":
     // a negative-only title_filter is a legitimate config that rejects a few
     // roles and keeps the rest.

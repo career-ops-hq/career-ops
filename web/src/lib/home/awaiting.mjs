@@ -1,10 +1,23 @@
 import { canonStatus } from "../status-alias.mjs";
+import { applyLineLabel, flaggedPosting } from "../report-sections.mjs";
 
 // states.yml forbids a date in the status cell, but real trackers carry one
 // anyway ("Evaluated 2026-08-21") and /^evaluat/i tolerated that. canonStatus()
 // is an exact-match alias table, so the date comes off before folding —
 // otherwise this narrows the very case the existing suite already pins.
 const baseStatus = (s) => String(s ?? "").replace(/\s+\d{4}-\d{2}-\d{2}\s*$/, "").trim();
+
+// Same calendar day as lib/local-today.mjs. today-dashboard.tsx is a client
+// component and imports this file, so this copy stays free of the checkout module.
+export function localDay(now = new Date()) {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
+}
+
+function alreadyClosed(row, today) {
+  const day = row?.closesAt;
+  return typeof day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(day) && day < today;
+}
 
 /**
  * Which scored-but-undecided applications the Today page shows, and in what
@@ -17,8 +30,9 @@ const baseStatus = (s) => String(s ?? "").replace(/\s+\d{4}-\d{2}-\d{2}\s*$/, ""
  * merge-tracker now re-sorts the tracker by # on every write, which would have
  * quietly changed the card set with no code change anywhere near this file.
  *
- * Newest first is what a "Today" queue means. The score breaks ties so that on
- * a day with several evaluations the better opportunity leads.
+ * Best score first, because a power user with dozens of scored rows needs the
+ * strongest match on top, not the newest one. The date breaks ties so a fresh
+ * evaluation leads among equal scores.
  *
  * Plain .mjs (same pattern as tracker-table.mjs and cv-selection.mjs) so the
  * test suite imports it with no build step and no `@/` alias loader — the whole
@@ -54,15 +68,71 @@ export function pickAwaitingDecision(applications, scoreOf, limit = 6) {
     // exists to fix. status-alias.mjs is the single alias table and its test
     // loads states.yml, so this cannot drift as a literal regex does.
     .filter((a) => canonStatus(baseStatus(a.status)) === "EVALUATED")
-    // A row with no date sorts LAST rather than jumping the queue. "" compares
-    // LESS than any real date, and the comparison is descending (b before a),
-    // so "least" lands at the end — which is where an undated row belongs in a
-    // recency queue. Covered by a test, because that is two negations deep and
-    // the wrong one is silent.
-    .sort((a, b) => {
-      const byDate = (b.date || "").localeCompare(a.date || "");
-      if (byDate !== 0) return byDate;
-      return rank(b.score) - rank(a.score);
-    })
+    // An unscored row ranks -1 and an undated row compares "" (least), and both
+    // comparisons are descending, so either one lands at the end.
+    .sort((a, b) => rank(b.score) - rank(a.score) || (b.date || "").localeCompare(a.date || ""))
     .slice(0, limit);
+}
+
+// "Check the posting first" is what applyLineLabel returns for a flagged
+// posting at or above the line (#5300). It has to be a group here too: a label
+// that is not in this list matches no group, and the row would drop off Today.
+const AWAITING_GROUPS = ["Recommended", "Check the posting first", "Below the apply line", "Not scored yet"];
+
+/**
+ * Splits the ranked queue into the groups the Today page renders, keeping the
+ * order inside each group. A row with no score has not been judged against the
+ * apply line, so it gets its own group instead of "Below the apply line".
+ *
+ * `legitimacyOf` is injected for the same reason as `scoreOf` above: the
+ * legitimacy lives in the report file, which the page reads and this module
+ * does not. With it, a flagged posting above the line is grouped the way the
+ * report page labels it (#5300).
+ *
+ * @template {{score?: string}} T
+ * @param {T[]} awaiting  output of pickAwaitingDecision
+ * @param {(row: T) => string | null | undefined} [legitimacyOf]
+ * @returns {[string, T[]][]}  only the non-empty groups, in display order
+ */
+export function groupAwaiting(awaiting, legitimacyOf = () => undefined) {
+  const labelOf = (a) => applyLineLabel(a.score, legitimacyOf(a)) ?? "Not scored yet";
+  return AWAITING_GROUPS
+    .map((label) => /** @type {[string, T[]]} */ ([label, awaiting.filter((a) => labelOf(a) === label)]))
+    .filter(([, group]) => group.length > 0);
+}
+
+/**
+ * The one-click target. The stored call decides. Score and date order match
+ * the cards and pick which Apply. A Skip, Research first, Consider, or
+ * missing call is not a target. A legitimacy-flagged posting is not a target
+ * either. A posting whose closesAt is a real day before today is not a
+ * target. The card stays. A missing or unreadable close day is not a close.
+ * The next open unflagged Apply is. The score cell is not rewritten.
+ *
+ * @template {{date?: string, score?: string, status?: string, n?: string, closesAt?: string}} T
+ * @param {T[]} applications
+ * @param {(score: string) => number} scoreOf
+ * @param {(row: T) => string | null | undefined} [decisionOf]
+ * @param {(row: T) => string | null | undefined} [legitimacyOf]
+ * @param {string} [today] local calendar day, YYYY-MM-DD
+ * @returns {T | null}
+ */
+export function pickApplyNext(applications, scoreOf, decisionOf = () => "", legitimacyOf = () => "", today = localDay()) {
+  const ordered = pickAwaitingDecision(applications, scoreOf, Infinity);
+  return ordered.find((row) => decisionOf(row) === "Apply" && !flaggedPosting(legitimacyOf(row)) && !alreadyClosed(row, today)) ?? null;
+}
+
+/**
+ * Keep the ranked cards, and keep the apply target on the page when the
+ * score cut left it off. Does not drop a row.
+ *
+ * @template {{n?: string}} T
+ * @param {T[]} shown
+ * @param {T | null | undefined} target
+ * @returns {T[]}
+ */
+export function includeApplyTarget(shown, target) {
+  if (!target) return shown;
+  if (shown.some((row) => row === target || (target.n != null && row.n === target.n))) return shown;
+  return [...shown, target];
 }

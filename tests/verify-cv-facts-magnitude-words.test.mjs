@@ -32,6 +32,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { metricClaims, auditClaims } from '../verify-cv-facts.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -111,25 +112,25 @@ function run({ source, generated }, args = []) {
 
 test('the CLI blocks a count inflated by a spelled-out magnitude', () => {
   const r = run({ source: 'Served 50 users.', generated: 'Served 50 million users.' });
-  assert.equal(r.status, 1, `an inflated count passed the gate:\n${r.all.slice(0, 400)}`);
+  assert.equal(r.status, 1, describeSpawn(r, `an inflated count passed the gate:\n${r.all.slice(0, 400)}`));
   assert.match(r.all, /absent from sources/i);
   assert.match(r.all, /50m users/);
 });
 
 test('the CLI passes the same fact written two equivalent ways', () => {
   const r = run({ source: 'Served 50 million users.', generated: 'Served 50M users.' });
-  assert.equal(r.status, 0, `an equivalent restatement failed the gate:\n${r.all.slice(0, 400)}`);
+  assert.equal(r.status, 0, describeSpawn(r, `an equivalent restatement failed the gate:\n${r.all.slice(0, 400)}`));
   assert.match(r.all, /passed/i);
 });
 
 test('the CLI still passes a count the source states plainly', () => {
   const r = run({ source: 'Served 50 users.', generated: 'Served 50 users.' });
-  assert.equal(r.status, 0, `a plain count failed the gate:\n${r.all.slice(0, 400)}`);
+  assert.equal(r.status, 0, describeSpawn(r, `a plain count failed the gate:\n${r.all.slice(0, 400)}`));
 });
 
 test('the CLI reports the magnitude claim in --json', () => {
   const r = run({ source: 'Served 50 users.', generated: 'Served 50 million users.' }, ['--json']);
-  assert.equal(r.status, 1);
+  assert.equal(r.status, 1, describeSpawn(r));
   const parsed = JSON.parse(r.stdout);
   assert.equal(parsed.verdict, 'block');
   assert.deepEqual(parsed.invented, ['50m users']);

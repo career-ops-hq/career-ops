@@ -165,6 +165,39 @@ test("a URL that only appears under Processed does not match as inbox Skip", () 
   assert.equal(result.error, "unmatched");
 });
 
+test("finds the Pending section in a non-English mode (German: Offen / Verarbeitet)", () => {
+  // Before #5569 the heading match was hardcoded to Pending|Pendientes, so a
+  // `## Offen` pipeline.md had no recognized Pending section: the Processed
+  // scoping was lost and the duplicate under Verarbeitet flipped too.
+  const GERMAN = [
+    "# Pipeline — Pending URLs",
+    "",
+    "## Offen",
+    "",
+    ACME_PENDING,
+    BETA_PENDING,
+    "",
+    "## Verarbeitet",
+    "",
+    DONE_PROCESSED,
+    BETA_PROCESSED,
+    "",
+  ].join("\n");
+
+  const result = applyInboxSkip(GERMAN, BETA, true);
+  assert.equal(result.ok, true);
+  assert.equal(result.matched, 1);
+  assert.equal(result.changed, 1);
+  const after = linesOf(result.text);
+  // The Pending (Offen) row flipped,
+  assert.ok(after.includes(BETA_SKIPPED), "Offen row should be skipped");
+  // and the Processed (Verarbeitet) duplicate stayed untouched.
+  assert.equal(
+    after.find((l) => l === BETA_PROCESSED),
+    BETA_PROCESSED,
+  );
+});
+
 test("setInboxSkip writes the fixture file, then undo restores it", { skip: HAS_LOCK ? false : "pipeline-lock.mjs not resolvable" }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "inbox-skip-"));
   const file = path.join(dir, "pipeline.md");

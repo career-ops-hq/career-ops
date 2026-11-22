@@ -9,6 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
+import { getProfilePath } from "./core/profile-path.mjs";
 
 /**
  * Lowercase, non-alphanumeric runs -> single hyphen, trimmed.
@@ -73,7 +74,7 @@ export function resolvePdfPaths(input, today, root, findReportFile) {
     // js-yaml v4's load() uses the safe default schema (no arbitrary type
     // construction, unlike Python's PyYAML) — same pattern already used in
     // web/src/app/api/profile/route.ts and portals/route.ts.
-    const profile = yaml.load(fs.readFileSync(path.join(root, "config", "profile.yml"), "utf8"));
+    const profile = yaml.load(fs.readFileSync(getProfilePath(root), "utf8"));
     if (profile?.candidate?.full_name) candidateSlug = slugify(profile.candidate.full_name);
   } catch (err) {
     // A missing profile.yml is expected (not every checkout has one yet) and

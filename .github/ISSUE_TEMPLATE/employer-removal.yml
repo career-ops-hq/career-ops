@@ -1,0 +1,54 @@
+name: "🏢 Employer removal"
+description: "Ask for your company's board to be removed from the employer registry (employers/)"
+title: "[Employer removal] "
+labels: ["employer-removal"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The [employer registry](https://github.com/career-ops-hq/career-ops/tree/main/employers) is a community-maintained list of employer job boards that the local scanner can read: one pointer per board (company, ATS, board URL), with no job postings. The rows hold no personal data; the contribution manifests do publish the GitHub username of whoever contributed a board and the name of whoever granted its license.
+
+        If your company's board is listed and you want it removed, fill in this form. Within 7 days a maintainer marks the row `retired: true` with `retired_reason: owner_request`. The row stays in the file, retired, so the same board is not added again by a later contribution, and tools that read the registry stop reading it.
+
+        This issue is public. If you would rather not ask in public, the [removal section of the registry README](https://github.com/career-ops-hq/career-ops/tree/main/employers#removal-at-an-employers-request) gives an email address.
+  - type: input
+    id: company
+    attributes:
+      label: Company name
+      placeholder: "Acme Inc."
+    validations:
+      required: true
+  - type: textarea
+    id: boards
+    attributes:
+      label: Board URL(s) to remove
+      description: The `careers_url` of each row, as it appears in `employers/boards/`. One per line.
+      placeholder: "https://job-boards.greenhouse.io/acme"
+    validations:
+      required: true
+  - type: input
+    id: relationship
+    attributes:
+      label: Your relationship to the company
+      description: For example, recruiting team or people operations. Do not include contact details here.
+      placeholder: "I run recruiting at Acme"
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: How a maintainer can confirm the request comes from the company
+      description: "For example: a link to the company's careers page that points to this board, or a note that you will confirm from an address at the company's domain. A maintainer may ask for one of these before retiring the row."
+    validations:
+      required: true
+  - type: checkboxes
+    id: understand
+    attributes:
+      label: What removal does
+      options:
+        - label: I understand that the row is retired, not deleted, so the board is not added again later.
+          required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else

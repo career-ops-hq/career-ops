@@ -1,16 +1,35 @@
 // @ts-check
-import { decodeEntities } from './_html-entities.mjs';
+import { parseWpJobFeedItems, wpJobFeedItems } from './_wp-job-feed.mjs';
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // Jobspresso provider - public WordPress jobs feed
-// (https://jobspresso.co/?feed=job_feed). The feed is public, no-auth,
+// (https://jobspresso.co/feed/job_feed/). The feed is public, no-auth,
 // and XML, so it is parsed in-process with the same tiny tag extractor
 // approach as providers/personio.mjs rather than adding an XML dependency.
+// The item parsing is shared with providers/wp-job-manager.mjs, the generic
+// provider for any board on the same plugin (providers/_wp-job-feed.mjs).
 //
 // Wire in via a `job_boards:` entry with `provider: jobspresso`.
+//
+// robots.txt (Source Indexing Policy rule 6): rule 6 changed in #6691 so
+// robots.txt is no longer a gate for providers (#6694). The feed returns 10
+// items by default; `posts_per_page` raises that to 100 per request.
 
-const FEED_URL = 'https://jobspresso.co/?feed=job_feed';
+const BASE_FEED_URL = 'https://jobspresso.co/feed/job_feed/';
+const DEFAULT_POSTS_PER_PAGE = 100;
+const MAX_POSTS_PER_PAGE = 100;
 const TRUSTED_HOST = 'jobspresso.co';
+
+/** @param {any} [entry] */
+export function buildFeedUrl(entry) {
+  const custom = entry?.posts_per_page;
+  const count = Number.isInteger(custom) && custom > 0
+    ? Math.min(custom, MAX_POSTS_PER_PAGE)
+    : DEFAULT_POSTS_PER_PAGE;
+  return `${BASE_FEED_URL}?posts_per_page=${count}`;
+}
+
+const DEFAULT_FEED_URL = buildFeedUrl();
 
 /** @param {string} url */
 function assertJobspressoUrl(url) {
@@ -30,44 +49,22 @@ function assertJobspressoUrl(url) {
   return url;
 }
 
-// NaN-safe Date.parse - `|| undefined` would also coerce a valid epoch 0.
-function toEpochMs(value) {
-  if (!value) return undefined;
-  const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? undefined : parsed;
-}
-
 /** @type {Provider} */
 export default {
   id: "jobspresso",
 
   detect(entry) {
-    return entry?.provider === "jobspresso" ? { url: FEED_URL } : null;
+    return entry?.provider === "jobspresso" ? { url: buildFeedUrl(entry) } : null;
   },
 
-  async fetch(_entry, ctx) {
-    const feedUrl = assertJobspressoUrl(FEED_URL);
+  async fetch(entry, ctx) {
+    const feedUrl = assertJobspressoUrl(buildFeedUrl(entry));
     // redirect:'error' prevents SSRF via server-side redirects; combined with
     // assertJobspressoUrl above it keeps the request pinned to jobspresso.co.
     const text = await ctx.fetchText(feedUrl, { redirect: "error" });
     return parseJobspressoFeed(text);
   },
 };
-
-// Resolve a tag's inner text: unwrap a CDATA section, else decode entities.
-function extractText(inner) {
-  const cdata = inner.match(/^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/);
-  if (cdata) return cdata[1].trim();
-  return decodeEntities(inner).trim();
-}
-
-// Extract the text of the first <tag>...</tag> in a block. Returns '' when absent.
-function tagText(block, tag) {
-  const m = block.match(
-    new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`, "i"),
-  );
-  return m ? extractText(m[1]) : "";
-}
 
 /** Validate a feed URL: https + jobspresso.co (or subdomain) only, else ''. */
 function cleanUrl(value) {
@@ -95,33 +92,13 @@ function cleanUrl(value) {
  * - pubDate
  * - job_listing:company
  * - job_listing:location
+ * - content:encoded (the full post, which becomes `description`)
  *
  * The RSS link is used as the dedup key.
  * @param {string} xml - raw RSS feed body
- * @returns {Array<{title: string, url: string, company: string, location: string, postedAt?: number}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, postedAt?: number, description?: string}>}
  */
 export function parseJobspressoFeed(xml) {
   if (typeof xml !== "string") return [];
-  const jobs = [];
-  const blocks = xml.match(/<item\b[^>]*>[\s\S]*?<\/item>/gi) || [];
-
-  for (const item of blocks) {
-    const url = cleanUrl(tagText(item, "link"));
-    if (!url) continue;
-
-    const title = tagText(item, "title");
-    if (!title) continue;
-    const company = tagText(item, "job_listing:company") || "";
-    const location = tagText(item, "job_listing:location");
-
-    jobs.push({
-      title,
-      company,
-      location,
-      url,
-      postedAt: toEpochMs(tagText(item, "pubDate")),
-    });
-  }
-
-  return jobs;
+  return parseWpJobFeedItems(wpJobFeedItems(xml), cleanUrl);
 }

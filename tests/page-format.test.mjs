@@ -18,10 +18,10 @@
  * expected value back out of the module it pins compares that module to itself
  * and stays green whatever the module becomes.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdtempSync, mkdirSync, realpathSync, writeFileSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -35,10 +35,19 @@ import {
   normalizePageFormat,
   resolvePageFormat,
 } from '../lib/page-format.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
+
+// Every workspace and cover sandbox this file makes, removed once its tests
+// have run, failed ones included.
+const scratchDirs = [];
+after(() => {
+  for (const dir of scratchDirs) rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
+});
 
 /** A throwaway workspace whose config/profile.yml states `pageFormat`, or none. */
 function workspace(pageFormat) {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-page-format-'));
+  scratchDirs.push(dir);
   mkdirSync(join(dir, 'config'), { recursive: true });
   mkdirSync(join(dir, 'data'), { recursive: true });
   mkdirSync(join(dir, 'output'), { recursive: true });
@@ -122,15 +131,17 @@ test('the owner pins its own values', () => {
 });
 
 test('the web agrees with the CLI about the sheet', async (t) => {
-  // web/src/lib/page-formats.mjs keeps its own copy of these two constants, and
+  // web/src/lib/page-formats.mjs keeps its own copy of these constants, and
   // wiring it to this module means loading it at runtime, so it stays out of
   // scope here. The two agree today and nothing says they still will, which is
-  // the drift this file exists to stop, one boundary out. It costs two lines.
+  // the drift this file exists to stop, one boundary out. It costs three lines.
   const webOwner = join(ROOT, 'web', 'src', 'lib', 'page-formats.mjs');
   if (!existsSync(webOwner)) return t.skip('this checkout carries no web/');
   const web = await import(pathToFileURL(webOwner).href);
   assert.equal(web.DEFAULT_PAGE_FORMAT, DEFAULT_PAGE_FORMAT);
   assert.deepEqual([...web.PAGE_FORMATS].sort(), [...PAGE_FORMATS].sort());
+  // The width the web's pdf prompt tells its agent to lay the body out at.
+  assert.deepEqual(web.PAGE_WIDTHS, PAGE_WIDTHS);
 });
 
 // --- the four consumers -------------------------------------------------
@@ -152,7 +163,7 @@ test('injectPrintPageCss: the flagless sheet comes from the profile', () => {
       '',
     ].join('\n'));
     const res = spawnSync(NODE, [probe], { env: workspaceEnv(dir), encoding: 'utf-8' });
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
     assert.match(res.stdout, new RegExp(`@page \\{ size: ${PAGE_CSS_SIZE[declared]};`), res.stdout + res.stderr);
   }
 });
@@ -171,7 +182,7 @@ test('build-cv-html: a payload with no page_format takes the profile width', () 
     env: workspaceEnv(dir),
     encoding: 'utf-8',
   });
-  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.status, 0, describeSpawn(res));
   const html = readFileSync(out, 'utf-8');
   assert.ok(html.includes(PAGE_WIDTHS.a4), `expected the a4 body width ${PAGE_WIDTHS.a4}\n${res.stdout}`);
   assert.ok(!html.includes(PAGE_WIDTHS.letter), 'the letter body width leaked into an a4 render');
@@ -190,7 +201,7 @@ test('build-cv-html: a payload stating its own page_format outranks the profile'
     env: workspaceEnv(dir),
     encoding: 'utf-8',
   });
-  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.status, 0, describeSpawn(res));
   const html = readFileSync(out, 'utf-8');
   assert.ok(html.includes(PAGE_WIDTHS.letter), `expected the letter body width ${PAGE_WIDTHS.letter}\n${res.stdout}`);
   assert.ok(!html.includes(PAGE_WIDTHS.a4), 'the a4 body width leaked into a letter render');
@@ -224,7 +235,7 @@ test('generate-pdf: an unrecognized --format is still a hard error', () => {
     env: workspaceEnv(dir),
     encoding: 'utf-8',
   });
-  assert.notEqual(res.status, 0);
+  assert.ok(exitedNonZero(res), describeSpawn(res, 'expected a non-zero exit'));
   assert.match(res.stderr, /Invalid format "legal"/);
 });
 
@@ -242,6 +253,7 @@ function coverSandbox() {
   // import.meta.url against argv[1], and a spawned copy that fails that check
   // exits 0 having done nothing (#3165).
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'career-ops-cover-format-')));
+  scratchDirs.push(dir);
   mkdirSync(join(dir, 'lib'), { recursive: true });
   mkdirSync(join(dir, 'providers'), { recursive: true });
   mkdirSync(join(dir, 'templates'), { recursive: true });
@@ -250,11 +262,14 @@ function coverSandbox() {
     copyFileSync(join(ROOT, f), join(dir, f));
   }
   copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(dir, 'lib', 'is-main-module.mjs'));
+  copyFileSync(join(ROOT, 'lib', 'cv-markdown.mjs'), join(dir, 'lib', 'cv-markdown.mjs'));
+  copyFileSync(join(ROOT, 'lib', 'yaml-document.mjs'), join(dir, 'lib', 'yaml-document.mjs'));
   // cv-templates.mjs decodes HTML entities when it reads a template's meta
   // block, so the sandbox needs this too. Without it the copied script dies at
   // module load with ERR_MODULE_NOT_FOUND and the format assertion below never
-  // runs. The module imports nothing, so it closes the graph on its own.
+  // runs. The module imports only the entity table, which is copied next.
   copyFileSync(join(ROOT, 'providers', '_html-entities.mjs'), join(dir, 'providers', '_html-entities.mjs'));
+  copyFileSync(join(ROOT, 'providers', '_html-entity-table.mjs'), join(dir, 'providers', '_html-entity-table.mjs'));
   // Same reason: cv-templates.mjs reads the template manifest block and the
   // section vocabulary from here, so the sandbox dies at module load without it.
   copyFileSync(join(ROOT, 'lib', 'template-manifest.mjs'), join(dir, 'lib', 'template-manifest.mjs'));
@@ -262,6 +277,7 @@ function coverSandbox() {
   // assertion below and not on a missing module. Resolving early is the quiet
   // form of this bug: it reads no profile path, so every letter gets the
   // project default while its CV keeps the user's configured size.
+  copyFileSync(join(ROOT, 'lib', 'output-names.mjs'), join(dir, 'lib', 'output-names.mjs'));
   copyFileSync(join(ROOT, 'lib', 'page-format.mjs'), join(dir, 'lib', 'page-format.mjs'));
   copyFileSync(
     join(ROOT, 'templates', 'cover-letter-template.html'),
@@ -274,6 +290,8 @@ function coverSandbox() {
     "import { writeFileSync } from 'node:fs';",
     "import { dirname, join } from 'node:path';",
     "import { fileURLToPath } from 'node:url';",
+    'export const normalizeTextForATS = (html) => ({ html, replacements: {} });',
+    'export const reportAtsReplacements = () => {};',
     'export async function renderHtmlToPdf(html, outputPath, opts = {}) {',
     "  const here = dirname(fileURLToPath(import.meta.url));",
     "  writeFileSync(join(here, 'render-opts.json'), JSON.stringify({ format: opts.format ?? null }));",

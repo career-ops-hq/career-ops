@@ -4,6 +4,7 @@
 import { resolveProfileKeywords } from './_profile-keywords.mjs';
 import { intInRange } from './_config-utils.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 // VDAB (Flanders' public employment service) provider — hits the public
 // vindeenjob search API directly (the same endpoint vdab.be's own frontend
@@ -44,8 +45,9 @@ const DETAIL_API = 'https://www.vdab.be/rest/vindeenjob/v4/vacatures/';
 // Public, build-time constant baked into VDAB's own frontend JS bundle (an
 // Angular HTTP interceptor stamps this on every request) — not a per-visitor
 // session token. Verified live: works from a cold request with no cookies.
-// Same trust tier as arbeitsagentur.mjs's public API_KEY below.
-const VEJ_KEY_MONITOR = 'b277002f-e1fa-4fc5-868a-fdab633c3851';
+// Same trust tier as arbeitsagentur.mjs's public API_KEY below. Exported for
+// liveness-api.mjs, whose VDAB rung reads the same detail endpoint.
+export const VEJ_KEY_MONITOR = 'b277002f-e1fa-4fc5-868a-fdab633c3851';
 // Plural + no slug is the correct canonical form and resolves without a
 // redirect (verified live). The singular form ("/vacature/{id}", no 's')
 // looks plausible but silently redirects to the generic listing page —
@@ -317,6 +319,11 @@ export default {
       throw new Error(`vdab: all ${keywords.length} keyword request(s) failed — ${errors[0]}`);
     }
 
-    return [...byId.values()].map(({ id, ...job }) => job);
+    const jobs = [...byId.values()].map(({ id, ...job }) => job);
+    // A keyword that failed was never read, so the board is only partly read.
+    // scan.mjs takes a board's health from the returned array: unmarked, it
+    // logs the board reachable as if every keyword had answered.
+    if (errors.length) markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
+    return jobs;
   },
 };

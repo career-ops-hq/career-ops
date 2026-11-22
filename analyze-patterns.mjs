@@ -10,25 +10,42 @@
  *      node analyze-patterns.mjs --summary (human-readable table)
  *      node analyze-patterns.mjs --min-threshold 3
  *      node analyze-patterns.mjs --min-vendor-n 8   (per-vendor sample floor)
+ *      node analyze-patterns.mjs --min-family-n 20  (role-family suggestion floor)
  *      node analyze-patterns.mjs --self-test
  */
 
 import { readFileSync, existsSync, realpathSync, writeFileSync, symlinkSync, rmSync } from 'fs';
-import { join, dirname, relative, sep } from 'path';
+import { join, dirname, relative, isAbsolute, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { load as yamlLoad } from 'js-yaml';
-import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
-import { loadCanonicalStates, resolveCanonicalStateId, foldStatusInput } from './tracker-utils.mjs';
+import { loadYaml } from './lib/yaml-document.mjs';
+import { machineSummarySection } from './lib/machine-summary-section.mjs';
+import { resolveColumns, parseTrackerRow, normalizeVia, firstLinkTarget } from './tracker-parse.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { loadCanonicalStates, resolveCanonicalStateId, foldStatusInput, trackerLinkDirsFor, resolveWorkspaceRoot, resolveWorkspaceRootFor } from './tracker-utils.mjs';
 import { atsVendorOf } from './ats-vendor.mjs';
+import { parseStatusLogStages, recoverFunnelStages } from './funnel-stages.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
-const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
-  ? join(CAREER_OPS, 'data/applications.md')
-  : join(CAREER_OPS, 'applications.md');
+const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+// Report links resolve from the same directories verify-pipeline.mjs checks:
+// the tracker's folder as realpathed and as spelled (a symlinked tracker FILE
+// writes links relative to its target; a symlinked data root, or macOS's
+// /var -> /private/var tmpdir, needs the spelled form, since withinReports()
+// compares lexically), then the data root.
+const TRACKER_DIRS = trackerLinkDirsFor(CAREER_OPS);
+// A CAREER_OPS_TRACKER that points at another workspace brings that
+// workspace's reports/ with it (see resolveWorkspaceRoot): the workspace of
+// the tracker as spelled, and of its target when the tracker is a symlink into
+// another workspace. The data root's own reports/ stays allowed for a tracker
+// kept apart from its reports.
+const REPORTS_ROOTS = [...new Set([
+  join(CAREER_OPS, 'reports'),
+  join(resolveWorkspaceRootFor(CAREER_OPS), 'reports'),
+  join(resolveWorkspaceRoot(APPS_FILE), 'reports'),
+])];
 const REPORTS_DIR = join(CAREER_OPS, 'reports');
 
 const MACHINE_SUMMARY_FIELDS = new Set([
@@ -69,22 +86,32 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   // Reporting line stated by the JD, verbatim (report + Machine Summary only).
   // Allowlisted so it round-trips; no consumer logic yet.
   'reports_to',
+  // Optional local cache metadata; never an input to candidate pattern analysis.
+  'job_facts_cache',
   // Block B's requirement -> importance table, mirrored row by row (evidence
   // tier, importance band, match). Allowlisted so it round-trips; no consumer
   // logic yet, deliberately: importance is score-neutral, so nothing that folds
   // historical scores may start reading it without its own design pass.
   'requirement_importance',
+  // Optional positioning label beside the 1-5 score (RFC #4720): challenge,
+  // target, safety_net, out_of_scope or unknown, with its reason and the four
+  // evidence inputs. Allowlisted so it round-trips; report output only, and
+  // nothing that folds historical scores may read it to change a score.
+  'positioning_band',
+  'positioning_band_reason',
+  'positioning_band_evidence',
 ]);
 
 const args = process.argv.slice(2);
 
-const KNOWN_FLAGS = ['--min-threshold', '--min-vendor-n', '--self-test', '--summary', '--help', '-h'];
-const VALUE_FLAGS = ['--min-threshold', '--min-vendor-n'];
+const KNOWN_FLAGS = ['--min-threshold', '--min-vendor-n', '--min-family-n', '--self-test', '--summary', '--help', '-h'];
+const VALUE_FLAGS = ['--min-threshold', '--min-vendor-n', '--min-family-n'];
 const USAGE = `Usage:
   node analyze-patterns.mjs                       # analyze application patterns as JSON
   node analyze-patterns.mjs --summary             # print a human-readable summary
   node analyze-patterns.mjs --min-threshold <n>   # minimum submitted applications required (default: 5)
   node analyze-patterns.mjs --min-vendor-n <n>    # minimum sample per vendor/channel (default: 8)
+  node analyze-patterns.mjs --min-family-n <n>    # minimum applications per role family before a suggestion (default: 20)
   node analyze-patterns.mjs --self-test           # run the built-in consistency checks
   node analyze-patterns.mjs --help                # show this message`;
 
@@ -284,7 +311,7 @@ const ADVANCED_STATUSES = new Set(['responded', 'assessment', 'interview', 'offe
 
 // Print order for the CONVERSION FUNNEL summary. A status absent here is
 // silently omitted from the printed funnel, so this must track states.yml.
-const FUNNEL_ORDER = ['evaluated', 'applied', 'responded', 'assessment', 'interview', 'offer', 'hired', 'rejected', 'discarded', 'skip'];
+const FUNNEL_ORDER = ['evaluated', 'speculative', 'applied', 'responded', 'assessment', 'interview', 'offer', 'hired', 'rejected', 'discarded', 'skip'];
 
 function normalizeList(value) {
   if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
@@ -300,14 +327,14 @@ function normalizeScalar(value) {
 }
 
 export function parseMachineSummary(content) {
-  const fenceMatch = content.match(/##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
+  const fenceMatch = machineSummarySection(content).match(/^##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
   if (!fenceMatch) return null;
 
   const raw = fenceMatch[1].trim();
   if (!raw) return null;
 
   try {
-    const parsed = yamlLoad(raw);
+    const parsed = loadYaml(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     return Object.fromEntries(
       Object.entries(parsed).filter(([key]) => MACHINE_SUMMARY_FIELDS.has(key))
@@ -334,7 +361,10 @@ function buildViaChannelAnalysis(submitted, isAdvanced, minSample = MIN_VENDOR_N
   const isDirect = (v) => v === '—' || v === '-';
   const agencySubmitted = submitted.filter(e => { const v = viaOf(e); return v !== '' && !isDirect(v); });
   const directSubmitted = submitted.filter(e => isDirect(viaOf(e)));
-  const rate = (arr) => (arr.length > 0 ? Math.round((arr.filter(isAdvanced).length / arr.length) * 100) : 0);
+  // null, not 0, for a channel nothing went through, as decidedRate is: a
+  // "direct 0 apps 0% advance" line reads as a channel that was tried and
+  // failed, for a user who simply applies through agencies.
+  const rate = (arr) => (arr.length > 0 ? Math.round((arr.filter(isAdvanced).length / arr.length) * 100) : null);
 
   const byAgency = new Map();
   for (const e of agencySubmitted) {
@@ -773,6 +803,31 @@ requirement_importance:
   if (classifyRemote('US-only remote') !== 'geo-restricted') {
     failures.push('classifyRemote geo-restricted precedence regressed');
   }
+  // Chinese Block A values (language.output: zh-CN) used to read as 'unknown'.
+  for (const [value, want] of [
+    ['远程为主：“可远程，仅限中国大陆境内”', 'regional remote'],
+    ['混合办公，每周 3 天到岗，新加坡', 'hybrid/onsite'],
+    ['每周 4 天到岗，不支持纯远程', 'hybrid/onsite'],
+    ['全球远程', 'global remote'],
+    ['全遠端', 'regional remote'],
+    // A negated requirement is not an onsite one.
+    ['全球远程，无需到岗', 'global remote'],
+    ['远程，不需要到岗', 'regional remote'],
+    ['無需進辦公室，全球遠端', 'global remote'],
+    // Every global rule runs before either regional fallback.
+    ['全球远程（fully remote）', 'global remote'],
+  ]) {
+    if (classifyRemote(value) !== want) failures.push(`classifyRemote('${value}') → '${classifyRemote(value)}', expected '${want}'`);
+  }
+  for (const [description, want] of [
+    ['工作地点冲突：上海徐汇每周 4 天到岗且不支持纯远程', 'geo-restriction'],
+    ['每周 4 天到岗，不支持纯远程', 'onsite-requirement'],
+    ['要求 8 年以上经验，年限不足', 'seniority-mismatch'],
+    ['薪资上限低于底线', 'other'],
+  ]) {
+    const got = extractBlockerType({ description, severity: 'hard stop' });
+    if (got !== want) failures.push(`extractBlockerType('${description}') → '${got}', expected '${want}'`);
+  }
 
   // Reports-root containment: a legit link stays inside reports/, a crafted
   // traversal link escapes root and must be rejected before parseReport. join()
@@ -784,6 +839,11 @@ requirement_importance:
     if (withinReports(escape)) failures.push('containment: traversal path escaped reports/ (path-traversal guard broken)');
     const sibling = join(CAREER_OPS, 'reports-evil', 'x.md');
     if (withinReports(sibling)) failures.push('containment: reports-prefixed sibling dir wrongly accepted');
+    // The same lexical guard against a workspace's reports root (REPORTS_ROOTS).
+    const otherRoot = join(CAREER_OPS, 'workspace', 'reports');
+    if (withinReports(join(otherRoot, '..', '..', 'reports', 'x.md'), otherRoot)) failures.push('containment: traversal escaped a workspace reports root');
+    if (withinReports(join(otherRoot, '..', 'reports-evil', 'x.md'), otherRoot)) failures.push('containment: sibling of a workspace reports root wrongly accepted');
+    if (withinReports(otherRoot, otherRoot)) failures.push('containment: a reports root itself wrongly accepted as a report');
   }
 
   // Symlink-escape + missing-file graceful degradation (#2655). realpath
@@ -833,6 +893,16 @@ requirement_importance:
     }
   }
 
+  // Role-family interview rate (#6028): a small family must not earn a suggestion.
+  {
+    const rows = [];
+    for (let i = 1; i <= 8; i++) rows.push({ num: i, role: 'Office Administrator', normalizedStatus: i === 1 ? 'interview' : 'applied', report: null });
+    for (let i = 9; i <= 40; i++) rows.push({ num: i, role: 'Payroll Clerk', normalizedStatus: 'applied', report: null });
+    const rf = buildRoleFamilyInterviewRate(rows, '');
+    const admin = rf.families.find(f => f.family === 'Administrative');
+    if (admin?.verdict !== NOT_ENOUGH_DATA || rf.suggestions.length > 0) failures.push('role-family: 8 applications with 1 interview produced a suggestion');
+  }
+
   if (failures.length > 0) {
     console.error(`analyze-patterns self-test failed: ${failures.join('; ')}`);
     process.exit(1);
@@ -840,6 +910,12 @@ requirement_importance:
 
   console.log('analyze-patterns self-test OK (Machine Summary parser + vendor detection + via channel analysis)');
   process.exit(0);
+}
+
+// The ledger sits next to the tracker (same rule as stats.mjs/funnel-velocity.mjs).
+function readStatusLog() {
+  const file = join(dirname(APPS_FILE), 'status-log.tsv');
+  return existsSync(file) ? readFileSync(file, 'utf-8') : '';
 }
 
 // --- Parse applications.md ---
@@ -857,23 +933,24 @@ function parseTracker() {
 }
 
 // Canonical reports-root containment. A tracker link resolves to a candidate
-// path; accept it only if it stays inside the repo's reports/ directory. Two
+// path; accept it only if it stays inside a reports/ directory (the data
+// root's by default; see REPORTS_ROOTS for the others). Two
 // layers: a cheap lexical traversal guard (no stat) rejects a crafted link like
-// reports/../../etc/passwd, which join() collapses to a repo-relative path that
-// no longer starts with reports/; then realpath canonicalization rejects a
+// reports/../../etc/passwd, which join() collapses to a path that is no longer
+// under reports/; then realpath canonicalization rejects a
 // symlink whose target escapes reports/ (a lexical-only check would follow it).
 // realpathSync throws ENOENT/ENOTDIR for a not-yet-created candidate or a
 // missing reports root — both are non-fatal: a missing candidate falls through
 // to the downstream read (which returns null, preserving prior semantics), a
 // missing root means there are simply no reports. Only genuinely unexpected
-// errors rethrow, matching readTextIfExists. Identical to the guard in
-// upskill.mjs so both sites behave the same.
-function withinReports(candidate) {
-  const repoRelative = relative(CAREER_OPS, candidate).split(sep).join('/');
-  if (!repoRelative.startsWith('reports/') || repoRelative.includes('..')) return false;
+// errors rethrow, matching readTextIfExists. The same guard as upskill.mjs's,
+// with the reports root as a parameter.
+function withinReports(candidate, reportsRoot = join(CAREER_OPS, 'reports')) {
+  const rootRelative = relative(reportsRoot, candidate);
+  if (!rootRelative || isAbsolute(rootRelative) || rootRelative.includes('..')) return false;
   let realRoot;
   try {
-    realRoot = realpathSync(join(CAREER_OPS, 'reports'));
+    realRoot = realpathSync(reportsRoot);
   } catch (err) {
     if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return false;
     throw err;
@@ -938,7 +1015,7 @@ const ARCHETYPE_LABELS = [
   'Archetipo',  // it   — modes/it/annuncio.md
   'Archetyp',   // de, pl — modes/de/angebot.md, modes/pl/oferta.md
   'Arketipe',   // id   — modes/id/lowongan.md
-  'Arketype',   // da   — modes/da/oferta.md
+  'Arketype',   // da, nb — modes/da/oferta.md, modes/nb/stilling.md
   'Arketip',    // tr   — modes/tr/is-ilani.md
   'Архетип',    // ru, ua — modes/ru/oferta.md, modes/ua/oferta.md
 ];
@@ -1009,11 +1086,15 @@ function parseReport(reportPath) {
   // Extract Block A table (Role Summary) — works with both EN and ES headers
   // Archetype cell may be labeled "Archetype", "Arquetipo", or "Detected archetype" (drift from EN translation).
   const blockARegex = /\|\s*(?:Detected\s+)?(?:Archetype|Arquetipo)\s*\|\s*(.*?)\s*\|/i;
-  const seniorityRegex = /\|\s*(?:Seniority|Nivel|Level)\s*\|\s*(.*?)\s*\|/i;
-  const remoteRegex = /\|\s*(?:Remote|Remoto|Location)\s*\|\s*(.*?)\s*\|/i;
-  const teamRegex = /\|\s*(?:Team|Team size|Equipo)\s*\|\s*(.*?)\s*\|/i;
+  // The Chinese labels are the ones modes/zh/oferta.md and modes/zh-TW/oferta.md
+  // gloss each Block A row with, which is what a `language.output: zh-CN` report
+  // writes in the label cell. Without them every such report read as remote /
+  // seniority / team "unknown".
+  const seniorityRegex = /\|\s*(?:Seniority|Nivel|Level|资深程度|資深程度)\s*\|\s*(.*?)\s*\|/i;
+  const remoteRegex = /\|\s*(?:Remote|Remoto|Location|工作模式)\s*\|\s*(.*?)\s*\|/i;
+  const teamRegex = /\|\s*(?:Team|Team size|Equipo|团队规模|團隊規模)\s*\|\s*(.*?)\s*\|/i;
   const compRegex = /\|\s*(?:Comp|Salary|Salario|Listed salary)\s*\|\s*(.*?)\s*\|/i;
-  const domainRegex = /\|\s*(?:Domain|Dominio|Industry)\s*\|\s*(.*?)\s*\|/i;
+  const domainRegex = /\|\s*(?:Domain|Dominio|Industry|(?:技术)?领域|(?:技術)?領域)\s*\|\s*(.*?)\s*\|/i;
 
   // Fallback: report header field `Archetype: ...` (newer reports use this).
   const headerArchRegex = REPORT_ARCHETYPE_RE;
@@ -1099,12 +1180,21 @@ function classifyRemote(raw) {
   if (/\b(us[- ]?only|canada[- ]?only|residents only|usa only|us residents|canada residents)\b/.test(lower)) return 'geo-restricted';
   if (/\bargentina\s+remote\s+only\b/.test(lower)) return 'geo-restricted';
   if (/\b(hybrid|on-?site|office|columbus|cape town|relocat)\b/.test(lower)) return 'hybrid/onsite';
+  // Chinese values carry no word boundaries, so they are matched as plain
+  // substrings. "不支持远程" is checked here, before the remote bucket below
+  // reads its "远程". A negated requirement ("无需到岗", "不需要坐班") is not
+  // an onsite one.
+  if (/(?<!(?:无|無|不)(?:需|須|须|必|用)要?)(?:混合|现场|現場|到岗|到崗|坐班|进办公室|進辦公室)|不支持(?:纯|純)?(?:远程|遠端|遠程)/.test(lower)) return 'hybrid/onsite';
+  // Every global rule runs before either regional fallback, so a mixed value
+  // such as "全球远程（fully remote）" is not caught by the English "remote".
   // (?<!\w)/(?!\w) not \b: the "70+" signal ends in "+", and a trailing \b
   // never matches after a symbol edge, so "remote in 70+ countries" fell
   // through to the weaker 'regional remote' bucket. Word alternatives behave
   // identically under either boundary, so this only rescues the "70+" case.
   if (/(?<!\w)(global|anywhere|worldwide|no restrict|70\+|work from anywhere)(?!\w)/.test(lower)) return 'global remote';
+  if (/全球(?:远程|遠端|遠程)|不限地[点點區区]/.test(lower)) return 'global remote';
   if (/\b(remote|latam|americas|brazil|fully remote)\b/.test(lower)) return 'regional remote';
+  if (/远程|遠端|遠程|居家办公|居家辦公/.test(lower)) return 'regional remote';
   return 'unknown';
 }
 
@@ -1118,7 +1208,7 @@ function classifyCompanySize(teamSize) {
   if (!teamSize) return 'unknown';
   const lower = teamSize.toLowerCase();
   // Extract numbers
-  const nums = lower.match(/[\d,]+/g);
+  const nums = lower.match(/\d[\d,]*/g);
   if (nums) {
     const max = Math.max(...nums.map(n => parseInt(n.replace(/,/g, ''))));
     if (max <= 50) return 'startup';
@@ -1139,6 +1229,10 @@ function extractBlockerType(gap) {
   if (/\b(javascript|typescript|python|ruby|java|go|rust|node|react|angular|vue|django|flask|rails)\b/.test(desc)) return 'stack-mismatch';
   if (/\b(senior|staff|lead|principal|director|manager|head)\b/.test(desc)) return 'seniority-mismatch';
   if (/\b(hybrid|on-?site|office|relocat)\b/.test(desc)) return 'onsite-requirement';
+  // Chinese hard stops, in the same order as the English checks above.
+  if (/签证|簽證|工作许可|工作許可|地点|地點|地域|国家|國家|迁居|遷居|搬迁|搬遷/.test(desc)) return 'geo-restriction';
+  if (/年限|资深|資深|职级|職級|级别|級別/.test(desc)) return 'seniority-mismatch';
+  if (/混合|到岗|到崗|坐班|现场|現場|不支持(?:纯|純)?(?:远程|遠端|遠程)/.test(desc)) return 'onsite-requirement';
   return 'other';
 }
 
@@ -1161,7 +1255,7 @@ const DISCARD_REASONS_FILE = join(dirname(fileURLToPath(import.meta.url)), 'temp
  */
 export function loadDiscardReasonVocabulary(file = DISCARD_REASONS_FILE) {
   try {
-    const parsed = yamlLoad(readFileSync(file, 'utf8'));
+    const parsed = loadYaml(readFileSync(file, 'utf8'));
     const reasons = Array.isArray(parsed?.reasons) ? parsed.reasons : [];
     const ids = reasons.map(reason => reason?.id).filter(id => typeof id === 'string' && id);
     return ids.length > 0 ? new Set(ids) : null;
@@ -1176,12 +1270,26 @@ function discardReasonKey(label) {
   return label.trim().toLowerCase().replace(/[\s-]+/g, '_');
 }
 
+// An id followed by a note ("geo_restriction: relocation to Singapore") is
+// still that id. The text before the first colon is matched by the same
+// spelling rule and the note is dropped; a label is cut nowhere else.
+function canonicalDiscardReason(label, vocabulary) {
+  if (!vocabulary) return null;
+  const key = discardReasonKey(label);
+  if (vocabulary.has(key)) return key;
+  const colon = label.search(/[:：]/);
+  if (colon < 1) return null;
+  const head = discardReasonKey(label.slice(0, colon));
+  return vocabulary.has(head) ? head : null;
+}
+
 /**
  * Forecasts stay separate from recorded outcomes (#2785). The base is tracker
  * entries whose linked report explicitly supplies prediction data, including
  * an empty list; a missing or malformed field is unknown, not an empty forecast.
  * All statuses remain eligible: advancing later does not erase a prediction.
- * Only canonical ids from templates/discard-reasons.yml enter the shares. Every
+ * Only canonical ids from templates/discard-reasons.yml enter the shares; an id
+ * followed by a colon and a note counts as that id. Every
  * other label is listed under `predictedDiscardReasonOther` with its own
  * spelling (case and surrounding whitespace normalized) and is never counted
  * in `predictedDiscardReasonStats`.
@@ -1217,8 +1325,8 @@ export function buildPredictedDiscardReasonSignals(enriched, vocabulary = loadDi
     const canonical = new Set();
     const other = new Set();
     for (const reason of reasons) {
-      const key = discardReasonKey(reason);
-      if (vocabulary?.has(key)) canonical.add(key);
+      const key = canonicalDiscardReason(reason, vocabulary);
+      if (key) canonical.add(key);
       else other.add(reason);
     }
     for (const reason of canonical) counts.set(reason, (counts.get(reason) || 0) + 1);
@@ -1327,7 +1435,115 @@ function buildPatternSignals(enriched) {
 }
 
 // --- Main analysis ---
-export function analyze(entries = parseTracker()) {
+// --- Interview rate by role family (#6028) ---
+// Advisory and read-only: groups rows by role family and reports how often each
+// family reached Interview, so a user can see where applications convert. It
+// never feeds scoring, targeting or portals.yml.
+//
+// Role family = the archetype recorded in the row's report; rows without one
+// fall back to the first matching keyword group below (first match wins), and
+// otherwise land in "Unclassified". The table is built in and deliberately
+// small; it is system-layer code, so user-specific families belong in report
+// archetypes (user layer), not here.
+const ROLE_FAMILY_KEYWORDS = Object.freeze([
+  ['HR / people operations', /\b(hr|human resources|talent|recruit\w*|payroll|people (ops|operations|partner|coordinator))\b/i],
+  ['Learning and development', /\b(instruction\w*|learning|training|curriculum|l&d|e-?learning|educator|teacher)\b/i],
+  ['Administrative', /\b(administrat\w*|office|receptionist|secretary|executive assistant|clerk)\b/i],
+  ['Data and reporting', /\b(data|analyst|analytics|reporting|bi)\b/i],
+  ['Software engineering', /\b(software|engineer\w*|developer|devops|programmer)\b/i],
+]);
+const UNCLASSIFIED_FAMILY = 'Unclassified';
+const familyKey = (name) => name.normalize('NFKC').toLowerCase();
+const UNCLASSIFIED_KEY = familyKey(UNCLASSIFIED_FAMILY);
+// A suggestion needs at least this many applications in the family AND a rate
+// at least this multiple of the overall rate. Below either, only counts print.
+let MIN_FAMILY_N = 20;
+const MIN_FAMILY_LIFT = 2;
+const NOT_ENOUGH_DATA = 'not enough data';
+
+export function roleFamilyOf(entry) {
+  const archetype = String(entry?.report?.archetype ?? '').trim();
+  if (archetype) return archetype;
+  const role = String(entry?.role ?? '');
+  for (const [family, re] of ROLE_FAMILY_KEYWORDS) {
+    if (re.test(role)) return family;
+  }
+  return UNCLASSIFIED_FAMILY;
+}
+
+/** Wilson 95% interval for k of n, as percentages with one decimal. */
+function wilson95(k, n) {
+  if (n === 0) return null;
+  const z = 1.96, p = k / n, d = 1 + (z * z) / n;
+  const centre = (p + (z * z) / (2 * n)) / d;
+  const half = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / d;
+  const r1 = (x) => Math.round(x * 1000) / 10;
+  return [r1(Math.max(0, centre - half)), r1(Math.min(1, centre + half))];
+}
+
+/**
+ * Interview rate per role family. "Reached interview" folds the status-log the
+ * same way stats.mjs/funnel-velocity.mjs do (recoverFunnelStages), so a row
+ * rejected after an interview still counts; with no ledger it falls back to
+ * the current status. Only rows that were actually applied count.
+ *
+ * @param {Array} enriched - tracker rows (num, role, normalizedStatus, report).
+ * @param {string} [statusLogContent] - raw data/status-log.tsv text.
+ */
+export function buildRoleFamilyInterviewRate(enriched, statusLogContent = '', { minFamilyN = MIN_FAMILY_N } = {}) {
+  const ledger = parseStatusLogStages(statusLogContent);
+  const statusByNum = new Map(enriched.map(e => [e.num, e.normalizedStatus]));
+  const reached = recoverFunnelStages(statusByNum, ledger);
+  const r1 = (x) => Math.round(x * 10) / 10;
+
+  const groups = new Map();
+  const seen = new Set();
+  let applied = 0, interviews = 0;
+  for (const e of enriched) {
+    if (seen.has(e.num)) continue;
+    seen.add(e.num);
+    const rank = reached.get(e.num) || 0;
+    if (rank < 1) continue;
+    const family = roleFamilyOf(e);
+    const key = familyKey(family);
+    if (!groups.has(key)) groups.set(key, { family, applied: 0, interviews: 0 });
+    const g = groups.get(key);
+    g.applied++;
+    applied++;
+    if (rank >= 4) { g.interviews++; interviews++; }
+  }
+
+  const families = [...groups.entries()].map(([key, g]) => {
+    const sufficientSample = g.applied >= minFamilyN;
+    const lifts = interviews > 0 && g.interviews > 0
+      && g.interviews * applied >= MIN_FAMILY_LIFT * interviews * g.applied;
+    const suggest = key !== UNCLASSIFIED_KEY && sufficientSample && lifts;
+    return {
+      family: g.family,
+      applied: g.applied,
+      interviews: g.interviews,
+      ratePct: r1((g.interviews / g.applied) * 100),
+      ci95Pct: sufficientSample ? wilson95(g.interviews, g.applied) : null,
+      sufficientSample,
+      verdict: suggest ? 'suggest' : (sufficientSample ? 'no clear lift' : NOT_ENOUGH_DATA),
+    };
+  }).sort((a, b) => b.applied - a.applied || a.family.localeCompare(b.family));
+
+  const overallRatePct = applied > 0 ? r1((interviews / applied) * 100) : null;
+  const suggestions = families.filter(f => f.verdict === 'suggest').map(f =>
+    `${f.family}: ${f.interviews}/${f.applied} reached interview (${f.ratePct}%) vs ${overallRatePct}% overall -- consider weighting more applications here. Advisory only; location, pay and visa fit may still outweigh it.`);
+
+  return {
+    basis: ledger.length > 0 ? 'ledger' : 'snapshot',
+    minFamilyN,
+    minLiftRatio: MIN_FAMILY_LIFT,
+    overall: { applied, interviews, ratePct: overallRatePct },
+    families,
+    suggestions,
+  };
+}
+
+export function analyze(entries = parseTracker(), { statusLogContent } = {}) {
   if (entries.length === 0) {
     // noData marks this as the empty-tracker case rather than a failure, so the
     // exit status below does not have to match on the message text.
@@ -1336,20 +1552,20 @@ export function analyze(entries = parseTracker()) {
 
   // Enrich entries with report data and classification
   const enriched = entries.map(e => {
-    const reportMatch = e.report.match(/\]\(([^)]+)\)/);
+    const reportTarget = firstLinkTarget(e.report);
     // Tracker links are relative to the tracker file's own directory (see
-    // merge-tracker.mjs link normalization); fall back to repo root for
-    // legacy root-relative links. Each candidate is guarded to reports/
-    // before the read is attempted; parseReport returns null for a missing
-    // file, so no pre-flight existsSync is needed (#2385).
+    // merge-tracker.mjs link normalization, and TRACKER_DIRS); fall back to
+    // repo root for legacy root-relative links. Each candidate is guarded to
+    // a reports/ root before the read is attempted; parseReport returns null
+    // for a missing file, so no pre-flight existsSync is needed (#2385).
     let reportData = null;
-    if (reportMatch) {
+    if (reportTarget != null) {
       const candidates = new Set([
-        join(dirname(APPS_FILE), reportMatch[1]),
-        join(CAREER_OPS, reportMatch[1]),
+        ...TRACKER_DIRS.map((dir) => join(dir, reportTarget)),
+        join(CAREER_OPS, reportTarget),
       ]);
       for (const candidate of candidates) {
-        if (!withinReports(candidate)) continue;
+        if (!REPORTS_ROOTS.some((root) => withinReports(candidate, root))) continue;
         reportData = parseReport(candidate);
         if (reportData) break;
       }
@@ -1612,6 +1828,7 @@ export function analyze(entries = parseTracker()) {
     funnel,
     scoreComparison,
     archetypeBreakdown,
+    roleFamilyInterviewRate: buildRoleFamilyInterviewRate(enriched, statusLogContent ?? readStatusLog()),
     blockerAnalysis,
     remotePolicy,
     companySizeBreakdown,
@@ -1637,7 +1854,7 @@ function printSummary(result) {
     return;
   }
 
-  const { metadata, funnel, scoreComparison, archetypeBreakdown, blockerAnalysis, remotePolicy, scoreThreshold, techStackGaps, discardReasonStats, recommendations } = result;
+  const { metadata, funnel, scoreComparison, archetypeBreakdown, roleFamilyInterviewRate, blockerAnalysis, remotePolicy, scoreThreshold, techStackGaps, discardReasonStats, recommendations } = result;
 
   console.log(`\n${'='.repeat(60)}`);
   console.log(`  Pattern Analysis — ${metadata.analysisDate}`);
@@ -1661,6 +1878,21 @@ function printSummary(result) {
     if (stats.count > 0) {
       console.log(`  ${group.padEnd(15)} avg ${stats.avg}/5  (${stats.count} entries, range ${stats.min}-${stats.max})`);
     }
+  }
+
+  // Interview rate by role family (#6028)
+  const rf = roleFamilyInterviewRate;
+  if (rf && rf.families.length > 0) {
+    console.log('\nINTERVIEW RATE BY ROLE FAMILY');
+    console.log('-'.repeat(40));
+    console.log(`  overall ${rf.overall.interviews}/${rf.overall.applied} reached interview (${rf.overall.ratePct}%)${rf.basis === 'ledger' ? '; status-log history folded' : ''}`);
+    for (const f of rf.families) {
+      const ci = f.ci95Pct ? ` 95% CI ${f.ci95Pct[0]}-${f.ci95Pct[1]}%` : '';
+      const tail = f.verdict === 'suggest' ? 'focus here' : f.verdict;
+      console.log(`  ${f.family.slice(0, 28).padEnd(28)} n=${String(f.applied).padStart(3)}  ${String(f.interviews).padStart(2)} interviews  ${String(f.ratePct).padStart(5)}%${ci}  ${tail}`);
+    }
+    for (const s of rf.suggestions) console.log(`  -> ${s}`);
+    console.log(`  A suggestion needs n >= ${rf.minFamilyN} and a rate >= ${rf.minLiftRatio}x overall.`);
   }
 
   // Blockers
@@ -1744,8 +1976,10 @@ function printSummary(result) {
   if (via && (via.breakdown.length > 0 || via.directSubmitted > 0)) {
     console.log('\nVIA CHANNEL ANALYSIS (agency vs direct, #1596)');
     console.log('-'.repeat(40));
-    console.log(`  direct  ${String(via.directSubmitted).padStart(3)} apps  ${String(via.directAdvanceRate).padStart(3)}% advance`);
-    console.log(`  agency  ${String(via.agencySubmitted).padStart(3)} apps  ${String(via.agencyAdvanceRate).padStart(3)}% advance`);
+    // A channel with no submissions has no rate; "—" keeps the column aligned.
+    const pct = (r) => (r == null ? '   —' : `${String(r).padStart(3)}%`);
+    console.log(`  direct  ${String(via.directSubmitted).padStart(3)} apps  ${pct(via.directAdvanceRate)} advance`);
+    console.log(`  agency  ${String(via.agencySubmitted).padStart(3)} apps  ${pct(via.agencyAdvanceRate)} advance`);
     if (via.unknownVia > 0) {
       console.log(`  unknown ${String(via.unknownVia).padStart(3)} apps  (no Via recorded — not counted in either channel)`);
     }
@@ -1797,6 +2031,16 @@ if (isMainModule(import.meta.url)) {
       process.exit(1);
     }
     MIN_THRESHOLD = Number(rawMinThreshold);
+  }
+
+  if (hasFlag(args, '--min-family-n')) {
+    const rawMinFamilyN = flagValue(args, '--min-family-n');
+    if (rawMinFamilyN === undefined || !/^\d+$/.test(String(rawMinFamilyN)) ||
+        !Number.isSafeInteger(Number(rawMinFamilyN)) || Number(rawMinFamilyN) < 1) {
+      console.error(`Error: --min-family-n requires a positive integer, got "${rawMinFamilyN ?? ''}"`);
+      process.exit(1);
+    }
+    MIN_FAMILY_N = Number(rawMinFamilyN);
   }
 
   if (hasFlag(args, '--min-vendor-n')) {

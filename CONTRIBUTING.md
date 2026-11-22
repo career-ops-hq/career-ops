@@ -19,7 +19,7 @@ New to all this? That's the point. Claim a good-first-issue by commenting `/assi
 
 **For a new feature, a new mode or command, or an architecture change, please open an issue first.** It saves you from investing time in something we'd have to redirect, and lets us align on direction before you write code.
 
-**Going straight to a PR is welcome — no issue needed — for:** bug fixes, new zero-auth scanner providers, docs, and translations. Don't let process slow these down; these are the contributions we most want.
+**Going straight to a PR is welcome — no issue needed — for:** bug fixes, new zero-auth scanner providers, docs, and translations. Don't let process slow these down; these are the contributions we most want. The one exception is a change to an [owner-reviewed path](#owner-reviewed-paths): open an issue first there, even for a bug fix or a docs change. A typo fix there needs no issue.
 
 A large *feature* PR that skipped this step may be asked to start with an issue if it doesn't fit the architecture or roadmap — that's a scope conversation, never a judgment on your work.
 
@@ -30,6 +30,26 @@ The review process you'll experience here is documented end-to-end in [Agentic m
 - Addresses a feature request that was discussed and approved
 - Includes a clear description of what changed and why
 - Follows the existing code style and project philosophy (simple, minimal, quality over quantity)
+
+### Owner-reviewed paths
+
+[`.github/CODEOWNERS`](.github/CODEOWNERS) sends a change to any of these paths to a maintainer for review. A bad change here usually passes CI, so that review is the real check.
+
+- Repo docs and governance: `README*.md`, `CONTRIBUTING.md`, `GOVERNANCE.md`, `MAINTAINERS.md`, `ARCHITECTURE.md`, `.github/CODEOWNERS`
+- Coding-agent configuration: `.github/copilot-instructions.md`, `.github/agents/`
+- Agent instructions and the skill router: `CLAUDE.md`, `AGENTS.md`, `CODEX.md`, `OPENCODE.md`, `GEMINI.md`, `KIMI.md`, `.agents/skills/career-ops/SKILL.md`
+- Scoring and the data contract: `modes/_shared.md`, `DATA_CONTRACT.md`
+- The self-updater: `update-system.mjs`, `lib/update-manifest.mjs`, `updater-migration-tests.mjs`
+- Plugin governance: `plugins-registry/`, `validate-plugin-registry.mjs`, `plugin-install.mjs`, `plugin-audit.mjs`, `plugins/_engine.mjs`, `plugins/_lock.mjs`, `plugins/_net.mjs`, `plugins/_registry.mjs`, `.github/workflows/`, `docs/PLUGIN_REVIEW.md`
+- The employer registry: `employers/`, `seeds/employers-validate.mjs`, `lib/ats-board-url.mjs`
+- The web UI: `web/`
+
+What that means depends on who makes the change:
+
+- **A contributor**, working by hand or with a coding agent they are directing: open an issue first and link it from the PR, then expect a closer review. A typo fix needs no issue and goes straight to a PR. These paths are not off limits; several plugin-engine fixes landed this way.
+- **An unattended coding agent**, a session no person is watching (the Copilot cloud agent, for one): leave these paths alone. Stop and explain in the report why the task needs them, so a person can open the issue.
+
+The area owners at the bottom of `CODEOWNERS` (`tests/`, `dashboard/`, `providers/`) are not on this list: those entries route review to the area's maintainer and need no issue first. `tests/contributing-owner-paths.test.mjs` fails when this list and `CODEOWNERS` disagree.
 
 ## Quick Start
 
@@ -141,11 +161,17 @@ career-ops reads job listings from public sources: ATSes, job boards, company ca
 
 3. **Paid placement doesn't reach the candidate.** Promoted content cannot buy position in career-ops. In the local core, ranking happens on each user's machine. When a user opts into the shared listings layer, scoring happens on the server, because scoring one CV against millions of listings is not work a laptop can do: the client sends a vector derived from the user's CV, never the CV itself, and the server returns listings with their scores. What is sent is stated at the moment of the opt-in. The scoring function is published and deterministic, so anyone can recompute a score and check it. Providers traverse their source's complete inventory, and the maintainer audits sources for response bias (API totals vs site totals, page distribution). career-ops itself carries no sponsored placements of any kind. This is manifesto right 8, "Your agent works for you. Not for a platform, not for an employer," enforced at the data layer.
 
-4. **Indexing is not endorsement, and distribution is not owed.** Presence in the registry places listings in front of the installed base (as of August 2026, a single network's launch post drove 15,626 unique machines to clone the repo in a day). Real, measurable, channel-dependent — and no source is owed placement, traffic, or permanence. Sources are listed with their operator declared, and no single source may exceed 40% of the registry. The project's own aggregation layer is not a source and does not count toward this cap (see rule 5).
+4. **Indexing is not endorsement, and distribution is not owed.** Presence in the registry places listings in front of the installed base (as of August 2026, a single network's launch post drove 15,626 unique machines to clone the repo in a day). Real, measurable, channel-dependent, and no source is owed placement, traffic, or permanence. Sources are listed with their operator declared. The operator is whoever decides that the listings are in the registry and benefits from their being there, not the software that hosts them: a company whose job board runs on an applicant tracking system is the operator of that board, and the system is not; a job board or a talent network is the operator of everything it lists. No single operator may exceed 40% of the registry. The cap exists so that no one who benefits from being listed can fill the registry. The share of each hosting system is published as well: it says how much the registry depends on one system, and it carries no cap while the registry is being filled. Both figures are published, with their date, on the status page of the shared listings layer from the day that layer is running. Sponsoring the project changes neither count. If this definition changes, the change is published here with its date and the reason. The project's own aggregation layer is not a source and does not count toward this cap (see rule 5).
 
 5. **The aggregation layer belongs to the project.** A provider reads its own source. Cross-source aggregation, ranking, matching and the registry are the project's own and are never delegated to a source. They are first-party wherever they run: on your machine in the local core, or in the opt-in shared layer the project governs (see "First-party and official surfaces").
 
-6. **The source's own `robots.txt`.** Checked before a provider is written, and read the way a crawler reads it: per path, under the group that binds career-ops's own client (`User-agent: *`, or a token the scanner actually sends). A `Disallow` counts only when it covers a path the provider would fetch — a rule on `/api`, `/data`, a subscribe form or any route the parser never requests is not an obstacle (precedent: ITviec, CareerViet, both carrying disallows they route around). A `Disallow` that does cover the listing paths the provider needs is a stop: the source is not indexed, and the finding goes in the [Evaluated, not supported](docs/SUPPORTED_JOB_BOARDS.md#evaluated-not-supported) table (precedent: Lagou — `Disallow: /*?*` under `User-agent: *`, and every usable request carries a query string). A `robots.txt` rule scoped to a named AI or agent crawler (`ClaudeBot`, `anthropic-ai`, `Claude-Web`, a generic managed AI-bot block) does **not** name this client — the scanner is a distinct, bounded, `career-ops`-identified fetcher, not that crawler — but a scan can still be the first step toward a model reading the posting in a later `pipeline` / `triage` run. Whether the operator's intent reaches it is therefore a maintainer decision on a [source proposal](https://github.com/career-ops-hq/career-ops/issues/new?template=source-proposal.yml), not something the rule settles by itself. Anything ambiguous takes the same route.
+6. **Read what is public, and say who is reading.** career-ops reads postings in two places, and they are not the same thing.
+
+   *On your machine.* A provider reads a posting on the job seeker's own machine so that person can understand it and, if it fits, apply on the employer's own page (rule 2). It builds no index and republishes nothing: what it reads is kept only in the user's own files.
+
+   *In the shared listings layer.* The project's aggregation layer (rule 5) does build an index: it reads the public job pages of employers and serves, to any agent that asks, a card for each posting: its title, the employer, where the job is and whether it is remote, hybrid or on site, the salary when the posting states one, the date it was posted, and the link to the employer's own page. It does not serve or republish the text of the posting; to read it, a person goes to the employer. It keeps a private working copy of that text while the posting is published and for 90 days after, and uses it only to derive the fields of the card and other closed facts about the posting, such as its level, its work mode or its salary. To derive them, it may send the text, without email addresses, phone numbers or links, to an outside AI model provider that processes it for the project under a data processing agreement and does not train on it. When an employer asks not to be read, the copy of its postings is deleted; the facts already derived from them are kept, with the employer's name, to study the job market. The layer is not a visitor and does not claim to be one. It does not treat a source's `robots.txt` as a gate; this is what it does instead. It reads only public job pages, and nothing behind a login. Every request says who it is, with a user agent that links to this policy, which says what it is and how to ask not to be read. It makes one request at a time to a host, at least a second apart, and keeps to a `Crawl-delay` or a `Retry-After` the host states. Every listing it serves links straight to the employer's own page (rule 2), and the layer adds no tracking of its own. An employer that asks not to be read is removed and stays removed, also when its postings would reach the layer through a job board.
+
+   Three things stay a stop in both places: content behind a login or a user account (LinkedIn and the like); anything that needs a CAPTCHA solved; and a source whose operator asks career-ops not to read it, which is removed ([open an issue](https://github.com/career-ops-hq/career-ops/issues/new) to ask). Until 2026-11-08 a `Disallow` covering the listing paths was a stop; the [Source Indexing Log](docs/SOURCE_INDEXING_LOG.md#rule-6-changed-2026-11-08) records why that changed, and [what changed on 2026-11-12](docs/SOURCE_INDEXING_LOG.md#rules-4-and-6-changed-2026-11-12).
 
 To see how the rules have actually been applied, read the [Source Indexing Log](docs/SOURCE_INDEXING_LOG.md): one entry per listed source, with what was checked and how.
 
@@ -156,11 +182,13 @@ To propose a source (yours or anyone's): [open a source proposal](https://github
 - Keep modes language-agnostic when possible (Claude handles both EN and ES)
 - Scripts should handle missing files gracefully (check `existsSync` before `readFileSync`)
 - Dashboard changes require a build (`npm run build:dashboard`) — test with real data before submitting
+- Changes to `dashboard/` or `templates/states.yml` need `go test ./...` run from `dashboard/`: CI runs it on every pull request, and it is the only check that the dashboard accepts every state in `templates/states.yml`; `node test-all.mjs` does not run it
 - Don't commit personal data (cv.md, profile.yml, applications.md, reports/)
+- An English doc change and its mechanical updates to the languages that already have that file go in the same PR, not one PR per language. A new language or market mode stays its own PR, since it usually brings prompts and core changes of its own.
 
 ## What we do NOT accept
 
-- **PRs that scrape platforms prohibiting automated access** (LinkedIn, etc.). We actively reject these to respect third-party ToS.
+- **PRs that read behind a login or solve CAPTCHAs** (LinkedIn and other signed-in platforms). A provider reads what any visitor sees without signing in, so one person can decide whether to apply there (Source Indexing Policy, rule 6).
 - **PRs that enable auto-submitting applications** without human review. career-ops is a decision-support tool, not a spam bot.
 - **PRs that add external API dependencies** without prior discussion in an issue.
 - **Feature PRs against bundled plugins** (`plugins/apify`, `plugins/gmail`, `plugins/notion`). Bundled plugins are stable *reference seeds* — to extend one, publish your own `career-ops-plugin-<id>` and we'll register it as the maintained successor that takes precedence once installed (see [docs/PLUGINS.md](docs/PLUGINS.md)). Bundled plugins only take security/compat fixes.
@@ -182,12 +210,23 @@ node cv-sync-check.mjs        # Config check
 # Dashboard
 npm run build:dashboard       # go build with platform-correct binary name
 npm run serve:dashboard       # launch the TUI against the repo root
+(cd dashboard && go test ./...)  # Go tests; CI runs them next to test-all
 
 # Tests
 node test-all.mjs             # Full suite — run before pushing/opening a PR
 node test-all.mjs --quick     # Full suite, skipping the dashboard build
 node test-all.mjs --only providers/themuse   # Run just one provider's test(s)
+node test-all.mjs --quick --jobs 4           # Run at most 4 test files at a time
 ```
+
+**The test files under `tests/` run in parallel**, one process each, as many at
+a time as the machine has CPUs, and the inline sections of `test-all.mjs` run
+alongside them in one of those slots. `--jobs N` changes that for one run and
+`CAREER_OPS_TEST_JOBS=N` for a machine; `1` runs everything one after another
+in a single process. The log comes out in the same order either way. If a test
+passes alone and fails in a full run (or the reverse), rerun with `--jobs 1`
+and see "Parallel runs" in [`tests/README.md`](tests/README.md) for what a
+suite may not rely on.
 
 **Any new test belongs in its own file** under `tests/`, not as a numbered
 section inside `test-all.mjs`. Anything matching `tests/**/*.test.mjs` is
@@ -219,12 +258,24 @@ section (syntax, scripts, dashboard, data contract, personal data, paths,
 etc.). A green `--only` run is **not** a green suite — always run the full
 `node test-all.mjs` before pushing.
 
+**A test that needs a real Chromium or a TeX engine** skips (or warns) where
+the tool is missing, and the `test` CI job installs neither. Declare the tool so
+that CI still runs it: call `toolRequired('browser')` in a node:test `skip`
+condition (from `tests/required-tools.mjs`), or `toolUnavailable('browser', …)`
+in place of `warn()` (from `tests/helpers.mjs`); `'latex'` for a TeX engine. The
+`tool-suites` CI job runs `node test-all.mjs --needs browser,latex` in the
+cv-visual Docker image, where a missing tool fails the run instead of skipping
+it.
+`tests/required-tools-declared.test.mjs` fails a suite that launches Chromium
+without declaring it.
+
 ### Checking translated mode structure
 
 Run `node i18n-drift.mjs --lang tr` (repeat `--lang` for several languages),
 or omit `--lang` to check every locale. `--json` emits machine-readable results;
 `--summary` prints language totals. The checker runs offline with Node alone and
-reports drift without failing.
+reports drift without failing; `--fail-under N` is the opt-in exception, exiting
+1 when any selected locale's coverage is below N%, for a CI gate you configure.
 It checks existing mode files, including nested interview modes, and files
 promised in each locale's README. Languages shipping only the core subset are
 not penalized for modes they have not translated.
@@ -240,6 +291,7 @@ review and the separate evaluation-template parity checks still apply.
 ## Brand and Trademark
 
 Contributions to the codebase are governed by the MIT [LICENSE](LICENSE).
+Data contributed to `employers/` is licensed under CC BY 4.0, and you also allow the maintainer to distribute it under ODbL 1.0 or CC0. See [employers/README.md](employers/README.md) for the format and the contribution manifest.
 The "career-ops" name itself is governed by [TRADEMARK.md](TRADEMARK.md).
 If you fork the project for commercial use, you're welcome to do so
 under MIT — please give it your own product name and follow the

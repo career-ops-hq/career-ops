@@ -1,6 +1,6 @@
 name: Plugin registration
 description: Register your career-ops-plugin-<name> repo so it can be listed as an approved community plugin
-labels: ["plugin-submission", "area:plugins"]
+labels: ["plugin-candidate"]
 body:
   - type: markdown
     attributes:

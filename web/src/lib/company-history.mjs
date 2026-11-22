@@ -71,13 +71,13 @@ const CHURN = {
   // the only moment it had news.
   "reposts-detected": {
     kind: "finding",
-    headline: "This role keeps being re-listed",
-    detail: "The same posting has reappeared across scans, which can mean the role is not really open.",
+    headline: "This company has re-listed roles",
+    detail: "Repeat postings were found in this company’s scan history; they may concern a different role.",
   },
   "none-detected": {
     kind: "absence",
     headline: "No repeat postings found",
-    detail: "Scan history was checked and this role has not been re-listed.",
+    detail: "Scan history was checked and no repeat postings were found for this company.",
   },
   "no-scan-data": {
     kind: "not-checked",
@@ -114,7 +114,9 @@ export function companyCardModel(payload) {
     available: true,
     reason: null,
     company: typeof card.company === "string" ? card.company : null,
-    responsiveness: verdictFor(RESPONSIVENESS, card.responsiveness?.label),
+    responsiveness: card.metadata?.sources?.tracker === false
+      ? { kind: "not-checked", headline: "Company history not checked", detail: "The tracker was not loaded, so this says nothing either way." }
+      : verdictFor(RESPONSIVENESS, card.responsiveness?.label),
     churn: verdictFor(CHURN, card.postingChurn?.label),
     facts: Array.isArray(card.responsiveness?.facts) ? card.responsiveness.facts : [],
     explanations: Array.isArray(card.explanations) ? card.explanations.filter((e) => typeof e === "string") : [],
@@ -170,8 +172,11 @@ export function factLine(f) {
   // A silent fact has no outcome — its content is how long the silence has run,
   // and whether the user chased it.
   if (Number.isFinite(f.silentDays)) {
-    bits.push(`no reply in ${Math.trunc(f.silentDays)} days`);
-    if (typeof f.appliedDate === "string" && f.appliedDate.trim() !== "") bits.push(`applied ${f.appliedDate.trim()}`);
+    const evaluationDate = f.dateBasis === "evaluation-date";
+    bits.push(evaluationDate ? "no reply recorded" : `no reply in ${Math.trunc(f.silentDays)} days`);
+    if (typeof f.appliedDate === "string" && f.appliedDate.trim() !== "") {
+      bits.push(evaluationDate ? `evaluated ${f.appliedDate.trim()} (${Math.trunc(f.silentDays)} days ago)` : `applied ${f.appliedDate.trim()}`);
+    }
     if (Number.isFinite(f.followupsSent) && f.followupsSent > 0) {
       bits.push(`${Math.trunc(f.followupsSent)} follow-up${f.followupsSent === 1 ? "" : "s"} sent`);
     }

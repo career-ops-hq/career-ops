@@ -11,7 +11,7 @@
 // "apt-get: command not found", only from a transient one (a flaky
 // Chromium binary download, which the flagless form still guards against).
 
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync, chmodSync } from 'fs';
 import { tmpdir } from 'os';
 import { delimiter, join } from 'path';
@@ -83,4 +83,45 @@ try {
   fail(`postinstall script failed to run: ${e.message}`);
 } finally {
   rmSync(stubDir, { recursive: true, force: true });
+}
+
+// Chromium is needed for PDF generation and browser checks, not for the rest
+// of career-ops, so a failed download must not fail `npm install`: offline,
+// behind a proxy, or with the CDN down, the dependencies are already in place
+// and only the browser is missing. The script tries twice, then warns and
+// exits 0. Here `npx` is stubbed to fail, so nothing downloads.
+console.log('\n📦 package.json postinstall — a failed Chromium download does not fail npm install');
+
+const failDir = mkdtempSync(join(tmpdir(), 'co-postinstall-fail-'));
+const attempts = join(failDir, 'npx-attempts');
+try {
+  writeFileSync(join(failDir, 'npx'), `#!/bin/sh\necho ran >> "${attempts}"\nexit 1\n`);
+  chmodSync(join(failDir, 'npx'), 0o755);
+  writeFileSync(join(failDir, 'npx.cmd'), `@echo ran>> "${attempts}"\r\n@exit /b 1\r\n`);
+
+  const env = { ...process.env, PATH: `${failDir}${delimiter}${process.env.PATH}` };
+  delete env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD;
+  // Run the script in the platform shell, as npm does, and read both of its
+  // streams. Appending `2>&1` to the command redirected only its last `||`
+  // step, so stderr from the steps before it never reached `output`.
+  const run = spawnSync(postinstall, { cwd: ROOT, env, encoding: 'utf-8', shell: true });
+  const output = (run.stdout ?? '') + (run.stderr ?? '');
+  if (run.status === 0) {
+    pass('postinstall exits 0 when both Chromium install attempts fail');
+  } else {
+    fail(`postinstall exited ${run.status} when the Chromium install failed, which fails npm install: ${postinstall}`);
+  }
+  const ran = existsSync(attempts) ? readFileSync(attempts, 'utf-8').trim().split(/\r?\n/).length : 0;
+  if (ran === 2) {
+    pass('postinstall retries the Chromium install once before giving up');
+  } else {
+    fail(`expected 2 Chromium install attempts, saw ${ran}`);
+  }
+  if (output.includes('npx playwright install chromium')) {
+    pass('postinstall tells the user how to install Chromium later');
+  } else {
+    fail(`postinstall gave no hint after the failed install; output was: ${JSON.stringify(output)}`);
+  }
+} finally {
+  rmSync(failDir, { recursive: true, force: true });
 }

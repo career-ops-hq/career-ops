@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT, rmSync } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const SCRIPT = join(ROOT, 'set-status.mjs');
 const TRACKER = [
@@ -45,7 +46,7 @@ test('matching UTF-8 tracker digest atomically writes status and receipt note', 
   const f = fixture(t);
   const receipt = `[reply-proposal:${'a'.repeat(64)}]`;
   const r = run(f, '--row', '1', 'interview', '--expect-tracker', digest(TRACKER), '--note', receipt, '--source', 'reply-watch');
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 0, describeSpawn(r));
   assert.equal(r.json.changed, true);
   assert.equal(r.json.newStatus, 'Interview');
   const content = readFileSync(f.tracker, 'utf8');
@@ -58,7 +59,7 @@ test('a change on a different row rejects the stale snapshot without any writes'
   const changed = TRACKER.replace('Sample Systems', 'Another Example');
   writeFileSync(f.tracker, changed);
   const r = run(f, '--row', '1', 'interview', '--expect-tracker', digest(TRACKER), '--note', 'must not append');
-  assert.equal(r.status, 3, r.stderr);
+  assert.equal(r.status, 3, describeSpawn(r));
   assert.equal(r.json.code, 'tracker-changed');
   assert.equal(readFileSync(f.tracker, 'utf8'), changed);
   assert.equal(existsSync(join(f.data, 'status-log.tsv')), false);
@@ -67,7 +68,7 @@ test('a change on a different row rejects the stale snapshot without any writes'
 test('stale digest also refuses an otherwise idempotent or forced update', (t) => {
   const f = fixture(t);
   const r = run(f, '--row', '1', 'applied', '--expect-tracker', digest(`${TRACKER}\n`), '--force');
-  assert.equal(r.status, 3, r.stderr);
+  assert.equal(r.status, 3, describeSpawn(r));
   assert.equal(r.json.code, 'tracker-changed');
   assert.equal(readFileSync(f.tracker, 'utf8'), TRACKER);
   assert.equal(existsSync(join(f.data, 'status-log.tsv')), false);
@@ -76,10 +77,10 @@ test('stale digest also refuses an otherwise idempotent or forced update', (t) =
 test('dry-run checks the same digest but never writes', (t) => {
   const f = fixture(t);
   const good = run(f, '--row', '1', 'interview', '--expect-tracker', digest(TRACKER), '--dry-run');
-  assert.equal(good.status, 0, good.stderr);
+  assert.equal(good.status, 0, describeSpawn(good));
   assert.equal(good.json.dryRun, true);
   const stale = run(f, '--row', '1', 'interview', '--expect-tracker', digest(`${TRACKER}\n`), '--dry-run');
-  assert.equal(stale.status, 3, stale.stderr);
+  assert.equal(stale.status, 3, describeSpawn(stale));
   assert.equal(stale.json.code, 'tracker-changed');
   assert.equal(readFileSync(f.tracker, 'utf8'), TRACKER);
   assert.equal(existsSync(join(f.data, 'status-log.tsv')), false);
@@ -90,12 +91,12 @@ test('invalid or missing hashes fail as usage errors before tracker access', (t)
   f.env.CAREER_OPS_TRACKER = join(f.root, 'missing.md');
   for (const value of ['', 'a'.repeat(63), 'a'.repeat(65), 'A'.repeat(64), 'g'.repeat(64), `${'a'.repeat(64)}\n`, '--dry-run']) {
     const r = run(f, '--row', '1', 'interview', '--expect-tracker', value);
-    assert.equal(r.status, 1, `${JSON.stringify(value)}: ${r.stderr}`);
+    assert.equal(r.status, 1, describeSpawn(r, `${JSON.stringify(value)}`));
     assert.equal(r.json.code, 'usage');
     assert.match(r.json.error, /--expect-tracker/);
   }
   const missing = run(f, '--row', '1', 'interview', '--expect-tracker');
-  assert.equal(missing.status, 1, missing.stderr);
+  assert.equal(missing.status, 1, describeSpawn(missing));
   assert.equal(missing.json.code, 'usage');
   assert.match(missing.json.error, /Missing value/);
   assert.equal(readFileSync(f.tracker, 'utf8'), TRACKER);

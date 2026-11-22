@@ -5,10 +5,11 @@
 import assert from "node:assert/strict";
 import http from "node:http";
 import { test } from "node:test";
+import { liveServerSkip } from "../helpers/live-server.mjs";
 
 const url = process.env.ASSISTANT_CONFIRM_TEST_URL;
 
-test("assistant confirmation context and keyboard continuation during streaming", { skip: !url, timeout: 120_000 }, async (t) => {
+test("assistant confirmation context and keyboard continuation during streaming", { skip: liveServerSkip("ASSISTANT_CONFIRM_TEST_URL"), timeout: 120_000 }, async (t) => {
   const origin = new URL(url);
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
   let response;
@@ -39,7 +40,7 @@ test("assistant confirmation context and keyboard continuation during streaming"
   await page.route("**/api/assistant/chats**", (route) => route.fulfill({ json: route.request().method() === "PUT" ? { revision: 1, title: "Fictional audit" } : { chats: [], errors: [] } }));
   await page.route("**/api/status", (route) => {
     writes.push(route.request().postDataJSON());
-    return route.fulfill({ json: { ok: true } });
+    return route.fulfill({ json: { ok: true, status: route.request().postDataJSON().status } });
   });
   await page.route("**/api/assistant", (route) => route.continue({ url: `http://127.0.0.1:${fixture.address().port}/assistant` }));
   async function until(check) {
@@ -65,7 +66,7 @@ test("assistant confirmation context and keyboard continuation during streaming"
   const proposal = (n, status) => `\n<<act:setStatus ${JSON.stringify({ n, status })}>>`;
 
   await page.goto(`${origin.origin}/pipeline?tab=ALL`);
-  const open = page.getByRole("button", { name: "Open assistant", exact: true });
+  const open = page.getByRole("button", { name: "Ask the assistant", exact: true });
   await open.waitFor();
   await tabTo(open);
   await page.keyboard.press("Enter");
@@ -112,10 +113,10 @@ test("assistant confirmation context and keyboard continuation during streaming"
   await page.keyboard.press("Space");
   const started = card("12", "Rejected").locator('[tabindex="-1"]');
   await until(() => focused(started));
-  assert.equal(await started.innerText(), "✓ started");
+  assert.equal(await started.innerText(), "Status saved.");
   assert.deepEqual(writes, [{ n: "12", status: "Rejected" }]);
   const startedTree = await cdp.send("Accessibility.getFullAXTree");
-  assert.ok(startedTree.nodes.some((node) => !node.ignored && node.name?.value === `${summary("12", "Rejected")} ✓ started` && node.properties?.some((p) => p.name === "focused" && p.value.value === true)));
+  assert.ok(startedTree.nodes.some((node) => !node.ignored && node.name?.value === `${summary("12", "Rejected")} Status saved.` && node.properties?.some((p) => p.name === "focused" && p.value.value === true)));
 
   // Automation activating a control while the user is elsewhere must not
   // relocate that user's focus. Both decisions keep the existing callback gate.
@@ -126,7 +127,7 @@ test("assistant confirmation context and keyboard continuation during streaming"
   await card("13", "Offer").getByText("cancelled", { exact: true }).waitFor();
   assert.equal(await focused(input), true);
   await decision("Confirm", "14", "Discarded").evaluate((button) => button.click());
-  await card("14", "Discarded").getByText("✓ started", { exact: true }).waitFor();
+  await card("14", "Discarded").getByText("Status saved.", { exact: true }).waitFor();
   assert.equal(await focused(input), true);
   assert.deepEqual(writes, [{ n: "12", status: "Rejected" }, { n: "14", status: "Discarded" }]);
   response.end();

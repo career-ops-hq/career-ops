@@ -312,7 +312,9 @@ const endless = () => recorder(url => pageOfRows(pageNum(url) * 1000, 100, { mor
 // ── the page ceiling ───────────────────────────────────────────────────────
 {
   const dflt = endless();
-  const { errors } = await captureConsoleErrors(() => pageup.fetch(entry, dflt));
+  const { result: capped, errors } = await captureConsoleErrors(() => pageup.fetch(entry, dflt));
+  if (capped.pageupTruncated === true) pass('a ceiling-truncated board is tagged pageupTruncated');
+  else fail(`ceiling-truncated board should carry pageupTruncated, got ${capped.pageupTruncated}`);
   if (dflt.calls.length === 20) pass('fetch() stops at the default 20-page ceiling');
   else fail(`default ceiling: ${dflt.calls.length} requests`);
   if (errors.some(w => /raise max_pages/.test(w))) pass('hitting the ceiling warns to raise max_pages');
@@ -342,6 +344,8 @@ for (const [label, laterPage] of [
   const { result: jobs, errors } = await captureConsoleErrors(() => pageup.fetch(entry, ctx));
   if (jobs.length === 100) pass(`${label} keeps the earlier pages`);
   else fail(`${label}: ${jobs.length} jobs`);
+  if (jobs.pageupTruncated === true) pass(`${label} tags the partial result pageupTruncated`);
+  else fail(`${label}: missing pageupTruncated`);
   if (errors.length === 1 && !/raise max_pages/.test(errors[0])) pass(`${label} warns once, not about max_pages`);
   else fail(`${label} warnings: ${JSON.stringify(errors)}`);
 }

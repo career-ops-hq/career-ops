@@ -49,6 +49,18 @@ try {
     fail(`personio.detect() with slug pin returned ${JSON.stringify(pinned)}`);
   }
 
+  const mixedPin = personio.detect({
+    name: 'N26',
+    provider: 'personio',
+    personio: 'N26',
+    careers_url: 'https://n26.com/en/careers/',
+  });
+  if (mixedPin && mixedPin.url === 'https://n26.jobs.personio.de/') {
+    pass('personio.detect() lowercases a mixed-case personio: <slug> pin');
+  } else {
+    fail(`personio.detect() with mixed-case slug pin returned ${JSON.stringify(mixedPin)}`);
+  }
+
   // The pin must not become an injection point for an arbitrary host.
   const badPin = personio.detect({
     name: 'Evil',
@@ -595,6 +607,63 @@ try {
       pass('personio.fetch(): under ctx.maxPages the language fan-out is skipped');
     } else {
       fail(`personio.fetch() probe: calls=${JSON.stringify(calls)} jobs=${jobs.length}`);
+    }
+  }
+
+  // portals.yml preferred_languages reaches the provider as
+  // ctx.preferredLanguageRank: a language's place in the list, -1 when absent.
+  const rankOf = (...languages) => (language) => languages.indexOf(language);
+
+  {
+    const { ctx, calls } = tenantCtx({ preferredLanguageRank: rankOf('en') });
+    const jobs = await personio.fetch({ name: 'Acme', careers_url: BASE }, ctx);
+    if (JSON.stringify(calls) === JSON.stringify([BASE, `${BASE}?language=en`])) {
+      pass('personio.fetch() with preferred languages: defaults page, then one page per preferred language');
+    } else {
+      fail(`personio.fetch() preferred languages: calls=${JSON.stringify(calls)}`);
+    }
+    if (JSON.stringify(brief(jobs)) === JSON.stringify([
+      'job/1?language=de|de|A de', 'job/1?language=en|en|A en', 'job/2?language=en|en|B en', 'job/3?language=fr|fr|C fr'])) {
+      pass('personio.fetch() with preferred languages: the preferred version next to the default one, never another language');
+    } else {
+      fail(`personio.fetch() preferred languages: jobs=${JSON.stringify(brief(jobs))}`);
+    }
+  }
+
+  {
+    const { ctx, calls } = tenantCtx({ preferredLanguageRank: rankOf('fr') });
+    const jobs = await personio.fetch({ name: 'Acme', careers_url: `${BASE}?language=en` }, ctx);
+    if (JSON.stringify(calls) === JSON.stringify([`${BASE}?language=en`]) && jobs.length === 3) {
+      pass('personio.fetch(): a careers_url language wins over the preferred languages (one fetch, no fan-out)');
+    } else {
+      fail(`personio.fetch() careers_url over preferred: calls=${JSON.stringify(calls)} jobs=${jobs.length}`);
+    }
+  }
+
+  {
+    const { ctx, calls } = tenantCtx({ preferredLanguageRank: rankOf('en'), maxPages: 1 });
+    await personio.fetch({ name: 'Acme', careers_url: BASE }, ctx);
+    if (JSON.stringify(calls) === JSON.stringify([BASE])) {
+      pass('personio.fetch(): under ctx.maxPages the preferred-language fetches are skipped too');
+    } else {
+      fail(`personio.fetch() probe with preferred languages: calls=${JSON.stringify(calls)}`);
+    }
+  }
+
+  {
+    const calls = [];
+    const page = flightPage(posting(1, 'A de', ['de', 'ar', 'cs', 'da', 'es', 'fi', 'fr', 'it'], 'de'));
+    await withWarnings(() => personio.fetch({ name: 'Acme', careers_url: BASE }, {
+      fetchText: async (url) => { calls.push(url); return page; },
+      sleep: async () => {},
+      dedupIncludeLanguage: true,
+      preferredLanguageRank: rankOf('it', 'fr'),
+    }));
+    const fetched = calls.slice(1).map(url => url.replace(`${BASE}?language=`, ''));
+    if (JSON.stringify(fetched) === JSON.stringify(['it', 'fr', 'ar', 'cs', 'da'])) {
+      pass('personio.fetch() with dedupIncludeLanguage: the preferred languages come first, best first, so the cap skips the other languages first');
+    } else {
+      fail(`personio.fetch() preferred languages under the cap: fetched ${JSON.stringify(fetched)}`);
     }
   }
 

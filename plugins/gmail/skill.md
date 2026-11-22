@@ -28,4 +28,5 @@ plugins:
 
 `Job[]` ({ title, url, company, location }) — the engine de-dups against the
 pipeline and appends new ones. It maintains its own processed-message cursor in
-`data/gmail-state.json` to avoid re-reading the same emails.
+`data/gmail-state.json`, under your data root, to avoid re-reading the same
+emails.

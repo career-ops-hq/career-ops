@@ -93,10 +93,10 @@ try {
   const boardUrl = 'https://blocked-board.example/jobs/1';
   const boardPage = postingPage(boardUrl, true);
   const board = await checkUrlLiveness(boardPage, boardUrl);
-  if (board.result === 'uncertain' && board.code === 'blocked_host' && boardPage.aborts === 1) {
-    pass('a posting whose own host the filter blocks still reads blocked_host');
+  if (board.result === 'uncertain' && board.code === 'dns_sinkhole' && boardPage.aborts === 1) {
+    pass('a posting whose own host the filter blocks reads uncertain (dns_sinkhole), not blocked_host');
   } else {
-    fail(`filtered main document: ${JSON.stringify(board)}, aborts=${boardPage.aborts} (want uncertain/blocked_host, aborts 1)`);
+    fail(`filtered main document: ${JSON.stringify(board)}, aborts=${boardPage.aborts} (want uncertain/dns_sinkhole, aborts 1)`);
   }
 
   // archive-posting.mjs shares validateUrlSecurity and only aborts on a throw,

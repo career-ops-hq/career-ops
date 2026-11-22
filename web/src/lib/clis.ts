@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { codexStreamArgs, isFatalClaudeStderr, isFatalCodexStderr, parseClaudeEvent, parseCodexEvent, parseGrokEvent } from "./run-cli-support.mjs";
 import { installedCliIds, pickUsableCli } from "./cli-pick.mjs";
+import { careerOpsRoot } from "./career-ops";
+import { readRememberedCli } from "./remembered-cli.mjs";
 
 // Server-only (node imports). The agnostic runtimes career-ops can delegate to
 // in headless mode (AGENTS.md). Install URLs from career-ops-docs.
@@ -72,6 +74,7 @@ export const KNOWN: CliSpec[] = [
   // which displayed fine and recorded `tokens: 0` on every grok run.
   { id: "grok", name: "Grok Build CLI", bin: "grok", run: "grok -p", url: "https://docs.x.ai/build/overview", args: (p) => ["-p", p], streamArgs: (p) => ["-p", p, "--output-format", "streaming-json"], parseEvent: parseGrokEvent },
   { id: "hermes", name: "Hermes Agent", bin: "hermes", run: "hermes chat", url: "https://github.com/NousResearch/hermes-agent", args: (p) => ["chat", "-q", p, "--oneshot", "-Q", "--no-restore-cwd"] },
+  { id: "omp", name: "Oh My Pi", bin: "omp", run: "omp -p", url: "https://github.com/can1357/oh-my-pi", args: (p) => ["-p", p] },
 ];
 
 function searchDirs(): string[] {
@@ -168,7 +171,7 @@ export type CliResolution = { spec: CliSpec; binPath: string; substitutedFrom: s
 export function resolveCliOrFallback(id: string): CliResolution | null {
   const direct = resolveCli(id);
   if (direct) return { ...direct, substitutedFrom: null };
-  const pick = pickUsableCli(id, detectClis());
+  const pick = pickUsableCli(id, detectClis(), readRememberedCli(careerOpsRoot()));
   if (!pick.id) return null;
   const fallback = resolveCli(pick.id);
   return fallback ? { ...fallback, substitutedFrom: pick.substitutedFrom } : null;

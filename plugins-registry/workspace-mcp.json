@@ -1,0 +1,18 @@
+{
+  "name": "career-ops-plugin-workspace-mcp",
+  "id": "workspace-mcp",
+  "repo": "https://github.com/theridgerugby/career-ops-plugin-workspace-mcp",
+  "author": "theridgerugby",
+  "hooks": [
+    "export"
+  ],
+  "description": "Read-only MCP access to application rows with scores and the absolute paths and byte sizes of reports, CVs and cover letters.",
+  "requiredEnv": [],
+  "allowedHosts": [],
+  "skill": true,
+  "license": "MIT",
+  "version": "0.1.2",
+  "sha": "69262526764850e110c1d4b0c30fbd0f8146be36",
+  "registrationIssue": "https://github.com/career-ops-hq/career-ops/issues/5097",
+  "addedAt": "2026-10-12"
+}

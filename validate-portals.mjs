@@ -10,14 +10,19 @@
  *   node validate-portals.mjs --help
  */
 
+import { buildWorkplacePolicy } from './providers/_country.mjs';
+import { parseEmploymentTypeFilterConfig } from './providers/_employment-type.mjs';
+import { normalizeWorkplaceType } from './providers/_workplace-type.mjs';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
-import { barePrefixDomainKeywords } from './title-keywords.mjs';
+import { barePrefixDomainKeywords, compileContentTraits } from './title-keywords.mjs';
+import { nearestKey } from './validate-profile.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PROVIDERS_DIR = join(ROOT, 'providers');
@@ -98,6 +103,20 @@ function validateUrl(value, path, errors) {
   }
 }
 
+// buildTitleFilter reads only an array as a keyword list and drops anything else,
+// so a bare string leaves the filter matching every title. validateKeywordList
+// accepts one (location_filter and content_filter do wrap it), so the title
+// filter's own lists are checked here. A warning, not an error: title_filter has
+// always been lenient about this and a hard failure would break configs that
+// currently load.
+function warnBareStringKeywords(block, path, warnings) {
+  for (const key of ['positive', 'negative']) {
+    if (typeof block[key] === 'string') {
+      add(warnings, `${path}.${key}`, `a bare string is ignored by the title filter, so this list does nothing; write it as a list: [${JSON.stringify(block[key])}]`);
+    }
+  }
+}
+
 function validateKeywordList(value, path, errors) {
   if (value === undefined || value === null) return;
   const arr = Array.isArray(value) ? value : [value];
@@ -109,6 +128,22 @@ function validateKeywordList(value, path, errors) {
     if (item.trim() === '') {
       add(errors, `${path}[${idx}]`, 'keyword must not be empty');
     }
+  }
+}
+
+// content_filter `min_match` (#6020): an integer from 1 to the number of
+// distinct positive traits, counted the way scan.mjs counts them (" | "
+// alternatives are one trait, case-insensitive duplicates are one trait).
+// scan.mjs refuses to start on the same shapes, so this only reports them
+// earlier.
+function validateContentMinMatch(rule, path, errors) {
+  if (rule.min_match === undefined) return;
+  const traits = compileContentTraits(rule.positive).length;
+  const minMatch = rule.min_match;
+  if (traits === 0) {
+    add(errors, `${path}.min_match`, `needs a non-empty ${path}.positive list`);
+  } else if (!Number.isInteger(minMatch) || minMatch < 1 || minMatch > traits) {
+    add(errors, `${path}.min_match`, `must be an integer from 1 to ${traits} (the number of distinct ${path}.positive entries)`);
   }
 }
 
@@ -173,6 +208,70 @@ const TITLE_FILTER_FIELDS = ['positive', 'negative', 'seniority_boost'];
 // whitelist this validation exists to catch.
 const FIELD_FILTER_FIELDS = ['positive', 'negative'];
 
+// Settings a scan actually reads. A key outside this list is left alone: people
+// keep private notes in the same file, and those must not fail a scan. A key
+// one or two edits from a real setting is different. `tracked_companys` is not
+// `tracked_companies`, so the company list is read as missing, the scan reports
+// zero companies, and the process exits 0.
+export const PORTAL_TOP_LEVEL_KEYS = [
+  'title_filter',
+  'title_filter_full',
+  'title_filter_overrides',
+  'search_queries',
+  'tracked_companies',
+  'job_boards',
+  'scan_history',
+  'preferred_languages',
+  'interamt_searches',
+  'topdev_searches',
+  'seek_searches',
+  'hn_hiring',
+  'dayforce_boards',
+  'location_filter',
+  'country_eligibility_filter',
+  'salary_filter',
+  'employment_type_filter',
+  'workplace_filter',
+  'experience_filter',
+  'portal_prune_quiet_days',
+  'max_posting_age_days',
+  'trust_filter',
+  'content_filter',
+  'visa_filter',
+  'skip_tiers',
+  'domain_filter',
+  'field_filters',
+  'company_aliases',
+  'portal_health_threshold',
+  'portal_health_stale_days',
+];
+
+export function portalTopLevelTypos(config) {
+  if (!isObject(config)) return [];
+  const known = new Set(PORTAL_TOP_LEVEL_KEYS);
+  const found = [];
+  for (const key of Object.keys(config)) {
+    if (known.has(key)) continue;
+    const suggestion = nearestKey(key, PORTAL_TOP_LEVEL_KEYS, 2);
+    if (!suggestion) continue;
+    found.push({ key, suggestion });
+  }
+  return found;
+}
+
+function unknownFieldMessage(key, allowed) {
+  const suggestion = nearestKey(key, allowed, 2);
+  if (suggestion) return `unknown key "${key}" — did you mean "${suggestion}"?`;
+  return `unknown key "${key}" — expected one of ${allowed.join(', ')}`;
+}
+
+function rejectUnknownFields(block, path, allowed, errors) {
+  for (const key of Object.keys(block)) {
+    if (allowed.includes(key)) continue;
+    add(errors, `${path}.${key}`, unknownFieldMessage(key, allowed));
+  }
+}
+
 export async function validatePortalsConfig(config, { providerIds = new Set() } = {}) {
   const errors = [];
   const warnings = [];
@@ -182,10 +281,20 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     return { errors, warnings };
   }
 
+  for (const typo of portalTopLevelTypos(config)) {
+    add(
+      errors,
+      typo.key,
+      `unknown top-level key "${typo.key}" — did you mean "${typo.suggestion}"? The misspelled key is ignored, so the setting never applies`,
+    );
+  }
+
   if (config.title_filter !== undefined) {
     if (!isObject(config.title_filter)) {
       add(errors, 'title_filter', 'title_filter must be an object');
     } else {
+      rejectUnknownFields(config.title_filter, 'title_filter', TITLE_FILTER_FIELDS, errors);
+      warnBareStringKeywords(config.title_filter, 'title_filter', warnings);
       validateKeywordList(config.title_filter.positive, 'title_filter.positive', errors);
       validateKeywordList(config.title_filter.negative, 'title_filter.negative', errors);
       validateKeywordList(config.title_filter.seniority_boost, 'title_filter.seniority_boost', errors);
@@ -206,11 +315,8 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       // matches every title on every board — the exact outcome this key
       // exists to prevent. An unknown field is therefore an error, while
       // `positive: []` stays valid as a deliberate choice.
-      for (const key of Object.keys(config.title_filter_full)) {
-        if (!TITLE_FILTER_FIELDS.includes(key)) {
-          add(errors, `title_filter_full.${key}`, `unknown title_filter_full field - expected one of ${TITLE_FILTER_FIELDS.join(', ')}`);
-        }
-      }
+      rejectUnknownFields(config.title_filter_full, 'title_filter_full', TITLE_FILTER_FIELDS, errors);
+      warnBareStringKeywords(config.title_filter_full, 'title_filter_full', warnings);
       validateKeywordList(config.title_filter_full.positive, 'title_filter_full.positive', errors);
       validateKeywordList(config.title_filter_full.negative, 'title_filter_full.negative', errors);
       validateKeywordList(config.title_filter_full.seniority_boost, 'title_filter_full.seniority_boost', errors);
@@ -244,6 +350,22 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     }
   }
 
+  // The languages a posting is wanted in, best first. scan.mjs skips an entry
+  // it cannot read, so a malformed list would quietly fall back to the default
+  // version — the typo can only surface here.
+  if (config.preferred_languages !== undefined) {
+    const list = config.preferred_languages;
+    if (!Array.isArray(list) && typeof list !== 'string') {
+      add(errors, 'preferred_languages', 'preferred_languages must be a list of language codes (e.g. [en])');
+    } else {
+      (Array.isArray(list) ? list : [list]).forEach((entry, idx) => {
+        if (typeof entry !== 'string' || !entry.trim()) {
+          add(errors, `preferred_languages[${idx}]`, 'each preferred language must be a non-empty language code');
+        }
+      });
+    }
+  }
+
   // #3438. Per-field whitelists a target can gate on instead of title. Each
   // block has the same shape as title_filter and is compiled by the same
   // buildTitleFilter(), so it gets the same structural checks for the same
@@ -265,11 +387,7 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
           add(errors, `field_filters.${field}`, `field_filters.${field} must be an object`);
           continue;
         }
-        for (const key of Object.keys(block)) {
-          if (!FIELD_FILTER_FIELDS.includes(key)) {
-            add(errors, `field_filters.${field}.${key}`, `unknown field_filters field - expected one of ${FIELD_FILTER_FIELDS.join(', ')}`);
-          }
-        }
+        rejectUnknownFields(block, `field_filters.${field}`, FIELD_FILTER_FIELDS, errors);
         // Stricter than title_filter on purpose: a bare-string list is dropped
         // by buildTitleFilter, and a block with no keyword at all matches every
         // posting. title_filter keeps that leniency for existing configs;
@@ -299,12 +417,25 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     if (!isObject(config.location_filter)) {
       add(errors, 'location_filter', 'location_filter must be an object');
     } else {
+      if (config.location_filter.workplace_policy !== undefined) {
+        const policy = config.location_filter.workplace_policy;
+        if (!isObject(policy)) add(errors, 'location_filter.workplace_policy', 'must be an object');
+        else {
+          for (const key of ['onsite_locations', 'onsite_countries', 'remote_countries', 'remote_regions']) {
+            validateKeywordList(policy[key], 'location_filter.workplace_policy.' + key, errors);
+          }
+          try { buildWorkplacePolicy(policy); } catch (error) { add(errors, 'location_filter.workplace_policy', error.message); }
+        }
+      }
       validateKeywordList(config.location_filter.always_allow, 'location_filter.always_allow', errors);
       validateKeywordList(config.location_filter.allow, 'location_filter.allow', errors);
       validateKeywordList(config.location_filter.block, 'location_filter.block', errors);
       validateKeywordList(config.location_filter.block_hard, 'location_filter.block_hard', errors);
       if (config.location_filter.strict !== undefined && typeof config.location_filter.strict !== 'boolean') {
         add(errors, 'location_filter.strict', 'must be a boolean when set');
+      }
+      if (config.location_filter.remote_title_fallback !== undefined && typeof config.location_filter.remote_title_fallback !== 'boolean') {
+        add(errors, 'location_filter.remote_title_fallback', 'must be a boolean when set');
       }
     }
   }
@@ -315,6 +446,13 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     } else {
       validateKeywordList(config.content_filter.positive, 'content_filter.positive', errors);
       validateKeywordList(config.content_filter.negative, 'content_filter.negative', errors);
+      validateContentMinMatch(config.content_filter, 'content_filter', errors);
+      const rescue = config.content_filter.rescue_title_misses;
+      if (rescue !== undefined && typeof rescue !== 'boolean') {
+        add(errors, 'content_filter.rescue_title_misses', 'must be a boolean when set');
+      } else if (rescue === true && compileContentTraits(config.content_filter.positive).length === 0) {
+        add(errors, 'content_filter.rescue_title_misses', 'needs a non-empty content_filter.positive list: a title miss is kept only on a positive match');
+      }
       if (config.content_filter.by_title_keyword !== undefined) {
         if (!isObject(config.content_filter.by_title_keyword)) {
           add(errors, 'content_filter.by_title_keyword', 'by_title_keyword must be an object keyed by title_filter.positive (or title_filter_full.positive) keyword');
@@ -339,6 +477,7 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
             }
             validateKeywordList(rule.positive, `${path}.positive`, errors);
             validateKeywordList(rule.negative, `${path}.negative`, errors);
+            validateContentMinMatch(rule, path, errors);
           }
         }
       }
@@ -357,6 +496,63 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       }
       validateKeywordList(config.visa_filter.positive, 'visa_filter.positive', errors);
       validateKeywordList(config.visa_filter.negative, 'visa_filter.negative', errors);
+    }
+  }
+
+  // One parser for scan.mjs and this check, so a block one accepts the other
+  // cannot reject (providers/_employment-type.mjs).
+  if (config.employment_type_filter !== undefined) {
+    try {
+      parseEmploymentTypeFilterConfig(config.employment_type_filter);
+    } catch (err) {
+      add(errors, 'employment_type_filter', err.message);
+    }
+  }
+
+  if (config.experience_filter !== undefined) {
+    const ef = config.experience_filter;
+    if (!isObject(ef)) {
+      add(errors, 'experience_filter', 'experience_filter must be an object');
+    } else {
+      if (ef.enabled !== undefined && typeof ef.enabled !== 'boolean') {
+        add(errors, 'experience_filter.enabled', 'must be a boolean when set');
+      }
+      for (const key of ['years', 'stretch_years']) {
+        if (ef[key] !== undefined && (typeof ef[key] !== 'number' || !Number.isFinite(ef[key]) || ef[key] < 0 || ef[key] > 60)) {
+          add(errors, `experience_filter.${key}`, 'must be a number from 0 to 60 when set');
+        }
+      }
+      if (ef.action !== undefined && ef.action !== 'drop' && ef.action !== 'label') {
+        add(errors, 'experience_filter.action', 'must be "drop" or "label" when set');
+      }
+      if (ef.concurrency !== undefined && (!Number.isInteger(ef.concurrency) || ef.concurrency < 1 || ef.concurrency > 16)) {
+        add(errors, 'experience_filter.concurrency', 'must be an integer from 1 to 16 when set');
+      }
+    }
+  }
+
+  if (config.workplace_filter !== undefined) {
+    if (!isObject(config.workplace_filter)) {
+      add(errors, 'workplace_filter', 'workplace_filter must be an object');
+    } else {
+      const wf = config.workplace_filter;
+      rejectUnknownFields(wf, 'workplace_filter', ['allow', 'include_unknown'], errors);
+      if (wf.include_unknown !== undefined && typeof wf.include_unknown !== 'boolean') {
+        add(errors, 'workplace_filter.include_unknown', 'must be a boolean when set');
+      }
+      if (wf.allow !== undefined) {
+        if (!Array.isArray(wf.allow)) {
+          add(errors, 'workplace_filter.allow', 'workplace_filter.allow must be an array');
+        } else {
+          for (let i = 0; i < wf.allow.length; i++) {
+            const v = wf.allow[i];
+            const norm = typeof v === 'string' ? normalizeWorkplaceType(v) : undefined;
+            if (!norm) {
+              add(errors, `workplace_filter.allow[${i}]`, `invalid workplace type "${v}" — must be one of: remote, hybrid, onsite`);
+            }
+          }
+        }
+      }
     }
   }
 
@@ -380,6 +576,13 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       if (!isObject(entry)) {
         add(errors, base, `${noun} entry must be an object`);
         continue;
+      }
+      // Every consumer reads only a boolean `false` as "off". js-yaml follows
+      // YAML 1.2, where `no`, `off` and a quoted "false" are strings, so such an
+      // entry is scanned while looking disabled. Flagged here, because the
+      // scanners cannot tell a typo from a deliberate non-boolean.
+      if (entry.enabled !== undefined && typeof entry.enabled !== 'boolean') {
+        add(errors, `${base}.enabled`, `enabled must be true or false, got ${JSON.stringify(entry.enabled)} - only a boolean false turns this ${noun} off, so it is still scanned`);
       }
       if (entry.enabled === false) continue;
 
@@ -463,7 +666,7 @@ async function validateFile(filePath) {
     throw new Error(`file not found: ${filePath}`);
   }
   const providerIds = await loadProviderIds();
-  const parsed = yaml.load(readFileSync(filePath, 'utf-8'));
+  const parsed = loadYaml(readFileSync(filePath, 'utf-8'));
   return validatePortalsConfig(parsed, { providerIds });
 }
 
@@ -484,6 +687,14 @@ tracked_companies:
       throw new Error(`expected 2 errors, got ${result.errors.length}`);
     }
     console.log('validate-portals self-test OK');
+
+    const typoFile = join(tmp, 'typo.yml');
+    writeFileSync(typoFile, 'tracked_companys:\n  - name: "Example Co"\n    careers_url: "https://boards.example.com/example"\n', 'utf-8');
+    const typo = await validateFile(typoFile);
+    const typoPaths = typo.errors.map((e) => e.path);
+    if (!typoPaths.includes('tracked_companys')) {
+      throw new Error(`expected tracked_companys to be rejected, got ${JSON.stringify(typo.errors)}`);
+    }
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -544,7 +755,9 @@ async function main() {
   if (result.errors.length > 0) process.exit(1);
 }
 
-main().catch((err) => {
-  console.error(`validate-portals failed: ${err.message}`);
-  process.exit(1);
-});
+if (isMainModule(import.meta.url)) {
+  main().catch((err) => {
+    console.error(`validate-portals failed: ${err.message}`);
+    process.exit(1);
+  });
+}

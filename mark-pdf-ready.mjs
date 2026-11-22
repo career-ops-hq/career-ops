@@ -37,7 +37,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import {
-  rebuildRow, resolveTrackerPath, writeFileAtomic, CLI_EXIT, makeCliFailWith, acquireTrackerLockForCli,
+  rebuildRow, resolveTrackerPath, writeFileAtomic, CLI_EXIT, makeCliFailWith, makeCliFailUsage, acquireTrackerLockForCli,
 } from './tracker-utils.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 
@@ -61,6 +61,14 @@ const rawArgs = process.argv.slice(2);
 const positional = [];
 const flags = { dryRun: false, json: false };
 
+// Before the parse loop: failUsage runs on the first bad token, and a const
+// is not hoisted the way the previous function declaration was.
+const failUsage = makeCliFailUsage({
+  argv: rawArgs,
+  usage: USAGE,
+  defaultMessage: 'Expected 1 argument: <report#>',
+});
+
 for (const a of rawArgs) {
   if (a === '--dry-run') { flags.dryRun = true; }
   else if (a === '--json') { flags.json = true; }
@@ -77,24 +85,6 @@ const [reportSelector] = positional;
 // Shared with set-status.mjs (tracker-utils.mjs) so the JSON-vs-human error
 // contract can't drift between the two canonical tracker-writer CLIs.
 const failWith = makeCliFailWith(flags.json);
-
-/**
- * Print usage (plus an optional specific complaint) and exit 1.
- *
- * @param {string|null} message - What was wrong with the invocation, if known.
- * @returns {never}
- */
-function failUsage(message) {
-  const msg = message ?? 'Expected 1 argument: <report#>';
-  if (rawArgs.includes('--json')) {
-    console.log(JSON.stringify({ error: msg, code: 'usage' }));
-    console.error(`❌ ${msg}`);
-  } else {
-    if (message) console.error(`❌ ${message}\n`);
-    console.error(USAGE);
-  }
-  process.exit(EXIT_USAGE);
-}
 
 if (!/^\d+$/.test(reportSelector)) {
   failUsage(`"${reportSelector}" is not a valid report number`);

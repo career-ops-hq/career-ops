@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import * as yaml from 'js-yaml';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 config();
 
@@ -51,7 +52,7 @@ if (process.env.CAREER_OPS_GEMINI_GATE_CHILD !== '1') {
         timeout: 10_000,
       });
 
-      assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+      assert.equal(result.status, 0, describeSpawn(result, `\n`));
       assert.match(result.stdout, /Gemini AI Integration Smoke Test.*skip/is);
       assert.equal(existsSync(fetchMarker), false, 'the Gemini client must not make a request without explicit opt-in');
     } finally {

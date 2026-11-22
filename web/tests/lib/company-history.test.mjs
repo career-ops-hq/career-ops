@@ -154,3 +154,27 @@ test("isConclusion is closed against kinds added later", () => {
   assert.equal(isConclusion({ kind: "not-checked" }), false);
   assert.equal(isConclusion({ kind: "speculative" }), false);
 });
+
+
+test("an unread tracker is not checked; a read empty tracker remains absence", () => {
+  for (const [available, kind] of [[false, "not-checked"], [true, "absence"]]) {
+    const m = companyCardModel(card({ metadata: { sources: { tracker: available } }, responsiveness: { label: "no-history", facts: [] } }));
+    assert.equal(m.responsiveness.kind, kind);
+    assert.equal(isConclusion(m.responsiveness), available);
+  }
+});
+
+test("company-wide churn does not claim that the report's role was reposted", () => {
+  for (const label of ["reposts-detected", "none-detected"]) {
+    const m = companyCardModel(card({ postingChurn: { label, clusters: [{ role: "Sales Manager" }] } }));
+    assert.doesNotMatch(m.churn.headline + m.churn.detail, /this role|same posting|role is not really open/i);
+    if (label === "reposts-detected") assert.match(m.churn.headline, /company/i);
+  }
+});
+
+test("an evaluation fallback date is not a confirmed application date", () => {
+  const fact = { num: 1, appliedDate: "2026-08-01", silentDays: 42, dateBasis: "evaluation-date" };
+  assert.match(factLine(fact), /evaluated 2026-08-01/);
+  assert.doesNotMatch(factLine(fact), /applied 2026-08-01|no reply in 42 days/);
+  for (const dateBasis of ["notes", "status-log"]) assert.match(factLine({ ...fact, dateBasis }), /applied 2026-08-01/);
+});

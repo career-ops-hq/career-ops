@@ -13,6 +13,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { pass, fail, ROOT } from './helpers.mjs';
+import { canonicalizeTrackerPath } from '../path-resolver.mjs';
 
 console.log('\nplugins — data-root path resolution and buildSnapshot pipeline parser');
 
@@ -33,6 +34,9 @@ try {
     join(dir, 'data', 'pipeline.md'),
     '# Pipeline\n- [ ] https://example.com/job/1\n- [x] https://example.com/job/2\n',
   );
+  // APPLICATIONS_PATH goes through resolveTrackerPath(), which picks
+  // data/applications.md only when it exists and realpaths the result.
+  writeFileSync(join(dir, 'data', 'applications.md'), '# Applications Tracker\n');
 
   // Import the REAL plugins.mjs. The '?root=...' query busts the ESM cache so
   // the module is re-evaluated with the current CAREER_OPS_ROOT even if an
@@ -44,7 +48,7 @@ try {
 
   // --- Bug 2: APPLICATIONS_PATH and PIPELINE_PATH must be rooted in DATA_ROOT ---
 
-  const expectedApps = join(dir, 'data', 'applications.md');
+  const expectedApps = canonicalizeTrackerPath(join(dir, 'data', 'applications.md'));
   if (_testPaths.APPLICATIONS_PATH === expectedApps) {
     pass('APPLICATIONS_PATH anchored to configured data root');
   } else {

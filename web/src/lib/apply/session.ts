@@ -1,11 +1,58 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium, type Browser, type BrowserContext, type Page, type Frame, type Response } from "playwright-core";
+import { resolveCodeRoot, resolveRootScript } from "@/lib/core/code-root.mjs";
 import { extractForm, type ApplyField, type ExtractedForm } from "./extract";
 import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
-import { statusBlock, dismissConsent, tryApplyTrigger, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, type ApplyIssue } from "./diagnose";
-import { interpretFormWithAgent } from "./agent-interpret";
+import { statusBlock, dismissConsent, tryApplyTrigger, blockedAfterAction, waitForBlankPopup, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, LOGIN_WALL_MESSAGE, type ApplyIssue } from "./diagnose";
+import { interpretFormWithAgent, type AgentInterpretation } from "./agent-interpret";
+import { pickComboboxOption } from "./option-match.mjs";
+import { checkboxOptionWanted, checkboxSelections, confirmCheckbox } from "./checkbox-options.mjs";
+import { isResumeLabel } from "./resume-label.mjs";
+import { cvUploadFile } from "./upload-name.mjs";
 import { resolveCli } from "../clis";
 import { fencingReport } from "../cli-fencing.mjs";
 import { CAPS } from "../worker-capabilities.mjs";
+import { assertSafeApplyUrl, installApplyEgressGuard, isUnsafeApplyUrlError, isBlockedNavigation, UnsafeApplyUrlError } from "./url-guard.mjs";
+import { unsupportedAtsMessage, unsupportedInAppAts } from "./unsupported-ats.mjs";
+
+type ApplyLaunch = { headless?: boolean; channel?: string; args?: string[] };
+
+/** A core script (`apply-scope`, `lib/egress-proxy`) by its root-relative name. */
+function rootScriptFile(name: string): string {
+  const explicit = (process.env.CAREER_OPS_CODE_ROOT || "").trim();
+  if (explicit) return resolveRootScript(resolveCodeRoot(process.cwd(), process.env), name);
+  // resolveCodeRoot assumes cwd is <checkout>/web. node --test from the
+  // checkout walks up to the parent and misses the script.
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    resolveRootScript(resolveCodeRoot(process.cwd(), process.env), name),
+    resolveRootScript(path.resolve(process.cwd()), name),
+    resolveRootScript(path.resolve(here, "../../../.."), name),
+  ];
+  return candidates.find((file) => existsSync(file)) || candidates[0];
+}
+
+async function applyLaunch(): Promise<{ HEADED_APPLY_LAUNCH: ApplyLaunch; BUNDLED_HEADED_LAUNCH: ApplyLaunch }> {
+  const file = rootScriptFile("apply-scope");
+  return import(/* webpackIgnore: true */ pathToFileURL(file).href) as Promise<{ HEADED_APPLY_LAUNCH: ApplyLaunch; BUNDLED_HEADED_LAUNCH: ApplyLaunch }>;
+}
+
+type EgressLaunch = ApplyLaunch & { proxy?: { server: string; bypass?: string } };
+
+/** The launch options with the core egress filter (lib/egress-proxy.mjs) as the
+ *  browser's proxy. installApplyEgressGuard's route() sees only the first URL of
+ *  a redirected request, so a page that redirected into private space was
+ *  loaded (GHSA-wwfx); the filter sees every connection, redirect hops included,
+ *  and checks the address it dials. */
+async function withEgressFilter(options: ApplyLaunch): Promise<EgressLaunch> {
+  const file = rootScriptFile("lib/egress-proxy");
+  const { egressLaunchOptions } = (await import(/* webpackIgnore: true */ pathToFileURL(file).href)) as {
+    egressLaunchOptions: (o: ApplyLaunch) => Promise<EgressLaunch>;
+  };
+  return egressLaunchOptions(options);
+}
 
 /** The frame with the most interactive controls — where the agentic interpreter
  *  should look when deterministic extraction found nothing usable. */
@@ -31,15 +78,20 @@ function cssAttr(v: string): string {
 
 /** Navigate resiliently: a transient nav error / slow ATS shouldn't fail the
  *  whole apply. Up to 3 attempts with backoff; returns the navigation Response
- *  (status/headers feed the cheap status-block check). */
+ *  (status/headers feed the cheap status-block check). A blocked/private hop
+ *  is not retried — it is the same SSRF miss as a first-hop-only check. */
 async function gotoResilient(page: Page, url: string): Promise<Response | null> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      await assertSafeApplyUrl(page.url());
       await page.waitForLoadState("load", { timeout: 8_000 }).catch(() => {});
+      await assertSafeApplyUrl(page.url());
       return resp;
     } catch (e) {
+      if (isUnsafeApplyUrlError(e)) throw e;
+      if (isBlockedNavigation(e)) throw new UnsafeApplyUrlError();
       lastErr = e;
       await page.waitForTimeout(800 * (attempt + 1));
     }
@@ -50,7 +102,24 @@ async function gotoResilient(page: Page, url: string): Promise<Response | null> 
 /** Distinguish a real APPLICATION form from a careers-listing / job-search form
  *  (a closed Greenhouse posting redirects to the board, whose keyword/department
  *  filters would otherwise look like a fillable form). */
+/** A password box is a sign-in or account page, even when it also asks for an email. */
+function formHasPassword(form: ExtractedForm): boolean {
+  return form.fields.some((f) => f.type === "password" || /\bpassword\b/i.test(f.label || ""));
+}
+
+// fieldsMeta is the extract snapshot. A sign-in dialog that opens later is on
+// the live page and missing from that snapshot, so the fill would still upload
+// and type. Count password inputs in every frame before either of those.
+async function pageHasPassword(page: Page): Promise<boolean> {
+  for (const frame of page.frames()) {
+    const count = await frame.locator('input[type="password"]').count().catch(() => 0);
+    if (count > 0) return true;
+  }
+  return false;
+}
+
 function looksLikeApplicationForm(form: ExtractedForm): boolean {
+  if (formHasPassword(form)) return false;
   const fs = form.fields;
   if (fs.length === 0) return false;
   const lab = (f: ApplyField) => (f.label || "").toLowerCase();
@@ -105,15 +174,12 @@ async function enrichFromAts(url: string, fields: ApplyField[]): Promise<void> {
     if (hit.type) f.type = hit.type as ApplyField["type"];
     if (hit.options.length) f.options = hit.options;
     if (hit.required) f.required = true;
-    if (hit.type === "select") f.combobox = true;
+    // Do not mark a native select or a yes/no as a menu. A combobox keeps the
+    // flag the reader already set. Typing into a menu is only for that flag.
   }
 }
 
-// A persistent apply SESSION keeps one real-form page open (headed-but-off-screen)
-// so we can: extract → (user verifies pre-filled answers) → FILL the real form →
-// bringToFront() for the human to submit it themselves. Headed (channel:chrome) =
-// the user's own Chrome on their residential IP (best ATS success); never submits.
-type Session = { id: string; url: string; title: string; fields: ApplyField[]; context: BrowserContext; page: Page; frame: Frame; createdAt: number; formShot?: string };
+type Session = { id: string; url: string; title: string; fields: ApplyField[]; context: BrowserContext; page: Page; frame: Frame; createdAt: number; formShot?: string; written?: Map<string, string> };
 
 declare global {
   // eslint-disable-next-line no-var
@@ -128,18 +194,15 @@ const SESSIONS: Map<string, Session> = (globalThis.__coApplySessions ??= new Map
 async function headedBrowser(): Promise<Browser> {
   const b = globalThis.__coHeadedBrowser;
   if (b && b.isConnected()) return b;
+  const { HEADED_APPLY_LAUNCH, BUNDLED_HEADED_LAUNCH } = await applyLaunch();
   let nb: Browser;
   try {
-    nb = await chromium.launch({
-      channel: "chrome",
-      headless: false,
-      args: ["--window-position=-3200,-3200", "--window-size=1280,940"], // off-screen during fill; moved on-screen at handoff
-    });
+    nb = await chromium.launch(await withEgressFilter(HEADED_APPLY_LAUNCH));
   } catch {
     // No system Google Chrome → fall back to Playwright's bundled Chromium if
     // present; otherwise a clear, actionable error.
     try {
-      nb = await chromium.launch({ headless: false, args: ["--window-position=-3200,-3200", "--window-size=1280,940"] });
+      nb = await chromium.launch(await withEgressFilter(BUNDLED_HEADED_LAUNCH));
     } catch {
       throw new Error("The apply feature needs Google Chrome. Install Chrome (or run: npx playwright install chromium) and try again.");
     }
@@ -176,11 +239,21 @@ async function nudgeScroll(page: Page): Promise<void> {
   await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
 }
 
-export async function openSession(url: string, cliId?: string, forceAgent?: boolean, noApplyBtn?: boolean): Promise<{ id: string; title: string; fields: ApplyField[]; shots: string[]; issues: ApplyIssue[]; needsDrive?: boolean }> {
+type OpenedApplySession = { id: string; title: string; fields: ApplyField[]; shots: string[]; issues: ApplyIssue[]; needsDrive?: boolean };
+type UnsupportedApplySession = { unsupported: { vendor: string; label: string; postingUrl: string }; message: string };
+
+export async function openSession(url: string, cliId?: string, forceAgent?: boolean, noApplyBtn?: boolean): Promise<OpenedApplySession | UnsupportedApplySession> {
+  // Workday, iCIMS, and UKG have no in-app fill. Refuse before Chrome starts.
+  const blockedAts = await unsupportedInAppAts(url);
+  if (blockedAts) return { unsupported: blockedAts, message: unsupportedAtsMessage(blockedAts.label) };
+  // Refuse before launching any navigation, so an obviously-internal target
+  // never reaches Playwright at all.
+  await assertSafeApplyUrl(url);
   prune();
   if (globalThis.__coIdleTimer) clearTimeout(globalThis.__coIdleTimer); // someone's active
   const browser = await headedBrowser();
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  await installApplyEgressGuard(context);
   context.setDefaultTimeout(8000); // no single action hangs the whole open/fill
   const page = await context.newPage();
   const abort = async (msg: string): Promise<never> => {
@@ -201,7 +274,22 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
     }
   };
   // 1) Navigate (resilient) → cheapest hard-block check on the Response status.
-  const resp = await gotoResilient(page, url);
+  let resp: Response | null;
+  try {
+    resp = await gotoResilient(page, url);
+  } catch (e) {
+    await context.close().catch(() => {});
+    if (SESSIONS.size === 0) scheduleIdleClose();
+    throw e;
+  }
+  // A career page can redirect onto a blocked portal. Close before scroll,
+  // screenshots, or the Apply click that opens a second window.
+  const landedAts = await unsupportedInAppAts(page.url());
+  if (landedAts) {
+    await context.close().catch(() => {});
+    if (SESSIONS.size === 0) scheduleIdleClose();
+    return { unsupported: landedAts, message: unsupportedAtsMessage(landedAts.label, true) };
+  }
   await snap(); // first paint
   const sBlock = statusBlock(resp?.status(), resp ? resp.headers() : {});
   if (sBlock) return abort(sBlock.message);
@@ -215,25 +303,54 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   await Promise.race(page.frames().map((f) => f.waitForSelector(formSel, { timeout: 12_000 }).catch(() => null))).catch(() => {});
   await page.waitForTimeout(1200);
   await dropNewTabs(page); // make any "Apply" link/popup navigate in OUR tab
+  const settledAts = await unsupportedInAppAts(page.url());
+  if (settledAts) {
+    await context.close().catch(() => {});
+    if (SESSIONS.size === 0) scheduleIdleClose();
+    return { unsupported: settledAts, message: unsupportedAtsMessage(settledAts.label, true) };
+  }
   await snap(); // settled
 
   // 4) Extract from the richest frame; if nothing yet, try (a) a scroll pass to
   //    trigger lazy/virtualized fields, then (b) clicking an "Apply" button (SPA;
   //    never a submit) — re-settling and re-extracting after each.
   let { frame, form } = await pickFormFrame(page);
+  // A password box is a login wall. Stop before scroll, Apply clicks, or the
+  // agent, so nothing is typed into the password field.
+  if (formHasPassword(form)) return abort(LOGIN_WALL_MESSAGE);
   // "no usable form yet" = 0 fields OR only non-application fields (e.g. a search
   // box on a job-description page) — both should trigger the recovery, not just 0.
   if (!looksLikeApplicationForm(form)) {
     await nudgeScroll(page);
     await page.waitForTimeout(400);
     ({ frame, form } = await pickFormFrame(page));
+    if (formHasPassword(form)) return abort(LOGIN_WALL_MESSAGE);
   }
-  if (!noApplyBtn && !looksLikeApplicationForm(form) && (await tryApplyTrigger(page))) {
-    await Promise.race(page.frames().map((f) => f.waitForSelector(formSel, { timeout: 6_000 }).catch(() => null))).catch(() => {});
-    await page.waitForTimeout(800);
-    await dropNewTabs(page);
-    ({ frame, form } = await pickFormFrame(page));
-    await snap();
+  if (!noApplyBtn && !looksLikeApplicationForm(form)) {
+    const trigger = await tryApplyTrigger(page);
+    // The Apply control points at Workday, iCIMS, or UKG. Close this window
+    // instead of following it or handing the page to the drive agent.
+    if (trigger && typeof trigger === "object" && "blocked" in trigger) {
+      const hit = await unsupportedInAppAts(trigger.blocked);
+      await context.close().catch(() => {});
+      if (SESSIONS.size === 0) scheduleIdleClose();
+      if (hit) return { unsupported: hit, message: unsupportedAtsMessage(hit.label, true) };
+    } else if (trigger && typeof trigger === "object" && "followed" in trigger) {
+      await Promise.race(page.frames().map((f) => f.waitForSelector(formSel, { timeout: 6_000 }).catch(() => null))).catch(() => {});
+      await page.waitForTimeout(800);
+      await dropNewTabs(page);
+      await waitForBlankPopup(page, trigger.followed);
+      const lateUrl = await blockedAfterAction(page, trigger.followed, false);
+      const lateAts = lateUrl ? await unsupportedInAppAts(lateUrl) : null;
+      if (lateAts) {
+        await context.close().catch(() => {});
+        if (SESSIONS.size === 0) scheduleIdleClose();
+        return { unsupported: lateAts, message: unsupportedAtsMessage(lateAts.label, true) };
+      }
+      ({ frame, form } = await pickFormFrame(page));
+      if (formHasPassword(form)) return abort(LOGIN_WALL_MESSAGE);
+      await snap();
+    }
   }
   await enrichFromAts(url, form.fields); // clean labels + real options for known ATS (Greenhouse)
   await snap();
@@ -242,15 +359,17 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   // Whether the user's CLI was actually LAUNCHED over the form, as reported by
   // the interpreter. Kept apart from aiInterpreted: a launched agent can come
   // back empty, and the fencing notice below is about the launch, not about the
-  // result. A missing CLI, an empty form or a fencing refusal (the throw the
-  // catch below absorbs) never launched anything, so no notice is owed.
+  // result. A missing CLI, an empty form or a fencing refusal never launched
+  // anything, so no notice is owed; a refusal carries its own reason instead.
   let agentSpawned = false;
+  let agentRefused: string | undefined;
   // Opt-in: ALWAYS interpret with AI (max robustness, ignores the deterministic
   // result) — for users who'd rather pay tokens than risk a heuristic miss.
   if (forceAgent && cliId) {
     const aiFrame = await richestControlFrame(page);
-    const ai = await interpretFormWithAgent(aiFrame, cliId, form.title || (await page.title().catch(() => ""))).catch(() => ({ fields: [] as ApplyField[], spawned: false }));
+    const ai: AgentInterpretation = await interpretFormWithAgent(aiFrame, cliId, form.title || (await page.title().catch(() => ""))).catch(() => ({ fields: [] as ApplyField[], spawned: false }));
     agentSpawned = ai.spawned;
+    agentRefused = ai.refused;
     const aiFields = ai.fields;
     if (aiFields.length) {
       frame = aiFrame;
@@ -286,7 +405,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   if (cap) issues.push(cap);
   if (multi) issues.push(multi);
   if (aiInterpreted) issues.push({ level: "info", code: "ai-interpreted", message: "This form had an uncommon layout, so AI read its fields live — give them an extra check before submitting." });
-  // agentInterpretForm just ran the user's chosen CLI over this form. If that
+  // interpretFormWithAgent just ran the user's chosen CLI over this form. If that
   // runtime has no verified fencing mechanism it read the page with its default
   // access, and the user should know — agent-interpret.ts has no stream of its
   // own, so the notice belongs here, where its callers already surface soft
@@ -296,6 +415,9 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   // it (no CLI, no controls, refused argv) owes no warning.
   const interpretFencing = agentSpawned && cliId ? fencingReport({ cliId, cliName: resolveCli(cliId)?.spec.name ?? cliId, capabilities: CAPS.localReadOnly }) : null;
   if (interpretFencing?.notice) issues.push({ level: "warn", code: "cli-unfenced", message: interpretFencing.notice });
+  // The fencing check refused to start the interpreter (#2507). Say why rather
+  // than leave the user with fields the fallback never got to read.
+  if (agentRefused) issues.push({ level: "warn", code: "ai-interpret-refused", message: `AI couldn't read this form's fields: ${agentRefused}` });
   if (unlabeled > 0) issues.push({ level: "warn", code: "unlabeled-fields", message: `${unlabeled} field${unlabeled > 1 ? "s" : ""} couldn't be labelled cleanly — double-check ${unlabeled > 1 ? "them" : "it"} before submitting.` });
 
   const id = `apply-${crypto.randomUUID()}`;
@@ -310,15 +432,22 @@ export function getSession(id: string): Session | undefined {
 /** Open a bare headed page on a URL (for the agentic drive loop / validation),
  *  without the full extract pipeline. Caller must close the context. */
 export async function newDrivePage(url: string): Promise<{ page: Page; context: BrowserContext }> {
+  await assertSafeApplyUrl(url);
   if (globalThis.__coIdleTimer) clearTimeout(globalThis.__coIdleTimer);
   const browser = await headedBrowser();
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  await installApplyEgressGuard(context);
   context.setDefaultTimeout(8000);
   const page = await context.newPage();
-  await gotoResilient(page, url);
-  await dismissConsent(page).catch(() => {});
-  await page.waitForTimeout(1000);
-  return { page, context };
+  try {
+    await gotoResilient(page, url);
+    await dismissConsent(page).catch(() => {});
+    await page.waitForTimeout(1000);
+    return { page, context };
+  } catch (e) {
+    await context.close().catch(() => {});
+    throw e;
+  }
 }
 
 /** Extract+enrich the current page (used after the drive loop reaches a form). */
@@ -340,12 +469,15 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
   if (!s) return null;
   let { frame, form } = await pickFormFrame(s.page);
   await enrichFromAts(s.url, form.fields);
+  if (formHasPassword(form)) return null;
   let aiInterpreted = false;
   let agentSpawned = false; // see openSession: launch, not result
+  let agentRefused: string | undefined;
   if (!looksLikeApplicationForm(form) && cliId) {
     const aiFrame = await richestControlFrame(s.page);
-    const ai = await interpretFormWithAgent(aiFrame, cliId, form.title || s.title).catch(() => ({ fields: [] as ApplyField[], spawned: false }));
+    const ai: AgentInterpretation = await interpretFormWithAgent(aiFrame, cliId, form.title || s.title).catch(() => ({ fields: [] as ApplyField[], spawned: false }));
     agentSpawned = ai.spawned;
+    agentRefused = ai.refused;
     const aiFields = ai.fields;
     if (aiFields.length && looksLikeApplicationForm({ title: form.title, url: form.url, fields: aiFields })) {
       frame = aiFrame;
@@ -359,7 +491,7 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
   if (form.title) s.title = form.title;
   const issues: ApplyIssue[] = [{ level: "info", code: "ai-navigated", message: "AI navigated to reach this application form on your machine — review the fields before submitting." }];
   if (aiInterpreted) issues.push({ level: "info", code: "ai-interpreted", message: "AI also read the fields live (uncommon layout) — give them an extra check." });
-  // agentInterpretForm just ran the user's chosen CLI over this form. If that
+  // interpretFormWithAgent just ran the user's chosen CLI over this form. If that
   // runtime has no verified fencing mechanism it read the page with its default
   // access, and the user should know — agent-interpret.ts has no stream of its
   // own, so the notice belongs here, where its callers already surface soft
@@ -369,6 +501,9 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
   // it (no CLI, no controls, refused argv) owes no warning.
   const interpretFencing = agentSpawned && cliId ? fencingReport({ cliId, cliName: resolveCli(cliId)?.spec.name ?? cliId, capabilities: CAPS.localReadOnly }) : null;
   if (interpretFencing?.notice) issues.push({ level: "warn", code: "cli-unfenced", message: interpretFencing.notice });
+  // The fencing check refused to start the interpreter (#2507). Say why rather
+  // than leave the user with fields the fallback never got to read.
+  if (agentRefused) issues.push({ level: "warn", code: "ai-interpret-refused", message: `AI couldn't read this form's fields: ${agentRefused}` });
   const cap = await captchaWarning(s.page);
   if (cap) issues.push(cap);
   return { title: s.title, fields: s.fields, issues };
@@ -386,7 +521,7 @@ export type FillStep = { fieldId: string; label: string; ok: boolean; thumb?: st
 /** True for a file field that wants the candidate's résumé/CV (vs. cover letter,
  *  portfolio, or a generic attachment we leave for the user). */
 function isResumeField(f: ApplyField): boolean {
-  return f.type === "file" && /resume|résumé|\bcv\b|curriculum|lebenslauf|currículum/i.test(f.label || "");
+  return f.type === "file" && isResumeLabel(f.label);
 }
 
 /** Fill the real form with verified answers, screenshotting after each field.
@@ -397,9 +532,15 @@ export async function fillSession(
   answers: Record<string, string>,
   fieldsMeta: ApplyField[],
   cvPath?: string,
+  cvUploadName?: string,
+  /** Answers to compare at read-back. Defaults to the map this call typed. */
+  readbackAnswers?: Record<string, string>,
 ): Promise<{ steps: FillStep[]; navigated: boolean; issues: ApplyIssue[] }> {
   const s = SESSIONS.get(id);
   if (!s) throw new Error("apply session not found (it may have expired)");
+  if (formHasPassword({ title: s.title, url: s.url, fields: fieldsMeta }) || await pageHasPassword(s.page)) {
+    return { steps: [], navigated: false, issues: [{ level: "block", code: "login-wall", message: LOGIN_WALL_MESSAGE }] };
+  }
   const byId = new Map(fieldsMeta.map((f) => [f.id, f]));
   const steps: FillStep[] = [];
   // Belt-and-suspenders: if filling ever navigates the page (i.e. something got
@@ -427,20 +568,20 @@ export async function fillSession(
   //    time; setInputFiles works even when the ATS visually hides it behind a
   //    dropzone. Other file fields (cover letter, portfolio) are left to the user.
   if (cvPath) {
+    // The employer sees the uploaded file's name, so send cvUploadName when
+    // given; the file on disk keeps its own name (#6399).
+    const cvFile = cvUploadFile(cvPath, cvUploadName);
     for (const meta of fieldsMeta) {
       if (!isResumeField(meta)) continue;
       let ok = false;
       try {
-        await s.frame.locator(`[data-co-field="${cssAttr(meta.id)}"]`).first().setInputFiles(cvPath);
+        await s.frame.locator(`[data-co-field="${cssAttr(meta.id)}"]`).first().setInputFiles(cvFile);
         ok = true;
       } catch {
-        // fallback: any file input inside the same field container
-        try {
-          await s.frame.locator(`input[type=file]`).first().setInputFiles(cvPath);
-          ok = true;
-        } catch {
-          ok = false;
-        }
+        // A replaced/missing resume control does not identify another upload.
+        // The first file input may be a cover letter or portfolio: leave it for
+        // the user rather than attach the CV to an unrelated field.
+        ok = false;
       }
       steps.push({ fieldId: meta.id, label: `${meta.label || "Resume"} (CV attached)`, ok, thumb: await shoot() });
     }
@@ -468,29 +609,52 @@ export async function fillSession(
         await loc.scrollIntoViewIfNeeded().catch(() => {});
         await loc.click();
         await s.page.waitForTimeout(150);
-        await loc.pressSequentially(value, { delay: 15 }).catch(async () => {
-          await s.page.keyboard.type(value);
+        // No line breaks reach the keyboard: an Enter in a form can submit it.
+        const typed = String(value).replace(/[\r\n]+/g, " ");
+        await loc.pressSequentially(typed, { delay: 15 }).catch(async () => {
+          await s.page.keyboard.insertText(typed);
         });
         await s.page.waitForTimeout(300);
-        const esc = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const menu = '.select__menu .select__option, .select__menu-list [role="option"], [class*="menu" i] [role="option"]';
-        const exact = s.frame.locator(menu).filter({ hasText: new RegExp(`^\\s*${esc}\\s*$`, "i") }).first();
-        if (await exact.count()) {
-          await exact.click();
+        const options = s.frame.locator(menu);
+        const pick = pickComboboxOption(await options.allInnerTexts(), value);
+        if (pick >= 0) {
+          await options.nth(pick).click();
         } else {
-          // fall back to the first option that contains the typed text; else give
-          // up (Escape closes the menu) — leave it for the human, never submit.
-          const partial = s.frame.locator(menu).filter({ hasText: new RegExp(esc, "i") }).first();
-          if (await partial.count()) await partial.click();
-          else {
-            await s.page.keyboard.press("Escape").catch(() => {});
-            gaveUp = true;
-          }
+          // No exact or single whole-word option: Escape closes the menu and the
+          // field is left for the person. Never Enter, never submit.
+          await s.page.keyboard.press("Escape").catch(() => {});
+          gaveUp = true;
         }
       } else if (meta.type === "select") {
         await loc.selectOption({ label: value }).catch(async () => {
           await loc.selectOption(value);
         });
+      } else if (meta.type === "checkbox" && meta.options?.length) {
+        const wanted = checkboxSelections(value, meta.options);
+        const consent = (label: string) => /\b(i (have )?read|i agree|i consent|i accept|consent to|privacy notice|terms|gdpr|data protection)\b/i.test(label);
+        const boxes = s.frame.locator(`[data-co-field="${cssAttr(fid)}"]`);
+        const count = await boxes.count();
+        let checked = 0;
+        let missed = 0;
+        for (let i = 0; i < count; i++) {
+          const box = boxes.nth(i);
+          const opt = (await box.getAttribute("data-co-option")) || "";
+          // A consent option keeps its own words, or the mark set when a shared
+          // consent label was replaced by the control's value. The group title
+          // does not make the whole group consent. Leave the box untouched.
+          if (consent(opt) || (await box.getAttribute("data-co-consent")) === "1") continue;
+          const want = checkboxOptionWanted(wanted, opt);
+          const did = await confirmCheckbox(
+            (state, opts) => box.setChecked(state, opts),
+            (opts) => box.isChecked(opts),
+            want,
+          );
+          if (!did) missed += 1;
+          else if (want) checked += 1;
+        }
+        const actionable = wanted.filter((opt) => !consent(opt));
+        gaveUp = missed > 0 || checked !== actionable.length || actionable.length !== wanted.length;
       } else if (meta.type === "checkbox") {
         const want = ["true", "1", "yes", "on", "checked"].includes(value.toLowerCase());
         let done = false;
@@ -529,7 +693,19 @@ export async function fillSession(
           });
         });
       } else {
-        await loc.fill(value);
+        const liveType = ((await loc.getAttribute("type").catch(() => "")) || "").toLowerCase();
+        if (liveType === "password") continue;
+        const current = (await loc.inputValue().catch(() => "")).trim();
+        // Remember only values this session wrote, without surrounding spaces.
+        // The live value is trimmed too, so a padded answer still matches on
+        // the next run and a dashboard correction can replace it. A different
+        // value already on the form was typed there, so a later run leaves it.
+        const answer = value.trim();
+        const remembered = s.written?.get(fid);
+        if (answer && (!current || current === remembered)) {
+          if (current !== answer) await loc.fill(answer);
+          (s.written ??= new Map()).set(fid, answer);
+        }
       }
       ok = !gaveUp;
     } catch {
@@ -546,7 +722,9 @@ export async function fillSession(
   })();
   // Read the real form back: did every answer actually land? any validation
   // error? — so we warn the user about silent divergence before the handoff.
-  const issues = await verifyFill(s.frame, fieldsMeta, answers).catch(() => [] as ApplyIssue[]);
+  const issues = await verifyFill(s.frame, fieldsMeta, readbackAnswers ?? answers).catch(() => [
+    { level: "warn" as const, code: "fill-unverified", message: "Couldn't read the form back, so it is not counted as pre-filled." },
+  ] as ApplyIssue[]);
   return { steps, navigated: endPath !== startPath, issues };
 }
 

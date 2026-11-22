@@ -21,10 +21,13 @@
 // One golden value has moved since capture, deliberately and by hand: the
 // `skipped_expired` row is now released by `scan_history.recheck_after_days`
 // rather than pinned forever (#3891 follow-up, requested in review on #3905).
-// `seen` loses that URL and `recheckEligible` goes 2 -> 3. Nothing else moved:
-// the role keys, the fingerprints and the four policy-liveness assertions below
-// are untouched, which is what bounds the change. The values were NOT
-// regenerated from the code under test.
+// `seen` loses that URL and `recheckEligible` goes 2 -> 3.
+//
+// A second hand edit: the two Greenhouse board URLs are now the same-job key
+// `greenhouse:{id}` (boards.greenhouse.io/acme/jobs/1 and the PipeCo pipeline
+// row). The other four keys, the role keys, the fingerprints and the
+// policy-liveness assertions are untouched. The values were NOT regenerated
+// from the code under test.
 import { pass, fail } from './helpers.mjs';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
@@ -76,8 +79,8 @@ const POLICY = { recheckAfterDays: 30, today: '2026-08-07' };
 // Golden outputs from the pre-refactor loaders (see header comment).
 const GOLDEN = {
   seen: [
-    'https://boards.greenhouse.io/acme/jobs/1',
-    'https://boards.greenhouse.io/pipeco/jobs/7',
+    'greenhouse:1',
+    'greenhouse:7',
     'https://jobs.example.com/delta/4',
     'https://jobs.lever.co/doneco/8',
     'https://old.example.com/zeta/6',

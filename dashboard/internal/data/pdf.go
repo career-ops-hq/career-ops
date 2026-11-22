@@ -102,7 +102,7 @@ func resolvePDFIndexPath(careerOpsPath string) string {
 	return filepath.Join(pdfWorkspaceRootForTracker(tracker), "data", "pdf-index.tsv")
 }
 
-// LoadPDFEntriesByPath reads the selected PDF index and returns all entries indexed
+// LoadPDFEntriesByPath reads the selected PDF index and returns CV entries indexed
 // by their relative PDF path. Unlike LoadPDFManifest, this includes rows that
 // were generated without a --report flag. Later rows in the file win.
 func LoadPDFEntriesByPath(careerOpsPath string) map[string]PDFManifestEntry {
@@ -118,6 +118,11 @@ func LoadPDFEntriesByPath(careerOpsPath string) map[string]PDFManifestEntry {
 		}
 		fields := strings.Split(line, "\t")
 		if len(fields) < 2 {
+			continue
+		}
+		// A report may have both a CV and a cover letter. Legacy rows without
+		// the sixth kind column are CVs, matching find.mjs's reader contract.
+		if len(fields) > 5 && strings.TrimSpace(fields[5]) == "cover" {
 			continue
 		}
 		entry := PDFManifestEntry{
@@ -147,7 +152,7 @@ func LoadPDFEntriesByPath(careerOpsPath string) map[string]PDFManifestEntry {
 // LoadPDFManifest reads the selected workspace's PDF index. A missing
 // file is not an error — the manifest is optional and absent until the
 // first generate-pdf.mjs run that writes it. Later rows win over earlier
-// ones for the same report number, so regenerated PDFs supersede stale
+// CV rows for the same report number, so regenerated PDFs supersede stale
 // entries without any compaction step.
 func LoadPDFManifest(careerOpsPath string) PDFManifest {
 	manifest := make(PDFManifest)
@@ -163,6 +168,9 @@ func LoadPDFManifest(careerOpsPath string) PDFManifest {
 		}
 		fields := strings.Split(line, "\t")
 		if len(fields) < 2 {
+			continue
+		}
+		if len(fields) > 5 && strings.TrimSpace(fields[5]) == "cover" {
 			continue
 		}
 		entry := PDFManifestEntry{
@@ -192,6 +200,12 @@ func LoadPDFManifest(careerOpsPath string) PDFManifest {
 // rePDFDate extracts the trailing YYYY-MM-DD stamp from generated CV
 // filenames (cv-{candidate}-{slug}-{date}.pdf).
 var rePDFDate = regexp.MustCompile(`(\d{4}-\d{2}-\d{2})\.pdf$`)
+
+// reOverflowDraft matches the sibling draft generate-pdf.mjs writes when a
+// render runs over its page budget: {name}.overflow.pdf, then .overflow-2.pdf
+// and so on when that name is taken. The draft is the version the budget
+// rejected, kept for inspection only, and is never the PDF to open (#6377).
+var reOverflowDraft = regexp.MustCompile(`\.overflow(-\d+)?\.pdf$`)
 
 // ResolvePDFs returns candidate PDF paths (relative to careerOpsPath) for an
 // application, best match first.
@@ -225,6 +239,9 @@ func ResolvePDFs(careerOpsPath string, app model.CareerApplication, manifest PDF
 	var matches []string
 	for _, p := range globbed {
 		base := strings.ToLower(filepath.Base(p))
+		if reOverflowDraft.MatchString(base) {
+			continue
+		}
 		if matchesCompanySlug(base, slug) {
 			if rel, err := filepath.Rel(careerOpsPath, p); err == nil {
 				matches = append(matches, filepath.ToSlash(rel))

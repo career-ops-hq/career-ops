@@ -1,4 +1,4 @@
-import { pipelineSummary, readApplicationStatusLog, readStatusLog } from "@/lib/career-ops";
+import { readApplications, readApplicationStatusLog, readStatusLog, type Application } from "@/lib/career-ops";
 import { PipelineSankey } from "@/components/analytics/pipeline-sankey";
 import { canonStatus } from "@/lib/format";
 import { cumulativeProgressWithHistory } from "@/lib/funnel-tiles.mjs";
@@ -12,7 +12,10 @@ export const dynamic = "force-dynamic";
 
 export default async function Analytics({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const params = await searchParams;
-  const { applications } = pipelineSummary();
+  // Not pipelineSummary: besides the tracker it parses all of
+  // data/scan-history.tsv (append-only, one row per posting ever seen) to date
+  // the inbox, and no analytics view reads the inbox.
+  const applications = readApplications();
   // One URL contract for all three views. Each view owns its reads, as on main:
   // an incomplete Progress core install must not take Insights/Search stats down.
   const view = resolveAnalyticsView(params.view);
@@ -23,7 +26,7 @@ export default async function Analytics({ searchParams }: { searchParams: Promis
   );
 }
 
-async function ProgressView({ applications }: { applications: ReturnType<typeof pipelineSummary>["applications"] }) {
+async function ProgressView({ applications }: { applications: Application[] }) {
   const achievements = await cumulativeProgressWithHistory(
     applications.map((app) => ({ n: app.n, status: canonStatus(app.status) })),
     readApplicationStatusLog(),
@@ -37,7 +40,7 @@ async function ProgressView({ applications }: { applications: ReturnType<typeof 
   );
 }
 
-function SearchStatsView({ applications }: { applications: ReturnType<typeof pipelineSummary>["applications"] }) {
+function SearchStatsView({ applications }: { applications: Application[] }) {
   const stats = computeStatsMetrics(analyticsApplications(applications));
   return <StatsPanel metrics={stats} insights={generateInsights(stats)} />;
 }

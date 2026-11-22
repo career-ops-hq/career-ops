@@ -25,6 +25,7 @@ import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const NO_PORTALS = join(tmpdir(), 'career-ops-no-such-portals.yml');
@@ -47,13 +48,13 @@ for (const flag of ['--posted-after', '--posted-before']) {
   test(`${flag}=BAD is validated, not silently ignored`, () => {
     const r = runScan(`${flag}=not-a-date`);
     assert.match(r.all, expects, `${flag}=value must reach the date validator`);
-    assert.notEqual(r.status, 0, 'a malformed bound must fail the run');
+    assert.ok(exitedNonZero(r), describeSpawn(r, 'a malformed bound must fail the run'));
   });
 
   test(`${flag} BAD (space form) still validated`, () => {
     const r = runScan(flag, 'not-a-date');
     assert.match(r.all, expects);
-    assert.notEqual(r.status, 0);
+    assert.ok(exitedNonZero(r), describeSpawn(r, 'expected a non-zero exit'));
   });
 
   test(`${flag}=VALID reaches the validator and passes it`, () => {
@@ -67,7 +68,7 @@ for (const flag of ['--posted-after', '--posted-before']) {
   test(`${flag} with no operand is rejected, not treated as absent`, () => {
     const r = runScan(flag);
     assert.match(r.all, new RegExp(`${flag} requires a value`));
-    assert.notEqual(r.status, 0, 'a missing operand must not fall back to no bound');
+    assert.ok(exitedNonZero(r), describeSpawn(r, 'a missing operand must not fall back to no bound'));
   });
 }
 
@@ -81,5 +82,5 @@ test('--company=VALUE reaches the filter (regression for the = form)', () => {
 test('--company with no operand is rejected', () => {
   const r = runScan('--company');
   assert.match(r.all, /--company requires a value/);
-  assert.notEqual(r.status, 0);
+  assert.ok(exitedNonZero(r), describeSpawn(r, 'expected a non-zero exit'));
 });

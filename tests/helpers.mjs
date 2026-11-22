@@ -2,12 +2,19 @@
 // Moved verbatim from test-all.mjs (issue #1440); no framework by design:
 // the suite must run on a fresh clone with only Node.
 import { execFileSync } from 'child_process';
-import { accessSync, constants, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync as _rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
+import { accessSync, constants, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync as _rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { basename, join, dirname, resolve, sep } from 'path';
-import { fileURLToPath } from 'url';
+import { basename, join, dirname, resolve, sep, delimiter } from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { isNestedCheckout, trackedFiles } from '../lib/mjs-files.mjs';
 import { localToday } from '../lib/local-today.mjs';
+import { getCareerOpsRoot } from '../path-resolver.mjs';
+import { describeDrift, diffSnapshots, snapshotDataRoot } from './data-root-guard.mjs';
+import { REQUIRED_TOOL_ENV, toolRequired } from './required-tools.mjs';
+import { formatManifest, looseManifest } from '../seeds/employers-fold.mjs';
+import { chunkInbox } from '../seeds/employers-import.mjs';
+import { INBOX_DIR } from '../seeds/employers-inbox.mjs';
+import { loadOwnDomainContributors } from '../seeds/employers-validate.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one level down)
@@ -30,6 +37,168 @@ export const NODE = process.execPath;
 // CAREER_OPS_PIPELINE). A test that needs the override sets its own.
 process.env.CAREER_OPS_TRACKER = '';
 
+// The same discipline for browser auto-detection (lib/browser-launch.mjs). A
+// developer's data-root .env may switch it on so career-ops runs on an OS the
+// bundled Chromium has dropped — correct for their own use, wrong for the
+// suite, where doctor's bundled-Chromium checks would then probe that system
+// browser instead and the result would vary by machine. Blanked rather than
+// deleted because the resolver treats a PRESENT-but-empty shell variable as
+// "off" and does not fall through to .env. PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+// is deliberately left alone: the tests that care set it themselves.
+process.env.CAREER_OPS_BROWSER_AUTODETECT = '';
+
+// A shell that opted into the shared PDF painter must not make the suite
+// attach to that painter or start one. Blanked rather than deleted, same as
+// the tracker override above. A test that wants the painter sets it itself.
+process.env.CAREER_OPS_PDF_SHARED = '';
+
+// The same rule for the data root itself, which is where everything else a
+// script reads and writes is resolved from (#5113). Left alone, the suite ran
+// against whatever the shell pointed at: with CAREER_OPS_ROOT exported the way
+// the README suggests, the script smoke tests appended a fixture row to the
+// developer's real data/assessments.tsv on every run, and with nothing
+// exported, three suites overwrote live files in the checkout's own data/ and
+// restored them from memory — so an interrupted run left a three-row fixture
+// where the tracker had been, in a directory git does not track.
+//
+// So the suite gets a data root of its own. Pinned through CAREER_OPS_ROOT
+// because that outranks both CAREER_OPS_DATA_DIR and the `.career-ops-data`
+// marker (path-resolver.mjs), and set here for the reason the tracker override
+// is cleared here: the runner and every child it spawns inherit it, and a suite
+// run on its own is covered as well. A test that needs a particular root pins
+// its own, in its child's env or around its own import.
+//
+// One directory per run, not per process. The process that creates it exports
+// it as CAREER_OPS_TEST_DATA_ROOT; a child that loads these helpers finds that
+// and joins the run's root rather than making another, and only the creator
+// removes it.
+const SANDBOX_ENV = 'CAREER_OPS_TEST_DATA_ROOT';
+const SANDBOX_PREFIX = 'career-ops-test-data-';
+
+// The variable is inherited, so it is only as trustworthy as the shell it came
+// from: a stale export naming a real directory would make this process a
+// guest in it — fixtures written there, no snapshot, no drift check. Join only
+// what these helpers could have made: a directory of that name, directly under
+// the OS temp directory.
+function isRunSandbox(path) {
+  try {
+    const real = realpathSync(path);
+    return statSync(real).isDirectory()
+      && dirname(real) === realpathSync(tmpdir())
+      && basename(real).startsWith(SANDBOX_PREFIX);
+  } catch {
+    return false;
+  }
+}
+
+const inheritedSandbox = process.env[SANDBOX_ENV]?.trim();
+const ownsSandbox = !(inheritedSandbox && isRunSandbox(inheritedSandbox));
+
+/**
+ * The data root the developer's own commands resolve to, read before it is
+ * overridden below. Null in a child of the run: the process that owns the
+ * sandbox is the one that answers for the real root.
+ */
+export const REAL_DATA_ROOT = ownsSandbox ? getCareerOpsRoot() : null;
+const realRootBefore = ownsSandbox ? snapshotDataRoot(REAL_DATA_ROOT, ROOT) : null;
+
+/** The scratch data root every script resolves to while the suite runs. */
+export const SANDBOX_DATA_ROOT = ownsSandbox
+  ? realpathSync(mkdtempSync(join(tmpdir(), SANDBOX_PREFIX)))
+  : realpathSync(inheritedSandbox);
+
+/**
+ * Point the data root back at the suite's sandbox.
+ *
+ * Called when these helpers load, and again by any test that had to move or
+ * unset the variable in-process: `delete process.env.CAREER_OPS_ROOT` in a
+ * `finally` does not restore anything, it hands every later suite in the same
+ * process the developer's real root.
+ *
+ * @returns {void}
+ */
+export function pinSandboxDataRoot() {
+  process.env[SANDBOX_ENV] = SANDBOX_DATA_ROOT;
+  process.env.CAREER_OPS_ROOT = SANDBOX_DATA_ROOT;
+  // Blanked, not deleted, for the same reasons as CAREER_OPS_TRACKER above.
+  process.env.CAREER_OPS_DATA_DIR = '';
+}
+pinSandboxDataRoot();
+
+/**
+ * Environment for a child that runs a COPY of the scripts as its own checkout.
+ *
+ * Many fixtures copy a script and path-resolver.mjs into a temp directory and
+ * expect the copy to treat that directory as its data root, which is what the
+ * resolver does when nothing overrides it. Something does now — the pin above —
+ * and a developer's exported CAREER_OPS_ROOT always did, so the expectation is
+ * stated in the child's env instead of assumed from the shell's.
+ *
+ * @param {Record<string, string>} [extra] - Further variables for the child.
+ * @returns {NodeJS.ProcessEnv}
+ */
+export function ownRootEnv(extra = {}) {
+  return { ...process.env, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: '', CAREER_OPS_PDF_SHARED: '', ...extra };
+}
+
+let realRootChecked = false;
+
+/**
+ * Compare the real data root with how the run found it.
+ *
+ * Answers once: finish() reports through the counters, and the exit hook
+ * below must not report the same paths a second time.
+ *
+ * @returns {string[]|null} Lines describing what changed, or null when nothing
+ *   did, the check already ran, or this process does not own the sandbox.
+ */
+export function realDataRootDrift() {
+  if (!ownsSandbox || realRootChecked) return null;
+  realRootChecked = true;
+  const drift = diffSnapshots(realRootBefore, snapshotDataRoot(REAL_DATA_ROOT, ROOT));
+  return drift.length > 0 ? describeDrift(REAL_DATA_ROOT, drift, ROOT) : null;
+}
+
+/**
+ * Make SIGINT and SIGTERM end the process through process.exit().
+ *
+ * Node's default for both is to die where it stands, which skips the 'exit'
+ * hook below — so the run most likely to have left something behind in the
+ * developer's data was the one run that never looked. Exiting through
+ * process.exit() runs the hook, and removes the scratch data root on the way.
+ *
+ * Opt-in, for the long-lived runner: a handler only runs between two turns of
+ * the event loop, so the caller has to be a process that yields.
+ *
+ * @returns {void}
+ */
+export function exitOnInterrupt() {
+  for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+    process.on(signal, () => {
+      console.log(`\n  ⛔ interrupted (${signal}) — this is not a test result`);
+      process.exit(code);
+    });
+  }
+}
+
+if (ownsSandbox) {
+  // 'exit' also fires for process.exit(), so this covers a suite run on its
+  // own, which never reaches finish(), and a run ended by exitOnInterrupt().
+  process.on('exit', () => {
+    const drift = realDataRootDrift();
+    if (drift) {
+      console.log(`\n  ❌ ${drift.join('\n     ')}\n`);
+      // Keep a signal's own exit status; anything else becomes a failure.
+      if (!process.exitCode) process.exitCode = 1;
+    }
+    try {
+      _rmSync(SANDBOX_DATA_ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch {
+      // Under the OS temp directory, which is reclaimed without us.
+    }
+  });
+}
+
 /**
  * A merge-tracker fixture must not consult the install's batch history.
  * Keep the default state path beside the fixture additions directory; tests
@@ -49,7 +218,36 @@ export function isolatedBatchStatePath(additionsDir) {
 // option still wins, and a removal that keeps failing still throws. Same
 // wrapper test-all.mjs applies to its own call sites (#3066), shared so the
 // suites under tests/ cannot drift from it.
-export const rmSync = (target, opts = {}) => _rmSync(target, { maxRetries: 10, retryDelay: 100, ...opts });
+export const rmSync = (target, opts = {}) => {
+  // A junction (or directory symlink) reports itself as a directory, so
+  // _rmSync treats it as a real directory and throws ERR_FS_EISDIR instead of
+  // dropping the link. Match Node's own rmSync semantics: a symbolic link is
+  // removed as the link itself, never recursed into — even with recursive.
+  const targetStat = lstatSync(target, { throwIfNoEntry: false });
+  if (targetStat?.isSymbolicLink()) {
+    // unlinkSync has no retry support of its own, so give the link removal
+    // the same transient-failure policy _rmSync applies below — the very
+    // Windows handle window (EBUSY/EMFILE/ENFILE/ENOTEMPTY/EPERM) this
+    // wrapper exists for — still removing only the link. Node retries with
+    // linear backoff (retry 1 waits retryDelay, retry 2 waits 2×retryDelay,
+    // …), so the wait scales with the attempt; Atomics.wait is the blocking
+    // sleep a synchronous retry loop needs.
+    const maxRetries = opts.maxRetries ?? 10;
+    const retryDelay = opts.retryDelay ?? 100;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        unlinkSync(target);
+        return;
+      } catch (err) {
+        if (attempt >= maxRetries || !TRANSIENT_UNLINK_ERRORS.has(err?.code)) throw err;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, (attempt + 1) * retryDelay);
+      }
+    }
+  }
+  return _rmSync(target, { maxRetries: 10, retryDelay: 100, ...opts });
+};
+
+const TRANSIENT_UNLINK_ERRORS = new Set(['EBUSY', 'EMFILE', 'ENFILE', 'ENOTEMPTY', 'EPERM']);
 
 /**
  * The per-script budget run() applies when a caller does not override it.
@@ -101,8 +299,102 @@ export function fail(msg) { console.log(`  ❌ ${msg}`); failed++; }
  */
 export function warn(msg) { console.log(`  ⚠️  ${msg}`); warnings++; }
 
+/**
+ * Report that a tool this suite needs is missing (see tests/required-tools.mjs).
+ *
+ * A warning on a machine that simply lacks the tool, and a failure in a run
+ * that must have it (`test-all.mjs --needs <tool>`, or its variable set to 1),
+ * where a skip would turn the check green without running it.
+ *
+ * @param {'browser'|'latex'} tool
+ * @param {string} msg - What was skipped and why.
+ * @returns {void}
+ */
+export function toolUnavailable(tool, msg) {
+  if (toolRequired(tool)) fail(`${msg} — ${REQUIRED_TOOL_ENV[tool]}=1, so a missing ${tool} is a failure in this run`);
+  else warn(msg);
+}
+
 /** Current counter snapshot. */
 export function results() { return { passed, failed, warnings }; }
+
+/**
+ * Add another process's counters to this one's.
+ *
+ * `test-all.mjs --jobs N` runs each discovered suite in a child process. The
+ * child counts its own pass()/fail()/warn() calls and has already printed their
+ * lines; the parent only needs the totals, so the summary line and the exit
+ * code cover every suite exactly as they do when suites run in-process.
+ *
+ * @param {{passed?: number, failed?: number, warnings?: number}} counts - A results() snapshot from a child.
+ * @returns {void}
+ */
+export function absorbResults({ passed: p = 0, failed: f = 0, warnings: w = 0 } = {}) {
+  passed += p;
+  failed += f;
+  warnings += w;
+}
+
+/**
+ * Import one discovered pass/fail-style suite, containing a throw.
+ *
+ * Shared by the two places a suite is imported: test-all.mjs's in-process loop
+ * (`--jobs 1`) and tests/run-discovered-child.mjs (one suite per process), so a
+ * crashing suite reads the same whichever way the run was started.
+ *
+ * An uncaught THROW from a suite ends the run just as completely as a
+ * process.exit() would, and rather more quietly: node unwinds straight out of
+ * test-all, finish() never prints its summary, and every suite sorting after
+ * this one silently never runs. That does not read as a broken suite — it reads
+ * as a finished one, so the screen of green above the cut looks like a pass.
+ * (Measured on a Windows box with no symlink privilege: tests/intake.test.mjs
+ * threw at import and took 2067 of 3693 checks with it, with no verdict line at
+ * all — #2828.) A discovered suite is a guest, not a co-host: its crash is one
+ * failure, not the end of the run.
+ *
+ * How much "one failure" actually cost is reported as `ran`, the exact number
+ * of assertions made before the throw; the reported totals only ever include
+ * those, and nothing else says the rest never happened (#3976). An earlier
+ * version also estimated how many assertions never ran, from a static count of
+ * pass()/fail() call sites in the file. artemtrofymenko (the issue's author)
+ * measured that estimate against real suites and found it wrong in both
+ * directions badly enough to make the diagnostic worse than none: a suite
+ * asserting through a local wrapper has far more real assertions than call
+ * sites (tests/discover-ats.test.mjs: 155 executed, 4 call sites — the estimate
+ * goes negative and the line silently does not print, for 38 of 278 in-process
+ * suites), and a suite writing `if (cond) pass(...); else fail(...)` pairs has
+ * roughly twice as many call sites as real assertions, so the estimate invents
+ * lost assertions that never existed. A signal present for some suites and
+ * silently absent for others turns its own absence into a false reassurance.
+ * `ran` alone does not have that failure mode, so it is printed
+ * unconditionally.
+ *
+ * @param {string} file - Absolute path of the suite.
+ * @param {string} rel - The name to report it under (repo-relative path).
+ * @returns {Promise<void>} Resolves when the import has; never rejects.
+ */
+export async function importSuiteContained(file, rel) {
+  const before = results();
+  try {
+    await import(pathToFileURL(file).href);
+  } catch (err) {
+    const ran = (results().passed - before.passed) + (results().failed - before.failed);
+    fail(`${rel} — suite threw and was contained (${err?.code ?? err?.name ?? 'Error'}): ${err?.message ?? err}`);
+    console.log(`      ${ran} assertion${ran === 1 ? '' : 's'} ran before the throw; everything after it in this file did not run`);
+    // The throw site, not just the message: a suite that dies mid-import
+    // leaves no other clue how far it got.
+    for (const line of String(err?.stack ?? '').split('\n').slice(1, 4)) {
+      if (line.trim()) console.log(`      ${line.trim()}`);
+    }
+  } finally {
+    // A suite that sealed git (sealProcessGitEnv) hands the environment back,
+    // so the suites after it in this process do not inherit the seal.
+    if (unsealGitEnv) {
+      unsealGitEnv();
+      unsealGitEnv = null;
+    }
+  }
+}
 
 /**
  * Print the summary line and exit with the suite's exit code.
@@ -124,6 +416,10 @@ export function finish() {
   // stay authoritative for inline assertions; this only adds a failure source
   // that was already being computed and thrown away.
   const runnerFailed = Boolean(process.exitCode);
+  // Before the summary, so a run that wrote to the developer's data cannot
+  // print "All tests passed" above the line that says it did (#5113).
+  const drift = realDataRootDrift();
+  if (drift) fail(drift.join('\n     '));
   console.log('\n' + '='.repeat(50));
   console.log(`📊 Results: ${passed} passed, ${failed} failed, ${warnings} warnings`
     + (runnerFailed ? ' — plus failures in a discovered node:test suite (see above)' : ''));
@@ -172,6 +468,116 @@ const WINDOWS_BASH_CANDIDATES = [
   ]),
 ];
 
+/**
+ * Bash candidates for the Git install that `git --exec-path` names.
+ *
+ * The literals above only cover the two installers whose locations are fixed.
+ * Anywhere else (D:\Git, a portable Git, an MSYS2 root) the probe misses and the
+ * PATH fallback takes over, which is a different shell from a different install.
+ * Asking the `git` on PATH where it lives answers the same question for every
+ * installer at once, and derives the bash that belongs to it.
+ *
+ * `usr/bin/bash.exe` comes first because it is the shell itself; `bin/bash.exe`
+ * on Git for Windows is a small launcher that sets up the MSYS environment and
+ * then starts it (43 KB against 2.4 MB measured on a current install). Both work
+ * from an interactive prompt, and the launcher is the one PATH usually exposes,
+ * but spawning the launcher from the harness is measurably worse: a suite that
+ * spawns `bin/bash.exe` with a PATH-injected stub binary hit its own 30 s
+ * spawnSync timeout on the machine this was written on, and passed again on
+ * `usr/bin/bash.exe`. Preferring the real shell keeps this function's answer
+ * close to what the PATH fallback would have produced.
+ *
+ * Pure string logic on purpose — no filesystem, no spawning — so the rule is
+ * assertable and the caller decides whether the answer is worth probing. Only a
+ * drive-letter path is accepted: `/usr/lib/git-core` is a POSIX git, where this
+ * function has nothing to say, and a relative path is not an install.
+ *
+ * @param {string|undefined|null} execPath - Output of `git --exec-path`.
+ * @returns {string[]} Candidate bash paths, the real shell before the launcher.
+ *   Empty when the input is not a Windows git install.
+ */
+export function bashCandidatesFromGitExecPath(execPath) {
+  if (typeof execPath !== 'string') return [];
+  const path = execPath.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!/^[a-z]:\//i.test(path)) return [];
+  // <root>/<environment>/libexec/git-core, or the older <root>/libexec/git-core.
+  // The environment directory is not always mingw64: Git for Windows ARM64 ships
+  // clangarm64, MSYS2 packages git under ucrt64 or clang64, and a git running
+  // from MSYS2's own environment sits under usr. Leaving any of those in place
+  // would build `<root>/<environment>/usr/bin/bash.exe`, one level too deep.
+  const stripped = path.replace(/\/libexec\/git-core$/i, '');
+  if (stripped === path) return [];
+  const segments = stripped.split('/');
+  const ENV_DIR = /^(?:mingw(?:32|64)|ucrt64|clang(?:32|64|arm64)|msys2?|usr)$/i;
+  const root = ENV_DIR.test(segments[segments.length - 1]) ? segments.slice(0, -1).join('/') : stripped;
+  if (!/^[a-z]:\/+[^/]/i.test(root)) return [];
+  return [`${root}/usr/bin/bash.exe`, `${root}/bin/bash.exe`];
+}
+
+/**
+ * `git --exec-path` for the git on PATH, or '' when git is missing or silent.
+ *
+ * Separated from the caller so a test can supply the answer instead of
+ * depending on which git the machine happens to have.
+ *
+ * @returns {string}
+ */
+export function readGitExecPath() {
+  try {
+    return execFileSync('git', ['--exec-path'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return '';
+  }
+}
+
+/** Memo for the real (non-injected) chain; see windowsBashCandidates(). */
+let derivedBashCandidatesCache = null;
+
+/**
+ * The fixed literals plus whatever the local git install adds to them.
+ *
+ * Both inputs are injectable so the appending can be asserted on any machine:
+ * a test supplies a fake exec-path and a short fixed list, and checks what the
+ * chain looks like without touching the local Git at all. The injected form
+ * never writes the memo, so a test cannot poison the answer the harness uses.
+ *
+ * Lazy and memoized for the real call: probing git costs one child process, and
+ * every getBash() caller on a machine that found a literal above should not pay
+ * for it.
+ *
+ * @param {object} [options]
+ * @param {string[]} [options.fixed] - Literal candidates, tried first.
+ * @param {() => string} [options.gitExecPath] - Source of `git --exec-path`.
+ * @returns {string[]}
+ */
+export function windowsBashCandidates({ fixed = WINDOWS_BASH_CANDIDATES, gitExecPath = readGitExecPath } = {}) {
+  const isDefault = fixed === WINDOWS_BASH_CANDIDATES && gitExecPath === readGitExecPath;
+  if (isDefault && derivedBashCandidatesCache !== null) return derivedBashCandidatesCache;
+  const derived = bashCandidatesFromGitExecPath(gitExecPath());
+  const list = [...fixed, ...derived.filter((candidate) => !fixed.includes(candidate))];
+  if (isDefault) derivedBashCandidatesCache = list;
+  return list;
+}
+
+/**
+ * The first candidate whose probe succeeds, or null.
+ *
+ * Pure apart from the probe, so the selection rule — first match wins, a throw
+ * counts as "not this one" — is assertable without spawning anything.
+ *
+ * @param {string[]} candidates
+ * @param {(candidate: string) => boolean} probe
+ * @returns {string|null}
+ */
+export function firstProbeable(candidates, probe) {
+  for (const candidate of candidates) {
+    try {
+      if (probe(candidate)) return candidate;
+    } catch {}
+  }
+  return null;
+}
+
 // Same discovery problem, same fix: cygpath must come from the SAME Git
 // install as the bash above. Mixing them is #1409 in reverse -- cygpath emits
 // /c/... while WSL bash expects /mnt/c/..., so the path silently fails to
@@ -180,6 +586,61 @@ const WINDOWS_CYGPATH_CANDIDATES = [
   'C:\\Program Files\\Git\\usr\\bin\\cygpath.exe',
   ...SCOOP_ROOTS.map((root) => join(root, 'apps', 'git', 'current', 'usr', 'bin', 'cygpath.exe')),
 ];
+
+/**
+ * The Git install a bash.exe belongs to, or null when the path is not one.
+ *
+ * `<root>/bin/bash.exe`, `<root>/usr/bin/bash.exe` and the Scoop
+ * `<root>/apps/git/current/bin/bash.exe` all name the same install two levels
+ * below. Forward-slashed output on purpose: it is what both `existsSync` and
+ * `execFileSync` accept on Windows, and it keeps this function pure so the
+ * pairing can be asserted without touching the filesystem.
+ *
+ * @param {string|undefined|null} bashPath
+ * @returns {string|null} The install root, e.g. `D:/Git`, or null.
+ */
+export function gitRootOfBash(bashPath) {
+  if (typeof bashPath !== 'string') return null;
+  const path = bashPath.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  const match = path.match(/^(.*?)\/(?:usr\/bin\/|bin\/)bash(?:\.exe)?$/i);
+  if (!match) return null;
+  const root = match[1];
+  return root && (root.includes('/') || /^[a-z]:$/i.test(root)) ? root : null;
+}
+
+/**
+ * cygpath candidates inside one Git install.
+ *
+ * `usr/bin/cygpath.exe` is where Git for Windows and MSYS2 put it; `bin/` is
+ * included because a stripped-down distribution may only expose the wrapper
+ * there. Empty for a null root, so an unresolved bash adds nothing.
+ *
+ * @param {string|null} root
+ * @returns {string[]}
+ */
+export function cygpathCandidatesForGitRoot(root) {
+  if (!root) return [];
+  return [`${root}/usr/bin/cygpath.exe`, `${root}/bin/cygpath.exe`];
+}
+
+/**
+ * Every cygpath worth trying, the bash install's own first.
+ *
+ * The fixed list alone answered "is a cygpath present on this machine", not
+ * "is it the one that belongs to this shell": on a Git outside Program Files
+ * and Scoop, a machine that also has either of those installed would hand Git
+ * Bash a cygpath from the other install, which is the mismatch the comment
+ * above warns about. Asking getBash() first is what keeps the pair together,
+ * and it costs nothing because that answer is memoized.
+ *
+ * Exported so a test can assert the pairing on the machine it runs on, rather
+ * than trusting that toBashPath() still calls it.
+ *
+ * @returns {string[]}
+ */
+export function cygpathCandidates() {
+  return [...cygpathCandidatesForGitRoot(gitRootOfBash(getBash())), ...WINDOWS_CYGPATH_CANDIDATES];
+}
 
 /**
  * Map a requested executable onto the harness allowlist, returning the
@@ -197,6 +658,12 @@ function resolveAllowedExecutable(cmd) {
   for (const candidate of WINDOWS_BASH_CANDIDATES) {
     if (cmd === candidate) return candidate;
   }
+  // The PATH probe resolves bash to an install dir the candidate list does not
+  // know (a Git outside Program Files/Scoop, e.g. D:\Git). Allow exactly the
+  // path getBash() itself resolved and memoized — never an arbitrary caller
+  // string: bash callers reach it as run(getBash(), ...), so the cache is set
+  // by construction, and what it holds is the same shell the probes ran.
+  if (bashCache !== null && cmd === bashCache) return cmd;
   throw new Error(`run(): executable not in the test-helper allowlist: ${cmd}`);
 }
 
@@ -242,6 +709,9 @@ export function run(cmd, args = [], opts = {}) {
     lastFailure = {
       status: e?.status ?? null,
       signal: e?.signal ?? null,
+      // 'ETIMEDOUT' when the timeout killed the child. A killed child has no
+      // exit status, so this is the only field that says it ran out of time.
+      code: e?.code ?? null,
       stdout: e?.stdout == null ? '' : String(e.stdout),
       stderr: e?.stderr == null ? '' : String(e.stderr),
     };
@@ -259,10 +729,51 @@ let lastFailure = null;
  * Cleared by a successful run so a stale record is never attributed to a later
  * command. The suite is sequential, so "most recent" is unambiguous.
  *
- * @returns {{status: number|null, signal: string|null, stdout: string, stderr: string}|null}
+ * @returns {{status: number|null, signal: string|null, code: string|null, stdout: string, stderr: string}|null}
  */
+// describeSpawn lives in helpers/describe-spawn.mjs and is re-exported here so
+// the 410 tests that already import from this file can reach it. It is a
+// SEPARATE module because importing this one is not free: the lines above set
+// process.env.CAREER_OPS_TRACKER, call pinSandboxDataRoot() and register an
+// 'exit' hook. A test that does not already depend on that must be able to
+// describe a failed child without inheriting it.
+export { describeSpawn } from './helpers/describe-spawn.mjs';
+
 export function lastRunFailure() {
   return lastFailure;
+}
+
+// A V8 stack frame as Node prints it for an uncaught exception:
+// `    at fn (/path/file.mjs:12:5)`, `    at /path/file.mjs:12:5`.
+const STACK_FRAME_RE = /^ {4}at \S.*:\d+:\d+\)?$/m;
+
+/**
+ * Run a command that is expected to refuse its input, and report whether it
+ * refused it the intended way.
+ *
+ * `run(...) === null` is not that check. run() returns null for every failure:
+ * the intended rejection, but also an uncaught TypeError (Node exits 1 for that
+ * too), a signal, and the 30 s timeout. A script that crashed on the bad input
+ * therefore read as "correctly rejected". This requires the expected exit
+ * status, no signal, the expected message on stderr, and no stack trace there,
+ * so a crash whose text happens to contain the message still fails.
+ *
+ * @param {string} cmd - Executable, resolved through the run() allowlist.
+ * @param {string[]} args - Argument vector.
+ * @param {{stderr: string|RegExp, status?: number|null}} expected - The rejection:
+ *   a substring (or pattern) stderr must contain, and the exit status (default 1).
+ *   A signal-killed child has status null; it still never passes, since any
+ *   signal is refused.
+ * @param {object} [opts={}] - Passed through to run().
+ * @returns {boolean} True only for the intended rejection. On false,
+ *   formatRunFailure() describes what the child actually did.
+ */
+export function runRejects(cmd, args, { stderr, status = 1 }, opts = {}) {
+  if (run(cmd, args, opts) !== null) return false;
+  const f = lastFailure;
+  if (!f || f.signal !== null || f.status !== status) return false;
+  if (STACK_FRAME_RE.test(f.stderr)) return false;
+  return typeof stderr === 'string' ? f.stderr.includes(stderr) : stderr.test(f.stderr);
 }
 
 /**
@@ -948,9 +1459,9 @@ let bashSourceCache = null;
  * Which probe in getBash() produced the current bash, or null before the first
  * getBash() call.
  *
- * getBash() returns the bare string 'bash' from three different branches -- the
- * WSL probe, the PATH probe, and the give-up path -- so its return value alone
- * cannot tell a caller which shell it is about to run. On Windows those are not
+ * getBash() returns the bare string 'bash' from two different branches -- the
+ * WSL probe and the give-up path -- so its return value alone cannot tell a
+ * caller which shell it is about to run. On Windows those are not
  * interchangeable: 'bash' via WSL is a different OS with a different PATH and a
  * different mount scheme (/mnt/c/... vs /c/...). Recording the branch is what
  * lets a failure name the shell instead of leaving the reader to infer it
@@ -1003,6 +1514,45 @@ function warnFallbackShell(exe) {
 }
 
 /**
+ * The absolute path of `name` as the ambient PATH resolves it, or null when
+ * no PATH entry holds it.
+ *
+ * The bare command name only resolves through the process's own PATH, and
+ * several bash-driven fixtures deliberately spawn with PATH replaced by a
+ * POSIX-only list (`SYSTEM_PATH`, e.g. tests/batch-runner-dry-run-without-cli
+ * .test.mjs). On Windows that override hides every real install directory, so
+ * a bare `bash` cached from the probe comes back ENOENT at spawn time. Resolve
+ * the file once here, while the ambient PATH is still intact, and later spawns
+ * need no PATH at all.
+ *
+ * Follows Windows executable resolution order (current directory unless
+ * NoDefaultCurrentDirectoryInExePath is set, then PATH directories in order,
+ * checking executable extensions: .com before .exe).
+ *
+ * @param {string} name - Executable base name, e.g. 'bash'.
+ * @returns {string|null} Absolute path, or null if not found on PATH.
+ */
+function resolveOnPath(name) {
+  const pathEnv = process.env.PATH || '';
+  const pathext = ['.com', '.exe'];
+  const includeCwd = !process.env.NoDefaultCurrentDirectoryInExePath;
+  const dirs = [
+    ...(includeCwd ? ['.'] : []),
+    ...pathEnv.split(delimiter).filter(Boolean),
+  ];
+  for (const entry of dirs) {
+    const dir = entry.replace(/^"|"$/g, ''); // Windows PATH entries may be quoted
+    for (const ext of pathext) {
+      for (const e of [ext, ext.toUpperCase()]) {
+        const candidate = join(dir, `${name}${e}`);
+        try { if (statSync(candidate).isFile()) return resolve(candidate); } catch {}
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Resolve the bash executable to use for shell-script checks, lazily.
  *
  * The Windows probes below shell out up to four times (the WSL probe can even
@@ -1016,12 +1566,13 @@ function warnFallbackShell(exe) {
 export function getBash() {
   if (bashCache !== null) return bashCache;
   if (process.platform !== 'win32') { bashSourceCache = 'posix'; return (bashCache = 'bash'); }
-  for (const cmd of WINDOWS_BASH_CANDIDATES) {
-    try {
-      execFileSync(cmd, ['-c', 'true'], { stdio: 'ignore' });
-      bashSourceCache = 'git-bash';
-      return (bashCache = cmd);
-    } catch {}
+  const pickedFromGit = firstProbeable(windowsBashCandidates(), (cmd) => {
+    execFileSync(cmd, ['-c', 'true'], { stdio: 'ignore' });
+    return true;
+  });
+  if (pickedFromGit) {
+    bashSourceCache = 'git-bash';
+    return (bashCache = pickedFromGit);
   }
   try {
     // Probe via argv vector — no shell string, nothing to interpolate.
@@ -1033,7 +1584,10 @@ export function getBash() {
     try {
       execFileSync(cmd, ['-c', 'true'], { stdio: 'ignore' });
       bashSourceCache = 'path';
-      return (bashCache = cmd);
+      // The probe proved `bash` resolves on the ambient PATH; cache the file
+      // it resolved to, not the bare name — a spawn that overrides PATH (the
+      // POSIX-only SYSTEM_PATH fixtures) cannot re-resolve it on Windows.
+      return (bashCache = resolveOnPath(cmd) || cmd);
     } catch {}
   }
   bashSourceCache = 'unresolved';
@@ -1054,7 +1608,7 @@ export function toBashPath(wpath) {
   try {
     // execFileSync: the path is passed as an argv element, never interpolated
     // into a shell string, so quotes/spaces in it can't be re-parsed.
-    const cygpathCmd = WINDOWS_CYGPATH_CANDIDATES.find((p) => existsSync(p)) || 'cygpath';
+    const cygpathCmd = cygpathCandidates().find((p) => existsSync(p)) || 'cygpath';
     const out = execFileSync(cygpathCmd, ['-u', forwardSlashed], { stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim();
     if (out) return out;
   } catch {}
@@ -1091,24 +1645,26 @@ export async function captureConsoleErrors(fn) {
 }
 
 /**
- * Build a throwaway git repository for the two updater suites that hand the
- * updater its git runner (`updater-add-paths`, `updater-is-tracked`). Only
- * the first asserts on ignore RESOLUTION; the second writes its own .gitignore
- * and then asks about index membership, which is a different question.
+ * Build a throwaway git repository for the updater suites that hand the
+ * updater its git runner (`updater-add-paths`, `updater-is-tracked`, and
+ * `updater-rollback-target-manifest`). The first asserts on ignore RESOLUTION;
+ * the second writes its own .gitignore and asks about index membership; the
+ * third builds real backup/target commits and invokes the rollback CLI.
  *
  * The pins below are the reason this is shared rather than copied, but they are
- * not all load-bearing for both callers, and this docstring should not imply
+ * not all load-bearing for every caller, and this docstring should not imply
  * otherwise. Mutation-tested by dropping each pin under a GIT_CONFIG_GLOBAL it
  * exists to neutralise:
  *
  *   - `commit.gpgsign=false` and `core.hooksPath` → an empty dir. Either one
  *     inherited from the environment breaks every commit the fixtures make.
- *     Dropping either reddens BOTH suites.
+ *     Dropping either reddens all three suites.
  *   - `core.excludesFile` → an empty file. A global ignore rule silently alters
  *     what is measured (the failure mode reported in #2269). Dropping it reddens
  *     updater-add-paths only: updater-is-tracked writes its own .gitignore and
- *     then reads index membership, which a global rule does not move. Kept for
- *     both as a defensive pin, proven by one.
+ *     then reads index membership, while updater-rollback-target-manifest stages
+ *     snapshots with `git add -A`, so a global rule could drop a fixture file;
+ *     it stayed green in the mutation run only because no such rule was set.
  *
  * Point `core.excludesFile` at an empty file rather than /dev/null: git on
  * Windows maps that to `nul` and dies with "fatal: cannot use nul as an
@@ -1149,6 +1705,7 @@ export function makeUpdaterRepo({ prefix = 'co-updater-', includeRoot = false } 
   const dir = mkdtempSync(join(tmpdir(), prefix));
   const g = hermeticGitRunner(dir);
   g('init', '-q', '-b', 'main', '.');
+  g('config', 'core.autocrlf', 'false');
   g('config', 'user.email', 'test@example.com');
   g('config', 'user.name', 'Test');
   const emptyExcludes = join(dir, '.git', 'co-empty-excludes');
@@ -1254,6 +1811,78 @@ export function hermeticGitRunner(dir, { stdio } = {}) {
 }
 
 /**
+ * Seal THIS process's git environment, for a suite whose fixtures run git
+ * through something that inherits process.env rather than through
+ * `hermeticGitRunner`: the updater's own `gitIn` / `gitQuietIn` and the `*In`
+ * helpers built on them, a bare `execFileSync('git', ...)`, or a CLI spawned
+ * with the parent's environment. Those inherit the environment as a real
+ * install must, so a fixture built with them is only as isolated as the
+ * contributor's shell. With `tag.gpgSign = true` in ~/.gitconfig a lightweight
+ * `git tag` becomes a signed annotated tag with no message and git dies with
+ * "no tag message?"; with `commit.gpgSign = true` every fixture commit is
+ * signed with the contributor's own key, or fails where gpg cannot sign.
+ *
+ * Sealing the process rather than one runner is what reaches the git calls
+ * the code under test makes for itself. Call it before the suite's first git
+ * command; a later `process.env` override (an identity negative control, say)
+ * still applies on top and restores back to the seal.
+ *
+ * A suite run directly, under `node --test`, or by `test-all.mjs --jobs N` has
+ * a process of its own. The serial loop (`--jobs 1`, or a single matched file)
+ * imports the suite into test-all's process instead, so the seal records every
+ * variable it changes and `importSuiteContained` puts them back once the import
+ * settles, thrown or not. The suites after it see the environment they would
+ * have seen without it.
+ *
+ * The environment is `hermeticGitEnv`'s, so the runtime-layer pins come with
+ * it, and the variables that helper and `hermeticGitRunner` drop are deleted
+ * from process.env, not merely left uncopied. The repository-location names
+ * are matched without regard to case: Windows environment names are
+ * case-insensitive, so a `Git_Dir` would otherwise survive and still point git
+ * at another repository. The config path names a file that is never created:
+ * a missing global file is simply an empty one.
+ */
+export function sealProcessGitEnv() {
+  // One directory per process: the serial loop imports several sealing suites
+  // into one, and an exit listener each would add up.
+  if (!sealDir) {
+    const dir = mkdtempSync(join(tmpdir(), 'co-sealed-git-'));
+    process.on('exit', () => _rmSync(dir, { recursive: true, force: true }));
+    sealDir = dir;
+  }
+  const sealed = hermeticGitEnv(join(sealDir, 'gitconfig'));
+  const repoLocation = new Set(REPO_LOCATION_ENV);
+  for (const name of Object.keys(sealed)) {
+    if (repoLocation.has(name.toUpperCase())) delete sealed[name];
+  }
+  const changed = new Map();
+  for (const name of Object.keys(process.env)) {
+    if (!Object.hasOwn(sealed, name)) {
+      changed.set(name, process.env[name]);
+      delete process.env[name];
+    }
+  }
+  for (const [name, value] of Object.entries(sealed)) {
+    if (process.env[name] !== value && !changed.has(name)) changed.set(name, process.env[name]);
+    process.env[name] = value;
+  }
+  // A second seal in the same suite must not record the first one's values as
+  // the originals.
+  if (!unsealGitEnv) {
+    unsealGitEnv = () => {
+      for (const [name, value] of changed) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    };
+  }
+}
+
+/** Set while a seal is in force; `importSuiteContained` calls and clears it. */
+let unsealGitEnv = null;
+let sealDir = null;
+
+/**
  * Can a directory write-deny actually stop THIS process from creating a file?
  *
  * Two suites arrange a write failure by making the tracker's directory
@@ -1337,4 +1966,103 @@ export async function withLocalServerAs(publicOrigin, localOrigin, fn) {
     return realFetch(url.startsWith(publicOrigin) ? localOrigin + url.slice(publicOrigin.length) : input, init);
   };
   try { return await fn(); } finally { globalThis.fetch = realFetch; }
+}
+
+/**
+ * Copy the committed employer registry (ROOT/employers) into `destDir/employers`,
+ * leaving out `employers/inbox/`. A contribution PR adds its rows to the inbox,
+ * and the fold, import and inbox tests build their own inbox in the copy and
+ * expect it to hold only what they wrote (#6960): copying the PR's own inbox
+ * file along with the registry turned its CI red with nothing wrong in its data.
+ * @param {string} destDir
+ */
+export function copyEmployerRegistry(destDir) {
+  const src = join(ROOT, 'employers');
+  const inbox = join(src, 'inbox');
+  cpSync(src, join(destDir, 'employers'), { recursive: true, filter: (p) => p !== inbox && !p.startsWith(inbox + sep) });
+}
+
+/** Write the own-domain rows as a separate contribution beside the imported files. */
+export function writeOwnDomainInbox(root, rows, date) {
+  if (rows.length === 0) return [];
+  const [login] = loadOwnDomainContributors(root);
+  if (!login) throw new Error('expected an authorized own-domain contributor');
+  const id = `${date}-${login}`;
+  const inbox = join(root, INBOX_DIR);
+  const lines = rows.map(({ ats, board, name, own_domain_mark }) => ({ ats, board, name, own_domain_mark }));
+  const chunks = chunkInbox(lines, id);
+  for (const chunk of chunks) {
+    writeFileSync(join(inbox, chunk.name), `${chunk.lines.map((line) => JSON.stringify(line)).join('\n')}\n`, { flag: 'wx' });
+  }
+  writeFileSync(join(inbox, `${id}.json`), formatManifest(looseManifest({ id, login, date, rows: lines.length })), { flag: 'wx' });
+  return chunks.map(({ name }) => name);
+}
+
+/** Every row of the committed employer registry, parsed. */
+function employerRegistryRows() {
+  const rows = [];
+  for (const file of trackedFiles(ROOT, (rel) => /^employers\/boards\/[^/]+\/[^/]+\.ndjson$/.test(rel))) {
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      if (line.trim()) rows.push(JSON.parse(line));
+    }
+  }
+  return rows;
+}
+
+/** The ids of the committed contribution manifests. */
+function employerContributionIds() {
+  return trackedFiles(ROOT, (rel) => /^employers\/contributions\/[^/]+\.json$/.test(rel)).map((file) => basename(file, '.json'));
+}
+
+/**
+ * The day the registry tests take as "today" when they validate a copy of the
+ * committed registry: noon UTC of the latest date the registry itself holds (a
+ * row's `added`, a contribution's `date`), and never before `floor`. A fixed day
+ * goes stale the first time a contribution is folded in after it: every row
+ * added later reads as "in the future", with nothing wrong in the data.
+ * It depends on the files only, never on the clock.
+ * @param {string} [floor] A YYYY-MM-DD date the result is never earlier than.
+ */
+export function employerRegistryToday(floor = '2026-11-11') {
+  let latest = floor;
+  const see = (date) => { if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) && date > latest) latest = date; };
+  for (const row of employerRegistryRows()) see(row.added);
+  for (const id of employerContributionIds()) {
+    see(JSON.parse(readFileSync(join(ROOT, 'employers', 'contributions', `${id}.json`), 'utf8')).date);
+  }
+  return new Date(`${latest}T12:00:00Z`);
+}
+
+/**
+ * The latest day before employerRegistryToday() that no committed contribution
+ * is dated, as YYYY-MM-DD: a contribution id a test makes on it is free, so the
+ * fold keeps it as it is instead of adding -2.
+ */
+export function unusedEmployerContributionDay() {
+  const taken = new Set(employerContributionIds().map((id) => id.slice(0, 10)));
+  const day = employerRegistryToday();
+  do day.setUTCDate(day.getUTCDate() - 1); while (taken.has(day.toISOString().slice(0, 10)));
+  return day.toISOString().slice(0, 10);
+}
+
+/**
+ * A board id for `ats` that no committed row has, letter case aside: `board`
+ * itself, or `board` with the first number from 2 up that is free (on the
+ * tenant, for Workday). The registry grows with every fold, so a test that needs
+ * a new board cannot count on the one it names staying unknown. The number goes
+ * at the end, so the board stays in the same <initial>.ndjson file.
+ * @param {string} ats
+ * @param {string} board
+ */
+export function unlistedEmployerBoard(ats, board) {
+  const taken = new Set(employerRegistryRows().filter((r) => r.ats === ats).map((r) => String(r.board).toLowerCase()));
+  const numbered = (n) => {
+    if (n === 1) return board;
+    if (ats !== 'workday') return `${board}${n}`;
+    const [tenant, ...rest] = board.split('/');
+    return [`${tenant}${n}`, ...rest].join('/');
+  };
+  let n = 1;
+  while (taken.has(numbered(n).toLowerCase())) n++;
+  return numbered(n);
 }

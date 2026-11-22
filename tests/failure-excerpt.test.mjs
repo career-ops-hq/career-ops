@@ -163,3 +163,102 @@ test('empty and whitespace-only input produce nothing', () => {
   assert.deepEqual(failureExcerpt(undefined), []);
   assert.deepEqual(failureExcerpt(null), []);
 });
+
+// The same one-assertion failure as `node --test` prints it on node 22.22.0
+// with stdout piped, which is how test-all.mjs runs every suite. node 20 and 22
+// default to the TAP reporter there (node 23 switched to spec), and TAP has no
+// `AssertionError [ERR_ASSERTION]: ...` line: the message is under `error: |-`
+// and the code is a YAML key. Captured verbatim; only the local path of the
+// suite is shortened. 33 non-empty lines; the twelve-line window starts at the
+// last frame, eight lines below the message.
+const REAL_TAP_FAILURE = String.raw`TAP version 13
+# Subtest: d fails
+not ok 1 - d fails
+  ---
+  duration_ms: 0.854
+  type: 'test'
+  location: 'C:\\repo\\tests\\d-runner-fail.test.mjs:3:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+
+    1 !== 2
+
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 2
+  actual: 1
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/repo/tests/d-runner-fail.test.mjs:3:32)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.start (node:internal/test_runner/test:944:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:296:17)
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 67.8509
+`;
+
+test('the TAP reporter: the message and the error code survive', () => {
+  const out = failureExcerpt(REAL_TAP_FAILURE).join('\n');
+  assert.match(out, /^\s*error: \|-$/m);
+  assert.match(out, /Expected values to be strictly equal:/);
+  assert.match(out, /1 !== 2/);
+  assert.match(out, /code: 'ERR_ASSERTION'/);
+
+  // The window on its own had neither, so this would fail against the code
+  // before TAP was read.
+  const window = REAL_TAP_FAILURE.split('\n').filter((l) => l.trim()).slice(-12).join('\n');
+  assert.doesNotMatch(window, /1 !== 2|ERR_ASSERTION/,
+    'fixture too short to reproduce the defect — the window already kept the message');
+});
+
+test('the TAP message ends at the next key', () => {
+  const out = failureExcerpt(REAL_TAP_FAILURE);
+  // Keys below the message are not the message. They sit above the window here,
+  // so a block that ran on past `error:` would pull them in.
+  assert.equal(out.some((l) => /^\s*(?:name|expected|actual|operator): /.test(l)), false,
+    `keys after the message were taken as part of it: ${JSON.stringify(out)}`);
+  // The first frame, which locates the assertion, is kept even though the
+  // window starts four frames below it; the frames between are not.
+  const text = out.join('\n');
+  assert.match(text, /TestContext\.<anonymous> \(file:\/\/\/C:\/repo\/tests\/d-runner-fail\.test\.mjs:3:32\)/);
+  assert.doesNotMatch(text, /Test\.runInAsyncScope/);
+  assert.match(text, /# fail 1/);
+});
+
+test('a one-line TAP message is kept on its own', () => {
+  const lines = [
+    'not ok 1 - throws',
+    '  ---',
+    "  failureType: 'testCodeFailure'",
+    "  error: 'boom at offset 17'",
+    "  code: 'ERR_TEST_FAILURE'",
+    "  name: 'Error'",
+    ...Array.from({ length: 14 }, (_, i) => `# filler ${i}`),
+  ].join('\n');
+  const out = failureExcerpt(lines);
+  assert.ok(out.includes("  error: 'boom at offset 17'"), JSON.stringify(out));
+  assert.ok(out.includes("  code: 'ERR_TEST_FAILURE'"), JSON.stringify(out));
+  assert.ok(!out.includes("  name: 'Error'"), JSON.stringify(out));
+});
+
+test('TAP output stays bounded when a suite fails in bulk', () => {
+  const bulk = Array.from({ length: 200 }, (_, i) => [
+    `not ok ${i + 1} - case ${i}`,
+    '  error: |-',
+    `    failure number ${i}`,
+    "  code: 'ERR_ASSERTION'",
+  ].join('\n')).join('\n');
+  const out = failureExcerpt(bulk);
+  assert.ok(out.length <= 20, `excerpt grew to ${out.length} lines`);
+  assert.match(out.join('\n'), /failure number 0/);
+});
