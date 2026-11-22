@@ -42,8 +42,8 @@ import { markTruncated } from '../lib/board-truncation.mjs';
 //     search.jobs.barclays is the same family in a card layout: the title sits
 //     in <strong> inside the anchor and the location is a SIBLING
 //     <div class="job-location"> after </a>, so the parser also looks between
-//     one anchor and the next. The title is the heading, else an element whose class
-//     holds `jobtitle` / `job-title` (`<span class="jobtitle">` on www.ccep.jobs). The
+//     one anchor and the next. The title is the heading, else an element with a
+//     `jobtitle` / `job-title` class token (`<span class="jobtitle">` on www.ccep.jobs). The
 //     modern markup on careers.loreal.com carries `<h3 class="…__job-title">` and
 //     `<span class="… job-location">` inside the link, read the same way.
 //     The location element is a span, p or div
@@ -234,9 +234,19 @@ function elementContent(html, tag, from) {
   return html.slice(from);
 }
 
+// A whole class token, plain or BEM-namespaced: `jobtitle`, `job-title`,
+// `search-results-list__job-title`. `job-title-label` and the like are not titles.
+const TITLE_CLASS_RE = /^(?:[\w-]*__)?job-?title$/i;
+
+/** Whether an opening tag's attributes carry a title class token. @param {string} attrs */
+function hasTitleClass(attrs) {
+  const cls = attrs.match(/(?:^|\s)class="([^"]*)"/i);
+  return !!cls && cls[1].split(/\s+/).some((token) => TITLE_CLASS_RE.test(token));
+}
+
 /**
- * The title element inside a result anchor: a heading, else an element whose
- * class holds `job-title` or `jobtitle` (`<span class="jobtitle">` on
+ * The title element inside a result anchor: a heading, else an element with a
+ * `job-title` or `jobtitle` class token (`<span class="jobtitle">` on
  * www.ccep.jobs, `<h3 class="search-results-list__job-title">` on
  * careers.loreal.com). Null when the anchor has neither, so the caller can fall
  * back to the anchor's own text.
@@ -245,7 +255,7 @@ function elementContent(html, tag, from) {
  */
 function titleElementText(inner) {
   const head = inner.match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/i);
-  const el = head ? null : inner.match(/<(\w+)\b[^>]*class="[^"]*job-?title[^"]*"[^>]*>/i);
+  const el = head ? null : [...inner.matchAll(/<(\w+)\b([^>]*)>/g)].find((m) => hasTitleClass(m[2]));
   const text = head ? head[1] : (el ? elementContent(inner, el[1], el.index + el[0].length) : '');
   return clean(text) || null;
 }

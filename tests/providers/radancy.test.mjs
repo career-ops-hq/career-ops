@@ -346,6 +346,13 @@ try {
   if (trailRows.length === 1 && trailRows[0].location === '') pass('radancy.parseResults() keeps the location fallback inside the last modern row');
   else fail(`radancy.parseResults() trailing location rows = ${JSON.stringify(trailRows)}`);
 
+  // The title class is a whole class token: a `job-title-label` span is not the
+  // title, so the anchor's own text stays the title.
+  const LABEL_SPAN = '<a href="/job/madrid/buyer/1299/702" data-job-id="702">Buyer <span class="job-title-label">Job title</span></a>';
+  const labelRows = parseLegacyResults(LABEL_SPAN, 'https://careers.acme.example');
+  if (labelRows.length === 1 && labelRows[0].title === 'Buyer') pass('radancy.parseLegacyResults() matches the title class as a whole token, not a substring');
+  else fail(`radancy.parseLegacyResults() label-span rows = ${JSON.stringify(labelRows)}`);
+
 
   // A <p class="job-location"> and a row with no location at all: the sibling
   // fallback must read the former and must not invent a location for the latter
