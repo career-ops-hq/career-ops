@@ -2231,11 +2231,17 @@ async function generatePDF() {
   // No flag seen yet: null, not a paper size. The default belongs to
   // lib/page-format.mjs, which ranks it below the user's config/profile.yml.
   let inputPath, outputPath, format = null, country = null, reportNum = '', allowReorder = false, allowNonChronological = false;
-  let maxPages = 2, maxPagesInput = '2', maxPagesSupplied = false, strictPages = false, batchManifestPath = null;
+  let maxPages = 2, maxPagesInput = '2', maxPagesSupplied = false, strictPages = false, batchManifestPath = null, batchSupplied = false;
 
   for (const arg of args) {
     if (arg.startsWith('--format=')) {
       format = arg.split('=')[1].toLowerCase();
+    } else if (arg === '--format') {
+      // A flag missing its operand, like the bare --country below. Left alone it
+      // falls through to the positional arms and is dropped, so `--format letter`
+      // printed the PDF on the profile's sheet instead of the one asked for.
+      // The empty value fails the format check below before any work.
+      format = '';
     } else if (arg.startsWith('--country=')) {
       country = arg.slice('--country='.length);
     } else if (arg === '--country') {
@@ -2264,7 +2270,14 @@ async function generatePDF() {
       kindSupplied = true;
       kindFlag = arg.slice('--kind='.length).trim();
     } else if (arg.startsWith('--batch=')) {
+      batchSupplied = true;
       batchManifestPath = arg.slice('--batch='.length);
+    } else if (arg === '--batch') {
+      // The same missing-operand case. Dropped, `in.html out.pdf --batch m.json`
+      // rendered the two positional paths and never read the manifest. Marked
+      // supplied, because the batch branch below treats an empty path as absent.
+      batchSupplied = true;
+      batchManifestPath = '';
     } else if (arg === '--max-pages') {
       // A flag missing its operand, not an absent flag. Left alone it falls
       // through to the positional arms, and cv.max_pages from the profile would
@@ -2304,6 +2317,11 @@ async function generatePDF() {
   // substitution the flag exists to prevent.
   if (reportSupplied && !reportNum) {
     console.error('Invalid --report "". Use a numeric report number, e.g. --report=42.');
+    process.exit(1);
+  }
+
+  if (batchSupplied && !batchManifestPath) {
+    console.error('Invalid --batch "". Name the manifest, e.g. --batch=output/batch.json.');
     process.exit(1);
   }
 
