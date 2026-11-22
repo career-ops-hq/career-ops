@@ -138,9 +138,11 @@ function corporateFormStems(company) {
   return stems;
 }
 
-// An email address or hostname, with or without a scheme: "no-reply@acme-partners.com",
-// "https://acme-partners.com/jobs", "careers.acme.io".
-const ADDRESS_OR_HOST_RE = /[^\s<>()"',;]+@[^\s<>()"',;]+|(?:https?:\/\/)?(?:[\p{L}\p{M}\p{N}-]+\.)+\p{L}{2,}(?:[/?#]\S*)?/gu;
+// A URL with a scheme, removed whole up to the next space or bracket whatever
+// its host ("https://192.0.2.1/acme", "https://jobs.example:8443/acme"); an
+// email address ("no-reply@acme-partners.com"); or a bare hostname with its
+// port and path ("careers.acme.io", "jobs.example:8443/acme").
+const ADDRESS_OR_HOST_RE = /[a-z][a-z\d+.-]*:\/\/[^\s<>()"']*|[^\s<>()"',;]+@[^\s<>()"',;]+|(?:[\p{L}\p{M}\p{N}-]+\.)+\p{L}{2,}(?::\d+)?(?:[/?#][^\s<>()"']*)?/giu;
 
 // Whole-token match in the same key space as the stem, so "acme" is found in
 // "Thanks for applying to Acme!" but not inside "Acmecorp". A stem is shorter

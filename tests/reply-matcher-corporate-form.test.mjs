@@ -59,6 +59,11 @@ test('a domain that shares the first word is not the company', () => {
   assert.equal(checkCompanyMatch('Jane Doe <jane@acme-partners.com> Your application', 'Acme Corp'), false);
   assert.equal(checkCompanyMatch('Apply at https://acme-recruiting.com/jobs today', 'Acme Corp'), false);
   assert.equal(checkCompanyMatch('See careers.acme.io for details', 'Acme Corp'), false);
+  // A URL goes whole, so its port, path and an IP host leave no "acme" behind.
+  assert.equal(checkCompanyMatch('Apply at https://jobs.example:8443/acme today', 'Acme Corp'), false);
+  assert.equal(checkCompanyMatch('Apply at https://192.0.2.1/acme today', 'Acme Corp'), false);
+  assert.equal(checkCompanyMatch('Apply at jobs.example:8443/acme today', 'Acme Corp'), false);
+  assert.equal(checkCompanyMatch('Apply at <https://jobs.example/apply> with Acme', 'Acme Corp'), true);
   // The words around the address still count.
   assert.equal(checkCompanyMatch('Acme Talent <no-reply@acme-partners.com> Interview', 'Acme Corp'), true);
   assert.equal(checkCompanyMatch('no-reply@partners.com Your Acme application', 'Acme Corp'), true);
