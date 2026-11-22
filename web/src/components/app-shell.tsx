@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { PanelLeftClose, PanelLeftOpen, MoveHorizontal } from "lucide-react";
-import { updateAppearance } from "@/lib/appearance";
+import { cycleWidth } from "@/lib/appearance"; // same store as the Config page; ignored until saved settings have loaded
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
@@ -41,11 +41,6 @@ export function AppShell({ children, followupsEnabled }: { children: React.React
     } catch {
       /* ignore */
     }
-  };
-  // Same store as the Config page; ignored until the saved settings have loaded.
-  const cycleWidth = () => {
-    const order = ["small", "medium", "full"] as const;
-    updateAppearance((cur) => ({ ...cur, width: order[(order.indexOf(cur.width) + 1) % 3] }));
   };
   return (
     <JobsProvider>

@@ -9,7 +9,9 @@ export const DEFAULT_APPEARANCE = { fonts: {}, uiSize: 100, previewSize: 100, wi
 // are allowed (no quotes, backslashes, semicolons, braces).
 const FAMILY_RE = /^[\p{L}\p{N} .,&'()+_-]{1,80}$/u;
 const DATA_URL_RE = /^data:[\w/.+-]{0,60};base64,[A-Za-z0-9+/=]+$/;
-const MAX_FONT_DATA = 8 * 1024 * 1024;
+// One uploaded font as a data URL (about 3 MB of font file), and the whole saved file.
+export const MAX_FONT_DATA = 4 * 1024 * 1024;
+export const MAX_APPEARANCE_BYTES = 24 * 1024 * 1024;
 
 const num = (v, min, max, dflt) => (typeof v === "number" && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : dflt);
 

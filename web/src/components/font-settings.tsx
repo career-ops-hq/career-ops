@@ -6,6 +6,7 @@ import {
   ROLES, DEFAULTS, getServerSnapshot, getSnapshot, initAppearance, subscribe, updateAppearance,
   type FontChoice, type RoleId,
 } from "@/lib/appearance";
+import { MAX_FONT_DATA } from "@/lib/appearance-schema.mjs";
 
 const COMMON = ["Segoe UI", "Arial", "Verdana", "Tahoma", "Calibri", "Georgia", "Cambria", "Trebuchet MS", "Consolas", "Courier New"];
 const opt = { background: "var(--bg)", color: "var(--fg)" };
@@ -44,7 +45,16 @@ export function FontSettings() {
   }
   function upload(id: RoleId, file: File) {
     const r = new FileReader();
-    r.onload = () => setFont(id, { kind: "upload", family: `UserFont-${id}`, data: String(r.result) });
+    r.onload = () => {
+      const data = String(r.result);
+      // Refuse before changing the role, so the current font stays in place.
+      if (data.length > MAX_FONT_DATA) {
+        setMsg("That font file is too large (limit about 3 MB). Your current font was kept.");
+        return;
+      }
+      setMsg("");
+      setFont(id, { kind: "upload", family: `UserFont-${id}`, data });
+    };
     r.readAsDataURL(file);
   }
 

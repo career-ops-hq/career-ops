@@ -75,6 +75,8 @@ let snap: AppearanceSnapshot = INITIAL;
 const listeners = new Set<() => void>();
 let started: Promise<void> | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+// Saves run one after another: an older request can never be written after a newer one.
+let saveQueue: Promise<unknown> = Promise.resolve();
 
 function set(next: Partial<AppearanceSnapshot>) {
   snap = { ...snap, ...next };
@@ -149,18 +151,26 @@ export function updateAppearance(change: (current: Appearance) => Appearance): b
   writeCache(next);
   set({ settings: next, message: "" });
   if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
+  saveTimer = setTimeout(() => {
     saveTimer = null;
-    try {
-      const res = await fetch("/api/appearance", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(snap.settings), // always the latest, whichever control made the last change
-      });
-      if (!res.ok) throw new Error("rejected");
-    } catch {
-      set({ message: "Could not save to your data folder. The setting applies now but will be lost on reload (font file too large?)." });
-    }
+    saveQueue = saveQueue.then(async () => {
+      try {
+        const res = await fetch("/api/appearance", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(snap.settings), // always the latest, whichever control made the last change
+        });
+        if (!res.ok) throw new Error("rejected");
+      } catch {
+        set({ message: "Could not save to your data folder. The setting applies now but will be lost on reload (font file too large?)." });
+      }
+    });
   }, 400);
   return true;
+}
+
+/** Next page width: small, medium, full, then small again. Same store as the Config page. */
+export function cycleWidth(): boolean {
+  const order = ["small", "medium", "full"] as const;
+  return updateAppearance((cur) => ({ ...cur, width: order[(order.indexOf(cur.width) + 1) % 3] }));
 }
