@@ -1168,11 +1168,10 @@ func UpdateApplicationStatusAndNotes(careerOpsPath string, app model.CareerAppli
 	if !isCanonicalStatusName(newStatus) {
 		return fmt.Errorf("unrecognized status: %q", newStatus)
 	}
-	ids := trackerIdentities(app)
-	if len(ids) == 0 {
+	if !HasTrackerIdentity(app) {
 		return fmt.Errorf("application has no tracker identity: no report link, and its # cell is not a positive number — number the row to change its status")
 	}
-	return runStatusWriter(careerOpsPath, ids, newStatus, notesAppend)
+	return runStatusWriter(careerOpsPath, app, newStatus, notesAppend)
 }
 
 // IsCanonicalStatusName reports whether status is one of the states.yml
