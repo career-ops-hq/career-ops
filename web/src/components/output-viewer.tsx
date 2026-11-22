@@ -83,7 +83,9 @@ export function OutputViewer() {
   const [missing, setMissing] = useState("");
   const [unreadable, setUnreadable] = useState(0);
   const [newTask, setNewTask] = useState("");
-  const draftId = useRef<string | null>(null); // one id per submission, kept across retries
+  const draftId = useRef<string | null>(null); // one id per submission, kept only to retry a failed one
+  const submitting = useRef(false); // a save is in flight: no second submission may start
+  const [busy, setBusy] = useState(false);
   const [canEdit, setCanEdit] = useState(false); // true once the saved progress has loaded
   // The company whose "My prep tasks" show: the folder of the open file (output/<company>/…),
   // or the company the page was opened for (?company=) while viewing its interview-prep file.
@@ -201,10 +203,18 @@ export function OutputViewer() {
             e.preventDefault();
             const text = newTask.trim();
             const forCompany = company;
-            if (!text || !forCompany) return;
+            if (!text || !forCompany || submitting.current) return;
+            submitting.current = true;
+            setBusy(true);
             // The same id on a retry replaces the failed attempt instead of adding a second task.
             const id = (draftId.current ??= String(Date.now()));
-            const saved = await setTasks([...myTasks.filter((x) => x.id !== id), { id, text, done: false }]);
+            let saved = false;
+            try {
+              saved = await setTasks([...myTasks.filter((x) => x.id !== id), { id, text, done: false }]);
+            } finally {
+              submitting.current = false;
+              setBusy(false);
+            }
             if (saved) {
               draftId.current = null;
               // Clear the box only after the save worked, and only if nothing newer was typed meanwhile.
@@ -217,9 +227,9 @@ export function OutputViewer() {
               setProg(progRef.current);
             }
           }}>
-            <input value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a task…" aria-label="New prep task" maxLength={MAX_TASK_TEXT} disabled={!canEdit}
+            <input value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a task…" aria-label="New prep task" maxLength={MAX_TASK_TEXT} disabled={!canEdit || busy}
               className="min-w-0 flex-1 rounded border border-border bg-transparent px-2 py-1 text-xs" />
-            <button type="submit" className="rounded border border-border px-1.5 text-muted hover:text-foreground" title="Add" aria-label="Add task" disabled={!canEdit}><Plus className="size-3.5" /></button>
+            <button type="submit" className="rounded border border-border px-1.5 text-muted hover:text-foreground" title="Add" aria-label="Add task" disabled={!canEdit || busy}><Plus className="size-3.5" /></button>
           </form>
         </div>
       )}
