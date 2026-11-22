@@ -767,7 +767,7 @@ process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1
 
 Por padrão, isto escaneia o `cv.md` base — leia-o como uma **lista de gaps pré-personalização** (quais keywords do JD incorporar durante a personalização), não um veredito sobre o documento que você enviará; a saída rotula o que foi escaneado. Para verificar o currículo personalizado final, adicione `"cv": "{path}"` ao arquivo JSON (o modo `pdf` faz isso contra o HTML gerado).
 
-**Apenas diagnóstico:** sinaliza keywords ausentes/finas para que o usuário possa decidir o que reforçar. Nunca fabrique — adicione uma keyword apenas se ela refletir a experiência real do usuário (veja `modes/_shared.md`).
+**Apenas diagnóstico:** lista as palavras-chave que a verificação não encontrou. O currículo pode descrever a mesma habilidade com outras palavras. Nunca fabrique — adicione uma keyword apenas se ela refletir a experiência real do usuário (veja `modes/_shared.md`).
 
 ### 2. Registrar no tracker
 
