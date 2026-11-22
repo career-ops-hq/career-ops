@@ -83,6 +83,7 @@ export function OutputViewer() {
   const [missing, setMissing] = useState("");
   const [unreadable, setUnreadable] = useState(0);
   const [newTask, setNewTask] = useState("");
+  const draftId = useRef<string | null>(null); // one id per submission, kept across retries
   const [canEdit, setCanEdit] = useState(false); // true once the saved progress has loaded
   // The company whose "My prep tasks" show: the folder of the open file (output/<company>/…),
   // or the company the page was opened for (?company=) while viewing its interview-prep file.
@@ -199,10 +200,22 @@ export function OutputViewer() {
           <form className="mt-1 flex gap-1" onSubmit={async (e) => {
             e.preventDefault();
             const text = newTask.trim();
-            if (!text) return;
-            const saved = await setTasks([...myTasks, { id: String(Date.now()), text, done: false }]);
-            // Clear the box only after the save worked, and only if nothing newer was typed meanwhile.
-            if (saved) setNewTask((cur) => (cur.trim() === text ? "" : cur));
+            const forCompany = company;
+            if (!text || !forCompany) return;
+            // The same id on a retry replaces the failed attempt instead of adding a second task.
+            const id = (draftId.current ??= String(Date.now()));
+            const saved = await setTasks([...myTasks.filter((x) => x.id !== id), { id, text, done: false }]);
+            if (saved) {
+              draftId.current = null;
+              // Clear the box only after the save worked, and only if nothing newer was typed meanwhile.
+              setNewTask((cur) => (cur.trim() === text ? "" : cur));
+            } else {
+              // Not saved: take the task back out so the list matches what is on disk. The draft stays for a retry.
+              const cur = progRef.current;
+              const list = Array.isArray(cur.tasks[forCompany]) ? cur.tasks[forCompany].filter((x) => x.id !== id) : [];
+              progRef.current = { ...cur, tasks: { ...cur.tasks, [forCompany]: list } };
+              setProg(progRef.current);
+            }
           }}>
             <input value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a task…" aria-label="New prep task" maxLength={MAX_TASK_TEXT} disabled={!canEdit}
               className="min-w-0 flex-1 rounded border border-border bg-transparent px-2 py-1 text-xs" />
