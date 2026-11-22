@@ -1472,14 +1472,40 @@ export function trackerRoleForReport(reportNum, trackerFile) {
  * tests.
  *
  * @param {string} outputPath - The canonical PDF, already written.
- * @param {{ fullName?: string, role?: string, html?: string }} opts
- * @returns {Promise<string>} The copy's path.
+ * @param {{ fullName?: string, role?: string, html?: string, workspaceRoot?: string }} opts
+ * @returns {Promise<string>} The copy's path. Rejects when the copy would land outside the workspace.
  */
 export async function writeUploadCopy(outputPath, opts = {}) {
   const target = await uploadCopyPath(outputPath, opts);
+  // Checked before mkdirSync: the canonical PDF's own check ran before
+  // upload/ existed, so a symlinked output/upload would escape it.
+  if (!isWorkspaceOutputPath(target, opts.workspaceRoot)) {
+    throw new Error(`${target} is outside the tracker workspace`);
+  }
   mkdirSync(dirname(target), { recursive: true });
   copyFileSync(outputPath, target);
   return target;
+}
+
+/**
+ * writeUploadCopy for a render that already wrote its PDF and index row. A
+ * failed copy is a warning, as a failed manifest update is: failing the run
+ * here would make a caller such as CV Studio restore the old HTML beside the
+ * new PDF, two revisions on disk. Exported for tests.
+ *
+ * @param {string} outputPath - The canonical PDF, already written.
+ * @param {{ fullName?: string, role?: string, html?: string, workspaceRoot?: string }} opts
+ * @returns {Promise<string|null>} The copy's path, or null when none was written.
+ */
+export async function writeUploadCopyOrWarn(outputPath, opts = {}) {
+  try {
+    const copy = await writeUploadCopy(outputPath, opts);
+    console.log(`📎 Upload copy: ${copy}`);
+    return copy;
+  } catch (err) {
+    console.error(`⚠️  Upload copy not written: ${err.message}. The PDF itself is fine.`);
+    return null;
+  }
 }
 
 /**
@@ -2755,9 +2781,8 @@ async function generatePDF() {
   if ((uploadCopyFlag || upload.uploadCopy) && !result.draftPath) {
     if (resolveArtifactKind(kindFlag, outputPath).kind === 'cv') {
       const role = uploadRole || trackerRoleForReport(reportNum, trackerPath);
-      const copy = await writeUploadCopy(result.outputPath || outputPath, { fullName: upload.fullName, role, html });
-      console.log(`📎 Upload copy: ${copy}`);
-      result.uploadCopyPath = copy;
+      const copy = await writeUploadCopyOrWarn(result.outputPath || outputPath, { fullName: upload.fullName, role, html });
+      if (copy) result.uploadCopyPath = copy;
     } else if (uploadCopyFlag) {
       console.warn('⚠️  --upload-copy applies to a CV only; no copy written for this document.');
     }

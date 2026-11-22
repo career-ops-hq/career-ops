@@ -2,7 +2,7 @@
 // employer sees, built by the same lib/upload-name.mjs the web apply flow uses
 // (#6399), written next to the canonical PDF and never indexed.
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -11,7 +11,7 @@ import { ROOT } from './helpers.mjs';
 import { cvUploadName, shortRole } from '../lib/upload-name.mjs';
 
 const {
-  uploadCopyPath, writeUploadCopy, readUploadCopySettings, trackerRoleForReport,
+  uploadCopyPath, writeUploadCopy, writeUploadCopyOrWarn, readUploadCopySettings, trackerRoleForReport,
 } = await import(pathToFileURL(join(ROOT, 'generate-pdf.mjs')).href);
 
 const NO_WEB = !existsSync(join(ROOT, 'web', 'src')) && 'web/ is not present in this checkout';
@@ -81,7 +81,7 @@ test('writing the copy leaves the canonical PDF and the manifest alone', async (
   mkdirSync(join(dir, 'output'), { recursive: true });
   writeFileSync(out, bytes);
 
-  const first = await writeUploadCopy(out, { fullName: 'Jane Doe', role: 'Analytics Engineer' });
+  const first = await writeUploadCopy(out, { fullName: 'Jane Doe', role: 'Analytics Engineer', workspaceRoot: dir });
   assert.equal(first, join(dir, 'output', 'upload', 'cv-jane-doe-012-globex-2026-11-19', 'Jane-Doe-Analytics-Engineer-CV.pdf'));
   assert.deepEqual(readFileSync(first), bytes);
   assert.deepEqual(readFileSync(out), bytes);
@@ -90,8 +90,47 @@ test('writing the copy leaves the canonical PDF and the manifest alone', async (
   // A re-render refreshes the same copy instead of piling up -2, -3.
   const newer = Buffer.from('%PDF-1.7 newer');
   writeFileSync(out, newer);
-  assert.equal(await writeUploadCopy(out, { fullName: 'Jane Doe', role: 'Analytics Engineer' }), first);
+  assert.equal(await writeUploadCopy(out, { fullName: 'Jane Doe', role: 'Analytics Engineer', workspaceRoot: dir }), first);
   assert.deepEqual(readFileSync(first), newer);
+});
+
+function renderedPdf(dir) {
+  const out = join(dir, 'output', 'cv-jane-doe-012-globex-2026-11-19.pdf');
+  mkdirSync(join(dir, 'output'), { recursive: true });
+  writeFileSync(out, Buffer.from('%PDF-1.7 fake'));
+  return out;
+}
+
+test('a symlinked output/upload cannot put the copy outside the workspace', async (t) => {
+  const dir = scratch(t);
+  const outside = scratch(t);
+  const out = renderedPdf(dir);
+  // A junction needs no privilege on Windows; elsewhere the type is ignored.
+  symlinkSync(outside, join(dir, 'output', 'upload'), 'junction');
+  await assert.rejects(
+    writeUploadCopy(out, { fullName: 'Jane Doe', role: 'Analytics Engineer', workspaceRoot: dir }),
+    /outside the tracker workspace/,
+  );
+  assert.deepEqual(readdirSync(outside), []);
+});
+
+test('a failed copy is a warning, and the rendered PDF stays (output/upload is a regular file)', async (t) => {
+  const dir = scratch(t);
+  const out = renderedPdf(dir);
+  writeFileSync(join(dir, 'output', 'upload'), 'not a folder');
+  const errors = [];
+  const original = console.error;
+  console.error = (msg) => errors.push(String(msg));
+  let copy;
+  try {
+    copy = await writeUploadCopyOrWarn(out, { fullName: 'Jane Doe', role: 'Analytics Engineer', workspaceRoot: dir });
+  } finally {
+    console.error = original;
+  }
+  assert.equal(copy, null);
+  assert.match(errors.join(' '), /Upload copy not written/);
+  assert.deepEqual(readFileSync(out), Buffer.from('%PDF-1.7 fake'));
+  assert.equal(readFileSync(join(dir, 'output', 'upload'), 'utf8'), 'not a folder');
 });
 
 test('cv.upload_copy and the full name are read from the profile', (t) => {
