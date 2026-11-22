@@ -1685,7 +1685,13 @@ it reports `hits` and `unique` (offers no other keyword catches), and flags:
 
 Rank keywords by `unique`, not `hits`. The audit reads only the positive list:
 offers that `title_filter.negative` or `location_filter` already drop still
-count. Duplicate entries are audited once and listed. Read-only, zero-LLM.
+count. Duplicate entries are audited once and listed. A `tracked_companies` entry
+with its own `title_filter.positive` replaces the global list for that company,
+so its rows are replayed against that list and its keywords are reported in a
+separate `companyRows` / "company-level keywords" section instead of landing in
+`unmatched`; the row's `company` must match the entry's `name`. `job_boards`
+entries are not covered, since an aggregator records each posting's own
+employer. Read-only, zero-LLM.
 
 ```bash
 npm run filter-audit            # human-readable summary
