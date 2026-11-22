@@ -350,6 +350,23 @@ async function main() {
           if (lastScanDate && pubDate && pubDate < lastScanDate) { dateSkipped.push(canonical); continue; }
           newOffers.push(canonical);
         }
+
+        // Flushed after every keyword, not batched to the end of the run: each
+        // keyword is its own real browser navigation, and a kill mid-sweep used
+        // to lose every already-scanned keyword's results because nothing was
+        // written until the whole loop finished. appendToPipeline/
+        // appendToScanHistory/appendUnrecordedToScanHistory all dedup against
+        // what's already on disk, so calling them again next keyword with the
+        // same accumulated arrays plus new entries is safe — already-written
+        // rows are simply skipped.
+        if (!DRY_RUN) {
+          if (newOffers.length > 0) await appendToPipeline(newOffers);
+          if (newOffers.length > 0) await appendToScanHistory(newOffers, date, 'added');
+          await appendUnrecordedToScanHistory(titleSkipped, date, 'skipped_title');
+          await appendUnrecordedToScanHistory(locationSkipped, date, 'skipped_location');
+          await appendUnrecordedToScanHistory(dateSkipped, date, 'skipped_date');
+          await appendUnrecordedToScanHistory(dupeSkipped, date, 'skipped_dup');
+        }
       } catch (err) {
         process.stdout.write(`ERROR\n`);
         errors.push({ keyword: kw, error: err.message });
@@ -360,16 +377,8 @@ async function main() {
     await browser.close();
   }
 
-  if (!DRY_RUN) {
-    if (newOffers.length > 0) await appendToPipeline(newOffers);
-    if (newOffers.length > 0) await appendToScanHistory(newOffers, date, 'added');
-    // Every search hands the same skipped postings back, so each is recorded
-    // once per status, not once per run (#2695, as scan.mjs records its own).
-    await appendUnrecordedToScanHistory(titleSkipped, date, 'skipped_title');
-    await appendUnrecordedToScanHistory(locationSkipped, date, 'skipped_location');
-    await appendUnrecordedToScanHistory(dateSkipped, date, 'skipped_date');
-    await appendUnrecordedToScanHistory(dupeSkipped, date, 'skipped_dup');
-  }
+  // Writes now happen per-keyword inside the loop above, not here — each
+  // completed keyword already flushed everything accumulated so far.
 
   // Summary
   printScanSummaryHeader('Interamt Scan', date);
