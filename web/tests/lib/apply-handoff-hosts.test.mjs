@@ -61,6 +61,21 @@ test("readHandoffHosts reads the profile from the data root", () => {
   }
 });
 
+test("an empty or comment-only profile states no hosts (js-yaml 5 throws on it)", () => {
+  assert.deepEqual(handoffHostsFrom("# only comments\n# here\n"), []);
+  assert.deepEqual(handoffHostsFrom("\n   \n\t\n"), []);
+  assert.deepEqual(handoffHostsFrom("  # indented comment\r\n"), []);
+  assert.deepEqual(handoffHostsFrom(""), []);
+  const root = mkdtempSync(join(tmpdir(), "handoff-hosts-"));
+  try {
+    mkdirSync(join(root, "config"));
+    writeFileSync(join(root, "config", "profile.yml"), "# apply:\n#   handoff_hosts: [\"gupy.io\"]\n");
+    assert.deepEqual(readHandoffHosts({ CAREER_OPS_ROOT: root }), [], "Apply reads no list instead of failing");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("readHandoffHosts surfaces a broken or unreadable profile with its path", () => {
   const root = mkdtempSync(join(tmpdir(), "handoff-hosts-"));
   try {

@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { register } from "node:module";
 import { tmpdir } from "node:os";
 import { after, before, describe, test } from "node:test";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import "../helpers/web-ts-alias-loader.mjs";
@@ -56,6 +56,7 @@ after(() => {
 const { setHostResolver } = await import(pathToFileURL(join(root, "liveness-browser.mjs")).href);
 const { openSession, refusedDestination, finalizeDrivenSession, getSession } = await import("../../src/lib/apply/session.ts");
 const { POST: drivePost } = await import("../../src/app/api/apply/drive/route.ts");
+const { POST: fillPost } = await import("../../src/app/api/apply/fill/route.ts");
 const { driveSession } = await import("../../src/lib/apply/drive.ts");
 const { classifyEmpty, tryApplyTrigger } = await import("../../src/lib/apply/diagnose.ts");
 const { POST } = await import("../../src/app/api/apply/session/route.ts");
@@ -528,7 +529,7 @@ describe("the streamed drive refuses a listed host", { concurrency: 1 }, () => {
     fakeBin = mkdtempSync(join(tmpdir(), "handoff-drive-bin-"));
     writeSync(join(fakeBin, "claude"), `#!/bin/sh\ntouch "${join(fakeBin, "ran")}"\necho '{"action":"stuck","reason":"fake"}'\n`, { mode: 0o755 });
     previousPath = process.env.PATH;
-    process.env.PATH = `${fakeBin}:${previousPath}`;
+    process.env.PATH = `${fakeBin}${delimiter}${previousPath}`;
   });
   after(() => {
     restore?.();
@@ -574,7 +575,10 @@ describe("the streamed drive refuses a listed host", { concurrency: 1 }, () => {
     assert.deepEqual(closed, [true]);
   });
 
-  test("POST /api/apply/drive streams the refusal panel and never starts the drive", async () => {
+  // The stand-in claude is a #!/bin/sh script, which Windows does not run.
+  const shFixture = process.platform === "win32" && "sh fixture";
+
+  test("POST /api/apply/drive streams the refusal panel and never starts the drive", { skip: shFixture }, async () => {
     const closed = [];
     const control = {};
     const id = await openUnlisted(closed, control);
@@ -597,6 +601,32 @@ describe("the streamed drive refuses a listed host", { concurrency: 1 }, () => {
     assert.deepEqual(closed, [true]);
   });
 
+  test("POST /api/apply/fill refuses a page that moved to a listed host, and fills nothing", async () => {
+    const closed = [];
+    const control = {};
+    const id = await openUnlisted(closed, control);
+    control.moveTo(LISTED);
+    const res = await fillPost(
+      new Request("http://fixture.invalid/api/apply/fill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: id, answers: { co0: "Ada" }, fields: APPLICATION_FIELDS, handoff: true, application: "42" }),
+      }),
+    );
+    const body = await res.json();
+    assert.equal(body.unsupported, true, JSON.stringify(body).slice(0, 300));
+    assert.equal(body.postingUrl, LISTED);
+    assert.match(body.checklistHref ?? "", /42/);
+    assert.equal(body.steps, undefined, "no field was filled");
+    assert.deepEqual(closed, [true], "the window was closed");
+    assert.equal(getSession(id), undefined);
+  });
+
+  test("the Apply page shows the refusal panel for a refused fill", () => {
+    const provider = readFileSync(join(here, "../../src/components/apply/apply-provider.tsx"), "utf8");
+    assert.match(provider, /const refusal = sessionFollowUp\(d\);\s*if \(refusal\.kind === "unsupported"\) \{\s*showRefusal\(refusal\)/);
+  });
+
   test("the reach drive sends the application number, so the refusal keeps its checklist link", () => {
     const provider = readFileSync(join(here, "../../src/components/apply/apply-provider.tsx"), "utf8");
     assert.match(provider, /goal: "reach", application: nRef\.current/);
@@ -617,7 +647,7 @@ describe("the streamed drive refuses a listed host", { concurrency: 1 }, () => {
     assert.deepEqual(closed, [true]);
   });
 
-  test("a page that moves while the planner thinks is refused, even when the reply is \"stuck\"", async () => {
+  test("a page that moves while the planner thinks is refused, even when the reply is \"stuck\"", { skip: shFixture }, async () => {
     // The stand-in claude replies "stuck". The destination check sees nothing
     // before the first step and a listed host once the planner has replied.
     const hit = { vendor: "handoff", label: "gupy.io", postingUrl: LISTED };

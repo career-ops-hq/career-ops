@@ -29,13 +29,30 @@ import { getProfilePath } from "../core/profile-path.mjs";
 const MAX_HOSTS = 200;
 
 /**
+ * True when `text` holds anything besides blank lines and comments. The same
+ * rule as hasYamlContent() in lib/yaml-document.mjs.
+ *
+ * @param {string | null | undefined} text
+ * @returns {boolean}
+ */
+function hasYamlContent(text) {
+  return String(text ?? "").split("\n").some((line) => {
+    const t = line.trim();
+    return t !== "" && !t.startsWith("#");
+  });
+}
+
+/**
  * @param {string | null} profileText Raw config/profile.yml.
  * @returns {string[]} Lower-cased hosts, without a scheme, a path, or a leading or trailing dot.
  * @throws {Error} When the profile is not valid YAML: a typo must not silently switch every handoff rule off.
  */
 export function handoffHostsFrom(profileText) {
-  if (!profileText) return [];
-  const doc = yaml.load(profileText);
+  // Empty or comment-only text is an empty document: no hosts. js-yaml 5
+  // throws on it, so it is caught here, the way loadYaml() in
+  // lib/yaml-document.mjs does for the core scripts.
+  if (!hasYamlContent(profileText)) return [];
+  const doc = yaml.load(String(profileText));
   const apply = doc && typeof doc === "object" ? /** @type {Record<string, unknown>} */ (doc).apply : null;
   const list = apply && typeof apply === "object" ? /** @type {Record<string, unknown>} */ (apply).handoff_hosts : null;
   if (!Array.isArray(list)) return [];

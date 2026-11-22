@@ -371,6 +371,11 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       // Also stops the escalation below from starting an agent drive on a
       // session the user has already walked away from.
       if (generation.current !== gen) return; // left mid-fill
+      const refusal = sessionFollowUp(d);
+      if (refusal.kind === "unsupported") {
+        showRefusal(refusal);
+        return;
+      }
       if (d.error) {
         setError(d.error);
         setStatus("error");

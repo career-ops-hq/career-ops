@@ -1,4 +1,5 @@
-import { fillSession, handoffSession, getSession } from "@/lib/apply/session";
+import { fillSession, handoffSession, getSession, refusedDestination } from "@/lib/apply/session";
+import { unsupportedSessionJson } from "@/lib/apply/unsupported-ats.mjs";
 import { resolveSessionCv, uploadNameForCv } from "@/lib/apply/cv";
 import { handoffDecision } from "@/lib/apply/handoff-gate.mjs";
 import { prepareFillAnswers, readApplyProfile } from "@/lib/apply/blank-unknown.mjs";
@@ -26,6 +27,17 @@ export async function POST(req: Request) {
   if (application !== undefined && typeof application !== "string") {
     return Response.json({ error: "application must be a string" }, { status: 400 });
   }
+
+  // A page that moved onto a refused host (Workday, iCIMS, UKG or
+  // apply.handoff_hosts) since the session opened is not filled: its window is
+  // closed and the answer is the same refusal the session open and the drive give.
+  let refused;
+  try {
+    refused = await refusedDestination(sessionId);
+  } catch (e) {
+    return Response.json({ error: e instanceof Error ? e.message.slice(0, 200) : "fill failed" }, { status: 500 });
+  }
+  if (refused) return Response.json(unsupportedSessionJson(refused, application, true));
 
   // Resolve the tailored CV server-side (never trust a client path): by the
   // offer's company if known, else best-effort from the form title.
