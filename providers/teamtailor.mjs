@@ -20,7 +20,10 @@ import { markTruncated } from '../lib/board-truncation.mjs';
 // `?per_page=500` also returned all 151, but how far the server honours
 // `per_page` is unknown: a silent clamp would truncate a big board with no
 // short page to reveal it. `offset` keeps every request at the size the feed
-// serves by default, so a short page is a trustworthy end-of-feed signal.
+// serves by default, so a short page is a trustworthy end-of-feed signal. A
+// page that is not an RSS `<channel>` at all (an error or maintenance page sent
+// with a 200) is a failed page, not a short one: an error on the first page, a
+// partial board on a later one.
 //
 // A walk is also bounded by its own wall-clock budget (WALK_BUDGET_MS). The
 // sweep in scan-ats-full.mjs gives one board 5 minutes and, when that fires,
@@ -153,6 +156,9 @@ export default {
       let text;
       try {
         text = await fetchTextWithRetry(ctx, pageUrl, { redirect: 'error' });
+        if (typeof text !== 'string' || !/<channel\b/i.test(text)) {
+          throw new Error(`teamtailor: ${pageUrl} is not an RSS feed (no <channel> in the response)`);
+        }
       } catch (err) {
         // The first page failing (or any page during a probe) is a broken
         // board: throw, unwrapped. A later page failing keeps what was read

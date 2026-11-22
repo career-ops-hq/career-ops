@@ -376,10 +376,17 @@ try {
   }
 
   {
-    // A non-RSS body is read as an empty board, as before.
-    const out = await teamtailor.fetch(acme, mkCtx(async () => '<html>not a feed</html>'));
-    if (out.length === 0 && !out.truncated) pass('teamtailor.fetch() treats a non-RSS body as an empty board');
-    else fail(`non-RSS body: ${out.length} jobs`);
+    // A body that is not an RSS channel is a failed page, not the end of the feed:
+    // on the first page the board is broken, on a later one it is read in part.
+    let threw = false;
+    try { await teamtailor.fetch(acme, mkCtx(async () => '<html>not a feed</html>')); } catch { threw = true; }
+    if (threw) pass('teamtailor.fetch() throws when the first page is not an RSS feed');
+    else fail('teamtailor.fetch() read a non-RSS first page as an empty board');
+    const pages = [feedOf(0, 100), '<html>down for maintenance</html>'];
+    let n = 0;
+    const { out, warnings } = await quietly(() => teamtailor.fetch(acme, mkCtx(async () => pages[n++])));
+    if (out.length === 100 && out.truncated?.reason === 'fetch-error' && warnings.length === 1) pass('teamtailor.fetch() marks a non-RSS later page fetch-error instead of ending the walk');
+    else fail(`non-RSS page 2: ${out.length} jobs, truncated=${JSON.stringify(out.truncated)}, warnings=${warnings.length}`);
   }
 
 } catch (e) {
