@@ -33,8 +33,9 @@
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { loadYaml } from './lib/yaml-document.mjs';
-import { matchedTitleKeywords, seenJobKey, PORTALS_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
+import { matchedTitleKeywords, normalizeFilterOn, seenJobKey, PORTALS_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
 import { foldTitle } from './title-keywords.mjs';
+import { normalizeCompany } from './tracker-utils.mjs';
 import { parseScanHistoryLine } from './lib/scan-history-columns.mjs';
 import { parseScore, unwrapReportUrlToken } from './tracker-parse.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -182,8 +183,43 @@ export function audit(titleFilter, history, scoresByUrl) {
   };
 }
 
-function printSummary(result) {
-  console.log('TITLE FILTER AUDIT');
+export function auditConfig(config, history, scoresByUrl) {
+  const companyFilters = new Map();
+  for (const entry of config.tracked_companies ?? []) {
+    const key = normalizeCompany(entry?.name);
+    if (!key || entry.enabled === false) continue;
+    // History records the employer name, so it cannot distinguish multiple
+    // enabled entries for the same company.
+    if (companyFilters.has(key)) {
+      companyFilters.set(key, null);
+      continue;
+    }
+    const positive = entry.title_filter?.positive;
+    const hasOwnPositives = Array.isArray(positive) && positive.some(k => typeof k === 'string' && k.trim());
+    companyFilters.set(key, hasOwnPositives && normalizeFilterOn(entry.filter_on).includes('title')
+      ? { entry, history: [] }
+      : null);
+  }
+
+  const globalHistory = [];
+  for (const row of history) {
+    const company = companyFilters.get(normalizeCompany(row.company));
+    (company?.history ?? globalHistory).push(row);
+  }
+  const global = audit(config.title_filter, globalHistory, scoresByUrl);
+  const companies = [...companyFilters.values()].filter(Boolean).map(({ entry, history }) => ({
+    company: entry.name,
+    ...audit(entry.title_filter, history, scoresByUrl),
+  }));
+  return {
+    ...global,
+    offers: history.length,
+    unmatchedRows: companies.reduce((count, company) => count + company.unmatchedRows, global.unmatchedRows),
+    ...(companies.length ? { globalOffers: global.offers, globalUnmatchedRows: global.unmatchedRows, companyFilters: companies } : {}),
+  };
+}
+
+function printFilterSummary(result) {
   console.log(`${result.keywords} keywords replayed over ${result.offers} offers that passed the title filter`);
   if (result.unmatchedRows) console.log(`${result.unmatchedRows} historical rows match no current keyword (filter changed since)`);
   console.log('');
@@ -214,6 +250,19 @@ function printSummary(result) {
   for (const r of carrying) {
     console.log(`    ${String(r.unique).padStart(4)} unique  ${String(r.hits).padStart(4)} hits  ${r.avgScore !== null ? `avg ${r.avgScore}` : '  —  '}  ${r.keyword}`);
   }
+}
+
+function printSummary(result) {
+  console.log('TITLE FILTER AUDIT');
+  printFilterSummary({
+    ...result,
+    offers: result.globalOffers ?? result.offers,
+    unmatchedRows: result.globalUnmatchedRows ?? result.unmatchedRows,
+  });
+  for (const company of result.companyFilters ?? []) {
+    console.log(`\n  COMPANY: ${company.company}`);
+    printFilterSummary(company);
+  }
   console.log('\n  `unique` is the number to tune on. A keyword with hits but no unique can go;');
   console.log('  one with few hits and all of them unique is the only reason those were seen.');
 }
@@ -233,7 +282,7 @@ function main() {
       .filter((f) => f.endsWith('.md') && !f.includes('RESERVED'))
       .map((name) => ({ name, text: readFileSync(join(REPORTS_DIR, name), 'utf-8') }))
     : [];
-  const result = audit(cfg.title_filter, history, readScoresByUrl(reports));
+  const result = auditConfig(cfg, history, readScoresByUrl(reports));
 
   if (args.includes('--summary')) printSummary(result);
   else console.log(JSON.stringify(result, null, 2));
