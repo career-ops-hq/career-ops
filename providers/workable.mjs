@@ -407,10 +407,14 @@ export function parseWorkableMarkdown(text, companyName) {
     if (!line.startsWith('|') || !line.includes('[View]')) continue;
     const cols = line.split('|').map(c => c.trim());
     // Cols: ['', title, dept, location, type, salary, posted, '[View](url.md)', '']
-    if (cols.length < 8) continue;
-    const title = cols[1];
+    // Title is free text and can hold a pipe, which adds a cell. Location and
+    // Type are counted back from Details, and the title takes every cell
+    // before Department, so an extra pipe in the title moves neither.
+    const detailsIdx = cols.findLastIndex(c => c.includes('[View]'));
+    if (detailsIdx < 7) continue;
+    const title = cols.slice(1, detailsIdx - 5).join(' | ');
     if (!title || title === 'Title') continue;
-    const location = cols[3] || '';
+    const location = cols[detailsIdx - 4] || '';
     const urlMatch = line.match(/\[View\]\(([^)]+)\)/);
     let url = urlMatch ? urlMatch[1] : '';
     if (url.endsWith('.md')) url = url.slice(0, -3);
@@ -422,7 +426,7 @@ export function parseWorkableMarkdown(text, companyName) {
     // The Type column carries the widget's labels ("Full-time", "Contract").
     // The table has no experience level, so an internship listed as
     // "Full-time" reads as full_time here, unlike the widget and the feed.
-    jobs.push({ title, url: safe, location, company: companyName, ...employmentTypeField(cols[4]) });
+    jobs.push({ title, url: safe, location, company: companyName, ...employmentTypeField(cols[detailsIdx - 3]) });
   }
   return jobs;
 }

@@ -458,8 +458,11 @@ try {
     '| Senior PM (full | part-time) | Product | Remote | Full-time | — | 2026-04-01 | [View](https://apply.workable.com/x/jobs/view/PIPE.md) |',
   ].join('\n');
   const strayJobs = parseWorkableMarkdown(strayPipeMd, 'X');
-  if (strayJobs.length === 1 && strayJobs[0].url === 'https://apply.workable.com/x/jobs/view/PIPE') {
-    pass('parseWorkableMarkdown extracts URL from line-level regex (survives stray pipes in title)');
+  if (strayJobs.length === 1 && strayJobs[0].url === 'https://apply.workable.com/x/jobs/view/PIPE'
+      && strayJobs[0].title === 'Senior PM (full | part-time)'
+      && strayJobs[0].location === 'Remote'
+      && strayJobs[0].employmentType === 'full_time') {
+    pass('parseWorkableMarkdown keeps title, location, URL and Type when the title holds a pipe');
   } else {
     fail(`stray-pipe row not handled correctly: ${JSON.stringify(strayJobs)}`);
   }
