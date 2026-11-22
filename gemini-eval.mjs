@@ -339,14 +339,17 @@ function readFile(path, label) {
 
 function validateEvaluationShape(text) {
   const issues = [];
+  // The letter must end the word: `## Analysis` is not Block A, nor `## Gaps`
+  // Block G (the /i flag would otherwise let any heading through). Same guard
+  // as openrouter-runner.mjs's validateEvaluationResponse().
   const requiredBlocks = [
-    ['A', /(?:^|\n)#{1,3}\s*(?:A[).:-]?|Block A\b)/im],
-    ['B', /(?:^|\n)#{1,3}\s*(?:B[).:-]?|Block B\b)/im],
-    ['C', /(?:^|\n)#{1,3}\s*(?:C[).:-]?|Block C\b)/im],
-    ['D', /(?:^|\n)#{1,3}\s*(?:D[).:-]?|Block D\b)/im],
-    ['E', /(?:^|\n)#{1,3}\s*(?:E[).:-]?|Block E\b)/im],
-    ['F', /(?:^|\n)#{1,3}\s*(?:F[).:-]?|Block F\b)/im],
-    ['G', /(?:^|\n)#{1,3}\s*(?:G[).:-]?|Block G\b)/im],
+    ['A', /(?:^|\n)#{1,3}\s*(?:A(?![A-Za-z0-9])[).:-]?|Block A\b)/im],
+    ['B', /(?:^|\n)#{1,3}\s*(?:B(?![A-Za-z0-9])[).:-]?|Block B\b)/im],
+    ['C', /(?:^|\n)#{1,3}\s*(?:C(?![A-Za-z0-9])[).:-]?|Block C\b)/im],
+    ['D', /(?:^|\n)#{1,3}\s*(?:D(?![A-Za-z0-9])[).:-]?|Block D\b)/im],
+    ['E', /(?:^|\n)#{1,3}\s*(?:E(?![A-Za-z0-9])[).:-]?|Block E\b)/im],
+    ['F', /(?:^|\n)#{1,3}\s*(?:F(?![A-Za-z0-9])[).:-]?|Block F\b)/im],
+    ['G', /(?:^|\n)#{1,3}\s*(?:G(?![A-Za-z0-9])[).:-]?|Block G\b)/im],
   ];
 
   for (const [label, pattern] of requiredBlocks) {
