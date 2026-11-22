@@ -7,6 +7,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const url = process.env.WORKER_FEEDBACK_TEST_URL;
 test("workers expose task-specific state and notify once without moving focus", { skip: liveServerSkip("WORKER_FEEDBACK_TEST_URL"), timeout: 120_000 }, async () => {
@@ -33,7 +34,7 @@ test("workers expose task-specific state and notify once without moving focus", 
   await new Promise((resolve) => fixture.listen(0, '127.0.0.1', resolve));
   try {
     const { chromium } = await import("playwright-core");
-    browser = await chromium.launch({ channel: 'chrome', headless: true });
+    browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
     page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Accessibility.enable');
@@ -254,7 +255,7 @@ test("worker dismiss stays discoverable without hover and by keyboard", { skip: 
   const origin = new URL(url);
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   for (const mode of [
     { name: "desktop", width: 1440, hasTouch: false },

@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const url = process.env.INBOX_KEYS_TEST_URL;
 const root = process.env.INBOX_KEYS_TEST_ROOT;
@@ -20,7 +21,7 @@ test("inbox keys act on the cursor row and on checked rows", { skip: liveServerS
   assert.equal(fs.readFileSync(path.join(root, ".inbox-undo-fixture"), "utf8").trim(), "fictional-only");
   const pipeline = path.join(root, "data/pipeline.md");
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const errors = [];
@@ -60,7 +61,7 @@ test("an unscored needs-review row keeps its review link and row-level Skip", { 
   assert.ok(relative && !relative.startsWith("..") && !path.isAbsolute(relative));
   assert.equal(fs.readFileSync(path.join(root, ".inbox-undo-fixture"), "utf8").trim(), "fictional-only");
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const posting = "https://example.com/fixture-alpha";
   await page.addInitScript(({ posting }) => {

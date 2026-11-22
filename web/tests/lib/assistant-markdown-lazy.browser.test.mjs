@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const url = process.env.ASSISTANT_MARKDOWN_LAZY_TEST_URL;
 // micromark's token type and remark's extension key: both survive minification
@@ -14,7 +15,7 @@ test("Assistant markdown loads only once the console opens", { skip: liveServerS
   const origin = new URL(url);
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage();
   const unexpected = [];

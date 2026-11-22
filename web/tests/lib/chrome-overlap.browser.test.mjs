@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const url = process.env.CHROME_OVERLAP_TEST_URL;
 
@@ -25,7 +26,7 @@ test("version pill and Ask stay out of the main column at 1440x900", {
   const origin = new URL(url);
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = [];
@@ -71,7 +72,7 @@ test("Ask stays off the sidebar's links and controls at short and tall desktop h
   const origin = new URL(url);
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   for (const height of [480, 560, 720, 900]) {
     const page = await browser.newPage({ viewport: { width: 1280, height } });

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
 import { FULL_EVALUATION } from "../../src/lib/evaluation-options.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const url = process.env.EVALUATION_OPTIONS_TEST_URL;
 test("evaluation choices survive navigation and reach pasted-URL and shortlist workers", {
@@ -10,7 +11,7 @@ test("evaluation choices survive navigation and reach pasted-URL and shortlist w
 }, async (t) => {
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(new URL(url).hostname));
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
   const requests = [];

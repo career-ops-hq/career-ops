@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { liveServerSkip } from "../helpers/live-server.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const target = process.env.WORKER_GATE_TEST_URL;
 const missing = "This evaluation didn't produce a report to save, so it isn't in your tracker — re-run it to verify. (The agent emitted no <<report-md>> envelope, so there is no report to save.)";
@@ -18,7 +19,7 @@ test("intentional evaluation stops and old missing-report history need review wi
   const origin = new URL(target);
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
   const unexpectedWrites = [];

@@ -10,6 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const url = process.env.PIPELINE_STATUS_TEST_URL;
 const root = process.env.PIPELINE_STATUS_TEST_ROOT;
@@ -24,7 +25,7 @@ test("inline Pipeline status browser flow (disposable data only)", { skip: liveS
   const initial = fs.readFileSync(tracker, "utf8");
   assert.ok(initial.includes("Fixture Alpha") && initial.includes("Fixture Beta") && initial.includes("Fixture Gamma"));
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const errors = [];

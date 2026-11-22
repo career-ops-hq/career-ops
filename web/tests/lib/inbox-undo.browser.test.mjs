@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const url = process.env.INBOX_UNDO_TEST_URL;
 const root = process.env.INBOX_UNDO_TEST_ROOT;
@@ -19,7 +20,7 @@ test("Inbox Undo remains retryable after failure", { skip: liveServerSkip("INBOX
   assert.equal(fs.readFileSync(path.join(root, ".inbox-undo-fixture"), "utf8").trim(), "fictional-only");
   const pipeline = path.join(root, "data/pipeline.md");
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   let release = () => {};
   t.after(async () => { release(); await page.unrouteAll({ behavior: "wait" }); await browser.close(); });

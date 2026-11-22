@@ -11,6 +11,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import { toolRequired } from "../../../tests/required-tools.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(join(here, "../fixtures/apply-star-required.html"), "utf8");
@@ -86,7 +87,7 @@ test("a trailing star marks the field required", async (t) => {
   let browser;
   try {
     try {
-      browser = await chromium.launch({ channel: "chrome", headless: true });
+      browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       if (toolRequired("browser")) throw err;

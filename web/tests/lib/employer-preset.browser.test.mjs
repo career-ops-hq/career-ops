@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 const base = process.env.EXPLORE_EMPLOYER_TEST_URL;
 
 test(
@@ -13,7 +14,7 @@ test(
     assert.ok(["127.0.0.1", "localhost", "[::1]"].includes(origin.hostname));
     const { chromium } = await import("playwright-core");
     const browser = await chromium.launch({
-      channel: "chrome",
+      channel: testBrowserChannel(),
       headless: true,
     });
     t.after(() => browser.close());
@@ -268,7 +269,7 @@ test(
   async (t) => {
     const { chromium } = await import("playwright-core");
     const browser = await chromium.launch({
-      channel: "chrome",
+      channel: testBrowserChannel(),
       headless: true,
     });
     t.after(() => browser.close());

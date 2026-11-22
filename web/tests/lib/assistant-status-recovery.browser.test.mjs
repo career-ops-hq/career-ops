@@ -11,6 +11,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const url = process.env.ASSISTANT_STATUS_TEST_URL;
 test("status confirmations recover from busy writes without replaying ambiguous outcomes", { skip: liveServerSkip("ASSISTANT_STATUS_TEST_URL"), timeout: 120_000 }, async (t) => {
@@ -44,7 +45,7 @@ test("status confirmations recover from busy writes without replaying ambiguous 
   });
   await new Promise(resolve => fixture.listen(0, "127.0.0.1", resolve));
   const { chromium } = await import("playwright-core");
-  browser = await chromium.launch({ channel: "chrome", headless: true });
+  browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const cdp = await page.context().newCDPSession(page); await cdp.send("Accessibility.enable");
   let saved; let revision = 0;

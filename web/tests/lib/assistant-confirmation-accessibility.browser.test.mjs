@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const url = process.env.ASSISTANT_CONFIRM_TEST_URL;
 
@@ -22,7 +23,7 @@ test("assistant confirmation context and keyboard continuation during streaming"
   await new Promise((resolve) => fixture.listen(0, "127.0.0.1", resolve));
   t.after(() => { response?.end(); fixture.closeAllConnections(); fixture.close(); });
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage();
   const cdp = await page.context().newCDPSession(page);

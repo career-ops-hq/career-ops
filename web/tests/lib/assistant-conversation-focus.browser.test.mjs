@@ -2,10 +2,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 test("conversation controls restore focus without stealing Tab or later focus", { skip: liveServerSkip("ASSISTANT_CONVERSATION_FOCUS_TEST_URL"), timeout: 120_000 }, async t => {
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage();
   const chat = { id: "11111111-1111-4111-8111-111111111111", revision: 1, title: "Fixture chat", messages: [{ role: "user", parts: [{ type: "text", text: "Hello" }] }] };

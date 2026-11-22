@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const url = process.env.PIPELINE_RETURN_TEST_URL;
 const root = process.env.PIPELINE_RETURN_TEST_ROOT;
@@ -18,7 +19,7 @@ test("Pipeline detail links preserve the list context", { skip: liveServerSkip("
   assert.ok(relative && !relative.startsWith("..") && !path.isAbsolute(relative));
   assert.equal(fs.readFileSync(path.join(root, ".inline-status-fixture"), "utf8").trim(), "fictional-only");
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const errors = [];

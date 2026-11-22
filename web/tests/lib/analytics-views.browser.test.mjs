@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const url = process.env.ANALYTICS_TEST_URL;
 const root = process.env.ANALYTICS_TEST_ROOT;
@@ -24,7 +25,7 @@ test("Analytics rebase retains Progress, Search stats and core Insights", {
   for (const name of ["Fixture Alpha", "Fixture Beta", "Fixture Gamma"]) assert.ok(initial.includes(name));
 
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage();
   const errors = [];

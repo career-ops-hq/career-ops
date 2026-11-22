@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const url = process.env.ASSISTANT_FOCUS_TEST_URL;
 test("Assistant keyboard continuation, semantic context and modeless behavior", { skip: liveServerSkip("ASSISTANT_FOCUS_TEST_URL"), timeout: 120_000 }, async (t) => {
@@ -24,7 +25,7 @@ test("Assistant keyboard continuation, semantic context and modeless behavior", 
   await new Promise((resolve) => fixture.listen(0, "127.0.0.1", resolve));
   t.after(() => { responses.forEach((res) => res.end()); fixture.closeAllConnections(); fixture.close(); });
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const unexpected = [];
   async function pageFor(cli = true, width = 1280) {
