@@ -681,3 +681,26 @@ test('fetchJdFromPage visibleFallback drops the doctype and prefers the <main> r
     assert.match(jd.text, /Staff Engineer/);
   } finally { net.restore(); }
 });
+
+test('fetchJdFromPage visibleFallback ignores a <main> inside a comment, template or hidden container', async () => {
+  const doc = `<html><body><!-- <main>OLD COMMENTED MAIN</main> --><template><main>TEMPLATE MAIN</main></template><div hidden><main>HIDDEN MAIN</main></div><nav>Site menu Login</nav><main><h1>Staff Engineer</h1><p>${BODY}</p></main><footer>Privacy Terms</footer></body></html>`;
+  const net = stubNetwork(() => html(doc));
+  try {
+    const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+    assert.ok(jd);
+    assert.match(jd.text, /production services/);
+    assert.doesNotMatch(jd.text, /COMMENTED MAIN|TEMPLATE MAIN|HIDDEN MAIN/);
+    assert.doesNotMatch(jd.text, /Site menu|Privacy Terms/, 'the one visible <main> still scopes the region');
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback marks text from a page longer than the scan cap as partial', async () => {
+  const doc = `<html><body><main><h1>Staff Engineer</h1><p>${BODY}</p></main>${'<p>filler</p>'.repeat(90_000)}</body></html>`;
+  assert.ok(doc.length > 1_000_000);
+  const net = stubNetwork(() => html(doc));
+  try {
+    const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+    assert.ok(jd);
+    assert.match(jd.text, /Job description truncated here/);
+  } finally { net.restore(); }
+});
