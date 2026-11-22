@@ -18,7 +18,7 @@
 
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import fs, { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, utimesSync } from 'node:fs';
+import fs, { mkdtempSync, mkdirSync, realpathSync, rmSync, existsSync, readFileSync, utimesSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -84,7 +84,12 @@ function plantPeerLock(realWrite, lockDir, token = 'peer') {
 const ownerToken = (lockDir) => JSON.parse(readFileSync(join(lockDir, 'owner.json'), 'utf-8')).token;
 
 function scratch(t, prefix) {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
+  // realpathSync, because the lock wrappers resolve the file they guard before
+  // deriving the lock path. On macOS the temporary directory goes through a
+  // symlink (`/var` to `/private/var`), so a lockDir built from the unresolved
+  // spelling is not the lock the code takes and a test that intercepts it
+  // intercepts nothing.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
