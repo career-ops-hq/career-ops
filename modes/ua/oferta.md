@@ -722,7 +722,7 @@
 (список з 15-20 keywords з JD для ATS-оптимізації)
 
 ## Keyword Coverage
-(автоматично згенеровано `keyword-match.mjs` (1b) — coverage %, present, thin, missing)
+(автоматично згенеровано `keyword-match.mjs` (1b) — coverage %, present, missing)
 
 ## Job Description (archived verbatim)
 (повний текст вакансії, вставлений дослівно — див. вимогу нижче)
