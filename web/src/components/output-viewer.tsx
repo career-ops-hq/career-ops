@@ -3,7 +3,7 @@
 import { Children, isValidElement, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { parseTaskItems, tickKey, countDone, pickForCompany, MAX_TASK_TEXT } from "@/lib/prep.mjs";
+import { parseTaskItems, tickKey, countDone, pickForCompany, matchesCompany, MAX_TASK_TEXT } from "@/lib/prep.mjs";
 import { noMarkdownImages } from "@/lib/markdown-options.mjs";
 import { ChevronRight, Folder, FolderOpen, FileText, FileCode, FileType, Download, PanelLeftClose, PanelLeftOpen, Plus, Trash2 } from "lucide-react";
 
@@ -83,11 +83,14 @@ export function OutputViewer() {
   const [missing, setMissing] = useState("");
   const [unreadable, setUnreadable] = useState(0);
   const [newTask, setNewTask] = useState("");
+  const [canEdit, setCanEdit] = useState(false); // true once the saved progress has loaded
   // The company whose "My prep tasks" show: the folder of the open file (output/<company>/…),
   // or the company the page was opened for (?company=) while viewing its interview-prep file.
   const [linked, setLinked] = useState<string | null>(null);
   const parts = sel?.split("/") ?? [];
-  const company = parts[0] === "output" && parts.length > 2 ? parts[1] : linked;
+  // The linked company only counts while the open file belongs to it, so another company's
+  // file never shows (or saves tasks under) the linked company.
+  const company = parts[0] === "output" && parts.length > 2 ? parts[1] : linked && sel && matchesCompany(sel, linked) ? linked : null;
 
   // Progress: the server file is the truth. If it cannot be read (damaged file),
   // saving is switched off so ticking a box never overwrites it.
@@ -103,14 +106,15 @@ export function OutputViewer() {
         progRef.current = p;
         canSave.current = true;
         setProg(p);
+        setCanEdit(true);
       })
       .catch((e) => setProgError(e instanceof Error ? e.message : "Could not read your saved progress."))
       .finally(() => setLoaded(true));
   }, []);
   // Writes run one after another, each sending the latest state, so an older
   // request can never land after a newer one.
-  const mutate = (fn: (p: Progress) => Progress) => {
-    if (!canSave.current) return;
+  const mutate = (fn: (p: Progress) => Progress): boolean => {
+    if (!canSave.current) return false;
     const next = fn(progRef.current);
     progRef.current = next;
     setProg(next);
@@ -119,11 +123,13 @@ export function OutputViewer() {
         .then((r) => setProgError(r.ok ? "" : "Could not save your progress."))
         .catch(() => setProgError("Could not save your progress.")),
     );
+    return true;
   };
   const isDone = (file: string, t: string, mark: boolean) => prog.ticks[tickKey(file, t)] ?? mark;
   const toggleTick = (file: string, t: string, to: boolean) => mutate((p) => ({ ...p, ticks: { ...p.ticks, [tickKey(file, t)]: to } }));
-  const myTasks = (company && prog.tasks[company]) || [];
-  const setTasks = (list: Task[]) => company && mutate((p) => ({ ...p, tasks: { ...p.tasks, [company]: list } }));
+  const own = company && Object.hasOwn(prog.tasks, company) ? prog.tasks[company] : null;
+  const myTasks = Array.isArray(own) ? own : [];
+  const setTasks = (list: Task[]): boolean => !!company && mutate((p) => ({ ...p, tasks: { ...p.tasks, [company]: list } }));
   const items = parseTaskItems(text);
   const itemsDone = sel ? countDone(sel, items, prog.ticks) : 0;
 
@@ -172,7 +178,7 @@ export function OutputViewer() {
           <p className="mb-1 text-xs font-semibold uppercase tracking-[0.14em] text-muted">My prep tasks · {company}</p>
           {myTasks.map((t) => (
             <label key={t.id} className="group flex items-start gap-2 py-0.5 text-sm">
-              <input type="checkbox" checked={t.done} className="mt-1 accent-[var(--color-brand)]"
+              <input type="checkbox" checked={t.done} disabled={!canEdit} className="mt-1 accent-[var(--color-brand)]"
                 onChange={(e) => setTasks(myTasks.map((x) => (x.id === t.id ? { ...x, done: e.target.checked } : x)))} />
               <span className={`flex-1 ${t.done ? "text-faint line-through" : ""}`}>{t.text}</span>
               <button onClick={() => setTasks(myTasks.filter((x) => x.id !== t.id))} className="text-faint opacity-0 hover:text-foreground focus:opacity-100 group-hover:opacity-100" title="Remove" aria-label={`Remove task ${t.text}`}>
@@ -181,10 +187,10 @@ export function OutputViewer() {
             </label>
           ))}
           {!!myTasks.length && <p className="mt-1 text-xs text-faint">{myTasks.filter((t) => t.done).length}/{myTasks.length} done</p>}
-          <form className="mt-1 flex gap-1" onSubmit={(e) => { e.preventDefault(); if (newTask.trim()) { setTasks([...myTasks, { id: String(Date.now()), text: newTask.trim(), done: false }]); setNewTask(""); } }}>
-            <input value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a task…" aria-label="New prep task" maxLength={MAX_TASK_TEXT}
+          <form className="mt-1 flex gap-1" onSubmit={(e) => { e.preventDefault(); if (newTask.trim() && setTasks([...myTasks, { id: String(Date.now()), text: newTask.trim(), done: false }])) setNewTask(""); }}>
+            <input value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a task…" aria-label="New prep task" maxLength={MAX_TASK_TEXT} disabled={!canEdit}
               className="min-w-0 flex-1 rounded border border-border bg-transparent px-2 py-1 text-xs" />
-            <button type="submit" className="rounded border border-border px-1.5 text-muted hover:text-foreground" title="Add" aria-label="Add task"><Plus className="size-3.5" /></button>
+            <button type="submit" className="rounded border border-border px-1.5 text-muted hover:text-foreground" title="Add" aria-label="Add task" disabled={!canEdit}><Plus className="size-3.5" /></button>
           </form>
         </div>
       )}

@@ -36,11 +36,11 @@ export function normalizeProgress(raw) {
   const out = { ticks: {}, tasks: {} };
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
   if (raw.ticks && typeof raw.ticks === "object" && !Array.isArray(raw.ticks)) {
-    for (const [k, v] of Object.entries(raw.ticks).slice(0, 5000)) if (typeof v === "boolean") out.ticks[k] = v;
+    for (const [k, v] of Object.entries(raw.ticks).slice(0, 5000)) if (typeof v === "boolean" && k !== "__proto__") out.ticks[k] = v;
   }
   if (raw.tasks && typeof raw.tasks === "object" && !Array.isArray(raw.tasks)) {
     for (const [company, list] of Object.entries(raw.tasks).slice(0, 500)) {
-      if (!Array.isArray(list)) continue;
+      if (!Array.isArray(list) || company === "__proto__") continue; // never let a key reach the prototype
       out.tasks[company] = list
         .filter((t) => t && typeof t.id === "string" && typeof t.text === "string")
         .slice(0, 200)

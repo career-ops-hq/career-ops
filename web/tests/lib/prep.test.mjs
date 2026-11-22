@@ -67,3 +67,11 @@ test("hasOversizedTask flags text over the limit so the API can refuse it instea
   assert.equal(hasOversizedTask(null), false);
   assert.equal(hasOversizedTask({ tasks: "nope" }), false);
 });
+
+test("normalizeProgress never lets a __proto__ key through", () => {
+  const raw = JSON.parse('{"ticks":{"__proto__":true,"a":true},"tasks":{"__proto__":[{"id":"1","text":"t","done":false}],"acme":[]}}');
+  const p = normalizeProgress(raw);
+  assert.deepEqual(Object.keys(p.ticks), ["a"]);
+  assert.deepEqual(Object.keys(p.tasks), ["acme"]);
+  assert.equal(Object.getPrototypeOf(p.tasks), Object.prototype);
+});
