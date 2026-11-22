@@ -614,6 +614,55 @@ const SECTION_ALIASES = new Map([
   ['centres d’intérêts', 'interests'],
   ['intérêts', 'interests'],
   ['loisirs', 'interests'],
+  // Hindi (modes/hi) — the same failure as the blocks around it: no Hindi title
+  // resolved here, so cv.sections matched no section of a CV written in Hindi,
+  // which modes/hi/README.md lists as a reason to use those modes, and the order
+  // guard compared raw titles. "कौशल" and "करियर इतिहास" are the skills and
+  // career-history terms in its glossary; the rest are each section's everyday
+  // headings. Plurals are listed in both the anusvara spelling (दक्षताएं,
+  // रुचियां) and the chandrabindu one (दक्षताएँ, रुचियाँ), and "प्रोफ़ाइल" with
+  // and without the nukta: both are in common use, and foldDiacritics folds
+  // neither onto the other.
+  ['सारांश', 'summary'],
+  ['पेशेवर सारांश', 'summary'],
+  ['व्यावसायिक सारांश', 'summary'],
+  ['करियर सारांश', 'summary'],
+  ['प्रोफ़ाइल', 'summary'],
+  ['प्रोफाइल', 'summary'],
+  ['परिचय', 'summary'],
+  ['मुख्य दक्षताएं', 'competencies'],
+  ['मुख्य दक्षताएँ', 'competencies'],
+  ['प्रमुख दक्षताएं', 'competencies'],
+  ['प्रमुख दक्षताएँ', 'competencies'],
+  ['दक्षताएं', 'competencies'],
+  ['दक्षताएँ', 'competencies'],
+  ['अनुभव', 'experience'],
+  ['कार्य अनुभव', 'experience'],
+  ['पेशेवर अनुभव', 'experience'],
+  ['व्यावसायिक अनुभव', 'experience'],
+  ['करियर इतिहास', 'experience'],
+  ['परियोजनाएं', 'projects'],
+  ['परियोजनाएँ', 'projects'],
+  ['प्रमुख परियोजनाएं', 'projects'],
+  ['प्रमुख परियोजनाएँ', 'projects'],
+  ['प्रोजेक्ट्स', 'projects'],
+  ['शिक्षा', 'education'],
+  ['शैक्षिक योग्यता', 'education'],
+  ['शैक्षणिक योग्यता', 'education'],
+  ['शैक्षिक पृष्ठभूमि', 'education'],
+  ['प्रमाणपत्र', 'certifications'],
+  ['प्रमाण पत्र', 'certifications'],
+  ['प्रमाणन', 'certifications'],
+  ['पुरस्कार', 'awards'],
+  ['सम्मान', 'awards'],
+  ['पुरस्कार और सम्मान', 'awards'],
+  ['पुरस्कार एवं सम्मान', 'awards'],
+  ['कौशल', 'skills'],
+  ['तकनीकी कौशल', 'skills'],
+  ['स्किल्स', 'skills'],
+  ['रुचियां', 'interests'],
+  ['रुचियाँ', 'interests'],
+  ['शौक', 'interests'],
   // Spanish — the same failure again: with no entries here, a Spanish CV
   // rendered in the documented modes/pdf.md order (Experiencia before Formación)
   // was rejected against a cv.md listing Formación first, and --allow-reorder was
