@@ -352,8 +352,11 @@ export function parseSmartRecruitersResponse(json, companyName, companySlug) {
       ...(requisitionId ? { requisitionId } : {}),
       ...(language ? { language } : {}),
       ...(postedAt !== undefined ? { postedAt } : {}),
-      // typeOfEmployment.label: "Full-time", "Part-time", "Contract", "Intern"
-      ...employmentTypeField(j.typeOfEmployment?.label),
+      // typeOfEmployment.label: "Full-time", "Part-time", "Contract", "Intern".
+      // An internship is often labelled "Full-time" with experienceLevel.id
+      // "internship" (BoschGroup, 2026-11-22: 18 of the first 100), so that
+      // level decides, as Workable's experience level does.
+      ...employmentTypeField(j.experienceLevel?.id === 'internship' ? 'Internship' : j.typeOfEmployment?.label),
     }];
   });
 }

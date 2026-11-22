@@ -349,10 +349,13 @@
 #   kula             employmentType
 #   lever            categories.commitment (free text per employer;
 #                    "Permanent" does not give the hours, so it stays unknown)
-#   personio         <employmentType> and <schedule> (XML feed only)
-#   recruitee        employment_type_code
+#   personio         employment_type_slug and schedule_slug (careers page),
+#                    <employmentType> and <schedule> (XML feed); trainee
+#                    (an apprenticeship) stays unknown
+#   recruitee        employment_type_code (fixed term counts as temporary)
 #   remotive         job_type ("freelance" counts as contract)
-#   smartrecruiters  typeOfEmployment.label
+#   smartrecruiters  typeOfEmployment.label; an experienceLevel of
+#                    internship decides
 #   wellfound        jobType
 #   weworkremotely   <type>
 #   workable         employment_type (widget), the Type column (markdown

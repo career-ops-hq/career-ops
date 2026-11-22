@@ -73,14 +73,9 @@
  *                               The posting's employment type, normalized by
  *                               `normalizeEmploymentType()` in
  *                               `_employment-type.mjs` from the source's own
- *                               field (Himalayas `employmentType`, We Work
- *                               Remotely `<type>`, Remotive `job_type`, Ashby
- *                               `employmentType`, Lever `categories.commitment`, Workable
- *                               `employment_type`, SmartRecruiters
- *                               `typeOfEmployment.label`, Recruitee
- *                               `employment_type_code`, Personio `<employmentType>`
- *                               and `<schedule>`, Welcome to the Jungle
- *                               `contract_type`).
+ *                               field; templates/portals.example.yml
+ *                               (employment_type_filter) lists the providers
+ *                               that set it and the field each reads.
  *                               Set ONLY from a dedicated field, never read out
  *                               of the title or description. Omitted when the
  *                               source has no such field or its value names no

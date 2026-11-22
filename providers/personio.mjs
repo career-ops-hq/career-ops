@@ -291,6 +291,7 @@ function listingPostingToJob(posting, companyName, host) {
     company: companyName,
     postedAt: toEpochMs(posting.createdAt),
     ...(language ? { language } : {}),
+    ...employmentTypeField(personioEmploymentType(posting.employmentTypeSlug, posting.scheduleSlug)),
   };
 }
 
@@ -303,6 +304,8 @@ function listingPostingToJob(posting, companyName, host) {
  * @property {string} createdAt
  * @property {string[]} availableLanguages
  * @property {string} currentLocale - The language this page rendered it in; '' when unreadable.
+ * @property {string} employmentTypeSlug - `employment_type_slug` ("permanent", "intern", ...); '' when absent.
+ * @property {string} scheduleSlug - `schedule_slug` ("full-time", "part-time", ...); '' when absent.
  */
 
 /**
@@ -371,6 +374,11 @@ function toListingPosting(raw) {
     createdAt: text(raw.created_at),
     availableLanguages: raw.available_languages.map(languageOf).filter(Boolean),
     currentLocale: languageOf(raw.current_locale),
+    // The slugs are the XML feed's <employmentType> and <schedule> values in
+    // every tenant language; the labels beside them ("Festanstellung",
+    // "Vollzeit") are translated, so only the slugs are read.
+    employmentTypeSlug: text(raw.employment_type_slug),
+    scheduleSlug: text(raw.schedule_slug),
   };
 }
 
@@ -421,6 +429,23 @@ function stripTags(s) {
 function tagText(block, tag) {
   const m = block.match(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`));
   return m ? extractText(m[1]) : '';
+}
+
+/**
+ * The raw type of a Personio posting, for employmentTypeField(), from the
+ * employment type and the schedule (the careers page's slugs or the feed's
+ * tags; same values). An employment type that names no hours ("permanent",
+ * "working_student") leaves the schedule to decide. "trainee" is a German
+ * apprenticeship (Ausbildung) whatever its hours, and an apprenticeship is
+ * left unknown, as for Welcome to the Jungle. "full-or-part-time" offers both,
+ * so it decides nothing.
+ * @param {string} employmentType
+ * @param {string} schedule
+ * @returns {string[]}
+ */
+function personioEmploymentType(employmentType, schedule) {
+  if (/^trainee$/i.test(employmentType)) return [];
+  return [employmentType, /^full-or-part-time$/i.test(schedule) ? '' : schedule];
 }
 
 /**
@@ -480,9 +505,9 @@ export function parsePersonioXml(xml, companyName, host) {
       location: offices.join(', '),
       company: companyName,
       postedAt: toEpochMs(tagText(scalar, 'createdAt')),
-      // <employmentType> ("permanent", "intern", "trainee", "freelance") and <schedule> ("full-time", "part-time"):
-      // "permanent" names no type, so the schedule decides it
-      ...employmentTypeField([tagText(scalar, 'employmentType'), tagText(scalar, 'schedule')]),
+      // <employmentType> ("permanent", "intern", "trainee", "working_student", "freelance") and
+      // <schedule> ("full-time", "part-time", "full-or-part-time"); see personioEmploymentType().
+      ...employmentTypeField(personioEmploymentType(tagText(scalar, 'employmentType'), tagText(scalar, 'schedule'))),
     });
   }
   return jobs;

@@ -231,9 +231,10 @@ const expect = (label, got, want) => {
 // ── SmartRecruiters (/v1/companies/<slug>/postings) ─────────────────
 {
   const { parseSmartRecruitersResponse } = await load('smartrecruiters.mjs');
-  const item = (id, type) => ({
+  const item = (id, type, level) => ({
     id,
     name: `Role ${id}`,
+    ...(level ? { experienceLevel: { id: level, label: level } } : {}),
     ref: `https://api.smartrecruiters.com/v1/companies/fixturelabs/postings/${id}`,
     releasedDate: '2026-11-10T09:00:00.000Z',
     location: { city: 'Madrid', country: 'es', remote: false, fullLocation: 'Madrid, Spain' },
@@ -246,13 +247,16 @@ const expect = (label, got, want) => {
         item('744000000000001', { id: 'permanent', label: 'Full-time' }),
         item('744000000000002', { id: 'intern', label: 'Intern' }),
         item('744000000000003'),
+        // the live BoschGroup shape: an internship labelled Full-time
+        item('744000000000004', { id: 'permanent', label: 'Full-time' }, 'internship'),
+        item('744000000000005', { id: 'permanent', label: 'Full-time' }, 'mid_senior_level'),
       ],
     },
     'Fixture Labs',
     'fixturelabs',
   );
-  expect('smartrecruiters: typeOfEmployment.label normalized; a missing field leaves it off',
-    types(jobs), ['full_time', 'internship', '<absent>']);
+  expect('smartrecruiters: typeOfEmployment.label normalized; an internship experienceLevel decides; a missing field leaves it off',
+    types(jobs), ['full_time', 'internship', '<absent>', 'internship', 'full_time']);
 }
 
 // ── Recruitee (/api/offers) ─────────────────────────────────────────
@@ -283,12 +287,14 @@ const expect = (label, got, want) => {
     (schedule ? `<schedule>${schedule}</schedule>` : '') +
     `<createdAt>2026-11-10T09:00:00+00:00</createdAt></position>`;
   const jobs = parsePersonioXml(
-    `<workzag-jobs>${position(1, 'permanent', 'full-time')}${position(2, 'intern', 'full-time')}${position(3)}</workzag-jobs>`,
+    `<workzag-jobs>${position(1, 'permanent', 'full-time')}${position(2, 'intern', 'full-time')}${position(3)}`
+      + `${position(4, 'permanent', 'full-or-part-time')}${position(5, 'intern', 'full-or-part-time')}`
+      + `${position(6, 'trainee', 'full-time')}${position(7, 'working_student', 'part-time')}</workzag-jobs>`,
     'Fixture Labs',
     'fixturelabs.jobs.personio.de',
   );
-  expect('personio: <employmentType> and <schedule> normalized ("permanent" says nothing, the schedule does)',
-    types(jobs), ['full_time', 'internship', '<absent>']);
+  expect('personio: <employmentType> and <schedule> normalized ("permanent" says nothing, the schedule does; "full-or-part-time" and "trainee" give no type)',
+    types(jobs), ['full_time', 'internship', '<absent>', '<absent>', 'internship', '<absent>', 'part_time']);
 }
 
 // ── Welcome to the Jungle (Algolia hit) ─────────────────────────────
