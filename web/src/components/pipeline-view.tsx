@@ -24,7 +24,7 @@ import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
 import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
 import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
 import { clampTrackerWindow, initialTrackerWindow, TRACKER_OVERSCAN, TRACKER_ROW_PX, trackerWindow } from "@/lib/tracker-window.mjs";
-import { clearHeldSaves, excludeInFlightStatusRows, offscreenStatusFailures, reduceHeldSave } from "@/lib/status-save-hold.mjs";
+import { clearHeldSaves, excludeInFlightStatusRows, offscreenStatusFailures, offscreenStatusNotices, reduceHeldSave } from "@/lib/status-save-hold.mjs";
 import { moveCursor, typingFromTarget } from "@/lib/inbox-keys.mjs";
 import { rangeKeys, selectionAfterFailedSave, trackerCommand } from "@/lib/tracker-keys.mjs";
 import { appliedPromptStale, appliedSelectionToken, appliedWriteAllowed } from "@/lib/applied-confirm.mjs";
@@ -309,7 +309,7 @@ export function PipelineView({
   const onHeldSave = useCallback((
     key: string,
     n: string,
-    event: { type: "start"; status: string } | { type: "fail"; error: string } | { type: "clear" },
+    event: { type: "start"; status: string } | { type: "fail"; error: string } | { type: "notice"; text: string } | { type: "clear" },
   ) => {
     // A clear event has no application number. Adding one
     // makes the object fail the event union.
@@ -442,6 +442,7 @@ export function PipelineView({
   const [rowPx, setRowPx] = useState(TRACKER_ROW_PX);
   const mountedRows = filtered.slice(span.start, span.end);
   const offscreenFailures = offscreenStatusFailures(heldSaves, mountedRows.map((row) => applicationKey(row)));
+  const offscreenNotices = offscreenStatusNotices(heldSaves, mountedRows.map((row) => applicationKey(row)));
   // The checkbox, the sortable columns and the resume column.
   const columnCount = SORT_KEYS.length + 2;
   // Same test as the selection bar's selectedRows.length > 0.
@@ -932,6 +933,16 @@ export function PipelineView({
         </div>
       )}
 
+      {visibleTab !== "INBOX" && offscreenNotices.length > 0 && (
+        <div className="mt-3 space-y-1">
+          {offscreenNotices.map((notice) => (
+            <p key={notice.key} role="status" className="text-xs text-red-500">
+              Application #{notice.n}: {notice.text}
+            </p>
+          ))}
+        </div>
+      )}
+
       {visibleTab !== "INBOX" && (
         <p className="mt-2 text-xs text-faint">j and k move. 1 Evaluated, 2 Applied, 3 Responded, 4 Interview, 5 Offer, 6 Rejected, 7 Discarded, 8 SKIP. Shift-click selects the rows in between.</p>
       )}
@@ -1095,13 +1106,13 @@ const TrackerRow = memo(function TrackerRow({
   isCursor: boolean;
   hasCv: boolean;
   detailQuery: string;
-  heldSave?: { phase: "pending"; status: string } | { phase: "failed"; error: string };
+  heldSave?: { phase: "pending"; status: string } | { phase: "failed"; error: string } | { phase: "notice"; text: string };
   onToggle: (key: string, shift: boolean) => void;
   onSaved: (r: Application, status: string, restoreFocus: boolean) => void;
   onHeldSave: (
     key: string,
     n: string,
-    event: { type: "start"; status: string } | { type: "fail"; error: string } | { type: "clear" },
+    event: { type: "start"; status: string } | { type: "fail"; error: string } | { type: "notice"; text: string } | { type: "clear" },
   ) => void;
   onOpen: (event: MouseEvent<HTMLAnchorElement>, n: string) => void;
   onArm: (event: PointerEvent<HTMLAnchorElement>, n: string) => void;

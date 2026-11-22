@@ -444,12 +444,19 @@ cover_letter:
 
 # ── Re-apply Cooldown Windows ──────────────────────────────────────────────
 #
-# Define cooldown windows for companies where you've recently applied.
-# The scanner will skip new postings at these companies during the window.
+# Many employers make a rejected candidate wait (often 6-12 months) before
+# another interview loop. The scanner skips postings inside a window, and
+# precheck-duplicate.mjs warns before you apply.
+#
+# You rarely write these by hand: marking a row Rejected with a cooldown
+# records one (`node set-status.mjs --row N Rejected --cooldown-days 180`,
+# or the cooldown prompt in the web dashboard's status menu).
 #
 # re_apply_windows:
 #   CompanyA:
-#     same_role_days: 180
-#     cross_role_bucket: "all_EM_roles"
-#     applied_to: ["Senior Software Engineer"]
-#     last_apply_date: "2026-01-01"
+#     cooldown_from: "2026-01-01"   # day the window starts (the rejection date);
+#                                   # last_apply_date is still accepted
+#     same_role_days: 180           # eligible again on cooldown_from + this
+#     applied_to: ["Senior Software Engineer"]  # titles containing these are skipped
+#     cross_role_bucket: "all_EM_roles"         # optional: also skip this role family
+#     scope: "company"              # optional: skip EVERY role at the company

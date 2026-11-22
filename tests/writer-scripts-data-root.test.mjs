@@ -157,7 +157,7 @@ const CLOSURE = {
     // lib/status-hooks.mjs (#5536): the hooks around a status change, and
     // session-activity.mjs (#4532), the advisory in-progress claim it takes
     // before the write.
-    'lib/status-hooks.mjs', 'session-activity.mjs',
+    'lib/status-hooks.mjs', 'lib/reapply-windows.mjs', 'session-activity.mjs',
     // --undo replays status-log.tsv through funnel-velocity.mjs, which brings
     // its own imports.
     'funnel-velocity.mjs', 'stats.mjs', 'followup-cadence.mjs', 'funnel-stages.mjs',

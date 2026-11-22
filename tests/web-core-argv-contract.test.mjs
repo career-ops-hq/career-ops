@@ -84,6 +84,16 @@ const CALL_SITES = [
     probe: 'run',
   },
   {
+    // The same route's Rejected-with-cooldown shape: the cooldown flags go
+    // between --detach-jd-archive and --json. --dry-run (not passed by the
+    // route) keeps row 1 Applied for the probes below.
+    source: 'web/src/lib/core-cli.ts',
+    argvSource: 'web/src/app/api/status/route.ts',
+    script: 'set-status.mjs',
+    args: ['--row', '1', 'Rejected', '--source', 'web', '--detach-jd-archive', '--cooldown-days', '180', '--cooldown-scope', 'company', '--dry-run', '--json'],
+    probe: 'run',
+  },
+  {
     source: 'web/src/app/api/portals/verify/route.ts',
     script: 'verify-portals.mjs',
     args: [],

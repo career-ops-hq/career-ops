@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check, Pencil, X } from "lucide-react";
 import { CANONICAL_STATES, statusDot } from "@/lib/format";
 import { cn } from "@/lib/cn";
-import { saveStatus } from "@/lib/pipeline-status.mjs";
+import { cooldownMessage, saveStatus } from "@/lib/pipeline-status.mjs";
 import { appliedWriteAllowed, statusEditAction } from "@/lib/applied-confirm.mjs";
 
 // Status writeback control. Updates the existing tracker row (status cell) via
@@ -20,8 +20,10 @@ type StatusSelectProps = {
   // Set when this row unmounted during an earlier save. Pending keeps the
   // chosen status on screen. Failed is the error the unmounted editor could
   // not show.
-  heldSave?: { phase: "pending"; status: string } | { phase: "failed"; error: string };
-  onHeldSave?: (event: { type: "start"; status: string } | { type: "fail"; error: string } | { type: "clear" }) => void;
+  // Notice is a save that landed with something to report (a cooldown that
+  // was not recorded) while this row was unmounted.
+  heldSave?: { phase: "pending"; status: string } | { phase: "failed"; error: string } | { phase: "notice"; text: string };
+  onHeldSave?: (event: { type: "start"; status: string } | { type: "fail"; error: string } | { type: "notice"; text: string } | { type: "clear" }) => void;
 };
 
 export function StatusSelect(props: StatusSelectProps) {
@@ -35,6 +37,12 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState("");
   const [pendingApplied, setPendingApplied] = useState(false);
+  // Choosing Rejected asks for the company's re-apply cooldown before saving.
+  // Optional: "No cooldown" saves the status alone.
+  const [pendingRejected, setPendingRejected] = useState(false);
+  const [cooldownDays, setCooldownDays] = useState("");
+  const [cooldownWide, setCooldownWide] = useState(false);
+  const [cooldownNote, setCooldownNote] = useState<{ ok: boolean; text: string } | null>(null);
   const pendingFrom = useRef("");
   const saving = useRef(false);
   const mounted = useRef(false);
@@ -49,6 +57,7 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
     if (!saving.current) {
       setStatus(current);
       setPendingApplied(false);
+      setPendingRejected(false);
     }
   }, [current]);
 
@@ -66,12 +75,14 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
 
   const heldPending = heldSave?.phase === "pending" ? heldSave.status : "";
   const heldError = heldSave?.phase === "failed" ? heldSave.error : "";
+  const heldNotice = heldSave?.phase === "notice" ? heldSave.text : "";
   const savingNow = busy || heldPending !== "";
   const errorShown = error || heldError;
 
   function cancel() {
     if (saving.current || heldPending) return;
     setPendingApplied(false);
+    setPendingRejected(false);
     setStatus(current);
     setEditing(false);
     setError("");
@@ -85,17 +96,30 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
     setError("");
   }
 
-  async function commitChange(next: string, prev: string, hadFocus: boolean) {
+  function declineRejected() {
+    if (saving.current || heldPending) return;
+    setPendingRejected(false);
+    setStatus(pendingFrom.current || current);
+    setError("");
+  }
+
+  async function commitChange(next: string, prev: string, hadFocus: boolean, cooldown?: { days: number; scope: "role" | "company" }) {
     saving.current = true;
     setStatus(next);
     setBusy(true);
     setSaved(false);
     setError("");
+    setCooldownNote(null);
     // Record the attempt before the request, so a scroll that unmounts this
     // editor still has the chosen status and can show a later failure.
     onHeldSave?.({ type: "start", status: next });
     try {
-      const confirmed = await saveStatus(n, prev, next);
+      // The cooldown outcome is kept here and reported after the save settles:
+      // the row may have unmounted by then, and the clear below must not wipe it.
+      let cooldownOutcome: ReturnType<typeof cooldownMessage> = null;
+      const confirmed = await saveStatus(n, prev, next, fetch, cooldown
+        ? { ...cooldown, onCooldown: (outcome) => { cooldownOutcome = cooldownMessage(outcome); } }
+        : null);
       if (!confirmed) {
         onHeldSave?.({ type: "clear" });
         return;
@@ -109,7 +133,14 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
       if (onSaved) onSaved(confirmed, restoreFocus);
       else router.refresh();
       onHeldSave?.({ type: "clear" });
-      if (!mounted.current) return;
+      const note = cooldownOutcome as ReturnType<typeof cooldownMessage>;
+      if (!mounted.current) {
+        // A failed cooldown on a row that scrolled away goes to the page,
+        // which shows it above the table until the row is mounted again.
+        if (note && !note.ok) onHeldSave?.({ type: "notice", text: note.text });
+        return;
+      }
+      setCooldownNote(note);
       setStatus(confirmed);
       setEditing(false);
       setSaved(true);
@@ -132,12 +163,24 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
 
   async function onChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const next = e.target.value;
-    const prev = pendingApplied ? pendingFrom.current : (inline ? current : status);
+    const prev = pendingApplied || pendingRejected ? pendingFrom.current : (inline ? current : status);
     if (saving.current || heldPending) return;
     const action = statusEditAction(next, prev);
     if (action === "keep") {
       setPendingApplied(false);
+      setPendingRejected(false);
       setStatus(current);
+      return;
+    }
+    setPendingRejected(false);
+    if (next === "Rejected") {
+      pendingFrom.current = prev;
+      setStatus(next);
+      setPendingApplied(false);
+      setPendingRejected(true);
+      setCooldownDays("");
+      setCooldownWide(false);
+      setError("");
       return;
     }
     if (action === "ask") {
@@ -161,7 +204,22 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
     await commitChange("Applied", prev, hadFocus);
   }
 
-  const shown = heldPending ? heldPending : pendingApplied ? status : inline && !busy ? current : status;
+  async function confirmRejected(withCooldown: boolean) {
+    if (!pendingRejected || saving.current || heldPending) return;
+    const days = Number(cooldownDays);
+    if (withCooldown && !(cooldownDays.trim() && Number.isInteger(days) && days > 0 && days <= 3650)) {
+      setError("Enter the cooldown in whole days (1 to 3650), or choose No cooldown.");
+      return;
+    }
+    const prev = pendingFrom.current;
+    const active = document.activeElement;
+    const hadFocus = active === select.current
+      || (active instanceof HTMLElement && Boolean(active.closest("[data-status-editor]")));
+    setPendingRejected(false);
+    await commitChange("Rejected", prev, hadFocus, withCooldown ? { days, scope: cooldownWide ? "company" : "role" } : undefined);
+  }
+
+  const shown = heldPending ? heldPending : pendingApplied || pendingRejected ? status : inline && !busy ? current : status;
   const appliedAsk = appliedWriteAllowed({ status: "Applied", confirmed: false });
   const known = (CANONICAL_STATES as readonly string[]).includes(shown);
   const buttonClass = "inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-hover hover:text-brand-text focus-visible:outline-2 focus-visible:outline-brand disabled:opacity-50 max-sm:size-11";
@@ -235,6 +293,51 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
           <button type="button" onClick={declineApplied} disabled={savingNow} className="text-xs text-muted hover:text-foreground disabled:opacity-60">
             Not yet
           </button>
+        </span>
+      )}
+      {pendingRejected && (
+        <span
+          data-status-cooldown=""
+          className={cn("flex-wrap items-center gap-2", inline ? "flex basis-full whitespace-normal" : "inline-flex")}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") { event.preventDefault(); declineRejected(); }
+          }}
+        >
+          <label htmlFor={`${id}-cooldown`} className="text-xs text-foreground">Re-apply cooldown?</label>
+          <input
+            id={`${id}-cooldown`}
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={3650}
+            step={1}
+            placeholder="days"
+            value={cooldownDays}
+            onChange={(event) => setCooldownDays(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") { event.preventDefault(); void confirmRejected(true); }
+            }}
+            disabled={savingNow}
+            className="w-20 rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-brand/40 max-sm:min-h-[44px]"
+          />
+          <label className="inline-flex items-center gap-1 text-xs text-muted">
+            <input type="checkbox" checked={cooldownWide} onChange={(event) => setCooldownWide(event.target.checked)} disabled={savingNow} />
+            all roles
+          </label>
+          <button type="button" onClick={() => void confirmRejected(true)} disabled={savingNow} className="text-xs font-medium text-brand-text disabled:opacity-60">
+            Save cooldown
+          </button>
+          <button type="button" onClick={() => void confirmRejected(false)} disabled={savingNow} className="text-xs text-muted hover:text-foreground disabled:opacity-60">
+            No cooldown
+          </button>
+          <button type="button" onClick={declineRejected} disabled={savingNow} className="text-xs text-muted hover:text-foreground disabled:opacity-60">
+            Cancel
+          </button>
+        </span>
+      )}
+      {(cooldownNote || heldNotice) && (
+        <span role="status" className={cn("basis-full whitespace-normal text-xs", cooldownNote?.ok ? "text-faint" : "text-red-700 dark:text-red-400")}>
+          {cooldownNote ? cooldownNote.text : heldNotice}
         </span>
       )}
       {!inline && savingNow && <span role="status" className="text-xs text-faint">saving…</span>}

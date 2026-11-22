@@ -29,6 +29,11 @@
  *                  same company, with a roleFuzzyMatch() title.
  * A Rejected row is surfaced with a warning flag, never as a block.
  *
+ * It also reports an active re-apply cooldown (config/profile.yml
+ * re_apply_windows, the windows scan.mjs skips postings inside) for the
+ * company: `coversThisRole` says whether the window's role/bucket/scope rules
+ * match --title, the same verdict scan.mjs would reach. Advisory as well.
+ *
  * The tracker comes from resolveTrackerPath(getCareerOpsRoot()), so
  * CAREER_OPS_TRACKER / CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / .career-ops-data
  * are honoured exactly as in set-status.mjs.
@@ -45,7 +50,9 @@ import {
 import { canonicalJobKey, normalizeUrl } from './url-key.mjs';
 import { titleIdentityKey } from './detect-reposts.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
+import { windowUntil } from './lib/reapply-windows.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
@@ -228,6 +235,45 @@ export function loadTrackerRows(trackerPath) {
   return lines.map(l => parseTrackerRow(l, colmap)).filter(Boolean);
 }
 
+/**
+ * The active re-apply cooldown for a company, or null. Reuses scan.mjs's
+ * loader, company matcher and filter, so this warning and the scanner never
+ * disagree about whether a window applies.
+ * @param {{ company?: string, title?: string }} input
+ * @param {{ profilePath?: string, today?: string }} [options]
+ */
+export async function findActiveCooldown({ company = '', title = '' }, { profilePath = getProfilePath(), today = localToday() } = {}) {
+  if (!company.trim()) return null;
+  const { loadReApplyWindows, buildCooldownFilter, companyMatch } = await import('./scan.mjs');
+  const windows = loadReApplyWindows(profilePath);
+  // Coverage is judged per window, so the verdict and the dates and roles
+  // reported beside it always describe the same window. Two keys can match one
+  // company ("Acme" and "Acme Inc"); a window that covers this title wins over
+  // one that only covers other roles, and among equals the longer one.
+  let best = null;
+  for (const [key, win] of Object.entries(windows)) {
+    const until = windowUntil(win);
+    if (!until || today >= until || !companyMatch(company, key)) continue;
+    const found = {
+      company: key,
+      until,
+      scope: win.scope === 'company' ? 'company' : 'role',
+      appliedTo: Array.isArray(win.applied_to) ? win.applied_to : [],
+      coversThisRole: buildCooldownFilter({ [key]: win }, today)({ company, title }).skip === true,
+    };
+    if (!best || (found.coversThisRole && !best.coversThisRole)
+      || (found.coversThisRole === best.coversThisRole && found.until > best.until)) best = found;
+  }
+  return best;
+}
+
+function formatCooldown(c) {
+  const roles = c.appliedTo.length ? ` (rejected for: ${c.appliedTo.join(', ')})` : '';
+  return c.coversThisRole
+    ? `WARN cooldown: inside the ${c.company} re-apply cooldown until ${c.until}${c.scope === 'company' ? ', all roles' : ''}${roles}`
+    : `NOTE cooldown: ${c.company} has a re-apply cooldown until ${c.until} for other roles${roles}; this title is outside it`;
+}
+
 function formatLine(c) {
   return `${c.warning ? 'WARN ' : ''}#${c.num} | ${c.company} | ${c.role} | ${c.status} | ${c.date} | ${c.detail}`;
 }
@@ -259,9 +305,13 @@ if (isMainModule(import.meta.url)) {
   const trackerPath = resolveTrackerPath(getCareerOpsRoot());
   const rows = loadTrackerRows(trackerPath);
   const candidates = rows ? findDuplicateCandidates(rows, input) : [];
+  const cooldown = await findActiveCooldown(input);
   if (json) {
-    console.log(JSON.stringify({ tracker: rows ? trackerPath : null, checked: input, candidates }, null, 2));
-  } else if (!rows) {
+    console.log(JSON.stringify({ tracker: rows ? trackerPath : null, checked: input, candidates, cooldown }, null, 2));
+    process.exit(0);
+  }
+  if (cooldown) console.log(formatCooldown(cooldown));
+  if (!rows) {
     console.log('No tracker found — nothing to compare against.');
   } else if (candidates.length === 0) {
     console.log('No possible duplicate in the tracker.');
