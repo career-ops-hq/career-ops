@@ -731,6 +731,37 @@ export const SECTION_ALIAS_ENTRIES = [
   ['yetenekler', 'skills'],
   ['ilgi alanları', 'interests'],
   ['hobiler', 'interests'],
+  // Vietnamese (modes/vi) — the same failure as the blocks around it: no
+  // Vietnamese title resolved here, so cv.sections matched no section of a
+  // Vietnamese CV and the order guard compared raw titles. "Kỹ năng" and "Lịch sử
+  // nghề nghiệp" are the skills and career-history terms in modes/vi/README.md;
+  // the rest are each section's everyday headings. foldDiacritics drops the tone
+  // and vowel marks on both sides of the lookup; "đ" has no decomposition and
+  // stays as written.
+  ['tóm tắt', 'summary'],
+  ['tóm tắt bản thân', 'summary'],
+  ['giới thiệu bản thân', 'summary'],
+  ['mục tiêu nghề nghiệp', 'summary'],
+  ['năng lực cốt lõi', 'competencies'],
+  ['năng lực chính', 'competencies'],
+  ['kinh nghiệm làm việc', 'experience'],
+  ['kinh nghiệm', 'experience'],
+  ['lịch sử nghề nghiệp', 'experience'],
+  ['quá trình làm việc', 'experience'],
+  ['dự án', 'projects'],
+  ['dự án tiêu biểu', 'projects'],
+  ['dự án nổi bật', 'projects'],
+  ['học vấn', 'education'],
+  ['trình độ học vấn', 'education'],
+  ['quá trình học tập', 'education'],
+  ['chứng chỉ', 'certifications'],
+  ['chứng nhận', 'certifications'],
+  ['giải thưởng', 'awards'],
+  ['danh hiệu', 'awards'],
+  ['kỹ năng', 'skills'],
+  ['kỹ năng chuyên môn', 'skills'],
+  ['kỹ năng kỹ thuật', 'skills'],
+  ['sở thích', 'interests'],
   // Italian (modes/it) — the same failure as the blocks around it: no Italian
   // title resolved here, so cv.sections matched no section of an Italian CV and
   // the order guard compared raw titles. A bare "Competenze" is the key-skills
