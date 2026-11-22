@@ -168,9 +168,11 @@ const METRIC_NOUNS = [
   // while an English source saying "1 location" produced no claim at all, so a
   // truthful translation was reported as invented. The lazy match still binds
   // the NEAREST noun, so "10 years as engineer" stays "10 years" and never
-  // becomes ten engineers. "offices" is here for "3 Büros" against "3 offices":
-  // both fold to facilities. Each singular folds to its plural canonical in
-  // NOUN_SYNONYMS below.
+  // becomes ten engineers. The four singulars are guarded below when they act
+  // as modifiers ("30 candidate interviews" counts interviews), while a direct
+  // "1 Standort" still binds. "offices" is here for "3 Büros" against "3
+  // offices": both fold to facilities. Each singular folds to its plural
+  // canonical in NOUN_SYNONYMS below.
   'consultant', 'candidate', 'engineer', 'location', 'offices',
   // German (language.output: de / modes/de). Without these a German CV or cover
   // letter produced no count claim at all and only got the coverage warning,
@@ -270,6 +272,21 @@ const SPELLED_MAGNITUDES = new Map([
 ]);
 const SPELLED_MAGNITUDE_ALT = [...SPELLED_MAGNITUDES.keys()].join('|');
 
+// These four singulars were added for counts of one, but they also appear as
+// attributive modifiers: "30 candidate interviews" counts the interviews, not
+// thirty candidates. Let a singular bind only when no other listed count noun
+// follows it inside the same number's modifier window. A second number is a
+// hard barrier for that window, so "1 Standort mit 1 Ingenieur" still reads as
+// two counts. Every other noun keeps the lazy nearest-noun rule unchanged.
+const ATTRIBUTIVE_SINGULAR_NOUNS = new Set(['consultant', 'candidate', 'engineer', 'location']);
+const BASE_COUNT_NOUNS = METRIC_NOUNS.filter((noun) => !ATTRIBUTIVE_SINGULAR_NOUNS.has(noun));
+const COUNT_NOUN_ALT = [
+  ...[...ATTRIBUTIVE_SINGULAR_NOUNS].map((noun) =>
+    String.raw`${noun}(?!\s+(?:\p{L}[\p{L}\p{M}-]*\s+){0,${MODIFIER_WINDOW - 1}}(?:${BASE_COUNT_NOUNS.join('|')})(?![\p{L}\p{N}]))`
+  ),
+  ...BASE_COUNT_NOUNS,
+].join('|');
+
 const COUNT_CLAIM_RE = new RegExp(
   // LAZY (`{0,N}?`), so the number binds to the NEAREST noun in the window
   // rather than the farthest. Greedy, the quantifier consumed as many filler
@@ -305,7 +322,10 @@ const COUNT_CLAIM_RE = new RegExp(
   // window. `(?:[\p{L}\p{N}]+-)*` lets the counted noun close a hyphenated
   // compound ("318 TryHackMe-Rooms"): German writes the modifier and the noun
   // as one hyphenated token, which a whitespace-only window never saw.
-  String.raw`(?<![A-Za-z]-)\b(?!1C\b)(\d[\d,.]*(?:[kKmMbB]\b|\s+(?:${SPELLED_MAGNITUDE_ALT})\b)?)\s*\+?\s*(?:\p{L}[\p{L}\p{M}-]*\s+){0,${MODIFIER_WINDOW}}?(?:[\p{L}\p{N}]+-)*(${METRIC_NOUNS.join('|')})(?![\p{L}\p{N}])`,
+  // COUNT_NOUN_ALT guards the English singulars added for counts of one so an
+  // attributive use ("30 candidate interviews") leaves the number to the head
+  // noun instead of inventing a candidate count.
+  String.raw`(?<![A-Za-z]-)\b(?!1C\b)(\d[\d,.]*(?:[kKmMbB]\b|\s+(?:${SPELLED_MAGNITUDE_ALT})\b)?)\s*\+?\s*(?:\p{L}[\p{L}\p{M}-]*\s+){0,${MODIFIER_WINDOW}}?(?:[\p{L}\p{N}]+-)*(${COUNT_NOUN_ALT})(?![\p{L}\p{N}])`,
   'giu'
 );
 const NOUN_SYNONYMS = new Map([

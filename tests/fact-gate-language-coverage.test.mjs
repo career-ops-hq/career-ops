@@ -244,6 +244,11 @@ test('a singular count of one matches its English source (#5406 review)', () => 
     const opts = { ...BARE, sourcePaths: [source] };
     const ok = verifyFacts('1 Standort mit 1 Ingenieur und 1 Berater.', opts);
     assert.deepEqual([...ok.invented], [], `invented: ${JSON.stringify([...ok.invented])}`);
+
+    // A singular modifier must not take the number from the noun it describes.
+    writeFileSync(source, 'Ran 30 interviews and 10 hires.');
+    const modifiers = verifyFacts('Ran 30 candidate interviews and 10 engineer hires.', opts);
+    assert.deepEqual([...modifiers.invented], [], `invented: ${JSON.stringify([...modifiers.invented])}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -251,6 +256,11 @@ test('a singular count of one matches its English source (#5406 review)', () => 
   // A time noun between the number and the noun still binds first: prose that
   // says "10 years as engineer" is not a claim of ten engineers.
   assert.deepEqual([...metricClaims('10 years as engineer.')], ['10 years']);
+
+  // Santifer's follow-up: the singulars added for counts of one must not take
+  // the number when they only modify the counted noun.
+  assert.deepEqual([...metricClaims('Conducted 12 candidate interviews.')], ['12 interviews']);
+  assert.deepEqual([...metricClaims('Ran 30 engineer hires.')], ['30 hires']);
 });
 
 test('Bürogebäude compares against office buildings (#5406 review)', () => {
