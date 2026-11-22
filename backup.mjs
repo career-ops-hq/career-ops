@@ -37,7 +37,7 @@
 
 import {
   accessSync, closeSync, constants as fsConstants, copyFileSync, existsSync, lstatSync, mkdirSync, openSync,
-  readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync,
+  readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync,
 } from 'fs';
 import { homedir, platform as osPlatform } from 'os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path';
@@ -54,6 +54,7 @@ import {
   isGeneratedTemplateArtifact,
   isUserConfiguredTemplateVariant,
 } from './update-system.mjs';
+import { renameSyncWithRetry } from './tracker-utils.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 
@@ -549,7 +550,7 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
       mkdirSync(dirname(target), { recursive: true });
       copyFileSync(source, part);
       utimesSync(part, new Date(), new Date(file.mtimeMs));
-      renameSync(part, target);
+      renameSyncWithRetry(part, target);
       result.copied++;
       result.bytes += file.size;
     } catch (error) {
