@@ -14,6 +14,7 @@
 import { fetchJsonWithRetry, fetchTextWithRetry } from './_http.mjs';
 import { coerceId } from './_ids.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { departmentTeamFields } from './_department-team.mjs';
 import { employmentTypeField } from './_employment-type.mjs';
 import { workplaceField } from './_workplace-type.mjs';
 import { isWorkModelOnly } from './greenhouse.mjs';
@@ -654,6 +655,7 @@ export default {
         // "FullTime" | "PartTime" | "Intern" | "Contract" | "Temporary".
         // Left off when absent or unrecognized (_employment-type.mjs).
         ...employmentTypeField(j.employmentType),
+        ...departmentTeamFields(j.department, j.team),
       };
     });
   },
