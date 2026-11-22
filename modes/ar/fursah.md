@@ -262,7 +262,7 @@
 (قائمة تحتوي على 15-20 كلمة مفتاحية مستخرجة من الـ JD ومهمة لتحسين الـ ATS)
 
 ## Keyword Coverage
-(يُنشئه `keyword-match.mjs` (1b) — نسبة التغطية، present، thin، missing)
+(يُنشئه `keyword-match.mjs` (1b) — نسبة التغطية، present، missing)
 
 ## Job Description (archived verbatim)
 (النص الكامل لإعلان الوظيفة، يُلصق حرفياً — انظر المتطلب أدناه)
