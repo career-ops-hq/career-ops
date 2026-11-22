@@ -100,10 +100,10 @@ batch/batch-runner.sh [OPTIONS]
 ```
 
 Options:
-- `--cli NAME` — worker CLI: `claude` (default), `opencode`, `gemini`, `qwen` or `grok`; every CLI except `claude` runs one job at a time, with a single attempt per run (a later run still retries a failed job, up to `--max-retries`)
+- `--cli NAME` — worker CLI: `claude` (default), `opencode`, `gemini`, `qwen` or `grok`. Only `claude` runs jobs in parallel. Claude and `grok` retry a rate limit. The others run one job at a time, one attempt each (a later run still retries a failed job, up to `--max-retries`)
 - `--dry-run` — list pending jobs without executing
 - `--retry-failed` — retry only failed jobs
-- `--resume-paused` — resume jobs paused after a Claude session/rate limit
+- `--resume-paused` — resume jobs paused after a session or rate limit
 - `--start-from N` — start from ID N
 - `--limit N` — max number of jobs to process in this run (positive integer; `0` is rejected, omit the flag for no limit)
 - `--parallel N` — N workers in parallel (`claude` only; other CLIs always use one worker)

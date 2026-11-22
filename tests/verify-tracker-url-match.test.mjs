@@ -171,3 +171,67 @@ test('CLI: the report is found through the row link, not by scanning reports/ by
   assert.equal(json.mismatches.length, 1);
   assert.equal(json.mismatches[0].reportFile, 'acme-handnamed.md');
 });
+
+test('same employer posting in different canonical spellings matches instead of skipping as "same"', () => {
+  const pairs = [
+    ['https://boards.greenhouse.io/acme/jobs/123456', 'https://job-boards.greenhouse.io/acme/jobs/123456'],
+    ['https://acme.example.com/careers?gh_jid=123456', 'https://boards.greenhouse.io/acme/jobs/123456'],
+    ['https://jobs.lever.co/acme/11111111-2222-3333-4444-555555555555/apply', 'https://jobs.lever.co/acme/11111111-2222-3333-4444-555555555555'],
+    ['https://jobs.ashbyhq.com/acme/11111111-2222-3333-4444-555555555555/application', 'https://jobs.ashbyhq.com/acme/11111111-2222-3333-4444-555555555555'],
+    ['https://apply.workable.com/j/ABC12345', 'https://apply.workable.com/acme/j/ABC12345'],
+    ['https://acme.wd3.myworkdayjobs.com/en-US/External/job/Berlin/Dev_R1', 'https://acme.wd3.myworkdayjobs.com/External/job/Berlin/Dev_R1'],
+    ['https://jobs.smartrecruiters.com/Acme/7440001-analyst-m-f-d-', 'https://jobs.smartrecruiters.com/Acme/7440001-analyst-m-f-d'],
+    ['https://ats.example.com/jobs/111?lang=en-US', 'https://ats.example.com/jobs/111?language=en-GB'],
+  ];
+  for (const [a, b] of pairs) {
+    assert.deepEqual(classifyPair(a, b), { verdict: 'match', reason: 'same-posting' }, `${a} vs ${b}`);
+  }
+  assert.equal(
+    classifyPair('https://boards.greenhouse.io/acme/jobs/123456?lang=en', 'https://job-boards.greenhouse.io/acme/jobs/123456?lang=de').verdict,
+    'mismatch',
+  );
+});
+
+test('CLI: single-report same-posting spelling variant counts as matched, not skipped', (t) => {
+  const root = workspace(
+    6,
+    'https://job-boards.greenhouse.io/acme/jobs/123456',
+    'https://boards.greenhouse.io/acme/jobs/123456',
+  );
+  t.after(() => { try { rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ } });
+  const { code, out } = runCheck(root);
+  assert.equal(code, 0, `expected exit 0, got ${code}: ${out}`);
+  const json = JSON.parse(out);
+  assert.equal(json.matched, 1);
+  assert.equal(json.mismatches.length, 0);
+  assert.equal(json.skipped.same, undefined);
+});
+
+test('CLI: multi-report row matching one report by same-posting spelling exits 0 and counts as matched', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'cops-urlmatch-'));
+  t.after(() => { try { rmSync(root, { recursive: true, force: true }); } catch { /* best effort */ } });
+  mkdirSync(join(root, 'data'), { recursive: true });
+  mkdirSync(join(root, REPORTS_DIR_NAME), { recursive: true });
+  writeFileSync(
+    join(root, 'data', 'applications.md'),
+    TRACKER.replace(
+      /\n$/,
+      '\n| 7 | 2026-10-27 | Acme | Engineer | 4.2/5 | Evaluated | ❌ | [7](../reports/007-acme-2026-10-20.md) / [8](../reports/008-acme-2026-10-27.md) | re-eval | https://job-boards.greenhouse.io/acme/jobs/123456 |\n',
+    ),
+  );
+  writeFileSync(
+    join(root, REPORTS_DIR_NAME, '007-acme-2026-10-20.md'),
+    '# Acme — Engineer\n\n**Score:** 4.0/5 | **URL:** https://boards.greenhouse.io/acme/jobs/123456 | **PDF:** ❌\n',
+  );
+  writeFileSync(
+    join(root, REPORTS_DIR_NAME, '008-acme-2026-10-27.md'),
+    '# Acme — Engineer\n\n**Score:** 4.2/5 | **URL:** https://ats.example.com/jobs/999 | **PDF:** ❌\n',
+  );
+  const { code, out } = runCheck(root);
+  assert.equal(code, 0, `expected exit 0 when row agrees with report 7, got ${code}: ${out}`);
+  const json = JSON.parse(out);
+  assert.equal(json.ok, true);
+  assert.equal(json.matched, 1);
+  assert.equal(json.mismatches.length, 0);
+  assert.equal(json.skipped['row-agrees-with-another-report'], 1);
+});

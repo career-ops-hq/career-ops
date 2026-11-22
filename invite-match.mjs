@@ -47,6 +47,7 @@ import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { LEGAL_SUFFIXES, GENERIC_DESCRIPTORS } from './tracker-utils.mjs';
 import { inviteEvidence } from './lib/invite-evidence.mjs';
+import { parseDate } from './lib/parse-date.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 // Sibling scripts live next to this file in the *code* checkout, which is a
@@ -314,21 +315,25 @@ export function extractCompany(text) {
  * not necessarily the email send date). Only matches unambiguous ISO or
  * "Month D, YYYY" forms — anything else is left for the human to read.
  *
+ * A date that does not exist on the calendar ("February 31, 2026",
+ * "2026-13-45") is skipped rather than reported: it is a typo or not a date,
+ * and returning it would show the user a day that cannot be the interview.
+ *
  * @param {string} text
  * @returns {string|null} YYYY-MM-DD or null.
  */
 export function extractDate(text) {
   if (!text) return null;
-  const iso = text.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
-  if (iso) return iso[0];
+  for (const iso of text.matchAll(/\b(\d{4})-(\d{2})-(\d{2})\b/g)) {
+    if (parseDate(iso[0])) return iso[0];
+  }
 
-  const months = 'January|February|March|April|May|June|July|August|September|October|November|December';
-  const named = text.match(new RegExp(`\\b(${months})\\s+(\\d{1,2}),?\\s+(\\d{4})\\b`, 'i'));
-  if (named) {
-    const monthIdx = new Date(`${named[1]} 1, 2000`).getMonth() + 1;
+  const months = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+  for (const named of text.matchAll(new RegExp(`\\b(${months.join('|')})\\s+(\\d{1,2}),?\\s+(\\d{4})\\b`, 'gi'))) {
+    const month = String(months.indexOf(named[1].toLowerCase()) + 1).padStart(2, '0');
     const day = String(named[2]).padStart(2, '0');
-    const month = String(monthIdx).padStart(2, '0');
-    return `${named[3]}-${month}-${day}`;
+    const date = `${named[3]}-${month}-${day}`;
+    if (parseDate(date)) return date;
   }
   return null;
 }

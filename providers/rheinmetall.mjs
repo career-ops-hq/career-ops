@@ -32,7 +32,7 @@ const PAGE_DELAY_MS = 150; // polite pacing — full walks are >100 sequential r
 
 /** @param {string} s */
 function clean(s) {
-  return decodeEntities(s.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(s.replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 }
 
 /** Resolve the list URL (entry.api / careers_url) or the /en default. */

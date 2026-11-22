@@ -7,9 +7,11 @@
 // the parallel loop says `killed after 120s` for the same thing. A contributor
 // re-running one red suite alone was told it crashed, when it ran out of time.
 //
-// The sandbox's copy of helpers.mjs gets a 2 s budget instead of 30 s, so the
-// case takes seconds; both spellings of the budget in that file are patched,
-// and the case fails if either is missing.
+// The sandbox's copy of helpers.mjs gets a 500 ms budget instead of 30 s, so
+// the case takes seconds; both spellings of the budget in that file are
+// patched, and the case fails if either is missing. The in-process loop runs
+// node:test suites at FACTOR × the script default (4 ×), so patching the
+// default to 500 ms puts the kill line at 2 s exactly.
 import { pass, fail } from './helpers.mjs';
 import { createRunnerSandbox } from './test-all-sandbox.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -25,9 +27,9 @@ try {
   const helpersFile = join(sandbox, 'tests', 'helpers.mjs');
   const src = readFileSync(helpersFile, 'utf-8');
   const patched = src
-    .replace('export const DEFAULT_SCRIPT_TIMEOUT_MS = 30_000;', 'export const DEFAULT_SCRIPT_TIMEOUT_MS = 2_000;')
-    .replace("encoding: 'utf-8', timeout: 30000,", "encoding: 'utf-8', timeout: 2000,");
-  const both = (patched.match(/2_000;|timeout: 2000,/g) ?? []).length === 2;
+    .replace('export const DEFAULT_SCRIPT_TIMEOUT_MS = 30_000;', 'export const DEFAULT_SCRIPT_TIMEOUT_MS = 500;')
+    .replace("encoding: 'utf-8', timeout: 30000,", "encoding: 'utf-8', timeout: 500,");
+  const both = (patched.match(/500;|timeout: 500,/g) ?? []).length === 2;
   check('the sandbox budget is shortened in both places helpers.mjs spells it', both);
   writeFileSync(helpersFile, patched);
 

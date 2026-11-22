@@ -20,10 +20,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { verifyFacts, diagnoseCoverage } from '../verify-cv-facts.mjs';
+import { verifyFacts, diagnoseCoverage, metricClaims } from '../verify-cv-facts.mjs';
 
 // No sources and no config: this asks what the gate SEES, not what it allows.
 const BARE = { sourcePaths: [], configPath: 'config/__no_such_config__.json' };
@@ -193,6 +193,103 @@ test('a French document checks against an English cv.md', () => {
   const inflated = verifyFacts('Encadré 60 collaborateurs sur 3 sites.', opts);
   assert.equal(inflated.verdict, 'block');
   assert.deepEqual([...inflated.invented], ['60 employees']);
+});
+
+test('the remaining German and French count nouns read now (#5125)', () => {
+  // Main already carried the core forms. These are the ones it did not. The
+  // gap review asked about is "45 Berater" beside a listed noun: before this,
+  // only the schools count was read and the consultant count stayed invisible.
+  const r = verifyFacts('Betreute 45 Berater an 10 Schulen.', BARE);
+  assert.equal(r.verdict, 'block');
+  assert.deepEqual([...r.invented].sort(), ['10 schools', '45 consultants']);
+  assert.equal(r.coverage, null);
+
+  assert.deepEqual([...verifyFacts('Betreute 45 Bewerber.', BARE).invented], ['45 candidates']);
+  assert.deepEqual([...verifyFacts('12 Kandidaten.', BARE).invented], ['12 candidates']);
+  assert.deepEqual([...verifyFacts('Encadré 45 candidats.', BARE).invented], ['45 candidates']);
+  assert.deepEqual([...verifyFacts('Verwaltete 12 Büros.', BARE).invented], ['12 facilities']);
+  assert.deepEqual([...verifyFacts('Encadré 8 bureaux.', BARE).invented], ['8 facilities']);
+});
+
+test('the new nouns compare against an English source through the shared canonical', () => {
+  // The point of folding both languages onto the English canonical: cv.md does
+  // not have to share the generated document's language. Same facts pass.
+  const dir = mkdtempSync(join(tmpdir(), 'fact-de-fr-rest-'));
+  try {
+    const source = join(dir, 'cv.md');
+    writeFileSync(source, 'Trained 45 candidates across 10 schools and advised 30 consultants.');
+    const opts = { ...BARE, sourcePaths: [source] };
+
+    const de = verifyFacts('Betreute 45 Bewerber an 10 Schulen und beriet 30 Berater.', opts);
+    assert.deepEqual([...de.invented], [], `invented: ${JSON.stringify([...de.invented])}`);
+
+    const fr = verifyFacts('Encadré 45 candidats dans 10 écoles et conseillé 30 consultants.', opts);
+    assert.deepEqual([...fr.invented], [], `invented: ${JSON.stringify([...fr.invented])}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a singular count of one matches its English source (#5406 review)', () => {
+  // A count of one is not a plural. Before this, a German "1 Standort" read as
+  // "1 locations" while the English source's "1 location" produced no claim at
+  // all, so the gate blocked a truthful translation.
+  assert.deepEqual([...verifyFacts('1 Standort.', BARE).invented], ['1 locations']);
+  assert.deepEqual([...verifyFacts('1 Ingenieur.', BARE).invented], ['1 engineers']);
+
+  const dir = mkdtempSync(join(tmpdir(), 'fact-singular-'));
+  try {
+    const source = join(dir, 'cv.md');
+    writeFileSync(source, 'Ran 1 location with 1 engineer and 1 consultant.');
+    const opts = { ...BARE, sourcePaths: [source] };
+    const ok = verifyFacts('1 Standort mit 1 Ingenieur und 1 Berater.', opts);
+    assert.deepEqual([...ok.invented], [], `invented: ${JSON.stringify([...ok.invented])}`);
+
+    // A singular modifier must not take the number from the noun it describes.
+    writeFileSync(source, 'Ran 30 interviews and 10 hires.');
+    const modifiers = verifyFacts('Ran 30 candidate interviews and 10 engineer hires.', opts);
+    assert.deepEqual([...modifiers.invented], [], `invented: ${JSON.stringify([...modifiers.invented])}`);
+
+    // The guard stops at a preposition or verb, so a direct singular count
+    // still binds even when a later count noun appears in the same clause.
+    writeFileSync(source, 'Interviewed 1 candidate. Hired 1 engineer.');
+    const heads = verifyFacts('Interviewed 1 consultant candidate. Hired 1 engineer to support teams.', opts);
+    assert.deepEqual([...heads.invented], [], `invented: ${JSON.stringify([...heads.invented])}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  // A time noun between the number and the noun still binds first: prose that
+  // says "10 years as engineer" is not a claim of ten engineers.
+  assert.deepEqual([...metricClaims('10 years as engineer.')], ['10 years']);
+
+  // Santifer's follow-up: the singulars added for counts of one must not take
+  // the number when they only modify the counted noun.
+  assert.deepEqual([...metricClaims('Conducted 12 candidate interviews.')], ['12 interviews']);
+  assert.deepEqual([...metricClaims('Ran 30 engineer hires.')], ['30 hires']);
+
+  // CodeRabbit follow-up: a singular head noun can follow another singular,
+  // while a direct count before a preposition or verb still binds.
+  assert.deepEqual([...metricClaims('Interviewed 1 consultant candidate.')], ['1 candidates']);
+  assert.deepEqual([...metricClaims('Hired 1 engineer to support teams.')], ['1 engineers']);
+  assert.deepEqual([...metricClaims('Hired 1 engineer leading teams.')], ['1 engineers']);
+});
+
+test('Bürogebäude compares against office buildings (#5406 review)', () => {
+  // A German "Bürogebäude" smuggled into the generic "facilities" bucket did
+  // not match the English source's "buildings", so a truthful line blocked.
+  assert.deepEqual([...verifyFacts('Verwaltete 3 Bürogebäude.', BARE).invented], ['3 buildings']);
+  assert.deepEqual([...verifyFacts('Verwaltete 3 Büros.', BARE).invented], ['3 facilities']);
+
+  const dir = mkdtempSync(join(tmpdir(), 'fact-buildings-'));
+  try {
+    const source = join(dir, 'cv.md');
+    writeFileSync(source, 'Managed 3 office buildings and 3 offices.');
+    const ok = verifyFacts('Verwaltete 3 Bürogebäude und 3 Büros.', { ...BARE, sourcePaths: [source] });
+    assert.deepEqual([...ok.invented], [], `invented: ${JSON.stringify([...ok.invented])}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('CJK is NOT covered by this detector, and that is recorded', () => {

@@ -242,8 +242,11 @@ export function roleFuzzyMatch(a, b) {
   // title that tokenizes to 0 words (e.g. a company posting just "Member of
   // Technical Staff" with no suffix) — tokenization can never be the reason
   // an exact repost fails to dedupe.
-  const textA = String(a ?? '').trim().toLowerCase();
-  const textB = String(b ?? '').trim().toLowerCase();
+  // Trim after the rewrite. cell() trims the stored slash, so a pipe at
+  // either edge ("VP |", "| Engineering") has to land on the same text.
+  const storedTitle = (value) => String(value ?? '').toLowerCase().replace(/\s*\|\s*/g, ' / ').trim();
+  const textA = storedTitle(a);
+  const textB = storedTitle(b);
   if (textA && textA === textB) return true;
 
   const senA = extractSeniorities(a);

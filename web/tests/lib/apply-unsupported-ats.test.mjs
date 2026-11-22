@@ -79,6 +79,8 @@ function pageForTrigger({ atsHref = null, applyHref = null } = {}) {
     count: async () => (applyHref ? 1 : 0),
     isVisible: async () => true,
     innerText: async () => "Apply",
+    // What factsOf reads from a posting's Apply link: not a submit control.
+    evaluate: async () => ({ tag: "a", type: "", role: "link", inForm: false, text: "Apply" }),
     getAttribute: async (name) => (name === "href" ? applyHref : null),
     click: async () => {
       clicks.push("apply");
@@ -90,10 +92,11 @@ function pageForTrigger({ atsHref = null, applyHref = null } = {}) {
     page: {
       url: () => "https://careers.acme.test/jobs/1",
       context: () => ({ pages: () => [] }),
+      evaluate: async () => undefined,
       goto: async (href) => {
         gotos.push(href);
       },
-      locator: () => ({ first: () => atsLink }),
+      locator: () => ({ first: () => atsLink, evaluateAll: async () => (atsHref ? [atsHref] : []) }),
       getByRole: () => ({ or: () => ({ first: () => apply }) }),
     },
   };
@@ -367,7 +370,7 @@ function careerPage(careerUrl, blockedHref, closed, options = {}) {
         click: async () => {},
         first() { return this; },
       };
-      return { first: () => node };
+      return { first: () => node, evaluateAll: async () => (hit ? [blockedHref] : []) };
     },
     getByRole(_role, roleOptions) {
       const wantsApply = Boolean(options.applyClick) && /apply/i.test(String(roleOptions?.name ?? ""));
@@ -375,6 +378,7 @@ function careerPage(careerUrl, blockedHref, closed, options = {}) {
         count: async () => (wantsApply ? 1 : 0),
         isVisible: async () => wantsApply,
         innerText: async () => "Apply",
+        evaluate: async () => ({ tag: "button", type: "button", role: "button", inForm: false, text: "Apply" }),
         getAttribute: async () => null,
         click: async () => {
           if (!wantsApply) return;

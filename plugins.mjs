@@ -806,6 +806,7 @@ async function cmdAdd(args) {
     consent: consentSurface(installed.manifest),
   });
   console.log(`✓ Installed plugins.local/${installed.id}  (${approved ? '✓ approved' : '❓ unverified'}, pinned ${String(useSha).slice(0, 7)})`);
+  for (const w of installed.warnings) console.log(`⚠ ${w}`);
   console.log(capabilityCard(installed.manifest, approved ? 'approved' : 'unverified'));
   if (confirm) { setEnabled(installed.id, true); console.log(`\n✅ Enabled.${installed.manifest.requiredEnv.length ? ' Add keys to .env: ' + installed.manifest.requiredEnv.join(', ') : ''}`); }
   else console.log(`\n  To enable it (grants the above), run:  node plugins.mjs enable ${installed.id} --confirm`);

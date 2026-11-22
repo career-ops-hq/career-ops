@@ -470,7 +470,7 @@ export function flattenHtml(html) {
   if (typeof html !== 'string') return '';
   return decodeEntities(html
     .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<[^>]+>/g, ' '))
+    .replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag)))
     .replace(CONTROL_CHARS, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -1448,8 +1448,14 @@ async function main(argv) {
   return 0;
 }
 
+// process.exitCode, not process.exit(): a run has made its requests by the
+// time main() settles, and on Windows Node 24 aborts when process.exit() runs
+// right after a request (nodejs/node#56645, the crash in #3788): it prints a
+// libuv assertion and exits with a crash code instead of the run's own. It
+// also lets a large YAML or --json result reach a pipe whole. The process ends
+// once nothing is pending.
 if (isMainModule(import.meta.url)) {
   main(process.argv.slice(2))
-    .then(code => process.exit(code))
-    .catch(err => { console.error(`harvest-buildlist: ${oneLine(err?.message ?? err)}`); process.exit(1); });
+    .then(code => { process.exitCode = code; })
+    .catch(err => { console.error(`harvest-buildlist: ${oneLine(err?.message ?? err)}`); process.exitCode = 1; });
 }

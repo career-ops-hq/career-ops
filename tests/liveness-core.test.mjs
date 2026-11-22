@@ -315,6 +315,37 @@ hiringRoomHelp.result === 'uncertain' && hiringRoomHelp.code === 'no_apply_contr
   ? pass('the "¿Cómo me postulo?" help link is not an Apply control')
   : fail(`the help link alone classified ${hiringRoomHelp.result}/${hiringRoomHelp.code}, expected uncertain/no_apply_control`);
 
+console.log('\nliveness-core — the Computrabajo Apply control');
+
+// Computrabajo labels Apply "Postularme". Without a pattern for it every live
+// posting read no_apply_control and scan --verify dropped it (16 of 83 on
+// 2026-11-18). The label counts at the start of a control only, so a help link
+// such as "¿Cómo postularme?" is not an Apply control.
+const computrabajoUrl = 'https://ar.computrabajo.com/ofertas-de-trabajo/oferta-de-trabajo-de-administrador-de-infraestructura-y-seguridad-it-en-rosario-003A801106BD682E61373E686DCF3405';
+const computrabajoBody = 'Descripción de la oferta\nAdministrar y mantener la infraestructura de servidores físicos y virtuales, redes, storage y servicios en la nube.\n'.repeat(4);
+for (const label of ['Postularme', 'Postularme ahora']) {
+  const computrabajoApply = classifyLiveness({
+    status: 200,
+    requestedUrl: computrabajoUrl,
+    finalUrl: computrabajoUrl,
+    bodyText: computrabajoBody,
+    applyControls: ['Guardar', label],
+  });
+  computrabajoApply.result === 'active' && computrabajoApply.code === 'apply_control_visible'
+    ? pass(`"${label}" marks a Computrabajo posting active`)
+    : fail(`"${label}" classified ${computrabajoApply.result}/${computrabajoApply.code}, expected active/apply_control_visible`);
+}
+const computrabajoHelp = classifyLiveness({
+  status: 200,
+  requestedUrl: computrabajoUrl,
+  finalUrl: computrabajoUrl,
+  bodyText: computrabajoBody,
+  applyControls: ['Guardar', '¿Cómo postularme?'],
+});
+computrabajoHelp.result === 'uncertain' && computrabajoHelp.code === 'no_apply_control'
+  ? pass('the "¿Cómo postularme?" help link is not an Apply control')
+  : fail(`the help link alone classified ${computrabajoHelp.result}/${computrabajoHelp.code}, expected uncertain/no_apply_control`);
+
 console.log('\nliveness-core — Bulgarian apply controls');
 
 // dev.bg and zaplata.bg label Apply "Кандидатствай", wherewework.bg
