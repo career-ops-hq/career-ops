@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import * as yaml from "js-yaml";
-import { patchProfileText } from "../../src/lib/profile-yaml-edit.mjs";
+import { patchProfileText, patchTopLevelKey } from "../../src/lib/profile-yaml-edit.mjs";
 
 const template = readFileSync(new URL("../../../config/profile.example.yml", import.meta.url), "utf8");
 const commentLines = (text) => text.split(/\r?\n/).filter((line) => /^\s*#/.test(line));
@@ -152,4 +152,32 @@ test("shapes the line edit does not place return null, so the route falls back t
 test("a result that does not parse to the expected document is never returned", () => {
   const source = "candidate:\n  full_name: A\n";
   assert.equal(patchProfileText(source, { candidate: { full_name: "B" } }, { candidate: { full_name: "C" } }), null);
+});
+
+test("patchTopLevelKey sets, adds and removes one top-level line and keeps every other", () => {
+  const source = "# header\ncandidate:\n  full_name: A # keep\n\n# Paper size\npage_format: letter # note\nother: 1\n";
+  const doc = (page) => ({ ...yaml.load(source), ...(page ? { page_format: page } : {}) });
+  const set = patchTopLevelKey(source, "page_format", "a4", doc("a4"));
+  assert.equal(set, source.replace("page_format: letter", 'page_format: "a4"'));
+  const removed = patchTopLevelKey(source, "page_format", undefined, (({ page_format, ...rest }) => rest)(yaml.load(source)));
+  assert.equal(removed, source.replace("page_format: letter # note\n", ""));
+  const bare = "candidate:\n  full_name: A\n";
+  assert.equal(patchTopLevelKey(bare, "page_format", "a4", { ...yaml.load(bare), page_format: "a4" }), `${bare}\npage_format: "a4"\n`);
+  assert.equal(patchTopLevelKey(bare, "page_format", undefined, yaml.load(bare)), bare);
+});
+
+test("patchTopLevelKey on the shipped template keeps every comment line", () => {
+  const out = patchTopLevelKey(template, "page_format", "letter", { ...yaml.load(template), page_format: "letter" });
+  assert.ok(out);
+  assert.deepEqual(commentLines(out), commentLines(template));
+});
+
+test("patchTopLevelKey returns null for a value it cannot place, so the route falls back to yaml.dump", () => {
+  for (const [shape, source] of [
+    ["a block value", "page_format:\n  - a4\nother: 1\n"],
+    ["a quoted key", '"page_format": letter\n'],
+  ]) {
+    const expected = { ...yaml.load(source), page_format: "a4" };
+    assert.equal(patchTopLevelKey(source, "page_format", "a4", expected), null, shape);
+  }
 });

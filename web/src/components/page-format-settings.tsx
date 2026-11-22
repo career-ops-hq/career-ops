@@ -6,7 +6,9 @@ import { cn } from "@/lib/cn";
 
 // Page format → config/profile.yml (page_format). Server-persisted (unlike the
 // localStorage engine prefs on this page) because lib/page-format.mjs reads the
-// same key — the CLI and the web must render the same paper size.
+// same key — the CLI and the web must render the same paper size. A profile can
+// also say `auto` (the sheet follows the employer's country). That is shown, not
+// guessed away, and nothing is rewritten until the user picks something else.
 
 type State = { formats: string[]; default: string; override: string | null };
 
@@ -66,6 +68,8 @@ export function PageFormatSettings() {
     setSaving(false);
   };
 
+  const unchanged = state !== null && choice === state.override;
+
   const options: { value: string | null; label: string; hint: string }[] = [
     ...(state?.formats ?? []).map((f) => ({ value: f, label: LABELS[f] ?? f.toUpperCase(), hint: HINTS[f] ?? "" })),
     {
@@ -107,6 +111,12 @@ export function PageFormatSettings() {
           </div>
         ) : (
           <>
+            {state.override === "auto" && (
+              <p className="mt-3 text-xs leading-relaxed text-muted">
+                Your profile is set to <span className="font-mono">auto</span>: each PDF uses the
+                sheet for the employer&apos;s country. It stays that way until you pick a size here.
+              </p>
+            )}
             <div role="group" aria-labelledby="page-format-label" className="mt-3 grid gap-2 sm:grid-cols-3">
               {options.map((o) => (
                 <button
@@ -133,7 +143,7 @@ export function PageFormatSettings() {
             <button
               type="button"
               onClick={save}
-              disabled={saving}
+              disabled={saving || unchanged}
               className={cn(
                 "mt-4 inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium transition-colors hover:bg-surface-hover",
                 "disabled:pointer-events-none disabled:opacity-60",
