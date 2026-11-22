@@ -304,6 +304,26 @@ try {
   }
 
   {
+    // Late in the budget a page gets one attempt: two 429s with a long Retry-After
+    // would otherwise keep it waiting past the sweep's watchdog.
+    const realNow = Date.now;
+    let clock = 0;
+    Date.now = () => clock;
+    try {
+      let lateCalls = 0;
+      const { out } = await quietly(() => teamtailor.fetch({ ...acme, max_pages: 50 }, mkCtx(async (url) => {
+        if (offsetOf(url) === 0) { clock = 200_000; return feedOf(0, 100); } // page 1 ends 200 s in
+        lateCalls++;
+        throw Object.assign(new Error('HTTP 429 Too Many Requests'), { status: 429, retryAfter: '32' });
+      })));
+      if (lateCalls === 1 && out.length === 100 && out.truncated?.reason === 'fetch-error') pass('teamtailor.fetch() does not retry a page in the last stretch of its walk budget');
+      else fail(`last stretch: ${lateCalls} attempts on page 2, ${out.length} jobs, truncated=${JSON.stringify(out.truncated)}`);
+    } finally {
+      Date.now = realNow;
+    }
+  }
+
+  {
     // An empty <item/> still counts toward a full page: 99 usable items plus one empty one
     // is a full page, so the next offset is requested.
     const log = [];

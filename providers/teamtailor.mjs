@@ -29,7 +29,9 @@ import { markTruncated } from '../lib/board-truncation.mjs';
 // sweep in scan-ats-full.mjs gives one board 5 minutes and, when that fires,
 // discards everything the board had read (the provider only sees an abort at
 // that same instant, too late to hand pages back). So the walk stops itself
-// before then and returns the pages already read, marked partial.
+// before then and returns the pages already read, marked partial. Pages in the
+// budget's last stretch get a single attempt, so the one in flight when it runs
+// out cannot sit in retry waits past the watchdog.
 //
 // Auto-detects `https://<slug>.teamtailor.com/...` careers URLs. Many tenants
 // front the same feed on a branded domain (e.g. careers.acme.com also serves
@@ -95,6 +97,11 @@ const INTER_PAGE_DELAY_MS = 250;
 // Under the 5-minute per-board watchdog of scan-ats-full.mjs (COMPANY_TIMEOUT_MS),
 // leaving room for the page in flight and for processJobs.
 const WALK_BUDGET_MS = 4 * 60_000;
+// With the shared retry defaults one page can take about a minute and a half:
+// three attempts of the 10 s request timeout plus two Retry-After waits, which
+// _http.mjs clamps at 32 s each. A page started this close to the end of the
+// budget is fetched once, so the walk still ends well inside the watchdog.
+const LAST_STRETCH_MS = 90_000;
 
 /** @param {import('./_types.js').PortalEntry} entry */
 function resolveMaxPages(entry) {
@@ -153,9 +160,10 @@ export default {
         await sleep(INTER_PAGE_DELAY_MS, ctx);
       }
       const pageUrl = page === 0 ? feedUrl : `${feedUrl}?offset=${page * PAGE_SIZE}`;
+      const lastStretch = Date.now() - startedAt >= WALK_BUDGET_MS - LAST_STRETCH_MS;
       let text;
       try {
-        text = await fetchTextWithRetry(ctx, pageUrl, { redirect: 'error' });
+        text = await fetchTextWithRetry(ctx, pageUrl, { redirect: 'error' }, lastStretch ? { retries: 0 } : {});
         if (!isWholeChannel(text)) {
           throw new Error(`teamtailor: ${pageUrl} is not a complete RSS feed (no closed <channel> in the response)`);
         }
