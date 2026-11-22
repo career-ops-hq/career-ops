@@ -32,7 +32,7 @@ try {
     '| Title | Department | Location | Type | Salary | Posted | Details |',
     '|---|---|---|---|---|---|---|',
     '| Senior AI PM | Product | Ghent, Belgium | Full-time | — | 2026-04-01 | [View](https://apply.workable.com/acme-widgets/jobs/view/ABC123.md) |',
-    '| Tech Lead | Engineering | Remote | Full-time | — | 2026-03-25 | [View](https://apply.workable.com/acme-widgets/jobs/view/DEF456.md) |',
+    '| Tech Lead | Engineering | Remote | Contract | — | 2026-03-25 | [View](https://apply.workable.com/acme-widgets/jobs/view/DEF456.md) |',
   ].join('\n');
 
   const jobs = parseWorkableMarkdown(sampleMd, 'AcmeWidgets');
@@ -43,6 +43,12 @@ try {
     pass('parseWorkableMarkdown extracts title, location, company correctly');
   } else {
     fail(`parseWorkableMarkdown row 0 = ${JSON.stringify(jobs[0])}`);
+  }
+
+  if (jobs[0]?.employmentType === 'full_time' && jobs[1]?.employmentType === 'contract') {
+    pass('parseWorkableMarkdown reads the employment type from the Type column');
+  } else {
+    fail(`parseWorkableMarkdown employment types = ${JSON.stringify(jobs.map((j) => j.employmentType))}`);
   }
 
   if (jobs[0]?.url === 'https://apply.workable.com/acme-widgets/jobs/view/ABC123') {

@@ -355,9 +355,8 @@ export function parseWorkableWidget(payload, companyName, boardSlug) {
       continue;
     }
 
-    // employment_type: "Full-time", "Part-time", "Contract", "Temporary", "Internship"
     /** @type {any} */
-    const job = { title, url, location, company: companyName, ...employmentTypeField(raw?.employment_type) };
+    const job = { title, url, location, company: companyName, ...employmentTypeField(workableEmploymentType(raw)) };
 
     const description = toPlainText(raw?.description);
     if (description) job.description = description;
@@ -399,7 +398,7 @@ export function parseWorkableWidget(payload, companyName, boardSlug) {
  *
  * @param {string} text — markdown body
  * @param {string} companyName — value to write into job.company
- * @returns {Array<{title: string, url: string, company: string, location: string}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, employmentType?: string}>}
  */
 export function parseWorkableMarkdown(text, companyName) {
   if (typeof text !== 'string') return [];
@@ -420,7 +419,10 @@ export function parseWorkableMarkdown(text, companyName) {
     const safe = safeJobUrl(url);
     if (!safe) continue;
 
-    jobs.push({ title, url: safe, location, company: companyName });
+    // The Type column carries the widget's labels ("Full-time", "Contract").
+    // The table has no experience level, so an internship listed as
+    // "Full-time" reads as full_time here, unlike the widget and the feed.
+    jobs.push({ title, url: safe, location, company: companyName, ...employmentTypeField(cols[4]) });
   }
   return jobs;
 }
@@ -524,6 +526,20 @@ export function readFeedField(block, name) {
 }
 
 /**
+ * The employment type of a widget or feed row. `employment_type` (the feed's
+ * `<jobtype>`) takes "Full-time", "Part-time", "Contract", "Temporary",
+ * "Other" or is empty. Workable states an internship in `experience`, a
+ * LinkedIn-style level ("Internship", "Associate", "Mid-Senior level"), on
+ * rows whose type is usually "Full-time" (feed sample 2026-11-22: 38 of 43),
+ * so an "Internship" level decides for those rows.
+ * @param {any} raw
+ */
+export function workableEmploymentType(raw) {
+  if (/^internship$/i.test(String(raw?.experience ?? '').trim())) return 'Internship';
+  return raw?.employment_type;
+}
+
+/**
  * One feed `<job>` in the widget's row shape, so parseWorkableWidget can read
  * it. Null when the block has no title or URL.
  * @param {string} block
@@ -542,6 +558,9 @@ export function feedRowToWidgetRow(block) {
     telecommuting: readFeedField(block, 'remote').toLowerCase() === 'true',
     published_on: Number.isNaN(stamp) ? '' : new Date(stamp).toISOString(),
     description: readFeedField(block, 'description'),
+    // The same fields as the widget's; workableEmploymentType() reads them.
+    employment_type: readFeedField(block, 'jobtype'),
+    experience: readFeedField(block, 'experience'),
     company: readFeedField(block, 'company'),
     website: readFeedField(block, 'website'),
     _postedMs: Number.isNaN(stamp) ? null : stamp,

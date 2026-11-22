@@ -198,7 +198,7 @@ const expect = (label, got, want) => {
 // ── Workable (widget API) ───────────────────────────────────────────
 {
   const { parseWorkableWidget } = await load('workable.mjs');
-  const row = (shortcode, employment_type) => ({
+  const row = (shortcode, employment_type, experience) => ({
     title: `Role ${shortcode}`,
     shortcode,
     shortlink: `https://apply.workable.com/j/${shortcode}`,
@@ -208,6 +208,7 @@ const expect = (label, got, want) => {
     telecommuting: false,
     department: 'Engineering',
     ...(employment_type === undefined ? {} : { employment_type }),
+    ...(experience === undefined ? {} : { experience }),
     published_on: '2026-11-10',
   });
   const jobs = parseWorkableWidget(
@@ -217,6 +218,14 @@ const expect = (label, got, want) => {
   );
   expect('workable: employment_type normalized; a missing field leaves it off',
     types(jobs), ['full_time', 'contract', '<absent>']);
+  // Workable states an internship in `experience`, on a "Full-time" row.
+  const levels = parseWorkableWidget(
+    { name: 'Fixture Labs', jobs: [row('DDD444', 'Full-time', 'Internship'), row('EEE555', 'Full-time', 'Mid-Senior level')] },
+    'Fixture Labs',
+    'fixture-labs',
+  );
+  expect('workable: an Internship experience level makes the row an internship; another level leaves employment_type in charge',
+    types(levels), ['internship', 'full_time']);
 }
 
 // ── SmartRecruiters (/v1/companies/<slug>/postings) ─────────────────

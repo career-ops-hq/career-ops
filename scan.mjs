@@ -1504,8 +1504,8 @@ export function buildVisaFilter(visaFilter) {
 // pass, byte-identical to before the filter existed.
 //
 // Reads the structured `job.employmentType` a provider sets from the source's
-// own field (providers/_employment-type.mjs; today Himalayas, We Work Remotely,
-// Remotive, Ashby and Lever), never the title or description. A local parser
+// own field (providers/_employment-type.mjs; templates/portals.example.yml
+// lists the providers that set it), never the title or description. A local parser
 // may emit a raw label ("Contractor"); it is normalized here the same way.
 //
 // Semantics:
