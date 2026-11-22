@@ -622,6 +622,18 @@ describe("the streamed drive refuses a listed host", { concurrency: 1 }, () => {
     assert.equal(getSession(id), undefined);
   });
 
+  test("the fill route checks the destination after the CV lookup, right before filling", () => {
+    // The CV lookup is awaited, so a check made before it could be stale by
+    // the time fillSession writes. Pin the order on the route's source.
+    const route = readFileSync(join(here, "../../src/app/api/apply/fill/route.ts"), "utf8");
+    const cv = route.indexOf("await resolveSessionCv(");
+    const check = route.indexOf("await refusedDestination(sessionId)");
+    const fill = route.indexOf("await fillSession(");
+    assert.ok(cv > 0 && check > 0 && fill > 0, "anchors still exist");
+    assert.equal(route.split("await refusedDestination(").length - 1, 1, "one check");
+    assert.ok(cv < check && check < fill, "CV lookup, then the check, then the fill");
+  });
+
   test("the Apply page shows the refusal panel for a refused fill", () => {
     const provider = readFileSync(join(here, "../../src/components/apply/apply-provider.tsx"), "utf8");
     assert.match(provider, /const refusal = sessionFollowUp\(d\);\s*if \(refusal\.kind === "unsupported"\) \{\s*showRefusal\(refusal\)/);
