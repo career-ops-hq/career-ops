@@ -52,6 +52,30 @@ test('a substantive extra word in the tracker name is still required', () => {
   assert.equal(checkCompanyMatch('Thanks for applying to Acme Robotics', 'Acme Robotics Inc.'), true);
 });
 
+test('a domain that shares the first word is not the company', () => {
+  // "acme-partners.com" normalizes to the tokens "acme partners com", so a
+  // bare-stem search over the raw text would find "acme" in it.
+  assert.equal(checkCompanyMatch('no-reply@acme-partners.com Interview invitation', 'Acme Corp'), false);
+  assert.equal(checkCompanyMatch('Jane Doe <jane@acme-partners.com> Your application', 'Acme Corp'), false);
+  assert.equal(checkCompanyMatch('Apply at https://acme-recruiting.com/jobs today', 'Acme Corp'), false);
+  assert.equal(checkCompanyMatch('See careers.acme.io for details', 'Acme Corp'), false);
+  // The words around the address still count.
+  assert.equal(checkCompanyMatch('Acme Talent <no-reply@acme-partners.com> Interview', 'Acme Corp'), true);
+  assert.equal(checkCompanyMatch('no-reply@partners.com Your Acme application', 'Acme Corp'), true);
+});
+
+test('a reply from a look-alike domain is not attributed to the company', () => {
+  const [result] = matchCandidates([{
+    message_id: 'cf-4',
+    from: 'no-reply@acme-partners.com',
+    subject: 'Interview invitation',
+    body_snippet: 'We would like to schedule an interview.',
+  }], [
+    { num: 42, company: 'Acme Corp', role: 'Backend Engineer', status: 'Applied', notes: '' },
+  ], []);
+  assert.equal(result.application_num, null);
+});
+
 test('placeholders still never match', () => {
   assert.equal(checkCompanyMatch('Are you available on Monday?', '?'), false);
   assert.equal(checkCompanyMatch('Are you available on Monday?', '? Inc.'), false);

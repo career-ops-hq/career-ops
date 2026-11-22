@@ -138,11 +138,20 @@ function corporateFormStems(company) {
   return stems;
 }
 
+// An email address or hostname, with or without a scheme: "no-reply@acme-partners.com",
+// "https://acme-partners.com/jobs", "careers.acme.io".
+const ADDRESS_OR_HOST_RE = /[^\s<>()"',;]+@[^\s<>()"',;]+|(?:https?:\/\/)?(?:[\p{L}\p{M}\p{N}-]+\.)+\p{L}{2,}(?:[/?#]\S*)?/gu;
+
 // Whole-token match in the same key space as the stem, so "acme" is found in
 // "Thanks for applying to Acme!" but not inside "Acmecorp". A stem is shorter
-// and more generic than the cell it came from, so it gets no substring path.
+// and more generic than the cell it came from, so it gets no substring path,
+// and addresses and hostnames are removed first: normalizing
+// "no-reply@acme-partners.com" yields the token "acme", and a domain that only
+// shares a tracked company's first word is not evidence for that company.
+// Domains are the sender-domain signal's job.
 function textHasTokenRun(text, stem) {
-  const tokens = normalizeTextKey(text, ' ').split(' ').filter(Boolean).join(' ');
+  const words = text.replace(ADDRESS_OR_HOST_RE, ' ');
+  const tokens = normalizeTextKey(words, ' ').split(' ').filter(Boolean).join(' ');
   return ` ${tokens} `.includes(` ${stem} `);
 }
 
