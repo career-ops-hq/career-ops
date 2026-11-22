@@ -607,6 +607,11 @@
 # skip_tiers: [intern, entry]  # optional: skip listings by seniority tier (note: unrecognized/plain titles fall back to 'mid')
 #   A tracked_companies / job_boards entry can set its own skip_tiers, which replaces this list for
 #   that entry; skip_tiers: [] turns the tier filter off for it.
+#
+#   A tracked_companies / job_boards entry can carry its own title_filter, which replaces this
+#   global filter for that entry only (including replacing global negatives, so restate any
+#   negatives like junior or intern if that entry still wants them). An entry with negatives
+#   but no positives keeps the global positive keywords and replaces only the negative list.
 
 title_filter:
   # A `positive` entry is matched case-insensitively as a substring — except a
@@ -2623,6 +2628,25 @@ search_queries:
 #   - name: BigCo
 #     careers_url: https://jobs.lever.co/bigco
 #     timeout_ms: 60000
+
+# ── title_filter (optional, per entry) ─────────────────────────────────
+# When an entry defines its own title_filter, it replaces the top-level
+# title_filter for that entry only. This replaces the global positive and
+# negative lists entirely, allowing you to target titles that a global negative
+# would normally drop, or customize keywords for specific employers.
+# An entry with negatives but no positives keeps the global positive keywords
+# and replaces only the negative list.
+#
+#   - name: Example County
+#     careers_url: https://www.governmentjobs.com/careers/examplecounty
+#     title_filter:
+#       positive: ["Librarian", "Library"]
+#       negative: ["Page", "Custodian"]
+#
+#   - name: Example Tech
+#     careers_url: https://example.invalid/jobs
+#     title_filter:
+#       negative: ["Contractor", "Intern"]
 
 tracked_companies:
 

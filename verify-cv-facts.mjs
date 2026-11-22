@@ -1335,8 +1335,34 @@ function removeBalancedElements(raw, openRe) {
  * accounting for potential nested tags of the same type (e.g. nowrap spans inside
  * a span field like job-company, or nested divs inside edu-title).
  */
+// The class carries the meaning; the element does not. A template is free to
+// render `job-company` or `edu-org` as a <td>, an <li>, a <p> or a <strong>, and
+// to quote the class with either character. One list, used by every reader and
+// every strip in this file: a second list is how the field was read in one layout
+// and missed in another, and how a nested `edu-org` ended up read twice.
+const FIELD_ELEMENT_TAGS = 'span|div|td|th|li|p|dd|dt|section|strong|em';
+
+/**
+ * A regex matching an opening tag that carries `cls` in its class attribute.
+ * Group 1 is the tag name, which `removeBalancedElements` and
+ * `findBalancedElements` both rely on.
+ *
+ * @param {string} cls - Class name, matched on word boundaries so a class that
+ *   merely contains it (`not-job-companyish`) is not a match.
+ * @returns {RegExp}
+ */
+function classedElementRe(cls) {
+  return new RegExp(
+    // `class=` has to be the attribute itself, so a whitespace or a quote precedes
+    // it. `\bclass=` also matched `data-class=`, which turned any element carrying
+    // that data attribute into a structured field.
+    String.raw`<(${FIELD_ELEMENT_TAGS})\b[^>]*[\s"']class=(?:"[^"]*(?<![\w-])${cls}(?![\w-])[^"]*"|'[^']*(?<![\w-])${cls}(?![\w-])[^']*')[^>]*>`,
+    'gi',
+  );
+}
+
 function extractStructuredFieldInners(raw, cls) {
-  const openRe = new RegExp(String.raw`<(span|div)\b[^>]*\bclass="[^"]*(?<![\w-])${cls}(?![\w-])[^"]*"[^>]*>`, 'gi');
+  const openRe = classedElementRe(cls);
   return findBalancedElements(raw, openRe).map(el => raw.slice(el.contentStart, el.contentEnd));
 }
 
@@ -1360,10 +1386,7 @@ export function structuredFieldClaims(text) {
       // edu-title encloses its edu-org span or div, which is read on its own.
       // Remove the full nested classed element (accounting for inner formatting
       // spans); unclassed formatting spans like nowrap wrappers must be kept.
-      const withoutEduOrg = removeBalancedElements(
-        inner,
-        /<(span|div)\b[^>]*\bclass="[^"]*(?<![\w-])edu-org(?![\w-])[^"]*"[^>]*>/gi,
-      );
+      const withoutEduOrg = removeBalancedElements(inner, classedElementRe('edu-org'));
       const cleaned = removeBalancedElements(
         withoutEduOrg,
         /<span\b[^>]*\bclass="[^"]*"[^>]*>/gi,
@@ -1434,10 +1457,7 @@ export function skillToolClaims(text) {
   const seen = new Set();
   for (const cls of ['skill-item', 'competency-tag']) {
     for (const inner of extractStructuredFieldInners(raw, cls)) {
-      const withoutCategory = removeBalancedElements(
-        inner,
-        /<(span|div)\b[^>]*\bclass="[^"]*(?<![\w-])skill-category(?![\w-])[^"]*"[^>]*>/gi,
-      );
+      const withoutCategory = removeBalancedElements(inner, classedElementRe('skill-category'));
       pushSkillTokens(claims, seen, stripMarkup(withoutCategory));
     }
   }
@@ -1570,7 +1590,7 @@ export function structuredAssociationClaims(targetText, sourceTexts, config = {}
   }
   for (const item of blocks('edu-item')) {
     const rawTitle = extractStructuredFieldInners(item, 'edu-title')[0] || '';
-    const title = norm(removeBalancedElements(rawTitle, /<(span|div)\b[^>]*\bclass="[^"]*(?<![\w-])edu-org(?![\w-])[^"]*"[^>]*>/gi));
+    const title = norm(removeBalancedElements(rawTitle, classedElementRe('edu-org')));
     const org = field(item, 'edu-org'), year = field(item, 'edu-year');
     if (!title || !org) { gaps.add('Education associations require both a degree and a school.'); continue; }
     const pairs = education.filter(entry => norm(entry.org) === norm(org) && norm(entry.title) === title);
@@ -1598,7 +1618,7 @@ export function structuredAssociationClaims(targetText, sourceTexts, config = {}
   }));
   // Cover prose has no job classes. Reuse the employer reader rather than
   // treating the addressed company or a future plan as employment evidence.
-  const prose = removeBalancedElements(String(targetText), /<(span|div)\b[^>]*\bclass="[^"]*(?<![\w-])job(?![\w-])[^"]*"[^>]*>/gi);
+  const prose = removeBalancedElements(String(targetText), classedElementRe('job'));
   for (const statement of sourceStatementsOf(prose)) {
     if (!metricClaims(statement).size || FORWARD_MARKER_RE.test(statement)) continue;
     const employers = factClaims(statement).filter(claim => claim.kind === 'employer');

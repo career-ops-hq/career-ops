@@ -6,6 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { cleanChips } from "../../src/lib/clean-chips.mjs";
 import { commitsOnPaste, commitsOnType, joinChipParam, splitChipParam, splitChipText } from "../../src/lib/chip-text.mjs";
 
@@ -102,4 +103,27 @@ test("a link written before quoting existed reads as it always did", async () =>
 
   assert.deepEqual(back.positive, ["staff engineer", "platform"]);
   assert.deepEqual(back.allow, ["Toronto", "Remote"]);
+});
+
+const FILTER_BUILDER = new URL("../../src/components/explore/filter-builder.tsx", import.meta.url);
+
+test("the quoting the Explore form shows under its location boxes is the rule the boxes follow", () => {
+  const source = readFileSync(FILTER_BUILDER, "utf8");
+  const hint = source.match(/function QuoteHint\([\s\S]*?<p[^>]*>([^<]+)<\/p>/);
+  assert.ok(hint, "QuoteHint renders one line of text");
+  const example = hint[1].replaceAll("&quot;", '"').match(/"[^"]*,[^"]*"/);
+  assert.ok(example, `the hint shows a quoted entry with a comma: ${hint[1]}`);
+  assert.deepEqual(chips(example[0]), [example[0].slice(1, -1)]);
+});
+
+test("every location box names a hint that is on the page as its description", () => {
+  const source = readFileSync(FILTER_BUILDER, "utf8");
+  const fields = source.split("<KeywordField").slice(1).map((s) => s.slice(0, s.indexOf("/>")));
+  for (const label of ["City or location", "Always include", "Exclude locations", "Never include"]) {
+    const field = fields.find((f) => f.includes(`ariaLabel="${label}"`));
+    assert.ok(field, `a box labelled ${label}`);
+    const ref = field.match(/describedBy=\{(\w+)\}/);
+    assert.ok(ref, `${label} has a describedBy`);
+    assert.match(source, new RegExp(`<QuoteHint id=\\{${ref[1]}\\} />`), `${label} points at a rendered hint`);
+  }
 });
