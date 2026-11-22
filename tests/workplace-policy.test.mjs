@@ -174,3 +174,192 @@ test('conditional hiring-presence regions need independent home-country eligibil
   assert.equal(gate('Remote EMEA', '', { description: description + ' You can work remotely from Spain.' }).eligible, true);
   assert.equal(buildWorkplacePolicy(undefined)('Remote EMEA', '', { description }).eligible, true);
 });
+
+test('local and-around qualifiers do not become the alpha-3 country AND', () => {
+  for (const target of ['and around Barcelona', 'around Barcelona']) {
+    assert.equal(gate('Remote Europe', '', { description: `Candidates must be based in ${target}.` }).eligible, true, target);
+  }
+  assert.equal(gate('Remote Europe', '', { description: 'Candidates must be based in and around London.' }).eligible, false);
+});
+
+test('ordinary AND continuations cannot establish Andorra eligibility', () => {
+  const andorra = buildWorkplacePolicy({ onsite_locations: ['Andorra la Vella'], remote_countries: ['AD'], remote_regions: ['Europe'] });
+  for (const description of [
+    'We work remotely and work in and around Barcelona.',
+    'We work remotely and work in and across different teams.',
+  ]) assert.equal(andorra('Remote', '', { description }).eligible, false, description);
+});
+
+test('explicit AND tokens and geographic separators still identify Andorra', () => {
+  const andorra = buildWorkplacePolicy({ onsite_locations: ['Andorra la Vella'], remote_countries: ['AD'], remote_regions: ['Europe'] });
+  for (const target of ['AND', 'AND only', 'AND or Spain', 'AND / Spain', 'AND and France']) {
+    assert.equal(andorra('Remote Europe', '', { description: `Candidates must be based in ${target}.` }).eligible, true, target);
+  }
+  assert.equal(andorra('Remote AND').eligible, true);
+  assert.equal(andorra('Remote', '', { eligibleCountries: ['AND'] }).eligible, true);
+  assert.equal(andorra('Remote', '', { description: 'You can work remotely from AND.' }).eligible, true);
+});
+
+test('AND stays a foreign mandatory country even with unrelated home-country evidence', () => {
+  for (const description of [
+    'Candidates must be based in AND.',
+    'Candidates must be based in AND only.',
+    'Candidates must be based in AND and collaborate with colleagues who work remotely from Spain.',
+  ]) assert.equal(gate('Remote Europe', '', { description }).eligible, false, description);
+  assert.equal(gate('Remote Europe', '', { description: 'Candidates must be based in AND or Spain.' }).eligible, true);
+  assert.equal(gate('Remote AND').eligible, false);
+});
+
+test('parsed home ISO alternatives do not rescue another foreign requirement', () => {
+  const andorra = buildWorkplacePolicy({ onsite_locations: ['Andorra la Vella'], remote_countries: ['AD'], remote_regions: ['Europe'] });
+  for (const description of [
+    'Candidates must be based in AU and collaborate with our Andorra office.',
+    'Candidates must be based in AND or Spain and must be located in AU.',
+    'Candidates must be based in AND or Spain and eligible countries are France.',
+  ]) assert.equal(andorra('Remote Europe', '', { description }).eligible, false, description);
+  assert.equal(gate('Remote Europe', '', { description: 'Candidates must be based in Spain and collaborate with our France office.' }).eligible, true, 'an already-accepted office mention is unchanged');
+});
+
+
+test('explicit mandatory AND accepts a following worker qualification', () => {
+  const andorra = buildWorkplacePolicy({ onsite_locations: ['Andorra la Vella'], remote_countries: ['AD'], remote_regions: ['Europe'] });
+  for (const target of ['AND with a valid work permit', 'AND with local tax registration']) {
+    const description = `Candidates must be based in ${target}.`;
+    assert.equal(andorra('Remote Europe', '', { description }).eligible, true, target);
+    assert.equal(gate('Remote Europe', '', { description }).eligible, false, 'an explicit foreign country remains mandatory');
+  }
+});
+
+test('AND qualification cannot rescue another mandatory foreign location', () => {
+  const andorra = buildWorkplacePolicy({ onsite_locations: ['Andorra la Vella'], remote_countries: ['AD'], remote_regions: ['Europe'] });
+  assert.equal(andorra('Remote Europe', '', { description: 'Candidates must be based in AND with a valid work permit and must be located in AU.' }).eligible, false);
+});
+
+test('a general prose conjunction does not become a qualified country token', () => {
+  const andorra = buildWorkplacePolicy({ onsite_locations: ['Andorra la Vella'], remote_countries: ['AD'], remote_regions: ['Europe'] });
+  assert.equal(andorra('Remote', '', { description: 'We work remotely and work in and with customer teams.' }).eligible, false);
+  assert.equal(andorra('Remote Europe', '', { description: 'Candidates must be based in and around Barcelona.' }).eligible, false);
+  assert.equal(gate('Remote Europe', '', { description: 'Candidates must be based in and around Barcelona.' }).eligible, true);
+});
+
+
+test('independent eligible-country restrictions intersect genuine alternatives', () => {
+  const cases = [
+    ['AD', 'AND or France', 'France', false],
+    ['AD', 'AND or France', 'AND or France', true],
+    ['AD', 'AND or France', 'France or Portugal', false],
+    ['FR', 'AND or France', 'France or Portugal', true],
+    ['ES', 'Spain or Portugal', 'Portugal', false],
+    ['PT', 'Spain or Portugal', 'Portugal', true],
+    ['AD', 'AND or France', 'AND or Portugal', true],
+  ];
+  for (const [home, first, second, expected] of cases) {
+    const policy = buildWorkplacePolicy({ onsite_locations: ['Office City'], remote_countries: [home], remote_regions: ['Europe'] });
+    const description = `Candidates must be based in ${first} and eligible countries are ${second}`;
+    assert.equal(policy('Remote Europe', '', { description }).eligible, expected, `${home}: ${description}`);
+  }
+});
+
+test('independent eligible locations do not borrow an earlier home alternative', () => {
+  const andorra = buildWorkplacePolicy({ onsite_locations: ['Andorra la Vella'], remote_countries: ['AD'], remote_regions: ['Europe'] });
+  assert.equal(andorra('Remote Europe', '', { description: 'Candidates must be based in AND or France and eligible locations are France.' }).eligible, false);
+  assert.equal(andorra('Remote Europe', '', { description: 'Candidates must be based in AND or France and eligible locations are AND or France.' }).eligible, true);
+  assert.equal(andorra('Remote Europe', '', { description: 'Candidates must be based in AND or France and must be located in AU.' }).eligible, false);
+});
+
+test('unrelated eligible-country prose is not a new geographic target', () => {
+  const andorra = buildWorkplacePolicy({ onsite_locations: ['Andorra la Vella'], remote_countries: ['AD'], remote_regions: ['Europe'] });
+  for (const suffix of ['eligible countries are considered during onboarding', 'eligible countries are reviewed annually', 'collaborate with France colleagues']) {
+    const description = `Candidates must be based in AND or France and ${suffix}.`;
+    assert.equal(andorra('Remote Europe', '', { description }).eligible, true, description);
+  }
+});
+
+
+test('explicit eligibility qualifiers cannot hide a narrower country list', () => {
+  const qualifiers = ['restricted to ', 'limited to ', 'only ', 'currently limited to ', 'open only to ', 'allowed in ', 'allowed only in ', 'permitted from ', 'available in ', 'currently only restricted to ', 'only currently limited to '];
+  for (const qualifier of qualifiers) {
+    for (const [home, countries, expected] of [['AD', 'France', false], ['AD', 'AND or France', true], ['AD', 'France or Portugal', false], ['FR', 'France or Portugal', true]]) {
+      const policy = buildWorkplacePolicy({ onsite_locations: ['Office City'], remote_countries: [home], remote_regions: ['Europe'] });
+      const description = `Candidates must be based in AND or France and eligible countries are ${qualifier}${countries}`;
+      assert.equal(policy('Remote Europe', '', { description }).eligible, expected, `${home}: ${description}`);
+    }
+  }
+});
+
+test('qualified eligible locations retain genuine alternatives and independent restrictions', () => {
+  const andorra = buildWorkplacePolicy({ onsite_locations: ['Office City'], remote_countries: ['AD'], remote_regions: ['Europe'] });
+  assert.equal(andorra('Remote Europe', '', { description: 'Candidates must be based in AND or France and eligible locations are restricted to France.' }).eligible, false);
+  assert.equal(andorra('Remote Europe', '', { description: 'Candidates must be based in AND or France and eligible locations are only AND or France.' }).eligible, true);
+  assert.equal(andorra('Remote Europe', '', { description: 'Candidates must be based in AND or France and eligible locations are allowed in AND or France and must be located in AU.' }).eligible, false);
+});
+
+test('eligibility qualifier grammar does not scan through nongeographic prose', () => {
+  const andorra = buildWorkplacePolicy({ onsite_locations: ['Office City'], remote_countries: ['AD'], remote_regions: ['Europe'] });
+  for (const tail of ['considered during onboarding', 'reviewed annually', 'only considered during onboarding', 'currently reviewed annually', 'allowed by company policy']) {
+    const description = `Candidates must be based in AND or France and eligible countries are ${tail}.`;
+    assert.equal(andorra('Remote Europe', '', { description }).eligible, true, description);
+  }
+});
+
+
+test('explicit eligibility lists retain every comma-separated country alternative', () => {
+  const cases = [
+    ['DE', 'Eligible countries are restricted to France, Germany.'],
+    ['PT', 'Eligible countries are restricted to France, Portugal.'],
+    ['PT', 'Eligible countries are France, Germany, Portugal.'],
+    ['PT', 'Eligible countries are France, Germany, and Portugal.'],
+    ['PT', 'Eligible locations are France, Germany, or Portugal.'],
+    ['AD', 'Eligible countries are France, AND or Germany.'],
+    ['AD', 'Eligible countries are France, Germany, AND.'],
+    ['DE', 'Eligible locations are France, Germany.'],
+    ['FR', 'Eligible countries are restricted to France, Germany.'],
+    ['PT', 'Eligible countries are FR, PT.'],
+    ['GB', 'Eligible countries are France, United Kingdom.'],
+    ['PT', 'Eligible countries are France, Germany or Portugal.'],
+    ['DE', 'Candidates must be based in France or Germany and eligible countries are restricted to France, Germany.'],
+    ['DE', 'Eligible countries are France, Germany and eligible countries are Germany or Portugal.'],
+  ];
+  for (const [home, description] of cases) {
+    const policy = buildWorkplacePolicy({ onsite_locations: ['Office City'], remote_countries: [home], remote_regions: ['Europe'] });
+    assert.equal(policy('Remote Europe', '', { description }).eligible, true, `${home}: ${description}`);
+  }
+});
+
+test('a country-list comma never absorbs a separate or narrower restriction', () => {
+  const cases = [
+    ['PT', 'Eligible countries are restricted to France, Germany.'],
+    ['DE', 'Eligible countries are France, Germany; candidates must be based in France.'],
+    ['DE', 'Candidates must be based in France; eligible countries are France, Germany.'],
+    ['DE', 'Eligible countries are France, Germany. Candidates must be based in France.'],
+    ['DE', 'Eligible countries are France, Germany, candidates must be based in France.'],
+    ['DE', 'Eligible countries are France, Germany, eligible countries are France.'],
+    ['DE', 'Eligible countries are France, Germany and eligible countries are France or Portugal.'],
+    ['DE', 'Eligible countries are France, Germany but candidates must be based in France.'],
+    ['DE', 'Eligible countries are France, Germany however candidates must be based in France.'],
+    ['DE', 'Eligible countries are France; Germany.'],
+    ['DE', 'Eligible countries are France, Germany and must be located in AU.'],
+  ];
+  for (const [home, description] of cases) {
+    const policy = buildWorkplacePolicy({ onsite_locations: ['Office City'], remote_countries: [home], remote_regions: ['Europe'] });
+    assert.equal(policy('Remote Europe', '', { description }).eligible, false, `${home}: ${description}`);
+  }
+});
+
+test('only complete country-list pieces can continue eligibility across a comma', () => {
+  const cases = [
+    ['DE', 'Eligible countries are France, Germany office supports Europe.', false],
+    ['PT', 'Eligible countries are France, Portugalish.', false],
+    ['PT', 'Eligible countries are France, PRTland.', false],
+    ['PT', 'Eligible countries are France, PT systems.', false],
+    ['PT', 'Eligible countries are France, and considered during onboarding.', false],
+    ['PT', 'Eligible countries are France, and PT systems.', false],
+    ['DE', 'Candidates must be based in Germany. Eligible countries are considered during onboarding, France office supports Europe.', true],
+    ['DE', 'Candidates must be based in Germany. Eligible countries are reviewed annually, France office supports Europe.', true],
+    ['FR', 'Eligible countries are France, Germany and eligible countries are France or Portugal.', true],
+  ];
+  for (const [home, description, expected] of cases) {
+    const policy = buildWorkplacePolicy({ onsite_locations: ['Office City'], remote_countries: [home], remote_regions: ['Europe'] });
+    assert.equal(policy('Remote Europe', '', { description }).eligible, expected, `${home}: ${description}`);
+  }
+});
