@@ -14,8 +14,10 @@
  *       truncating it in place, leaves no temp file behind, keeps the file's
  *       permissions, and writes through a symlinked inbox.
  *   5. An empty `add` fails loudly (exit 1) rather than queuing a blank line.
- *   6. On the default path, a first `add` self-heals .gitignore (idempotent) so
- *      the personal queue isn't accidentally tracked.
+ *   6. The default path lives under the data root (getCareerOpsRoot()), not the
+ *      cwd: CAREER_OPS_DATA_DIR and a plugin install copy both move it, and
+ *      CAREER_OPS_INBOX still wins. A first `add` self-heals .gitignore
+ *      (idempotent) only when the data root is the code checkout.
  *   7. Concurrent `add` calls all survive — the queue is appended to, never
  *      rewritten, so simultaneous writers cannot clobber each other.
  *   7c. When a writer in 7 dies, the line 7 prints names the cause. It did not:
@@ -36,8 +38,9 @@
  *      valueless `--expect` fails rather than silently disabling the guard —
  *      every occurrence, not only the first.
  *
- * Provisions a throwaway queue via CAREER_OPS_INBOX and a temp CWD; never
- * touches real user data.
+ * Provisions a throwaway queue via CAREER_OPS_INBOX and a temp CWD, or (§6) a
+ * disposable code root holding the script's import closure; never touches real
+ * user data.
  */
 
 import { execFileSync, spawn } from 'child_process';
@@ -45,9 +48,10 @@ import {
   readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, existsSync, statSync,
   lstatSync, chmodSync, symlinkSync,
 } from 'fs';
-import { join } from 'path';
+import { dirname, join, resolve, sep } from 'path';
 import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
+import { createRequire } from 'module';
 import { acquirePipelineLock } from '../pipeline-lock.mjs';
 
 import { pass, fail, ROOT } from './helpers.mjs';
@@ -108,6 +112,53 @@ function run(inbox, args, opts = {}) {
     encoding: 'utf8',
     stdio: ['pipe', 'pipe', 'pipe'],
     ...opts,
+  });
+}
+
+// Every variable that could point a child at the developer's real data root.
+const DATA_ROOT_ENV = ['CAREER_OPS_ROOT', 'CAREER_OPS_DATA_DIR', 'CAREER_OPS_INBOX', 'CLAUDE_CODE_PLUGIN_CACHE_DIR'];
+
+// The node_modules that serves the repo's packages (a worktree resolves it
+// from an ancestor checkout), linked into each disposable code root for js-yaml.
+const NODE_MODULES = (() => {
+  const pkg = createRequire(join(ROOT, 'package.json')).resolve('js-yaml/package.json');
+  return pkg.slice(0, pkg.lastIndexOf(`${sep}node_modules${sep}`) + `${sep}node_modules`.length);
+})();
+
+// Copy agent-inbox.mjs and its relative-import closure into `dir`, so
+// path-resolver.mjs sees `dir` as the code root, plus tracker-aliases.json,
+// which tracker-parse.mjs loads at import. No .career-ops-data marker is copied,
+// so only the environment decides the data root.
+function codeRootFixture(dir) {
+  const IMPORT_RE = /(?:import|export)\s[^'"]*?from\s*['"](\.[^'"]+)['"]|import\(\s*['"](\.[^'"]+)['"]\s*\)/g;
+  const seen = new Set();
+  const stack = [CLI];
+  const assets = [join(ROOT, 'tracker-aliases.json')];
+  while (stack.length) {
+    const file = stack.pop();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    for (const m of readFileSync(file, 'utf8').matchAll(IMPORT_RE)) {
+      const target = resolve(dirname(file), m[1] || m[2]);
+      if (existsSync(target)) stack.push(target);
+    }
+  }
+  for (const file of [...seen, ...assets]) {
+    const dest = join(dir, file.slice(ROOT.length + 1));
+    mkdirSync(dirname(dest), { recursive: true });
+    writeFileSync(dest, readFileSync(file));
+  }
+  symlinkSync(NODE_MODULES, join(dir, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
+  return dir;
+}
+
+// Run a code root's agent-inbox.mjs from `cwd` with no inherited data-root
+// variables, only `env`; returns stdout.
+function runDefault(codeRoot, cwd, env, args) {
+  const base = { ...process.env };
+  for (const k of DATA_ROOT_ENV) delete base[k];
+  return execFileSync(NODE, [join(codeRoot, 'agent-inbox.mjs'), ...args], {
+    cwd, env: { ...base, ...env }, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
   });
 }
 
@@ -251,17 +302,60 @@ console.log('5. empty add fails (exit 1), does not queue a blank line');
 }
 
 // ---------------------------------------------------------------------------
-console.log('6. first add on the default path self-heals .gitignore (idempotent)');
+console.log('6. the default path follows the data root; .gitignore self-heals only in the code checkout');
 {
-  const repo = tmp('inbox-repo-');
-  writeFileSync(join(repo, '.gitignore'), 'node_modules\noutput/*\n');
-  const addOnce = () => execFileSync(NODE, [CLI, 'add', 'queue a scan'], {
-    cwd: repo, env: { ...process.env, CAREER_OPS_INBOX: '' }, stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  // 6a. Data root = code root (a plain checkout): the queue lands in its data/
+  // and the checkout's .gitignore gains the rule once, whatever the cwd is.
+  const code = codeRootFixture(tmp('inbox-repo-'));
+  writeFileSync(join(code, '.gitignore'), 'node_modules\noutput/*\n');
+  const elsewhere = tmp('inbox-cwd-');
+  const addOnce = () => runDefault(code, elsewhere, {}, ['add', 'queue a scan']);
   addOnce(); addOnce();
-  const gi = readFileSync(join(repo, '.gitignore'), 'utf8');
+  const gi = readFileSync(join(code, '.gitignore'), 'utf8');
   const ruleCount = gi.split('\n').filter((l) => l.trim() === 'data/agent-inbox.md').length;
   check('.gitignore gains exactly one data/agent-inbox.md rule', ruleCount === 1, `count=${ruleCount}`);
+  check('queue lands in the code root\'s data/', existsSync(join(code, 'data', 'agent-inbox.md')));
+  check('nothing written under the cwd', readdirSync(elsewhere).length === 0, readdirSync(elsewhere).join(','));
+
+  // 6b. CAREER_OPS_DATA_DIR: the queue follows it, not the cwd, and neither the
+  // data root's nor the code root's .gitignore is touched.
+  const code2 = codeRootFixture(tmp('inbox-code-'));
+  writeFileSync(join(code2, '.gitignore'), 'node_modules\n');
+  const dataDir = tmp('inbox-data-');
+  writeFileSync(join(dataDir, '.gitignore'), 'secrets\n');
+  const cwd2 = tmp('inbox-cwd-');
+  runDefault(code2, cwd2, { CAREER_OPS_DATA_DIR: dataDir }, ['add', 'probe']);
+  check('CAREER_OPS_DATA_DIR: queue lands under the data dir',
+    /- \[ \] .* — probe$/m.test(readFileSync(join(dataDir, 'data', 'agent-inbox.md'), 'utf8')));
+  check('CAREER_OPS_DATA_DIR: nothing written under the cwd', readdirSync(cwd2).length === 0, readdirSync(cwd2).join(','));
+  check('CAREER_OPS_DATA_DIR: no queue in the code root', !existsSync(join(code2, 'data', 'agent-inbox.md')));
+  check('CAREER_OPS_DATA_DIR: data dir .gitignore untouched', readFileSync(join(dataDir, '.gitignore'), 'utf8') === 'secrets\n');
+  check('CAREER_OPS_DATA_DIR: code root .gitignore untouched', readFileSync(join(code2, '.gitignore'), 'utf8') === 'node_modules\n');
+  const listed = runDefault(code2, cwd2, { CAREER_OPS_DATA_DIR: dataDir }, ['list']);
+  check('CAREER_OPS_DATA_DIR: list reads the same queue', /probe/.test(listed), listed);
+
+  // 6c. CAREER_OPS_INBOX still beats the data root; a relative value resolves
+  // against the cwd.
+  const cwd3 = tmp('inbox-cwd-');
+  runDefault(code2, cwd3, { CAREER_OPS_DATA_DIR: dataDir, CAREER_OPS_INBOX: 'q/inbox.md' }, ['add', 'override wins']);
+  check('CAREER_OPS_INBOX wins over CAREER_OPS_DATA_DIR', existsSync(join(cwd3, 'q', 'inbox.md'))
+    && !readFileSync(join(dataDir, 'data', 'agent-inbox.md'), 'utf8').includes('override wins'));
+
+  // 6d. A Claude Code plugin install copy: the scripts run from the copy, which
+  // Claude Code replaces on update, so the queue goes to ~/career-ops-data and
+  // the copy's .gitignore is left alone.
+  const plugins = tmp('inbox-plugins-');
+  const copy = codeRootFixture(join(plugins, 'cache', 'career-ops', 'career-ops', '1.0.0'));
+  writeFileSync(join(copy, '.gitignore'), 'node_modules\n');
+  const home = tmp('inbox-home-');
+  runDefault(copy, copy, {
+    CLAUDE_CODE_PLUGIN_CACHE_DIR: plugins, CLAUDE_CONFIG_DIR: join(home, '.claude'),
+    HOME: home, USERPROFILE: home,
+  }, ['add', 'from the plugin']);
+  check('plugin copy: queue lands under ~/career-ops-data',
+    /from the plugin/.test(readFileSync(join(home, 'career-ops-data', 'data', 'agent-inbox.md'), 'utf8')));
+  check('plugin copy: nothing queued inside the copy', !existsSync(join(copy, 'data', 'agent-inbox.md')));
+  check('plugin copy: copy .gitignore untouched', readFileSync(join(copy, '.gitignore'), 'utf8') === 'node_modules\n');
 }
 
 // ---------------------------------------------------------------------------
