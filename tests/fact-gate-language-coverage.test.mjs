@@ -249,6 +249,12 @@ test('a singular count of one matches its English source (#5406 review)', () => 
     writeFileSync(source, 'Ran 30 interviews and 10 hires.');
     const modifiers = verifyFacts('Ran 30 candidate interviews and 10 engineer hires.', opts);
     assert.deepEqual([...modifiers.invented], [], `invented: ${JSON.stringify([...modifiers.invented])}`);
+
+    // The guard stops at a preposition or verb, so a direct singular count
+    // still binds even when a later count noun appears in the same clause.
+    writeFileSync(source, 'Interviewed 1 candidate. Hired 1 engineer.');
+    const heads = verifyFacts('Interviewed 1 consultant candidate. Hired 1 engineer to support teams.', opts);
+    assert.deepEqual([...heads.invented], [], `invented: ${JSON.stringify([...heads.invented])}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -261,6 +267,12 @@ test('a singular count of one matches its English source (#5406 review)', () => 
   // the number when they only modify the counted noun.
   assert.deepEqual([...metricClaims('Conducted 12 candidate interviews.')], ['12 interviews']);
   assert.deepEqual([...metricClaims('Ran 30 engineer hires.')], ['30 hires']);
+
+  // CodeRabbit follow-up: a singular head noun can follow another singular,
+  // while a direct count before a preposition or verb still binds.
+  assert.deepEqual([...metricClaims('Interviewed 1 consultant candidate.')], ['1 candidates']);
+  assert.deepEqual([...metricClaims('Hired 1 engineer to support teams.')], ['1 engineers']);
+  assert.deepEqual([...metricClaims('Hired 1 engineer leading teams.')], ['1 engineers']);
 });
 
 test('Bürogebäude compares against office buildings (#5406 review)', () => {

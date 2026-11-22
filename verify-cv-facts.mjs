@@ -275,14 +275,50 @@ const SPELLED_MAGNITUDE_ALT = [...SPELLED_MAGNITUDES.keys()].join('|');
 // These four singulars were added for counts of one, but they also appear as
 // attributive modifiers: "30 candidate interviews" counts the interviews, not
 // thirty candidates. Let a singular bind only when no other listed count noun
-// follows it inside the same number's modifier window. A second number is a
-// hard barrier for that window, so "1 Standort mit 1 Ingenieur" still reads as
-// two counts. Every other noun keeps the lazy nearest-noun rule unchanged.
+// follows it as the head of the same noun phrase. Direct counts before a
+// preposition, conjunction, relative pronoun, or common CV verb still bind:
+// "1 engineer to support teams" stays one engineer, not one team. A second
+// number is a hard barrier for the window, so "1 Standort mit 1 Ingenieur"
+// still reads as two counts. Every other noun keeps the lazy nearest-noun rule.
 const ATTRIBUTIVE_SINGULAR_NOUNS = new Set(['consultant', 'candidate', 'engineer', 'location']);
 const BASE_COUNT_NOUNS = METRIC_NOUNS.filter((noun) => !ATTRIBUTIVE_SINGULAR_NOUNS.has(noun));
+const ATTRIBUTIVE_BREAK_WORDS = [
+  // Prepositions, conjunctions, and relative pronouns.
+  'to', 'for', 'with', 'at', 'in', 'on', 'by', 'from', 'of', 'as', 'into',
+  'onto', 'over', 'under', 'across', 'within', 'without', 'about', 'after',
+  'before', 'during', 'per', 'via', 'through', 'between', 'among', 'against',
+  'around', 'behind', 'beyond', 'despite', 'except', 'inside', 'outside',
+  'toward', 'towards', 'upon', 'versus', 'than', 'near', 'and', 'or', 'but',
+  'nor', 'so', 'yet', 'while', 'when', 'where', 'which', 'who', 'whom',
+  'whose', 'that', 'if', 'because', 'since', 'although', 'though', 'whether',
+  // Common CV verbs. A singular count followed by one of these is the head of
+  // the phrase, not a modifier before the later noun.
+  'lead', 'leads', 'leading', 'led', 'manage', 'manages', 'managed', 'managing',
+  'support', 'supports', 'supported', 'supporting', 'build', 'builds', 'built',
+  'building', 'run', 'runs', 'ran', 'running', 'own', 'owns', 'owned', 'owning',
+  'drive', 'drives', 'drove', 'driven', 'driving', 'deliver', 'delivers',
+  'delivered', 'delivering', 'develop', 'develops', 'developed', 'developing',
+  'design', 'designs', 'designed', 'designing', 'create', 'creates', 'created',
+  'creating', 'improve', 'improves', 'improved', 'improving', 'reduce',
+  'reduces', 'reduced', 'reducing', 'increase', 'increases', 'increased',
+  'increasing', 'grow', 'grows', 'grew', 'grown', 'growing', 'mentor',
+  'mentors', 'mentored', 'mentoring', 'train', 'trains', 'trained', 'training',
+  'coach', 'coaches', 'coached', 'coaching', 'partner', 'partners', 'partnered',
+  'partnering', 'collaborate', 'collaborates', 'collaborated', 'collaborating',
+  'serve', 'serves', 'served', 'serving', 'hire', 'hired', 'hiring', 'work',
+  'works', 'worked', 'working', 'contribute', 'contributes', 'contributed',
+  'contributing', 'base', 'based', 'basing', 'embed', 'embeds', 'embedded',
+  'embedding', 'join', 'joins', 'joined', 'joining', 'use', 'uses', 'used',
+  'using', 'have', 'has', 'had', 'having', 'make', 'makes', 'made', 'making',
+  'help', 'helps', 'helped', 'helping', 'enable', 'enables', 'enabled',
+  'enabling', 'allow', 'allows', 'allowed', 'allowing', 'require', 'requires',
+  'required', 'requiring', 'keep', 'keeps', 'kept', 'keeping',
+];
+const ATTRIBUTIVE_BREAK_ALT = ATTRIBUTIVE_BREAK_WORDS.join('|');
+const ATTRIBUTIVE_MODIFIER = String.raw`(?!\b(?:${ATTRIBUTIVE_BREAK_ALT})\b)\p{L}[\p{L}\p{M}-]*`;
 const COUNT_NOUN_ALT = [
   ...[...ATTRIBUTIVE_SINGULAR_NOUNS].map((noun) =>
-    String.raw`${noun}(?!\s+(?:\p{L}[\p{L}\p{M}-]*\s+){0,${MODIFIER_WINDOW - 1}}(?:${BASE_COUNT_NOUNS.join('|')})(?![\p{L}\p{N}]))`
+    String.raw`${noun}(?!\s+(?:${ATTRIBUTIVE_MODIFIER}\s+){0,${MODIFIER_WINDOW - 1}}(?:${METRIC_NOUNS.join('|')})(?![\p{L}\p{N}]))`
   ),
   ...BASE_COUNT_NOUNS,
 ].join('|');
