@@ -77,6 +77,7 @@ export function TriageRow({
       <input
         type="checkbox"
         checked={selected}
+        disabled={evaluated}
         onChange={onToggleSelect}
         aria-label={`Select ${job.company} ${job.role}`}
         className="size-4 shrink-0 accent-brand max-sm:min-h-[44px] max-sm:min-w-[24px]"
