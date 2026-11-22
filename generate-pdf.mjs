@@ -756,6 +756,36 @@ const SECTION_ALIASES = new Map([
   ['tekniske ferdigheter', 'skills'],
   ['interesser', 'interests'],
   ['fritidsinteresser', 'interests'],
+  // Indonesian (modes/id) — the same failure as the blocks around it: no
+  // Indonesian title resolved here, so cv.sections matched no section of an
+  // Indonesian CV and the order guard compared raw titles. "Keahlian",
+  // "Kompetensi" and "Riwayat karier" are the skills and career-history terms
+  // in modes/id/README.md; the rest are each section's everyday headings.
+  // "Profil" is already in the German block above.
+  ['ringkasan', 'summary'],
+  ['ringkasan profesional', 'summary'],
+  ['tentang saya', 'summary'],
+  ['kompetensi inti', 'competencies'],
+  ['kompetensi utama', 'competencies'],
+  ['pengalaman kerja', 'experience'],
+  ['pengalaman', 'experience'],
+  ['pengalaman profesional', 'experience'],
+  ['riwayat karier', 'experience'],
+  ['riwayat pekerjaan', 'experience'],
+  ['proyek', 'projects'],
+  ['proyek pilihan', 'projects'],
+  ['pendidikan', 'education'],
+  ['riwayat pendidikan', 'education'],
+  ['sertifikasi', 'certifications'],
+  ['sertifikat', 'certifications'],
+  ['penghargaan', 'awards'],
+  ['keahlian', 'skills'],
+  ['kompetensi', 'skills'],
+  ['keterampilan', 'skills'],
+  ['keahlian teknis', 'skills'],
+  ['keterampilan teknis', 'skills'],
+  ['minat', 'interests'],
+  ['hobi', 'interests'],
   // Chinese — the same failure the Polish block above fixes, for the two Chinese
   // markets this repo ships modes for: Traditional (modes/zh-TW) and Simplified
   // (modes/zh), rendered through templates/cv-template.zh-minimal.html. Both
@@ -822,6 +852,40 @@ const SECTION_ALIASES = new Map([
   ['技术栈', 'skills'],
   ['興趣', 'interests'],
   ['兴趣', 'interests'],
+  // Arabic (modes/ar) — the same failure as the blocks around it: no Arabic
+  // title resolved here, so cv.sections matched no section of an Arabic CV and
+  // the order guard compared raw titles. "مهارات" and "التاريخ المهني" /
+  // "الخبرات المهنية" are the skills and career-history terms in
+  // modes/ar/README.md; the rest are each section's everyday headings, with and
+  // without the definite article where both are common.
+  ['ملخص', 'summary'],
+  ['الملخص', 'summary'],
+  ['ملخص مهني', 'summary'],
+  ['نبذة', 'summary'],
+  ['نبذة عني', 'summary'],
+  ['الملف الشخصي', 'summary'],
+  ['الكفاءات الأساسية', 'competencies'],
+  ['الكفاءات', 'competencies'],
+  ['الخبرات المهنية', 'experience'],
+  ['الخبرة المهنية', 'experience'],
+  ['الخبرة العملية', 'experience'],
+  ['الخبرات العملية', 'experience'],
+  ['التاريخ المهني', 'experience'],
+  ['الخبرة', 'experience'],
+  ['المشاريع', 'projects'],
+  ['مشاريع', 'projects'],
+  ['التعليم', 'education'],
+  ['المؤهلات العلمية', 'education'],
+  ['المؤهل العلمي', 'education'],
+  ['الشهادات', 'certifications'],
+  ['الشهادات المهنية', 'certifications'],
+  ['الجوائز', 'awards'],
+  ['الجوائز والتكريمات', 'awards'],
+  ['المهارات', 'skills'],
+  ['مهارات', 'skills'],
+  ['المهارات التقنية', 'skills'],
+  ['الاهتمامات', 'interests'],
+  ['الهوايات', 'interests'],
   // Dutch (modes/nl) — the same failure as the blocks around it: no Dutch title
   // resolved here, so cv.sections matched no section of a Dutch CV and the
   // order guard compared raw titles. "Interesses" folds to the Portuguese key

@@ -5228,6 +5228,34 @@ async function main() {
   // description. See the title gate in the scan loop.
   const rescueTitleMisses = contentFilter.rescueTitleMisses === true;
   const titleGate = buildTitleGate(config.title_filter, contentFilter, titleFilter);
+
+  // #7244. A tracked_companies / job_boards entry may carry its own title_filter,
+  // which replaces the global filter for that entry only.
+  const entryTitleGates = new WeakMap();
+  const resolveEntryTitleGate = (entry) => {
+    const entryFilter = (entry?.title_filter && typeof entry.title_filter === 'object' && !Array.isArray(entry.title_filter))
+      ? entry.title_filter
+      : null;
+    if (!entryFilter) {
+      return { titleFilter, titleGate, rawFilter: config.title_filter };
+    }
+    const cached = entryTitleGates.get(entryFilter);
+    if (cached) return cached;
+
+    let raw = entryFilter;
+    // An entry without usable positive keywords keeps the global positives with or without negatives (#7244)
+    const hasEntryPositives = Array.isArray(raw.positive)
+      && raw.positive.some(k => typeof k === 'string' && k.trim().length > 0);
+    if (!hasEntryPositives && config.title_filter?.positive) {
+      raw = { ...raw, positive: config.title_filter.positive };
+    }
+
+    const tf = buildTitleFilter(raw);
+    const tg = buildTitleGate(raw, contentFilter, tf);
+    const compiled = { titleFilter: tf, titleGate: tg, rawFilter: raw };
+    entryTitleGates.set(entryFilter, compiled);
+    return compiled;
+  };
   const candidateCountry = loadCandidateCountry();
   const countryEligibilityFilter = buildCountryEligibilityFilter(config.country_eligibility_filter, candidateCountry);
   const visaFilter = buildVisaFilter(config.visa_filter);
@@ -5399,6 +5427,16 @@ async function main() {
       && (!Array.isArray(target.skip_tiers)
         || target.skip_tiers.some(t => typeof t !== 'string' || !TIERS.includes(t.toLowerCase())))) {
       exitOnConfigError(`${target.name}: skip_tiers must be a list of ${TIERS.join(', ')}, or [] to turn the tier filter off`);
+    }
+    if (target.title_filter !== undefined) {
+      if (!target.title_filter || typeof target.title_filter !== 'object' || Array.isArray(target.title_filter)) {
+        exitOnConfigError(`${target.name}: title_filter must be an object with positive and/or negative keyword lists`);
+      }
+      for (const key of Object.keys(target.title_filter)) {
+        if (!['positive', 'negative', 'seniority_boost'].includes(key)) {
+          exitOnConfigError(`${target.name}: title_filter.${key} is not a recognized key - expected one of positive, negative, seniority_boost`);
+        }
+      }
     }
   }
   const tierFilterActive = skipTiers.length > 0 || targets.some(t => entrySkipTiers(t).length > 0);
@@ -5598,7 +5636,7 @@ async function main() {
       // posting (Workday's multi-location detail GETs) and can skip postings
       // the title filter below will drop. Absent when this company's filter_on
       // leaves the title out, since then no title is dropped.
-      ...(normalizeFilterOn(company.filter_on).includes('title') ? { titleWanted: (title) => titleGate(title) === 'match' } : {}),
+      ...(normalizeFilterOn(company.filter_on).includes('title') ? { titleWanted: (title) => resolveEntryTitleGate(company).titleGate(title) === 'match' } : {}),
       idCache: idCaches.forProvider(provider.id),
     };
     applyEntryResponseCap(ctx, company);
@@ -5675,6 +5713,7 @@ async function main() {
 
       const declaredFields = normalizeFilterOn(company.filter_on);
       const companySkipTiers = entrySkipTiers(company);
+      const { titleGate: companyTitleGate, rawFilter: companyRawTitleFilter } = resolveEntryTitleGate(company);
       const orderedJobs = preferredLanguageRank ? orderByPreferredLanguage(jobs, preferredLanguageRank) : jobs;
       for (const job of orderedJobs) {
         const listingToken = refreshListingKey(job);
@@ -5733,7 +5772,7 @@ async function main() {
         let titleMissed = false;
         for (const field of declaredFields) {
           if (field === 'title') {
-            const verdict = titleGate(job.title);
+            const verdict = companyTitleGate(job.title);
             if (verdict === 'rescue') { titleMissed = true; continue; }
             if (verdict === 'reject') { failedField = field; break; }
           } else {
@@ -5806,7 +5845,7 @@ async function main() {
             continue;
           }
           totalRescuedByContent++;
-        } else if (!contentFilter(job.description, matchedTitleKeywords(job.title, config.title_filter))) {
+        } else if (!contentFilter(job.description, matchedTitleKeywords(job.title, companyRawTitleFilter))) {
           totalFilteredContent++;
           st.other++;
           continue;

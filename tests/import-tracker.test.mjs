@@ -271,6 +271,10 @@ function rerunFromElsewhere(fx, retry) {
   writeFileSync(join(fx.root, 'batch', 'batch-state.tsv'), BATCH_HEADER);
   const env = { ...process.env };
   for (const name of ['CAREER_OPS_ROOT', 'CAREER_OPS_DATA_DIR', 'CAREER_OPS_TRACKER', 'CAREER_OPS_BATCH_STATE', 'CAREER_OPS_ADDITIONS']) delete env[name];
+  // merge-tracker also reads the CHECKOUT's batch/batch-state.tsv (#6449), which this process cannot
+  // move without an override. Point it at the fixture's cleared file so a failed row left in a
+  // developer's own checkout cannot refuse the row (same isolation as #4742 and #4846).
+  env.CAREER_OPS_BATCH_STATE = join(fx.root, 'batch', 'batch-state.tsv');
   const rerun = spawnSync(getBash(), ['-c', retry], { encoding: 'utf-8', env, cwd: tmpdir(), timeout: 60_000 });
   assert.equal(rerun.status, 0, describeSpawn(rerun));
   assert.ok(rowFor(readFileSync(fx.trackerPath, 'utf-8'), 'Quillfeather Health'), 'the re-run adds the row to the same tracker');

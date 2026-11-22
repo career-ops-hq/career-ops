@@ -776,6 +776,19 @@ export function isRetryableError(err) {
   // third time. The size error carries no status, so without this it would
   // fall through to the network-error case below.
   if (err?.code === 'response_too_large') return false;
+  // A blocked address is a verdict about the host, not a transient failure: the
+  // same lookup resolves to the same private address next time. It carries no
+  // status, so without this it falls through to the network-error case and every
+  // blocked host costs three attempts and ~1.7 s of backoff per sweep.
+  //
+  // The code arrives on the error itself for a literal address, and on `cause`
+  // when the blocked lookup was what the request failed on: the guarded resolver
+  // hands the refusal to the connector, and fetch rejects with its own error whose
+  // cause is the verdict. Reading only the top level left the hostname path, which
+  // is the common one, still retrying.
+  if (err?.code === 'ECAREEROPS_BLOCKED_ADDRESS' || err?.cause?.code === 'ECAREEROPS_BLOCKED_ADDRESS') {
+    return false;
+  }
   // Checked after 429 / 5xx so a status the server actually sent still wins.
   if (err?.timedOut === true) return false;
   return status === undefined; // network error / abort that did not spend the timer

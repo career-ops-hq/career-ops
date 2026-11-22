@@ -34,12 +34,14 @@ function KeywordField({
   tone,
   placeholder,
   ariaLabel,
+  describedBy,
   onChange,
 }: {
   values: string[];
   tone: "inc" | "exc";
   placeholder: string;
   ariaLabel?: string;
+  describedBy?: string;
   onChange: (v: string[]) => void;
 }) {
   const [draft, setDraft] = useState("");
@@ -65,6 +67,7 @@ function KeywordField({
       ))}
       <input
         aria-label={ariaLabel}
+        aria-describedby={describedBy}
         value={draft}
         onChange={(e) => {
           const val = e.target.value;
@@ -94,6 +97,16 @@ function KeywordField({
       />
     </div>
   );
+}
+
+// A comma ends an entry unless the entry is quoted (#7424). The placeholder shows
+// that only while a box is empty, so the rule is also stated under the boxes, and
+// each location box names its hint in aria-describedby so a screen reader reads it.
+const QUOTE_HINT_CITY = "explore-quote-hint-city";
+const QUOTE_HINT_MORE = "explore-quote-hint-more";
+
+function QuoteHint({ id }: { id: string }) {
+  return <p id={id} className="mt-1 text-[11px] text-faint">An entry with a comma goes in double quotes: &quot;Portland, OR&quot;.</p>;
 }
 
 function Label({ children, hint }: { children: React.ReactNode; hint?: string }) {
@@ -168,8 +181,10 @@ export function FilterBuilder({
           tone="inc"
           placeholder='Toronto, "Portland, OR", Remote…'
           ariaLabel="City or location"
+          describedBy={QUOTE_HINT_CITY}
           onChange={(v) => set({ allow: v })}
         />
+        <QuoteHint id={QUOTE_HINT_CITY} />
       </div>
 
       {!employer && <div className="flex flex-wrap items-end gap-x-8 gap-y-4">
@@ -234,16 +249,17 @@ export function FilterBuilder({
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <Label hint="rescues a multi-location posting">Always include</Label>
-              <KeywordField ariaLabel="Always include" values={filters.alwaysAllow} tone="inc" placeholder="Toronto…" onChange={(v) => set({ alwaysAllow: v })} />
+              <KeywordField ariaLabel="Always include" describedBy={QUOTE_HINT_MORE} values={filters.alwaysAllow} tone="inc" placeholder="Toronto…" onChange={(v) => set({ alwaysAllow: v })} />
             </div>
             <div>
               <Label hint="unless Always include also matches">Exclude locations</Label>
-              <KeywordField ariaLabel="Exclude locations" values={filters.block} tone="exc" placeholder="India…" onChange={(v) => set({ block: v })} />
+              <KeywordField ariaLabel="Exclude locations" describedBy={QUOTE_HINT_MORE} values={filters.block} tone="exc" placeholder="India…" onChange={(v) => set({ block: v })} />
             </div>
           </div>
           <div>
             <Label hint="hard reject — overrides Always include">Never include</Label>
-            <KeywordField ariaLabel="Never include" values={filters.blockHard} tone="exc" placeholder="USA, Brazil…" onChange={(v) => set({ blockHard: v })} />
+            <KeywordField ariaLabel="Never include" describedBy={QUOTE_HINT_MORE} values={filters.blockHard} tone="exc" placeholder="USA, Brazil…" onChange={(v) => set({ blockHard: v })} />
+            <QuoteHint id={QUOTE_HINT_MORE} />
           </div>
           <div>
             <Label hint={`${filters.limitPerAts} companies / source`}>Scan depth</Label>
