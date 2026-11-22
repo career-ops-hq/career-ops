@@ -95,20 +95,43 @@ test('the CLI reads the user layer under CAREER_OPS_ROOT', () => {
   try {
     mkdirSync(join(dir, 'data'));
     mkdirSync(join(dir, 'reports'));
-    writeFileSync(join(dir, 'portals.yml'), 'title_filter:\n  positive:\n    - Inference\n    - Inference\n    - Quantization\n');
-    writeFileSync(join(dir, 'data', 'scan-history.tsv'), `${HEADER}\nhttps://x.example/1\t2026-10-01\tgh\tInference Engineer\tA\tadded\n`);
+    writeFileSync(join(dir, 'portals.yml'), `title_filter:
+  positive: [Inference, Inference, Quantization]
+tracked_companies:
+  - name: Research Labs
+    title_filter:
+      positive: [Librarian]
+  - name: A
+    title_filter:
+      negative: [Intern]
+`);
+    writeFileSync(join(dir, 'data', 'scan-history.tsv'), [
+      HEADER,
+      'https://x.example/1\t2026-10-01\tgh\tInference Engineer\tA\tadded',
+      'https://x.example/2\t2026-10-01\tgh\tResearch Librarian\tResearch Labs\tadded',
+      'https://x.example/3\t2026-10-01\tgh\tInference Engineer\tResearch Labs\tadded',
+      '',
+    ].join('\n'));
     writeFileSync(join(dir, 'reports', '001-a-2026-10-02.md'), '**URL:** https://x.example/1\n**Score:** 3.5/5\n');
+    writeFileSync(join(dir, 'reports', '002-research-2026-10-02.md'), '**URL:** https://x.example/2\n**Score:** 4.5/5\n');
     const env = { ...process.env, CAREER_OPS_ROOT: dir };
     delete env.CAREER_OPS_PORTALS;
     delete env.CAREER_OPS_SCAN_HISTORY;
     const json = JSON.parse(execFileSync(process.execPath, [SCRIPT], { env, encoding: 'utf-8', timeout: 20000 }));
-    assert.equal(json.offers, 1);
+    assert.equal(json.offers, 3);
+    assert.equal(json.globalOffers, 1);
+    assert.equal(json.unmatchedRows, 1, 'a global keyword does not match inside a company override');
+    assert.equal(json.globalUnmatchedRows, 0);
+    assert.deepEqual(json.companyFilters.map(c => [
+      c.company, c.offers, c.unmatchedRows, c.rows[0].keyword, c.rows[0].unique, c.rows[0].avgScore,
+    ]), [['Research Labs', 2, 1, 'Librarian', 1, 4.5]]);
     assert.deepEqual(json.dead, ['Quantization']);
     assert.deepEqual(json.duplicates, ['Inference']);
     assert.equal(json.rows.find((r) => r.keyword === 'Inference').avgScore, 3.5);
     const text = execFileSync(process.execPath, [SCRIPT, '--summary'], { env, encoding: 'utf-8', timeout: 20000 });
     assert.match(text, /DUPLICATE \(1\)/);
     assert.match(text, /NEVER MATCHED \(1\)/);
+    assert.match(text, /COMPANY: Research Labs[\s\S]*4\.5.*Librarian/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
