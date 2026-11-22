@@ -14,16 +14,24 @@ test("readJsonObject with maxBytes refuses a body over the limit", async () => {
 });
 
 test("readJsonObject with maxBytes counts bytes as they stream in, not only a declared length", async () => {
-  const chunk = new TextEncoder().encode('{"a":"' + "x".repeat(60));
-  const stream = new ReadableStream({
-    start(c) {
-      c.enqueue(chunk);
-      c.enqueue(chunk);
-      c.close();
-    },
-  });
-  const req = new Request("http://127.0.0.1/api/x", { method: "POST", body: stream, duplex: "half" });
-  assert.equal(await readJsonObject(req, { maxBytes: 100 }), null);
+  // One valid JSON object (about 140 bytes) split across two chunks, so a rejection can only
+  // come from the byte count, never from a parse error.
+  const whole = new TextEncoder().encode(JSON.stringify({ a: "x".repeat(130) }));
+  const half = Math.floor(whole.length / 2);
+  const streamed = () =>
+    new Request("http://127.0.0.1/api/x", {
+      method: "POST",
+      duplex: "half",
+      body: new ReadableStream({
+        start(c) {
+          c.enqueue(whole.slice(0, half));
+          c.enqueue(whole.slice(half));
+          c.close();
+        },
+      }),
+    });
+  assert.deepEqual(await readJsonObject(streamed(), { maxBytes: 1000 }), { a: "x".repeat(130) });
+  assert.equal(await readJsonObject(streamed(), { maxBytes: 100 }), null);
 });
 
 test("readJsonObject without maxBytes behaves as before", async () => {
