@@ -89,11 +89,8 @@ function readStore(file) {
 export async function radar(root, app, input, { extract = fetchPosting, now = () => new Date().toISOString() } = {}) {
   if (!app || !/^\d+$/.test(String(app.id)) || !app.company || !app.title) throw new Error('A tracked application with company and title is required');
   if (!['load', 'check', 'baseline', 'review'].includes(input.action)) throw new Error('Unknown Radar action');
-  // A report number is added later, so keep the tracker identity stable across
-  // the application's whole lifetime and retain the report-keyed store as a
-  // migration source for existing installations.
+  // Keep tracker identity stable when the application later gains a report.
   const identity = `tracker:${app.id}:${app.company}:${app.title}`;
-  const reportIdentity = app.reportNum ? `report:${app.reportNum}` : null;
   const directory = safe(root, path.join(root, 'data', 'role-change-radar'));
   fs.mkdirSync(directory, { recursive: true });
   const file = safe(root, path.join(directory, `${hashText(identity)}.json`));
@@ -102,46 +99,6 @@ export async function radar(root, app, input, { extract = fetchPosting, now = ()
   try {
     let state = readStore(file) || { version: 1, identity, baseline: null, captures: [], comparisons: [], lastCheck: null };
     if (state.identity !== identity) throw new Error('Radar application identity does not match saved state');
-    if (reportIdentity) {
-      const legacyFile = safe(root, path.join(directory, `${hashText(reportIdentity)}.json`));
-      const legacy = legacyFile !== file ? readStore(legacyFile) : null;
-      if (legacy?.identity === reportIdentity) {
-        const targetBaseline = state.baseline;
-        const migrationBaseline = legacy.baseline;
-        if (!targetBaseline && migrationBaseline) state.baseline = migrationBaseline;
-        for (const capture of legacy.captures) {
-          if (!state.captures.some(c => c.hash === capture.hash && c.source === capture.source)) state.captures.push(capture);
-        }
-        const retainedBaseline = state.baseline;
-        const baselinesDiffer = Boolean(
-          retainedBaseline?.hash
-          && migrationBaseline?.hash
-          && retainedBaseline.hash !== migrationBaseline.hash
-        );
-        for (const comparison of legacy.comparisons) {
-          if (!state.comparisons.some(c => c.captureHash === comparison.captureHash && c.source === comparison.source && c.checkedAt === comparison.checkedAt)) {
-            let id = comparison.id;
-            if (state.comparisons.some(c => c.id === id)) id = `${comparison.checkedAt}-${state.comparisons.length}`;
-            if (baselinesDiffer) {
-              const capture = state.captures.find(c => c.hash === comparison.captureHash && c.source === comparison.source);
-              if (capture) {
-                state.comparisons.push({
-                  ...comparison,
-                  id,
-                  reviewedAt: null,
-                  ...compareDescriptions(retainedBaseline.text, capture.text),
-                });
-              }
-            } else {
-              state.comparisons.push({ ...comparison, id });
-            }
-          }
-        }
-        state.comparisons.sort((a, b) => String(a.checkedAt || '').localeCompare(String(b.checkedAt || ''))
-          || String(a.id || '').localeCompare(String(b.id || '')));
-        if (!state.lastCheck && legacy.lastCheck) state.lastCheck = legacy.lastCheck;
-      }
-    }
     if (!state.baseline) state.baseline = discoverBaseline(root, app);
     if (input.action === 'review') {
       const comparison = state.comparisons.find(c => c.id === input.comparisonId);
