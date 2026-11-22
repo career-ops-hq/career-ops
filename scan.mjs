@@ -5154,6 +5154,15 @@ async function main() {
   const sinceDays = since.days;
 
   const effectiveAfter = resolveEffectiveAfter(postedAfter, sinceDays);
+  // Each bound is a valid date on its own, but a lower bound past the upper
+  // one leaves an empty window: every dated posting is filtered out and the
+  // run reports it as an ordinary "Filtered by posted date" count. Swapped
+  // dates or a mistyped year are the same typo the checks above exist for.
+  if (effectiveAfter && postedBefore && effectiveAfter > postedBefore) {
+    const lower = postedAfter === effectiveAfter ? `--posted-after ${postedAfter}` : `--since ${sinceDays} (from ${effectiveAfter})`;
+    console.error(`Error: ${lower} is later than --posted-before ${postedBefore}, so no dated posting can match`);
+    process.exit(1);
+  }
 
   // 1. Load providers
   const providers = await loadProviders(PROVIDERS_DIR);
