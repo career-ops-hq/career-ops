@@ -83,10 +83,12 @@ function ensureGitignored() {
   // accidentally commit it. Only manages the default, non-overridden path, and
   // only when the data root is the code checkout: a separate data root (an
   // environment variable, the marker, a plugin install) is not that checkout's
-  // working tree, and a plugin copy's .gitignore is not ours to edit.
-  if (!DATA_ROOT || resolvePath(DATA_ROOT) !== resolvePath(CODE_ROOT)) return;
-  const gitignore = join(DATA_ROOT, '.gitignore');
+  // working tree, and a plugin copy's .gitignore is not ours to edit. Compare
+  // real paths: CAREER_OPS_ROOT may name a symlink to the checkout itself.
+  if (!DATA_ROOT) return;
   try {
+    if (realpathSync(DATA_ROOT) !== realpathSync(CODE_ROOT)) return;
+    const gitignore = join(DATA_ROOT, '.gitignore');
     if (!existsSync(gitignore)) return; // not a git checkout we should touch
     const text = readFileSync(gitignore, 'utf8');
     if (text.split('\n').some((l) => l.trim() === DEFAULT_REL)) return; // already ignored
