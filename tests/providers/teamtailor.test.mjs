@@ -324,6 +324,40 @@ try {
   }
 
   {
+    // A raised CAREER_OPS_HTTP_TIMEOUT_MS (60 s) shrinks both limits: from about 6 s in
+    // a page gets a single attempt, and no page starts after 190 s, so the last one
+    // still ends before the sweep's watchdog.
+    const realNow = Date.now;
+    const prevTimeout = process.env.CAREER_OPS_HTTP_TIMEOUT_MS;
+    let clock = 0;
+    Date.now = () => clock;
+    process.env.CAREER_OPS_HTTP_TIMEOUT_MS = '60000';
+    try {
+      let calls = 0;
+      const failing = await quietly(() => teamtailor.fetch({ ...acme, max_pages: 50 }, mkCtx(async (url) => {
+        if (offsetOf(url) === 0) { clock = 100_000; return feedOf(0, 100); } // page 1 ends 100 s in
+        calls++;
+        throw Object.assign(new Error('HTTP 429 Too Many Requests'), { status: 429, retryAfter: '32' });
+      })));
+      if (calls === 1 && failing.out.truncated?.reason === 'fetch-error') pass('teamtailor.fetch() scales the single-attempt window to the configured request timeout');
+      else fail(`60 s timeout, page 2 at 100 s: ${calls} attempts, truncated=${JSON.stringify(failing.out.truncated)}`);
+      clock = 0;
+      let requests = 0;
+      const slow = await quietly(() => teamtailor.fetch({ ...acme, max_pages: 50 }, mkCtx(async (url) => {
+        requests++;
+        clock += 100_000;
+        return feedOf(offsetOf(url), 100);
+      })));
+      if (requests === 2 && slow.out.length === 200 && slow.out.truncated?.reason === 'time-budget') pass('teamtailor.fetch() shortens its time budget to the configured request timeout');
+      else fail(`60 s timeout, 100 s pages: ${requests} requests, ${slow.out.length} jobs, truncated=${JSON.stringify(slow.out.truncated)}`);
+    } finally {
+      Date.now = realNow;
+      if (prevTimeout === undefined) delete process.env.CAREER_OPS_HTTP_TIMEOUT_MS;
+      else process.env.CAREER_OPS_HTTP_TIMEOUT_MS = prevTimeout;
+    }
+  }
+
+  {
     // An empty <item/> still counts toward a full page: 99 usable items plus one empty one
     // is a full page, so the next offset is requested.
     const log = [];

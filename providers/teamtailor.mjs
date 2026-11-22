@@ -1,6 +1,6 @@
 // @ts-check
 import { decodeEntities } from './_html-entities.mjs';
-import { fetchTextWithRetry, sleep } from './_http.mjs';
+import { fetchTextWithRetry, resolveDefaultTimeoutMs, sleep } from './_http.mjs';
 import { markTruncated } from '../lib/board-truncation.mjs';
 /** @typedef {import('./_types.js').Provider} Provider */
 
@@ -25,13 +25,13 @@ import { markTruncated } from '../lib/board-truncation.mjs';
 // with a 200, or a body cut off before `</channel>`) is a failed page, not a
 // short one: an error on the first page, a partial board on a later one.
 //
-// A walk is also bounded by its own wall-clock budget (WALK_BUDGET_MS). The
-// sweep in scan-ats-full.mjs gives one board 5 minutes and, when that fires,
-// discards everything the board had read (the provider only sees an abort at
-// that same instant, too late to hand pages back). So the walk stops itself
-// before then and returns the pages already read, marked partial. Pages in the
-// budget's last stretch get a single attempt, so the one in flight when it runs
-// out cannot sit in retry waits past the watchdog.
+// A walk is also bounded by its own wall-clock budget. The sweep in
+// scan-ats-full.mjs gives one board 5 minutes and, when that fires, discards
+// everything the board had read (the provider only sees an abort at that same
+// instant, too late to hand pages back). So the walk stops itself before then
+// and returns the pages already read, marked partial. The budget is sized from
+// the request timeout, so the page in flight when it runs out, retries
+// included, still ends before the watchdog (see WALK_END_MS).
 //
 // Auto-detects `https://<slug>.teamtailor.com/...` careers URLs. Many tenants
 // front the same feed on a branded domain (e.g. careers.acme.com also serves
@@ -94,14 +94,13 @@ const PAGE_SIZE = 100;           // items `/jobs.rss` serves per request
 const DEFAULT_MAX_PAGES = 20;    // 20 * 100 = 2,000 postings, when the entry sets no max_pages
 const MAX_PAGES_CAP = 100;       // hard ceiling even for a user override (10,000 postings)
 const INTER_PAGE_DELAY_MS = 250;
-// Under the 5-minute per-board watchdog of scan-ats-full.mjs (COMPANY_TIMEOUT_MS),
-// leaving room for the page in flight and for processJobs.
-const WALK_BUDGET_MS = 4 * 60_000;
-// With the shared retry defaults one page can take about a minute and a half:
-// three attempts of the 10 s request timeout plus two Retry-After waits, which
-// _http.mjs clamps at 32 s each. A page started this close to the end of the
-// budget is fetched once, so the walk still ends well inside the watchdog.
-const LAST_STRETCH_MS = 90_000;
+// The walk is over by this point, 50 s inside the 5-minute per-board watchdog of
+// scan-ats-full.mjs (COMPANY_TIMEOUT_MS), which leaves room for processJobs.
+const WALK_END_MS = 5 * 60_000 - 50_000;
+// The shared retry policy (RETRY_DEFAULTS and withRetry in _http.mjs): two
+// retries, each after a Retry-After wait that withRetry clamps at 32 s.
+const RETRIES = 2;
+const RETRY_WAIT_CAP_MS = 32_000;
 
 /** @param {import('./_types.js').PortalEntry} entry */
 function resolveMaxPages(entry) {
@@ -142,6 +141,13 @@ export default {
     const jobs = [];
     const seen = new Set();
     const seenItems = new Set(); // raw item identities, before any row is dropped
+    // Each attempt may run for the request timeout (10 s, or
+    // CAREER_OPS_HTTP_TIMEOUT_MS when set). A page starts only while one attempt
+    // still ends by WALK_END_MS (4 minutes into the walk at 10 s), and retries only
+    // while its worst case, three attempts and two waits, does too.
+    const attemptMs = resolveDefaultTimeoutMs(process.env.CAREER_OPS_HTTP_TIMEOUT_MS);
+    const budgetMs = WALK_END_MS - attemptMs;
+    const retryUntilMs = WALK_END_MS - (RETRIES + 1) * attemptMs - RETRIES * RETRY_WAIT_CAP_MS;
     const startedAt = Date.now();
     // Why the walk stopped: 'complete' (short or empty page), 'cap' (page
     // budget ran out on a full page), 'offset-ignored' (a full page made only
@@ -153,14 +159,14 @@ export default {
     let page = 0;
     for (; page < pagesToFetch; page++) {
       if (page > 0) {
-        if (Date.now() - startedAt >= WALK_BUDGET_MS) {
+        if (Date.now() - startedAt >= budgetMs) {
           stopReason = 'time-budget';
           break;
         }
         await sleep(INTER_PAGE_DELAY_MS, ctx);
       }
       const pageUrl = page === 0 ? feedUrl : `${feedUrl}?offset=${page * PAGE_SIZE}`;
-      const lastStretch = Date.now() - startedAt >= WALK_BUDGET_MS - LAST_STRETCH_MS;
+      const lastStretch = Date.now() - startedAt >= retryUntilMs;
       let text;
       try {
         text = await fetchTextWithRetry(ctx, pageUrl, { redirect: 'error' }, lastStretch ? { retries: 0 } : {});
@@ -207,7 +213,7 @@ export default {
       console.error(`⚠️  teamtailor: ${company} truncated at max_pages=${maxPages} (${jobs.length} jobs) — ${advice}`);
       markTruncated(jobs, 'page-cap', { fetched: jobs.length });
     } else if (stopReason === 'time-budget') {
-      console.error(`⚠️  teamtailor: ${company} stopped at page ${page} of ${maxPages} after ${Math.round(WALK_BUDGET_MS / 60_000)} minutes (${jobs.length} jobs read, the rest of the board was not reached)`);
+      console.error(`⚠️  teamtailor: ${company} stopped at page ${page} of ${maxPages} after its ${Math.round(budgetMs / 1000)} s time budget (${jobs.length} jobs read, the rest of the board was not reached)`);
       markTruncated(jobs, 'time-budget', { fetched: jobs.length });
     } else if (stopReason === 'fetch-error') {
       markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
