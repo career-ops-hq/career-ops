@@ -32,7 +32,7 @@ import { num } from './lib/api.mjs';
 import * as localBackend from './lib/index.mjs';
 import { readCache, writeCache } from './lib/cache.mjs';
 import { classifyTier } from './lib/tier.mjs';
-import { CONTROL_CHARS, cleanForDisplay } from './lib/clean.mjs';
+import { cleanForDisplay } from './lib/clean.mjs';
 
 // Set once main() has chosen a backend. Null while unchosen and after a failed
 // choice, which is what lets the error handler report a source of null instead

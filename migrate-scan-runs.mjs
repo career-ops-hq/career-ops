@@ -174,6 +174,59 @@ export async function writeMigrated(target, snapshot, text, lockOptions = {}) {
   }, lockOptions);
 }
 
+/**
+ * Migrate the text read from `target`, print the summary, and with `apply`
+ * write the result. Returns the process exit code: 0, or 2 when the write was
+ * refused because the file changed after it was read.
+ *
+ * The --json summary prints after the write, so `applied` reports what
+ * happened rather than what was attempted. A refused write used to print
+ * `applied: true` and then exit 2.
+ *
+ * @param {string} target - Path to scan-runs.tsv.
+ * @param {string} before - Text the migration is computed from.
+ * @param {{apply?: boolean, asJson?: boolean, lockOptions?: object,
+ *   log?: (line: string) => void, error?: (line: string) => void}} [options]
+ * @returns {Promise<number>}
+ */
+export async function runMigration(target, before, {
+  apply = false, asJson = false, lockOptions = {}, log = console.log, error = console.error,
+} = {}) {
+  const result = migrateScanRuns(before);
+
+  if (!asJson) {
+    if (result.refused) {
+      log(`Refused: ${result.refused} (${target})`);
+    } else if (!result.changed) {
+      log(`Already on the current schema: ${target}`);
+    } else {
+      log(`${target}`);
+      log(`  header migrated: ${result.headerMigrated}`);
+      log(`  rows migrated:   ${result.migratedRows}`);
+      log(`  rows passed through (unrecognized width): ${result.passedThrough}`);
+      log(apply ? `  applying — original saved to ${target}.bak` : '  dry run — nothing written. Re-run with --apply to write.');
+    }
+  }
+
+  let applied = false;
+  let code = 0;
+  if (apply && result.changed) {
+    const { written, reason } = await writeMigrated(target, before, result.text, lockOptions);
+    if (written) {
+      applied = true;
+    } else {
+      error(`Refused to write ${target}: ${reason}. A scan most likely appended a run `
+        + 'while this was migrating. Nothing was changed — re-run the command.');
+      code = 2;
+    }
+  }
+
+  if (asJson) {
+    log(JSON.stringify({ file: target, applied, ...result, text: undefined }, null, 2));
+  }
+  return code;
+}
+
 if (isMainModule(import.meta.url)) {
   const argv = process.argv.slice(2);
   const fileArg = flagValue(argv, '--file');
@@ -207,29 +260,6 @@ Options:
     process.exit(1);
   }
 
-  const before = readFileSync(target, 'utf-8');
-  const result = migrateScanRuns(before);
-
-  if (asJson) {
-    console.log(JSON.stringify({ file: target, applied: apply && result.changed, ...result, text: undefined }, null, 2));
-  } else if (result.refused) {
-    console.log(`Refused: ${result.refused} (${target})`);
-  } else if (!result.changed) {
-    console.log(`Already on the current schema: ${target}`);
-  } else {
-    console.log(`${target}`);
-    console.log(`  header migrated: ${result.headerMigrated}`);
-    console.log(`  rows migrated:   ${result.migratedRows}`);
-    console.log(`  rows passed through (unrecognized width): ${result.passedThrough}`);
-    console.log(apply ? `  applying — original saved to ${target}.bak` : '  dry run — nothing written. Re-run with --apply to write.');
-  }
-
-  if (apply && result.changed) {
-    const { written, reason } = await writeMigrated(target, before, result.text);
-    if (!written) {
-      console.error(`Refused to write ${target}: ${reason}. A scan most likely appended a run `
-        + 'while this was migrating. Nothing was changed — re-run the command.');
-      process.exit(2);
-    }
-  }
+  const code = await runMigration(target, readFileSync(target, 'utf-8'), { apply, asJson });
+  if (code) process.exit(code);
 }
