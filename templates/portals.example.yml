@@ -2543,7 +2543,8 @@ search_queries:
 # entry only (with dedup_include_language off).
 #
 # Teamtailor auto-detects from a <slug>.teamtailor.com careers host and reads
-# the public no-auth /jobs.rss feed — e.g.:
+# the public no-auth /jobs.rss feed (100 postings per request, so it is paged
+# with ?offset= up to max_pages, default 20, hard ceiling 100) — e.g.:
 #
 #   - name: Example Co
 #     careers_url: https://example.teamtailor.com
