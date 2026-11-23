@@ -7,12 +7,11 @@
 // over a destination that already exists and can be held open by a transient
 // reader (AV scanner, Search indexer, a concurrent readFileSync).
 //
-// This test used to pin five hand-picked files. Eleven more write-tmp-then-
-// rename sites (scan.mjs atomicWriteFile, capture-jd.mjs, dead-boards.mjs,
-// plugins/_lock.mjs, career-profile.mjs, learn.mjs, sponsor-check.mjs,
-// plugins.mjs, and the .part renames in backup.mjs, install-latex-engine.mjs
-// and batch/jd-rescue.mjs) kept calling bare renameSync because nothing listed them. The set is now
-// DERIVED from the files git ships, the way tests/lock-rm-contention.test.mjs
+// This test used to pin five hand-picked files. Ten more write-tmp-then-rename
+// sites (scan.mjs atomicWriteFile, capture-jd.mjs, dead-boards.mjs,
+// career-profile.mjs, learn.mjs, sponsor-check.mjs, plugins.mjs, and the .part
+// renames in backup.mjs, install-latex-engine.mjs and batch/jd-rescue.mjs) kept
+// calling bare renameSync because nothing listed them. The set is now DERIVED from the files git ships, the way tests/lock-rm-contention.test.mjs
 // derives its lock-body scan: every shipped core module is forbidden a direct
 // renameSync call, except the files in EXEMPT below, each with its reason.
 // A new site fails here instead of waiting for the next census.
@@ -45,6 +44,10 @@ const EXEMPT = {
   // Renames inside a freshly created temp/scaffold directory, and the first
   // call already has a tolerant catch with an in-place fallback.
   'plugin-install.mjs': 'renames inside a directory it just created',
+  // doctor.mjs loads it through plugins/_engine.mjs and must run before
+  // `npm install` (tests/doctor-without-node-modules.test.mjs), while
+  // tracker-utils.mjs pulls in js-yaml.
+  'plugins/_lock.mjs': 'loaded by doctor.mjs without node_modules',
 };
 
 // Every core module git ships. The suites are out (fixtures rename by hand on
@@ -55,16 +58,46 @@ const shipped = trackedFiles(ROOT, (rel) => rel.endsWith('.mjs')
   .map((abs) => abs.slice(ROOT.length + 1).replace(/\\/g, '/'));
 
 // Comments are stripped first: explaining the bare call is not making it.
-const withoutComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+// String and template literals are copied through untouched, so the `//` in
+// 'https://...' does not swallow the code after it on the same line.
+function withoutComments(src) {
+  let out = '';
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (c === '/' && src[i + 1] === '/') {
+      while (i < src.length && src[i] !== '\n') i++;
+      out += '\n';
+    } else if (c === '/' && src[i + 1] === '*') {
+      const end = src.indexOf('*/', i + 2);
+      i = end === -1 ? src.length : end + 1;
+    } else if (c === "'" || c === '"' || c === '`') {
+      const start = i;
+      for (i++; i < src.length && src[i] !== c; i++) if (src[i] === '\\') i++;
+      out += src.slice(start, i + 1);
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
 
-// `renameSync(`, `fs.renameSync(`, and an aliased import (`renameSync as mv`).
-const DIRECT_CALL = /(?<![\w.])renameSync\s*\(|\bfs\.renameSync\s*\(|\brenameSync\s+as\s+\w+/;
+// `renameSync(`, a call through any namespace (`fs.renameSync(`,
+// `disk.renameSync(` after `import * as disk`), and a renamed binding
+// (`renameSync as mv`, `{ renameSync: mv } = fs`).
+const DIRECT_CALL = /(?<![\w$])renameSync\s*\(|\brenameSync\s+as\s+[\w$]+|\brenameSync\s*:\s*[\w$]+/;
 const SEAM_CALL = /\b(?:renameSyncWithRetry|writeFileAtomic)\s*\(/;
 
 // A guard that cannot look must never pass.
 ok(shipped.length > 100, `scanned ${shipped.length} shipped .mjs files (the guard can see the tree)`);
 ok(DIRECT_CALL.test('fs.renameSync(tmp, file)'), 'the scan recognizes fs.renameSync(');
+ok(DIRECT_CALL.test('disk.renameSync(tmp, file)'), 'the scan recognizes a namespace alias (disk.renameSync()');
+ok(DIRECT_CALL.test('const { renameSync: mv } = fs;'), 'the scan recognizes a destructured rename binding');
 ok(!DIRECT_CALL.test('renameSyncWithRetry(tmp, file)'), 'the scan does not flag renameSyncWithRetry(');
+ok(
+  DIRECT_CALL.test(withoutComments("const url = 'https://example.com'; renameSync(tmp, file);")),
+  'a // inside a string does not hide the call after it',
+);
+ok(!DIRECT_CALL.test(withoutComments('// renameSync(tmp, file)\n/* renameSync(a, b) */')), 'comments are not calls');
 
 const directCallers = shipped.filter((rel) =>
   DIRECT_CALL.test(withoutComments(readFileSync(join(ROOT, rel), 'utf-8'))));
