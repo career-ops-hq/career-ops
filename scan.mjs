@@ -191,6 +191,8 @@ export const VERIFY_CONCURRENCY = 10;
 
 export function companyFetchHost(company) {
   try {
+    const group = company?._provider?.fetchConcurrencyGroup;
+    if (group) return `provider:${company._provider.id}`;
     const declared = company?._provider?.fetchHost?.(company);
     if (typeof declared === 'string' && declared.trim()) return declared.trim().toLowerCase();
     const detected = company?._provider?.detect?.(company);
@@ -203,6 +205,22 @@ export function companyFetchHost(company) {
   } catch {
     return '';
   }
+}
+
+export function companyFetchPoolOptions(targets, hostLimit = HOST_CONCURRENCY) {
+  const limits = new Map();
+  const hosts = targets.map((target) => {
+    const host = companyFetchHost(target);
+    const groupLimit = target?._provider?.fetchConcurrencyGroup?.limit;
+    if (Number.isSafeInteger(groupLimit) && groupLimit > 0) {
+      limits.set(host, Math.min(hostLimit, groupLimit));
+    }
+    return host;
+  });
+  return {
+    hostOf: (_task, index) => hosts[index],
+    hostLimit: (host) => limits.get(host) ?? hostLimit,
+  };
 }
 const PROGRESS_EVERY = 25;
 
@@ -4678,7 +4696,6 @@ export async function parallelFetch(tasks, limit, onDone = () => {}, { hostOf = 
 
   const n = tasks.length;
   if (n === 0 || !(limit > 0)) return [];
-  const perHost = Math.max(1, hostLimit);
   const hosts = tasks.map((task, index) => {
     try {
       const host = hostOf(task, index);
@@ -4687,6 +4704,11 @@ export async function parallelFetch(tasks, limit, onDone = () => {}, { hostOf = 
       return '';
     }
   });
+  const hostCaps = new Map();
+  for (const host of new Set(hosts.filter(Boolean))) {
+    const cap = typeof hostLimit === 'function' ? hostLimit(host) : hostLimit;
+    hostCaps.set(host, Math.max(1, cap));
+  }
   const results = new Array(n);
   const pending = hosts.map((_, index) => index);
   const hostActive = new Map();
@@ -4699,7 +4721,7 @@ export async function parallelFetch(tasks, limit, onDone = () => {}, { hostOf = 
       const index = pending[k];
       const host = hosts[index];
       // An empty host is not a bucket. Unknown URLs must not share one cap.
-      if (host && (hostActive.get(host) || 0) >= perHost) continue;
+      if (host && (hostActive.get(host) || 0) >= hostCaps.get(host)) continue;
       pending.splice(k, 1);
       return index;
     }
@@ -6013,10 +6035,7 @@ async function main() {
   };
 
   const companyFetches = async () => {
-    await parallelFetch(tasks, SCAN_CONCURRENCY, progressTicker(tasks.length), {
-      hostLimit: HOST_CONCURRENCY,
-      hostOf: (_task, index) => companyFetchHost(targets[index]),
-    });
+    await parallelFetch(tasks, SCAN_CONCURRENCY, progressTicker(tasks.length), companyFetchPoolOptions(targets));
     await retryTransientFailures();
   };
   if (process.env.CAREER_OPS_HTTP_CACHE === '0') {
