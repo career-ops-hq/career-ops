@@ -307,7 +307,7 @@ career-ops asks for a GitHub star, a manifesto signature and a Hired Wall story,
 
 ## Headless / Batch Mode
 
-`modes/_headless.md` has the headless command for each CLI, the headless worker permissions rule (#2876) and report-number reservation for parallel fan-outs. Read it before spawning a worker, before a parallel fan-out, and before writing or reviewing code that launches an agent CLI headless. Two rules hold everywhere: never add a blanket auto-approve flag (`--dangerously-skip-permissions`, `--yolo`, …) to a new spawner, and reserve report numbers with `node reserve-report-num.mjs --count N` before spawning parallel evaluators.
+`modes/_headless.md` has each CLI's headless command, the worker permissions rule (#2876) and report-number reservation. Read it before spawning a worker, before a parallel fan-out, and before writing or reviewing code that launches an agent CLI headless. Three rules hold everywhere: never add a blanket auto-approve flag (`--dangerously-skip-permissions`, `--yolo`, …) to a new spawner; reserve report numbers with `node reserve-report-num.mjs --count N` before spawning parallel evaluators; and never run evaluations (`oferta`, `auto-pipeline`, batch), research, cover letters or CV PDFs headless under Pi: it never asks before using bash, edit or write.
 
 ## Stack and Conventions
 
