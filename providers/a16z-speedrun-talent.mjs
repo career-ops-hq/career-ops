@@ -1,6 +1,7 @@
 // @ts-check
 import { fetchJsonWithRetry } from './_http.mjs';
 import { coerceId } from './_ids.mjs';
+import { workplaceField } from './_workplace-type.mjs';
 import { markTruncated } from '../lib/board-truncation.mjs';
 
 /** @typedef {import('./_types.js').Provider} Provider */
@@ -90,13 +91,14 @@ function toEpochMs(value) {
  *               "speedrun talent network". Unannounced roles arrive already
  *               masked as "Stealth" by the feed.
  *   - location: `location`; "Remote" is appended when `remote` is true.
+ *   - workplaceType: `workplace_type` (Remote, Hybrid, OnSite); omitted when null.
  *   - postedAt: `published_at` ISO date → epoch ms (omitted when absent or
  *               unparseable).
  *   - externalId: `id`, the feed's own posting id (omitted when absent).
  *
  * @param {any} j
  * @param {string} [fallbackCompany]
- * @returns {{ title: string, url: string, company: string, location: string, postedAt?: number, externalId?: string } | null}
+ * @returns {{ title: string, url: string, company: string, location: string, workplaceType?: 'remote' | 'hybrid' | 'onsite', postedAt?: number, externalId?: string } | null}
  */
 export function normalizeSpeedrunJob(j, fallbackCompany) {
   if (!j || typeof j !== 'object') return null;
@@ -126,8 +128,11 @@ export function normalizeSpeedrunJob(j, fallbackCompany) {
   const base = typeof j.location === 'string' ? j.location.trim() : '';
   const location = [base, j.remote === true ? 'Remote' : ''].filter(Boolean).join(', ');
 
-  /** @type {{ title: string, url: string, company: string, location: string, postedAt?: number, externalId?: string }} */
+  /** @type {{ title: string, url: string, company: string, location: string, workplaceType?: 'remote' | 'hybrid' | 'onsite', postedAt?: number, externalId?: string }} */
   const job = { title, url, company, location };
+  // `workplace_type` is "Remote", "Hybrid", "OnSite" or "Onsite", and null when
+  // the poster gave none.
+  Object.assign(job, workplaceField(j.workplace_type));
   const postedAt = toEpochMs(j.published_at);
   if (postedAt !== undefined) job.postedAt = postedAt;
   const externalId = coerceId(j.id);
