@@ -123,13 +123,25 @@ Declared paths must name their file directly. An absolute path, a path that leav
 
 Every declared template must carry the placeholders `validateTemplate` requires, and must pass `renderLint`: a script, remote asset or other construct the renderer drops fails the pack, with no advisory tier.
 
-Run it against the pack directory:
+The validator lives in career-ops and imports `./cv-templates.mjs` and `./lib/is-main-module.mjs`, so a pack checkout does not contain it. Run it from a career-ops checkout, after `npm install --ignore-scripts` there, and pass the pack directory:
 
 ```bash
-node validate-template-pack.mjs <pack-dir>
+node <career-ops-checkout>/validate-template-pack.mjs <pack-dir>
 ```
 
-It exits 0 and prints `✓ template pack is valid` when the pack passes. It exits 1 with one `✗` line per problem on stderr, and 2 when no directory is given. `--help` prints the usage. Fix every line, then run it again; the same command is the check to put in the pack's own CI.
+It exits 0 and prints `✓ template pack is valid` when the pack passes. It exits 1 with one `✗` line per problem on stderr, and 2 when no directory is given. `--help` prints the usage. Fix every line, then run it again.
+
+To check a pack in its own CI, have the job check out career-ops next to the pack and run that same command. For example, in GitHub Actions:
+
+```yaml
+- uses: actions/checkout@v4
+- uses: actions/checkout@v4
+  with:
+    repository: career-ops-hq/career-ops
+    path: career-ops
+- run: npm install --ignore-scripts --prefix career-ops
+- run: node career-ops/validate-template-pack.mjs .
+```
 
 ### resume-template.html
 
