@@ -298,8 +298,14 @@ async function doImport(args) {
         // Content-derived IDs can move between same-heading jobs when facts
         // are added. Match their evidence before allowing an ID to be reused.
         const prior = exact ?? (overlapping.length === 1 ? overlapping[0] : undefined);
-        const duplicateHeading = sameHeading.length > 1 || extracted[key].filter((candidate) => entityHeadingKey(candidate) === heading).length > 1;
+        const otherOccurrences = extracted[key].filter((candidate) => candidate !== original && entityHeadingKey(candidate) === heading);
+        const duplicateHeading = sameHeading.length > 1 || otherOccurrences.length > 0;
+        const competingOverlap = !exact && prior && otherOccurrences.some((occurrence) => {
+          const evidence = new Set(occurrence.facts.map(evidenceKey));
+          return prior.facts.some((fact) => evidence.has(evidenceKey(fact)));
+        });
         if (exactMatches.length > 1 || (!exact && overlapping.length > 1) || (prior && migratedIds.has(prior.id))
+            || competingOverlap
             || (!prior && duplicateHeading && existingItems.some((candidate) => candidate.id === item.id))) {
           throw new Error(`Import rejected: ambiguous ${key} identity for "${item.label}"; existing profile was not changed.`);
         }

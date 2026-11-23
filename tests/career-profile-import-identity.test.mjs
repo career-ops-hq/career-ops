@@ -139,6 +139,20 @@ scenario('skipping a duplicate heading cannot assign another job its content-der
   assert.equal(readFileSync(file, 'utf8'), before);
 });
 
+scenario('an approved job cannot absorb a stored job claimed by a skipped occurrence', ({ importCv, file }) => {
+  const stored = '# Candidate\n## Experience\n### Example Co — Analyst\n- Shared result.\n- Built beta reports.\n';
+  assert.equal(importCv(stored, 'y\ny\ny\n').status, 0);
+  const before = readFileSync(file, 'utf8');
+  const alpha = stored.replace('Built beta reports.', 'Built alpha pipelines.');
+  const skipped = '### Example Co — Analyst\n- Shared result.\n- Built beta reports.\n';
+  for (const other of [skipped, skipped + '- Verified another beta report.\n']) {
+    const result = importCv(alpha + other, 'y\ny\ny\nn\n');
+    assert.equal(result.status, 1, 'the skipped occurrence competes for the stored job');
+    assert.match(result.stderr, /ambiguous.*identity/i);
+    assert.equal(readFileSync(file, 'utf8'), before, 'ambiguous import changed the profile');
+  }
+});
+
 scenario('changing the heading level preserves the matching job and its approved label', ({ importCv, profile }) => {
   const first = importCv(initial, 'e\nExample Co — Approved Alpha\ny\ne\nExample Co — Approved Beta\ny\n');
   assert.equal(first.status, 0, first.stderr);
