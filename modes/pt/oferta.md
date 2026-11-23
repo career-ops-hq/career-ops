@@ -715,7 +715,7 @@ Salvar avaliação completa em `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 (lista de 15-20 keywords do JD para otimização ATS)
 
 ## Keyword Coverage
-(auto-gerado por `keyword-match.mjs` (1b) — % de cobertura, presente, fino, ausente)
+(auto-gerado por `keyword-match.mjs` (1b) — % de cobertura, presente, ausente)
 
 ## Job Description (archived verbatim)
 (o texto completo da vaga, colado verbatim — veja requisito abaixo)
