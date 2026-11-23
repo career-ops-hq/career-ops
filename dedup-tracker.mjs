@@ -23,7 +23,7 @@ import {
   stripStatusDecoration, appendLedgerRows,
   resolveWorkspaceRoot, containedReportFile, reportUrlToken,
 } from './tracker-utils.mjs';
-import { resolveColumns, parseTrackerRow, isUnsetUrlCell, normalizeVia, extractReqNumber, parseScore, normalizeTextKey } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, isUnsetUrlCell, normalizeVia, extractReqNumber, extractTrackerReportLinks, parseScore, normalizeTextKey } from './tracker-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
@@ -165,7 +165,7 @@ function extractReportNum(reportStr) {
  * Determine whether two tracker rows point to the same exact report identity.
  *
  * Exact identity is stronger than fuzzy role matching: it may cluster rows
- * even when an advanced status is present. Matching bracketed report numbers
+ * even when an advanced status is present. Matching local report targets
  * are that evidence. A shared tracker number alone is NOT — duplicate tracker
  * numbers are a known artifact of the old merge bug (verify-pipeline Check 12
  * exists because they never mean the same application), so a bare number match
@@ -176,9 +176,7 @@ function extractReportNum(reportStr) {
  * @returns {boolean} True when both rows represent the same report identity.
  */
 function sameReportIdentity(a, b) {
-  const reportA = extractReportNum(a.report);
-  const reportB = extractReportNum(b.report);
-  if (reportA !== null && reportA === reportB) return true;
+  if (a.reportTarget != null && a.reportTarget === b.reportTarget) return true;
   return a.num === b.num && normalizeRole(a.role) === normalizeRole(b.role);
 }
 
@@ -337,7 +335,7 @@ function reqNumsConflict(a, b) {
  * Decide whether two same-company tracker rows should be deduplicated.
  *
  * Rows merge only when they describe the same opening: either the exact same
- * report identity (same tracker number or bracketed report number), or an exact
+ * report identity (same tracker number and title, or the same report target), or an exact
  * role-title match after normalizing case and whitespace. Fuzzy title matching
  * is deliberately NOT used here — it collapsed distinct sibling roles at one
  * company (e.g. "Software Engineer, Data Infrastructure" vs "Senior Software
@@ -449,6 +447,8 @@ for (let i = 0; i < lines.length; i++) {
   const app = parseAppLine(lines[i]);
   if (app && app.num > 0) {
     app.lineIdx = i;
+    const targets = new Set(extractTrackerReportLinks(app.report).map(link => link.target));
+    app.reportTarget = targets.size === 1 ? targets.values().next().value : null;
     entries.push(app);
   }
 }
