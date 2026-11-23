@@ -27,6 +27,7 @@ function doctor(dir, args = ['--json']) {
       CAREER_OPS_ROOT: dir,
       CAREER_OPS_DATA_DIR: '',
       CAREER_OPS_PIPELINE: '',
+      CAREER_OPS_PORTALS: join(dir, 'portals.yml'),
       CAREER_OPS_CLI: 'claude',
     },
   });
@@ -83,6 +84,31 @@ test('--json leaves an empty data root empty with shipped templates available', 
   assert.equal(result.missing.length, 4);
   assert.deepEqual(result.autoCopied, []);
   assert.deepEqual(readdirSync(dir), []);
+});
+
+test('--json requests onboarding when either YAML prerequisite has no settings', (t) => {
+  const dir = fixture(t);
+  mkdirSync(join(dir, 'config'));
+  mkdirSync(join(dir, 'modes'));
+  writeFileSync(join(dir, 'cv.md'), '# Example Candidate\n');
+  writeFileSync(join(dir, 'modes/_profile.md'), 'Personalized targeting\n');
+  const prereqs = {
+    'config/profile.yml': 'candidate: { full_name: Example Candidate }\n',
+    'portals.yml': 'tracked_companies: []\n',
+  };
+  for (const [path, content] of Object.entries(prereqs)) writeFileSync(join(dir, path), content);
+  assert.equal(state(dir).onboardingNeeded, false);
+
+  for (const [path, content] of Object.entries(prereqs)) {
+    writeFileSync(join(dir, path), '# Settings go here\n');
+    const before = snapshot(dir);
+    const result = state(dir);
+    assert.equal(result.onboardingNeeded, true, path);
+    assert.deepEqual(result.missing, []);
+    assert.ok(result.unpersonalized.some((entry) => entry.path === path));
+    assert.deepEqual(snapshot(dir), before);
+    writeFileSync(join(dir, path), content);
+  }
 });
 
 test('a plain run still creates the data skeleton', (t) => {

@@ -403,15 +403,13 @@ export async function pdfPathForReport(n: string): Promise<string | null> {
 export type LifecyclePhase = "first-run" | "in-between" | "established";
 /**
  * Server-side lifecycle, mirroring the core doctor.mjs prerequisite list with the
- * SAME existsSync semantics (the SSOT the OnboardingBanner already reads via
- * /api/doctor). The 4 user-layer prereqs: cv.md, config/profile.yml,
+ * same missing-file and empty-YAML checks. The 4 user-layer prereqs: cv.md, config/profile.yml,
  * modes/_profile.md, portals.yml (or CAREER_OPS_PORTALS).
  *   - first-run  → a TRULY empty install (no cv AND no data): the CV takeover.
  *     CRITICAL back-compat (maintainer): NEVER force onboarding on a user who
  *     already has data (a full pipeline/tracker with no cv.md is valid).
  *   - in-between → has cv/data but setup incomplete: dashboard + the nudge banner.
- *   - established → all 4 prereqs present.
- * onboardingNeeded mirrors doctor.mjs: true if ANY prereq is missing → show banner.
+ *   - established → all 4 prereqs present and both YAML files contain settings.
  */
 /** Absolute portals.yml path: CAREER_OPS_PORTALS when set, else <root>/portals.yml. */
 export function portalsConfigPath(root = careerOpsRoot(), env: NodeJS.ProcessEnv = process.env): string {
@@ -427,16 +425,6 @@ export function doctorState(snapshot?: Pick<PipelineSummary, "applications" | "i
   hasData: boolean;
 } {
   const root = careerOpsRoot();
-  const has = (rel: string) => {
-    try {
-      // The profile is where getProfilePath() says, not always <root>/config/profile.yml,
-      // so this agrees with core's `node doctor.mjs --json` under CAREER_OPS_PROFILE.
-      const file = rel === "config/profile.yml" ? getProfilePath(root) : path.join(root, rel);
-      return fs.existsSync(file);
-    } catch {
-      return false;
-    }
-  };
   // Keep this list shaped like doctor.mjs USER_LAYER_PREREQS so the #2369
   // freeze in test-all.mjs can grep the paths. portals.yml alone resolves
   // through portalsConfigPath (CAREER_OPS_PORTALS when set).
@@ -446,24 +434,44 @@ export function doctorState(snapshot?: Pick<PipelineSummary, "applications" | "i
     ["modes/_profile.md", "modes/_profile.md"],
     ["portals.yml", "portals.yml"],
   ];
-  const missing = prereqs
-    .filter(([rel]) => {
-      if (rel === "portals.yml") {
-        try {
-          return !fs.existsSync(portalsConfigPath(root));
-        } catch {
-          return true;
-        }
+  const missing: string[] = [];
+  let emptyYaml = false;
+  for (const [rel, label] of prereqs) {
+    let file: string;
+    try {
+      if (rel === "portals.yml") file = portalsConfigPath(root);
+      else if (rel === "config/profile.yml") file = getProfilePath(root);
+      else file = path.join(root, rel);
+    } catch {
+      missing.push(label);
+      continue;
+    }
+    if (!fs.existsSync(file)) {
+      missing.push(label);
+      continue;
+    }
+    if (rel === "config/profile.yml" || rel === "portals.yml") {
+      try {
+        // Mirror core's hasYamlContent. Malformed or unreadable files are
+        // diagnosed elsewhere and must not be offered for replacement.
+        const source = fs.readFileSync(file, "utf8");
+        const hasContent = source.split("\n").some((line) => {
+          const trimmed = line.trim();
+          return trimmed !== "" && !trimmed.startsWith("#");
+        });
+        const value = hasContent ? yaml.load(source) : null;
+        emptyYaml ||= value == null || (Object.prototype.toString.call(value) === "[object Object]" && Object.keys(value as object).length === 0);
+      } catch {
+        // Match doctor.mjs when a file exists but cannot be read.
       }
-      return !has(rel);
-    })
-    .map(([, label]) => label);
-  const hasCv = has("cv.md");
+    }
+  }
+  const hasCv = !missing.includes("cv.md");
   // Home already reads these files. Reuse that snapshot so its setup check
   // neither parses the tracker twice nor disagrees with the rendered queue.
   const hasData = (snapshot?.applications ?? readApplications()).length > 0 ||
     (snapshot?.inbox ?? readInbox()).some((j) => !j.done);
-  const onboardingNeeded = missing.length > 0;
+  const onboardingNeeded = missing.length > 0 || emptyYaml;
   const phase: LifecyclePhase = !hasCv && !hasData ? "first-run" : onboardingNeeded ? "in-between" : "established";
   return { phase, onboardingNeeded, missing, hasCv, hasData };
 }
