@@ -53,8 +53,8 @@ export function sweepEvaluationInstructions(root, now = Date.now()) {
     if (!entry.isDirectory() || !entry.name.startsWith(".evaluation-instructions-")) continue;
     const dir = path.join(root, entry.name);
     const { pid, host } = ownerRecord(dir);
+    if (host && host !== os.hostname()) continue;
     if (pid !== null) {
-      if (host && host !== os.hostname()) continue;
       if (!processIsAlive(pid)) removeInstructionDir(dir);
       continue;
     }

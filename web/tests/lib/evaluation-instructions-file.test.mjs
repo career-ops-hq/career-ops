@@ -117,10 +117,22 @@ test("a dead run's instruction directory is removed and a live one stays", async
   fs.writeFileSync(path.join(otherHost, "owner.json"), `${JSON.stringify({ pid: deadPid, host: "other-host.example" })}\n`);
   fs.writeFileSync(path.join(otherHost, "instructions.md"), "elsewhere");
 
+  const otherHostNoPid = fs.mkdtempSync(path.join(root, ".evaluation-instructions-"));
+  fs.writeFileSync(path.join(otherHostNoPid, "owner.json"), `${JSON.stringify({ pid: null, host: "other-host.example" })}\n`);
+  fs.writeFileSync(path.join(otherHostNoPid, "instructions.md"), "elsewhere-no-pid");
+  fs.utimesSync(otherHostNoPid, past, past);
+
+  const sameHostNoPid = fs.mkdtempSync(path.join(root, ".evaluation-instructions-"));
+  fs.writeFileSync(path.join(sameHostNoPid, "owner.json"), `${JSON.stringify({ pid: null, host: os.hostname() })}\n`);
+  fs.writeFileSync(path.join(sameHostNoPid, "instructions.md"), "same-host");
+  fs.utimesSync(sameHostNoPid, past, past);
+
   sweepEvaluationInstructions(root);
 
   assert.equal(fs.existsSync(deadDir), false);
   assert.equal(fs.readFileSync(path.join(otherHost, "instructions.md"), "utf8"), "elsewhere");
+  assert.equal(fs.readFileSync(path.join(otherHostNoPid, "instructions.md"), "utf8"), "elsewhere-no-pid");
+  assert.equal(fs.existsSync(sameHostNoPid), false);
   assert.equal(fs.readFileSync(path.join(liveDir, "instructions.md"), "utf8"), "live");
   assert.equal(fs.existsSync(young), true);
   assert.equal(fs.existsSync(old), false);
