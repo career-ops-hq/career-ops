@@ -501,7 +501,7 @@ const NOUN_SYNONYMS = new Map([
 // is not a currency. A bare "pound(s)" is left out because it is also a weight.
 const MAGNITUDE_ALT = String.raw`(?:\s?(?:thousand|million|billion)\b|\s?[kKmMbB](?![\p{L}]))`;
 const SIMPLE_CLAIM_PATTERNS = [
-  /\b\d+(?:\.\d+)?[^\S\n]?(?:%|(?:percent|per\s?cent|pct)\b)/gi,
+  /\b\d+(?:[.,]\d+)?[^\S\n]?(?:%|(?:percent|per\s?cent|pct)\b)/gi,
   /(?<![\p{L}\p{N}])%\d+(?:[.,]\d+)?(?![\p{L}\p{N}])/gu,
   new RegExp(String.raw`(?<![\w$€£])[$€£]\s?\d[\d,.]*(?:\s?(?:thousand|million|billion)\b|\s?[kKmMbB])?`, 'gu'),
   new RegExp(String.raw`(?:\b(?:USD|EUR|GBP)|\bUS\$)\s?\d[\d,.]*${MAGNITUDE_ALT}?`, 'gu'),
@@ -527,11 +527,9 @@ const CURRENCY_SYMBOLS = new Map([
  * @returns {string}
  */
 function canonicalMetric(raw) {
-  const prefix = /^%(\d+(?:[.,]\d+)?)$/.exec(raw);
-  if (prefix) return prefix[1].replace(',', '.') + '%';
+  const percent = /^(?:%(\d+(?:[.,]\d+)?)|(\d+(?:[.,]\d+)?)\s*(?:%|percent|per\s?cent|pct))$/i.exec(raw.trim());
+  if (percent) return (percent[1] ?? percent[2]).replace(',', '.') + '%';
   const claim = normalizeClaim(raw);
-  const percent = /^(\d+(?:\.\d+)?) ?(?:%|percent|per ?cent|pct)$/.exec(claim);
-  if (percent) return `${percent[1]}%`;
   const multiplier = /^(\d+(?:\.\d+)?) ?(?:x|-? ?fold)$/.exec(claim);
   if (multiplier) return `${multiplier[1]}x`;
   const amount = String.raw`(\d[\d.]*)(?: ?(thousand|million|billion|[kmb]))?`;
@@ -3819,7 +3817,7 @@ function sourceFileLines(path, text) {
  * past metric into the plan set.
  */
 const PAST_TIME_CLAIM_RE = /\b(?:have|has|had|spent|worked)\s+(?:[\p{L}\p{M}-]+\s+){0,4}\d[\d,.]*\s*\+?\s*(?:months|years|weeks|days)\b/giu;
-const PAST_PERCENT_CLAIM_RE = /\b(?:grew|increased|improved|reduced|generated|achieved|delivered|managed|led)\b[^.!?;\n]{0,80}?\d[\d,.]*\s*(?:%|(?:percent|per\s?cent|pct)\b)/giu;
+const PAST_PERCENT_CLAIM_RE = /\b(?:grew|increased|improved|reduced|generated|achieved|delivered|managed|led)\b[^.!?;\n]{0,80}?(?:%\d+(?:[.,]\d+)?|\d[\d,.]*\s*(?:%|(?:percent|per\s?cent|pct)\b))/giu;
 const DURATION_INTRO_RE = /^\s*(?:over|in|within|for|during|across)\b[^,;:]*?\d[\d,.]*\s*\+?\s*(?:days|weeks|months|years)\s*$/i;
 // Recognize Turkish plans only where the number directly modifies the
 // planned change. A later intention cannot license an earlier percentage.
