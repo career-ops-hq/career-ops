@@ -659,10 +659,13 @@ try {
 
   const durations = ['P7D', 'P2W', 'P1M', 'PT12H', 'P1DT12H', 'P1Y2M3DT4H5M6S'];
   const badDurations = ['7d', 'P', 'PT', 'P7', 'P1DT', '7', 'week', 'P-1D', 7, true];
-  const accepted = await Promise.all(durations.map((d) => walkRun({ consider_posted_since: d }, { pages: 1, total: 2 })));
+  // walkRun swaps the process-wide console.error, so the runs go one at a time.
+  const accepted = [];
+  for (const d of durations) accepted.push(await walkRun({ consider_posted_since: d }, { pages: 1, total: 2 }));
   if (accepted.every((r, i) => !r.thrown && r.queries[0]?.postedSince === durations[i])) pass('consider.fetch() accepts ISO 8601 durations for consider_posted_since');
   else fail(`consider.fetch() durations: ${JSON.stringify(accepted.map((r) => r.thrown?.message ?? r.queries[0]))}`);
-  const rejected = await Promise.all(badDurations.map((d) => walkRun({ consider_posted_since: d })));
+  const rejected = [];
+  for (const d of badDurations) rejected.push(await walkRun({ consider_posted_since: d }));
   if (rejected.every((r) => r.thrown?.message.includes('consider_posted_since must be an ISO 8601 duration') && r.metas.length === 0)) pass('consider.fetch() refuses a consider_posted_since that is not an ISO 8601 duration, before any request');
   else fail(`consider.fetch() bad durations: ${JSON.stringify(rejected.map((r) => [r.thrown?.message, r.metas.length]))}`);
   const blank = await walkRun({ consider_posted_since: '' }, { pages: 1, total: 2 });
