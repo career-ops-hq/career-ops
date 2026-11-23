@@ -3,10 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Sparkles, X, Settings } from "lucide-react";
-import { SETUP_BANNER_KEY, bannerStaysDismissed, setupBannerDismissKey } from "@/lib/home/setup-banner.mjs";
+import { SETUP_BANNER_KEY, bannerStaysDismissed, setupBannerDismissKey, setupPaths } from "@/lib/home/setup-banner.mjs";
 import { readSavedCliId, resolveCliId } from "@/lib/saved-cli";
 
-type Doctor = { available: boolean; onboardingNeeded: boolean; missing: string[]; warnings: string[] };
+type Doctor = { available: boolean; onboardingNeeded: boolean; missing: string[]; unpersonalized?: { path: string; reason: string }[]; warnings: string[] };
 
 const LABELS: Record<string, string> = {
   "cv.md": "your CV",
@@ -43,7 +43,7 @@ export function OnboardingBanner() {
         .then((doctor: Doctor) => {
           setD(doctor);
           try {
-            setDismissed(bannerStaysDismissed(localStorage.getItem(SETUP_BANNER_KEY), doctor.missing));
+            setDismissed(bannerStaysDismissed(localStorage.getItem(SETUP_BANNER_KEY), setupPaths(doctor)));
           } catch {
             // A blocked storage read just shows the banner again.
             setDismissed(false);
@@ -60,7 +60,8 @@ export function OnboardingBanner() {
   }, []);
 
   if (dismissed || !d || !d.onboardingNeeded) return null;
-  const items = d.missing.map((m) => LABELS[m] ?? m);
+  const paths = setupPaths(d);
+  const items = paths.map(path => LABELS[path] ? LABELS[path] + " (" + path + ")" : path);
   const kickoff =
     `Help me finish setting up career-ops. I still need to add ${items.join(", ")} — walk me through just those, conversationally, and write the files for me. Don't ask me for anything that's already set up (for example, don't ask for my CV if it's already saved).`;
 
@@ -69,7 +70,7 @@ export function OnboardingBanner() {
       <button
         onClick={() => {
           try {
-            localStorage.setItem(SETUP_BANNER_KEY, setupBannerDismissKey(d.missing));
+            localStorage.setItem(SETUP_BANNER_KEY, setupBannerDismissKey(paths));
           } catch {
             // Dismiss still hides the banner for this visit.
           }

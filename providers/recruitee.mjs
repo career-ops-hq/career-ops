@@ -8,6 +8,7 @@
 // regex match on `<safe-slug>.recruitee.com` rather than a static
 // allowlist.
 
+import { employmentTypeField } from './_employment-type.mjs';
 import { departmentTeamFields } from './_department-team.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 
@@ -516,6 +517,8 @@ export function parseRecruiteeResponse(json, companyName, { allLanguages = false
         ...(salary ? { salary } : {}),
         ...(version.language ? { language: version.language } : {}),
         ...(listingIdentity ? { listingIdentity } : {}),
+        // employment_type_code: "fulltime_permanent", "parttime_fixed_term", "contract", "internship", "freelance"
+        ...employmentTypeField(j.employment_type_code),
       });
     }
   }

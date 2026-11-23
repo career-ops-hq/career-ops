@@ -143,7 +143,7 @@ export function flaggedPosting(legitimacy) {
  */
 export function applyLineLabel(score, legitimacy) {
   if (score == null || score === "") return null;
-  const n = typeof score === "number" ? score : Number(String(score).match(/(\d+(?:\.\d+)?)/)?.[1]);
+  const n = typeof score === "number" ? score : Number(String(score).match(/(\d+(?:[.,]\d+)?)/)?.[1]?.replace(",", "."));
   if (!Number.isFinite(n)) return null;
   if (n < APPLY_LINE) return "Below the apply line";
   return flaggedPosting(legitimacy) ? "Check the posting first" : "Recommended";

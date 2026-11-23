@@ -755,7 +755,7 @@ I am happy to discuss further at your convenience.
 (列出 15-20 个从 JD 中提取的高频核心技术/业务关键词，用于简历优化)
 
 ## Keyword Coverage
-(由 `keyword-match.mjs` 命令在步骤 1b 中打印 —— 覆盖率 %、present、thin、missing)
+(由 `keyword-match.mjs` 命令在步骤 1b 中打印 —— 覆盖率 %、present、missing)
 
 ## Job Description (archived verbatim)
 （职位描述全文，逐字粘贴——见下方要求）
@@ -809,7 +809,7 @@ process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1
 
 默认情况下它扫描基础 `cv.md` —— 把输出当作**定制前的 gap 列表**读（告诉你在定制时需要织入哪些 JD 关键词），而不是对你**将要发送**文档的裁定；输出里会标明它扫描的是哪份。要核验最终的定制 CV，往 JSON 里加 `"cv": "{path}"`（`pdf` 模式对生成的 HTML 这样做）。
 
-**仅诊断：** 它标出 missing/thin 关键词，让用户决定补什么。绝不编造 —— 只有当某个关键词真实反映用户的经验时才补（见 `modes/_shared.md`）。
+**仅诊断：** 它列出未匹配的关键词。简历可能用其他措辞描述同一项技能。绝不编造 —— 只有当某个关键词真实反映用户的经验时才补（见 `modes/_shared.md`）。
 
 ### 2. 登记到 tracker
 

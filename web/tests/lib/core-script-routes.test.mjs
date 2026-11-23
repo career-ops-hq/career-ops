@@ -191,7 +191,7 @@ test("census: the routes driven above are every route that calls execFile", () =
 // doctor: "the check didn't answer" is never "you're all set up".
 // ---------------------------------------------------------------------------
 
-const UNAVAILABLE = { available: false, onboardingNeeded: false, missing: [], warnings: [] };
+const UNAVAILABLE = { available: false, onboardingNeeded: false, missing: [], unpersonalized: [], warnings: [] };
 
 test("doctor reports unavailable when its child fails without output", async () => {
   // Given the doctor dies the way 0xC0000142 kills it: non-zero, nothing printed
@@ -229,16 +229,15 @@ test("doctor reports unavailable when the payload carries no onboarding verdict"
 test("doctor still relays a real verdict, including that onboarding is needed", async () => {
   // Given a healthy doctor that finds cv.md missing (a banner line before the
   // payload must not matter: the verdict is the last line)
-  standIn(
-    "doctor",
-    'console.log("banner");' +
-      'console.log(JSON.stringify({ onboardingNeeded: true, missing: ["cv.md"], warnings: ["w"] }));',
-  );
+  const unpersonalized = [{ path: "portals.yml", reason: "has no settings (empty or only comments)" }];
+  const verdict = { onboardingNeeded: true, missing: ["cv.md"], unpersonalized, warnings: ["w"] };
+  standIn("doctor", `console.log("banner"); console.log(JSON.stringify(${JSON.stringify(verdict)}));`);
   const { GET } = await route("doctor");
   assert.deepEqual((await call(GET)).body, {
     available: true,
     onboardingNeeded: true,
     missing: ["cv.md"],
+    unpersonalized,
     warnings: ["w"],
   });
 });

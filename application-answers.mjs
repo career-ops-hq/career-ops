@@ -501,10 +501,19 @@ export function upsertApplicationAnswersSection(reportText, snapshot = {}) {
   return updated.endsWith('\n') ? updated : `${updated}\n`;
 }
 
+const ANSWER_FLAGS = new Set([
+  '--help', '-h', '--read', '--read-draft', '--strict',
+  '--report', '--input', '--state', '--date',
+]);
+
 function parseArgs(argv) {
   const args = {};
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
+    if (arg.startsWith('-')) {
+      const name = arg.split('=')[0];
+      if (!ANSWER_FLAGS.has(name)) throw new Error(`Unrecognized flag: ${name}`);
+    }
     if (arg === '--help' || arg === '-h') args.help = true;
     else if (arg === '--read') args.read = true;
     else if (arg === '--read-draft') args.readDraft = true;

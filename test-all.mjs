@@ -1373,9 +1373,15 @@ try {
     visibleMetric,
     '<html><body><p>Improved onboarding for 918273645 users.</p></body></html>'
   );
+  // The suite pins CAREER_OPS_ROOT at a temp dir with no cv.md. Without a
+  // source file the script exits 1 and says so, and a check that only looks
+  // at the status reports that as "script contents were visible".
+  writeFileSync(join(tmp, 'cv.md'), '# Jordan Example\n\n- Led a team of 4 engineers.\n');
+  const factEnv = { ...process.env, CAREER_OPS_ROOT: tmp, CAREER_OPS_DATA_DIR: '' };
 
   const hiddenResult = run(NODE, ['verify-cv-facts.mjs', hiddenScriptMetric], {
     stdio: ['pipe', 'pipe', 'pipe'],
+    env: factEnv,
   });
   if (hiddenResult !== null) {
     pass('verify-cv-facts strips script tags with irregular closing tags');
@@ -1385,6 +1391,7 @@ try {
 
   const visibleResult = run(NODE, ['verify-cv-facts.mjs', visibleMetric], {
     stdio: ['pipe', 'pipe', 'pipe'],
+    env: factEnv,
   });
   if (visibleResult === null) {
     pass('verify-cv-facts still flags visible unsupported metrics');
@@ -16274,9 +16281,6 @@ try {
   if (r.present.includes('Python')) pass('keyword coverage: exact match (Python)');
   else fail('keyword coverage: Python should be present');
 
-  if (!r.thin.includes('Python')) pass('keyword coverage: count>1 keyword not flagged thin (Python x2)');
-  else fail('keyword coverage: Python appears twice and must not be thin');
-
   if (r.present.includes('Kubernetes')) pass('keyword coverage: synonym match (k8s -> Kubernetes)');
   else fail('keyword coverage: Kubernetes should match via k8s synonym');
 
@@ -16295,8 +16299,8 @@ try {
   if (r.missing.includes('gRPC')) pass('keyword coverage: genuine miss reported (gRPC)');
   else fail('keyword coverage: gRPC should be missing');
 
-  if (r.thin.includes('observability')) pass('keyword coverage: count-1 keyword flagged thin (observability)');
-  else fail('keyword coverage: observability should be thin');
+  if (r.present.includes('observability')) pass('keyword coverage: one occurrence counts as present (observability)');
+  else fail('keyword coverage: one mention of observability should count as present');
 
   if (r.coveragePct === 80) pass('keyword coverage: percentage computed correctly (8/10 = 80%)');
   else fail(`keyword coverage: percentage wrong: ${r.coveragePct} (expected 80)`);
@@ -19662,25 +19666,25 @@ try {
     fail('docs/SCRIPTS.md missing the exit-code semantics for check-table-freshness');
   }
 
-  const agentsDoc = readFile('AGENTS.md');
-  // Only the table under the Main Files heading counts: the name in prose,
-  // another table or a fenced example does not list the script there.
-  const agentsLines = agentsDoc.split(/\r?\n/);
-  const mainFilesHeading = agentsLines.indexOf('### Main Files');
+  // The Main Files table moved from AGENTS.md to modes/_files.md (#6693).
+  // Only the table under its heading counts: the name in prose, another table
+  // or a fenced example does not list the script there.
+  const filesLines = readFile('modes/_files.md').split(/\r?\n/);
+  const mainFilesHeading = filesLines.indexOf('## Scripts and data files');
   const mainFilesRows = [];
-  for (const line of mainFilesHeading < 0 ? [] : agentsLines.slice(mainFilesHeading + 1)) {
+  for (const line of mainFilesHeading < 0 ? [] : filesLines.slice(mainFilesHeading + 1)) {
     if (line.startsWith('|')) mainFilesRows.push(line);
     else if (mainFilesRows.length > 0 || line.trim() !== '') break;
   }
   if (mainFilesRows.some((row) => row.startsWith('| `check-table-freshness.mjs` |'))) {
-    pass('AGENTS.md Main Files table lists check-table-freshness.mjs');
+    pass('modes/_files.md Main Files table lists check-table-freshness.mjs');
   } else {
-    fail('AGENTS.md Main Files table missing check-table-freshness.mjs');
+    fail('modes/_files.md Main Files table missing check-table-freshness.mjs');
   }
   if (mainFilesRows.some((row) => row.startsWith('| `add-entry.mjs` |'))) {
-    pass('AGENTS.md Main Files table lists add-entry.mjs');
+    pass('modes/_files.md Main Files table lists add-entry.mjs');
   } else {
-    fail('AGENTS.md Main Files table missing add-entry.mjs');
+    fail('modes/_files.md Main Files table missing add-entry.mjs');
   }
 
   // Read-only import boundary: the ONLY fs capabilities the script may hold

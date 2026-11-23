@@ -73,9 +73,9 @@
  *                               The posting's employment type, normalized by
  *                               `normalizeEmploymentType()` in
  *                               `_employment-type.mjs` from the source's own
- *                               field (Himalayas `employmentType`, We Work
- *                               Remotely `<type>`, Remotive `job_type`, Ashby
- *                               `employmentType`, Lever `categories.commitment`).
+ *                               field; templates/portals.example.yml
+ *                               (employment_type_filter) lists the providers
+ *                               that set it and the field each reads.
  *                               Set ONLY from a dedicated field, never read out
  *                               of the title or description. Omitted when the
  *                               source has no such field or its value names no
@@ -360,7 +360,9 @@
  * @property {{limit: number}} [fetchConcurrencyGroup]                      Optional.
  *   A parallel board scan limit shared by every entry for this provider,
  *   including entries that use different hostnames.
- * @property {(entry: PortalEntry, ctx: Context) => Promise<Job[]>} fetch      Required.
+ * @property {(entry: PortalEntry, ctx: Context) => Promise<Job[] & {queryScope?: {config: string, queries: string[]}}>} fetch
+ *   Required. Attach queryScope when the returned jobs cover keyword queries
+ *   only, even when every query was read to completion.
  * @property {((job: Job) => (string | null))} [dedupKey]                     Optional. A
  *   provider-scoped identifier for a job, precise where URL normalization
  *   isn't — e.g. a Workday requisition ID, so the same posting served under
