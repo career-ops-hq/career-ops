@@ -44,3 +44,13 @@ test('a healthy variant and no variants add no warning, and onboarding is unchan
   assert.ok(!none.warnings.some((w) => w.includes('cv-variants')));
   assert.equal(doctorJson(target({ 'broken.md': 'x' })).onboardingNeeded, none.onboardingNeeded);
 });
+
+test('a cv.variants mapping to a missing file, an invalid entry or a duplicate is a warning', () => {
+  const dir = target({ 'ok.md': CV });
+  mkdirSync(join(dir, 'config'), { recursive: true });
+  writeFileSync(join(dir, 'config', 'profile.yml'), 'cv:\n  variants:\n    ghost: ["Ghost"]\n    bad: "x"\n    ok: ["Same"]\n    dup: ["same"]\n');
+  const text = doctorJson(dir).warnings.join('\n');
+  assert.match(text, /ghost/);
+  assert.match(text, /bad/);
+  assert.match(text, /archetype/i);
+});
