@@ -31,6 +31,7 @@ function workspace(variants = {}) {
   const root = mkdtempSync(join(tmpdir(), 'co-variants-'));
   writeFileSync(join(root, 'cv.md'), CV);
   mkdirSync(join(root, 'data', 'cv-variants'), { recursive: true });
+  mkdirSync(join(root, 'config'), { recursive: true });
   for (const [file, text] of Object.entries(variants)) writeFileSync(join(root, 'data', 'cv-variants', file), text);
   return root;
 }
@@ -80,6 +81,13 @@ test('reordering and omitting cv.md content is clean', () => {
 
 test('an added claim is a facts problem', () => {
   const root = workspace({ 'a.md': OMIT_AND_REORDER.replace('Led a team of 3 engineers', 'Led a team of 30 engineers and grew revenue 250%') });
+  const types = checkVariant('a', { root }).problems.map((p) => p.type);
+  assert.ok(types.includes('facts'), JSON.stringify(types));
+});
+
+test('config allowances do not support a variant claim (#6792)', () => {
+  const root = workspace({ 'a.md': OMIT_AND_REORDER.replace('Led a team of 3 engineers', 'Led a team of 3 engineers and cut costs 40%') });
+  writeFileSync(join(root, 'config', 'cv-facts.json'), JSON.stringify({ allow_metrics: ['40%'] }));
   const types = checkVariant('a', { root }).problems.map((p) => p.type);
   assert.ok(types.includes('facts'), JSON.stringify(types));
 });

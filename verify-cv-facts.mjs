@@ -3302,13 +3302,17 @@ export function verifyFacts(targetText, {
   planTexts = [],
   configPath = DEFAULT_CONFIG,
   cwd = process.cwd(),
+  strictSource = false,
 } = {}) {
   // Per file, before the join: stripMarkup keeps only the body of a LaTeX
   // document, and run on the joined text it would discard every source read
   // ahead of a .tex one as if it were that document's preamble.
   const sourceTexts = sourcePaths.map(path => latexBody(readIfExists(resolveInputPath(path, cwd))));
   const sourceText = sourceTexts.join('\n');
-  const { missing: configMissing, config } = loadFactConfig(resolveInputPath(configPath, cwd));
+  const { missing: configMissing, config: loaded } = loadFactConfig(resolveInputPath(configPath, cwd));
+  // strictSource: the sources alone support a claim, so no config allowance clears one.
+  // The phrase lists stay, so forbidden and advisory checks still run.
+  const config = strictSource ? { ...loaded, allow_metrics: [], allow_facts: [], allow_swaps: [] } : loaded;
   const allowed = allowedMetricSet(sourceText, config.allow_metrics);
   const targetClaims = metricClaims(targetText);
   const planned = plannedClaims(targetText, planTexts);
@@ -3535,6 +3539,7 @@ function parseCliArgs(args) {
   let targetArg = '';
   let configPath = DEFAULT_CONFIG;
   let json = false;
+  let strictSource = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--source' || arg === '--config') {
@@ -3545,6 +3550,8 @@ function parseCliArgs(args) {
       return { help: true };
     } else if (arg === '--json') {
       json = true;
+    } else if (arg === '--strict-source') {
+      strictSource = true;
     } else if (arg.startsWith('--')) {
       throw new Error(`unknown option: ${arg}`);
     } else if (!targetArg) {
@@ -3553,12 +3560,12 @@ function parseCliArgs(args) {
       throw new Error(`unexpected extra positional argument: ${arg}`);
     }
   }
-  return { targetArg, sourcePaths, configPath, json, help: false };
+  return { targetArg, sourcePaths, configPath, json, strictSource, help: false };
 }
 
 /** Return the command-line usage text. */
 function usage() {
-  return `Usage: node verify-cv-facts.mjs <generated-document> [--source path] [--config path] [--json]
+  return `Usage: node verify-cv-facts.mjs <generated-document> [--source path] [--config path] [--strict-source] [--json]
        node verify-cv-facts.mjs --self-test
 
 Checks generated candidate-facing text for unsupported metrics and explicitly asserted
@@ -3568,7 +3575,9 @@ source bullet they restate) absent from source files.
 Default sources: cv.md and article-digest.md.
 A cover letter also reads the answers supplied for that letter, which support
 only a number the letter states as a plan. The rendered letter is not a source.
-Default config:  config/cv-facts.json (optional)`;
+Default config:  config/cv-facts.json (optional)
+--strict-source ignores allow_metrics, allow_facts and allow_swaps, so only the sources
+support a claim; forbidden_phrases and warn_phrases still apply.`;
 }
 
 /** Exercise the metric extraction regressions that the shared gate depends on. */
@@ -4297,6 +4306,7 @@ export function runCli(args = process.argv.slice(2)) {
     const result = verifyFacts(readFileSync(targetPath, 'utf-8'), {
       sourcePaths: parsed.sourcePaths.length ? parsed.sourcePaths : DEFAULT_SOURCES,
       configPath: parsed.configPath,
+      strictSource: parsed.strictSource,
     });
     // On stderr, before any verdict line and regardless of it: with no config
     // the phrase lists are empty, so "passed" below means the phrase check never
