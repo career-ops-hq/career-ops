@@ -1603,7 +1603,7 @@ function checkCvVariants(root) {
   return {
     warn: true,
     label: `data/cv-variants: ${findings.length} variant${findings.length === 1 ? '' : 's'} need${findings.length === 1 ? 's' : ''} attention`,
-    fix: findings.flatMap((f) => f.problems.map((p) => `${f.path.endsWith('.md') ? `${f.name}.md` : 'config/profile.yml'}: ${p.detail}`)),
+    fix: findings.flatMap((f) => f.problems.map((p) => `${f.path.endsWith('.md') ? `${f.name}.md` : f.path}: ${p.detail}`)),
   };
 }
 

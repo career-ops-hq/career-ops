@@ -54,3 +54,11 @@ test('a cv.variants mapping to a missing file, an invalid entry or a duplicate i
   assert.match(text, /bad/);
   assert.match(text, /archetype/i);
 });
+
+test('a mapping finding names the profile file that was audited', () => {
+  const dir = target({});
+  mkdirSync(join(dir, 'config'), { recursive: true });
+  writeFileSync(join(dir, 'config', 'profile.yml'), 'cv:\n  variants:\n    ghost: ["Ghost"]\n');
+  const w = doctorJson(dir).warnings.join('\n');
+  assert.match(w, /profile\.yml: cv\.variants\.ghost/);
+});
