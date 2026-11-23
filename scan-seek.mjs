@@ -1,18 +1,23 @@
 #!/usr/bin/env node
 
 /**
- * scan-seek.mjs — SEEK NZ keyword scanner over the SEO path form.
+ * scan-seek.mjs — SEEK keyword scanner over the SEO path form (NZ and AU).
  *
- * Fetches https://nz.seek.com/<keyword>-jobs[/in-<Location>] and reads the
+ * Fetches https://{nz|au}.seek.com/<keyword>-jobs[/in-<Location>] and reads the
  * job records out of the page's inlined `window.SEEK_REDUX_DATA` (id, title,
  * advertiser, location, salary label, listing date, teaser, work types, and
  * SEEK's Remote/Hybrid/On-site label as `workArrangement` for workplace_policy).
  *
  * Unlike `providers/jobstreet.mjs` (which queries `/api/jobsearch/v5/search`
  * for known companies in `companies:`), this scanner discovers roles by
- * keyword across NZ-domestic employers and recruiters with no public ATS
+ * keyword across domestic employers and recruiters that have no public ATS
  * board. It never fetches a `/job/<id>` detail page: the posting URL is built
  * for the pipeline, not requested during the scan.
+ *
+ * Both sites are served from the same SEO path form and inline the same Redux
+ * dump, so the only per-site differences are the fetch host, the posting host
+ * (AU posts under `www.seek.com.au`, which 403s a plain fetch), the location
+ * slug map and the location record shape `seekLocation()` already reads.
  *
  * PAGINATION & FRESHNESS (#6694). Paginates `?page=N` (from page 2 onward) up
  * to `max_pages` per search (default 5, cap 50, or `--pages N` on the CLI),
@@ -22,9 +27,9 @@
  * inside `nz.seek.com/robots.txt`'s `*?` disallow; rule 6 no longer treats
  * `robots.txt` as a gate.)
  *
- * Config (portals.yml): `seek_searches`, a list of
- * `{ keyword, location?, daterange?, max_pages? }`.
- * title_filter, location_filter and data/blacklist.md apply as in scan.mjs.
+ * Config (portals.yml): `seek_site` (`nz`, the default, or `au`) and
+ * `seek_searches`, a list of `{ keyword, location?, daterange?, max_pages? }`.
+ * `title_filter`, `location_filter` and `data/blacklist.md` apply as in scan.mjs.
  */
 
 try {
@@ -53,16 +58,17 @@ const USAGE = `Usage:
   node scan-seek.mjs --pages 3        # fetch up to 3 pages per search (?page=N)
   node scan-seek.mjs --dry-run        # print matches, write nothing
 
-Reads seek_searches from portals.yml:
+Reads seek_site and seek_searches from portals.yml:
+  seek_site: au                       # optional; nz (default) or au
   seek_searches:
     - keyword: "data analyst"
-      location: "Wellington"          # optional; omit for all of NZ
+      location: "Adelaide"            # optional; omit for the whole country
       daterange: 7                    # optional; last N days
       max_pages: 5                    # optional; default 5 (cap 50)
 
-Fetches the SEO path (nz.seek.com/<keyword>-jobs[/in-<Location>]) and reads
-the inlined window.SEEK_REDUX_DATA results, paging ?page=N until a page yields
-no new postings or max_pages is reached.
+Fetches the SEO path ({nz|au}.seek.com/<keyword>-jobs[/in-<Location>]) and
+reads the inlined window.SEEK_REDUX_DATA results, paging ?page=N until a page
+yields no new postings or max_pages is reached.
 
 Flags:
   --daterange N     append daterange=N (last N days of ads)
@@ -71,7 +77,6 @@ Flags:
   --dry-run         do not touch pipeline, scan history or scan-runs
   --help, -h        show this help and exit`;
 
-const BASE = 'https://nz.seek.com';
 export const DEFAULT_MAX_PAGES = 5;
 export const MAX_PAGES_CAP = 50;
 
@@ -139,12 +144,99 @@ const NZ_LOCATION_SLUGS = {
   masterton: 'in-Masterton-Wellington',
 };
 
+// State-wide forms are `in-<State-Name>` or the bare `in-<ABBR>`; `in-All-<State>`
+// returns zero results on SEEK, so it is never used for a state. City forms
+// take the short `<City>-<STATE>` slug, not `in-All-<City>-<STATE>`.
+const AU_LOCATION_SLUGS = {
+  adelaide: 'in-Adelaide-SA',
+  'adelaide-sa': 'in-Adelaide-SA',
+  'south-australia': 'in-South-Australia',
+  sa: 'in-SA',
+  sydney: 'in-Sydney-NSW',
+  'sydney-nsw': 'in-Sydney-NSW',
+  'new-south-wales': 'in-New-South-Wales',
+  nsw: 'in-NSW',
+  melbourne: 'in-Melbourne-VIC',
+  'melbourne-vic': 'in-Melbourne-VIC',
+  victoria: 'in-Victoria',
+  vic: 'in-VIC',
+  brisbane: 'in-Brisbane-QLD',
+  'brisbane-qld': 'in-Brisbane-QLD',
+  queensland: 'in-Queensland',
+  qld: 'in-QLD',
+  perth: 'in-Perth-WA',
+  'perth-wa': 'in-Perth-WA',
+  'western-australia': 'in-Western-Australia',
+  wa: 'in-WA',
+  canberra: 'in-Canberra-ACT',
+  'canberra-act': 'in-Canberra-ACT',
+  'australian-capital-territory': 'in-Australian-Capital-Territory',
+  act: 'in-ACT',
+  hobart: 'in-Hobart-TAS',
+  'hobart-tas': 'in-Hobart-TAS',
+  tasmania: 'in-Tasmania',
+  tas: 'in-TAS',
+  darwin: 'in-Darwin-NT',
+  'darwin-nt': 'in-Darwin-NT',
+  'northern-territory': 'in-Northern-Territory',
+  nt: 'in-NT',
+  newcastle: 'in-Newcastle-NSW',
+  'newcastle-nsw': 'in-Newcastle-NSW',
+  'gold-coast': 'in-Gold-Coast-QLD',
+  'gold-coast-qld': 'in-Gold-Coast-QLD',
+  wollongong: 'in-Wollongong-NSW',
+  'wollongong-nsw': 'in-Wollongong-NSW',
+  geelong: 'in-Geelong-VIC',
+  'geelong-vic': 'in-Geelong-VIC',
+  remote: 'in-Remote',
+};
+
 /**
- * Resolve a configured location ("Wellington", "Masterton", or "in-All-Wellington")
- * to SEEK's canonical `in-...` path segment, or throw if an unmapped plain
- * location is passed instead of guessing a broken `in-All-...` URL.
+ * Per-site hosts, location map and country aliases that mean "no location".
+ * `base` is the fetch host; `postingBase` is the host written into the offer's
+ * URL. They differ on AU: `www.seek.com.au` answers 403 to a plain fetch but is
+ * the host jobstreet writes, so scan-history/tracker URLs only dedup with it.
  */
-export function formatSeekLocation(location) {
+export const SEEK_SITES = {
+  nz: {
+    base: 'https://nz.seek.com',
+    postingBase: 'https://nz.seek.com',
+    locations: NZ_LOCATION_SLUGS,
+    countrySlugs: ['new-zealand', 'nz'],
+    label: 'NZ',
+  },
+  au: {
+    base: 'https://au.seek.com',
+    postingBase: 'https://www.seek.com.au',
+    locations: AU_LOCATION_SLUGS,
+    countrySlugs: ['australia', 'au', 'all-australia'],
+    label: 'AU',
+  },
+};
+
+/** Resolve `seek_site` from portals.yml (default `nz`) to a site descriptor. */
+export function resolveSeekSite(value) {
+  const raw = String(value ?? '').trim().toLowerCase();
+  if (!raw) return SEEK_SITES.nz;
+  // Validate the shape before stripping anything: a suffix-stripping lookup
+  // would coerce `seek.com`, `au.seek.com.au` or `evil.com/au` into a valid key.
+  const host = raw.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/\.$/, '');
+  const key = host.endsWith('.seek.com') ? host.slice(0, -'.seek.com'.length) : '';
+  // Object.hasOwn, not a bare lookup: `constructor` and `__proto__` would
+  // otherwise resolve to Object.prototype members instead of throwing.
+  const resolved = Object.hasOwn(SEEK_SITES, raw) ? raw : key;
+  if (!Object.hasOwn(SEEK_SITES, resolved)) {
+    throw new Error(`Unknown seek_site ${JSON.stringify(value)}; use "nz" or "au"`);
+  }
+  return SEEK_SITES[resolved];
+}
+
+/**
+ * Resolve a configured location ("Wellington", "Adelaide", or "in-All-Wellington")
+ * to SEEK's canonical `in-...` path segment for that site, or throw if an
+ * unmapped plain location is passed instead of guessing a broken URL.
+ */
+export function formatSeekLocation(location, site = SEEK_SITES.nz) {
   const raw = String(location ?? '')
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -154,21 +246,23 @@ export function formatSeekLocation(location) {
     return raw.replace(/^in-(all-)?/i, (_, all) => (all ? 'in-All-' : 'in-'));
   }
   const key = slugify(raw);
-  if (key === 'new-zealand' || key === 'nz') return '';
-  if (NZ_LOCATION_SLUGS[key]) return NZ_LOCATION_SLUGS[key];
-  throw new Error(`Unknown SEEK NZ location ${JSON.stringify(location)}; use a known NZ region/city or a canonical "in-..." SEEK path slug`);
+  if (site.countrySlugs.includes(key)) return '';
+  if (site.locations[key]) return site.locations[key];
+  throw new Error(`Unknown SEEK ${site.label} location ${JSON.stringify(location)}; use a known ${site.label} region/city or a canonical "in-..." SEEK path slug`);
 }
 
 /**
- * SEO path URL for one search. `daterange` (positive integer days) and `page`
- * (1-based; omitted on page 1) are appended as query parameters when set.
- * Accepts either `(search, daterange, page)` or `(search, { daterange, page })`.
+ * SEO path URL for one search. `daterange` (positive integer days), `page`
+ * (1-based; omitted on page 1) and `site` (a SEEK_SITES entry; defaults to NZ)
+ * are read from the options object. A bare number or null in that position is
+ * still read as `daterange`, which keeps the original call shape working.
  */
 export function buildSeekUrl({ keyword, location, daterange: entryDaterange }, optsOrDaterange = null, pageArg = 1) {
   const kw = slugify(keyword);
   if (!kw) throw new Error(`Empty keyword: ${JSON.stringify(keyword)}`);
-  const loc = formatSeekLocation(location);
   const isOpts = optsOrDaterange !== null && typeof optsOrDaterange === 'object';
+  const site = (isOpts && optsOrDaterange.site) || SEEK_SITES.nz;
+  const loc = formatSeekLocation(location, site);
   const daterange = isOpts ? (optsOrDaterange.daterange ?? entryDaterange ?? null) : (optsOrDaterange ?? entryDaterange ?? null);
   const page = isOpts ? (optsOrDaterange.page ?? 1) : (pageArg ?? 1);
 
@@ -181,7 +275,7 @@ export function buildSeekUrl({ keyword, location, daterange: entryDaterange }, o
     const p = parsePositiveInt(page, 'page');
     if (p > 1) params.set('page', String(p));
   }
-  const base = `${BASE}/${kw}-jobs${loc ? `/${loc}` : ''}`;
+  const base = `${site.base}/${kw}-jobs${loc ? `/${loc}` : ''}`;
   const qs = params.toString();
   return qs ? `${base}?${qs}` : base;
 }
@@ -258,7 +352,7 @@ export function seekWorkArrangement(job) {
   return text ? { workArrangement: text } : {};
 }
 
-export function parseSeekPage(html) {
+export function parseSeekPage(html, site = SEEK_SITES.nz) {
   const raw = extractReduxJson(html);
   if (!raw) throw new Error('SEEK_REDUX_DATA not found — page may be blocked or layout changed');
   let data;
@@ -277,7 +371,7 @@ export function parseSeekPage(html) {
     const date = typeof j.listingDate === 'string' ? j.listingDate.slice(0, 10) : '';
     offers.push({
       id,
-      url: `${BASE}/job/${id}`, // recorded, never fetched during scan
+      url: `${site.postingBase}/job/${id}`, // recorded, never fetched during scan
       title: decodeHtml(j.title),
       company: decodeHtml(j.advertiser?.description ?? j.companyName ?? ''),
       location: seekLocation(j),
@@ -286,7 +380,7 @@ export function parseSeekPage(html) {
       workTypes: toArray(j.workTypes).map(String),
       ...seekWorkArrangement(j),
       postedAt: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : '',
-      source: 'seek-nz',
+      source: `seek-${site.label.toLowerCase()}`,
     });
   }
   return offers;
@@ -300,6 +394,7 @@ export async function scanSeekSearch(
   search,
   {
     fetchText,
+    site = SEEK_SITES.nz,
     daterange = null,
     maxPages = null,
     delayMs = 0,
@@ -316,10 +411,10 @@ export async function scanSeekSearch(
 
   for (let page = 1; page <= pageLimit; page++) {
     try {
-      lastUrl = buildSeekUrl(search, effectiveDaterange, page);
+      lastUrl = buildSeekUrl(search, { site, daterange: effectiveDaterange, page });
       if (page > 1 && delayMs > 0) await sleepImpl(delayMs);
       const html = await fetchText(lastUrl);
-      const offers = parseSeekPage(html);
+      const offers = parseSeekPage(html, site);
       const fresh = offers.filter((o) => !seenIds.has(o.id));
       if (fresh.length === 0) break;
       for (const o of fresh) {
@@ -374,6 +469,13 @@ async function main(args) {
   }
 
   const portals = loadPortals();
+  let site;
+  try {
+    site = resolveSeekSite(portals.seek_site);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
   const searches = loadSearches(portals);
   if (searches.length === 0) {
     console.error('No seek_searches in portals.yml. Add entries like { keyword: "data analyst", location: "Wellington" }.');
@@ -391,6 +493,7 @@ async function main(args) {
     try {
       const offers = await scanSeekSearch(searches[i], {
         fetchText: (url) => fetchTextWithRetry(ctx, url, { headers: { 'accept-language': 'en' } }),
+        site,
         daterange,
         maxPages,
         delayMs,
@@ -419,7 +522,13 @@ async function main(args) {
     await writeRunLog({ found, counts: gate.counts, newAdded: added.length, queries: searches.length, errors });
   }
 
-  printScanSummaryHeader('SEEK NZ Scan', localToday());
+  // Literal per site, not a template: the banner title is a contract tests/
+  // scan-summary-marker.test.mjs asserts on the source text.
+  if (site === SEEK_SITES.au) {
+    printScanSummaryHeader('SEEK AU Scan', localToday());
+  } else {
+    printScanSummaryHeader('SEEK NZ Scan', localToday());
+  }
   console.log(`Queries:            ${searches.length}`);
   console.log(`Postings fetched:   ${found}`);
   console.log(`New offers:         ${added.length}${dryRun ? ' (dry run, nothing written)' : ''}`);

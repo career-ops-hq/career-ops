@@ -5,6 +5,8 @@
 import { inviteEvidence } from './lib/invite-evidence.mjs';
 import { isPlaceholderCompany } from './lib/placeholder-cell.mjs';
 import { parseAppliedDate } from './followup-cadence.mjs';
+import { companiesMatchIgnoringCorporateForm, LEGAL_SUFFIXES } from './tracker-utils.mjs';
+import { normalizeTextKey } from './tracker-parse.mjs';
 
 export function extractDomain(emailStr) {
   if (!emailStr) return null;
@@ -108,7 +110,51 @@ export function checkCompanyMatch(text, company) {
   const cChi = normalizeChinese(company);
   if (cChi && cChi.length >= 2 && text.includes(cChi)) return true;
 
-  return false;
+  // Corporate form: the tracker says "Acme Inc." and the mail says "Acme".
+  // Every check above looks for the whole tracker cell in the text, so it
+  // matches the reverse direction only.
+  return corporateFormStems(company).some(stem => textHasTokenRun(text, stem));
+}
+
+// Legal suffixes only. The shared rule's default set also treats generic
+// descriptors ("Solutions", "Holdings") as optional, which is fine for comparing
+// two company cells but not for searching free text: "Data Solutions Inc." would
+// shrink to "data" and match any mail that mentions data.
+const LEGAL_FORM_WORDS = new Set(LEGAL_SUFFIXES);
+
+// The leading token runs of `company` that companiesMatchIgnoringCorporateForm()
+// accepts as the same employer: "Acme Holdings Inc." → ["acme holdings"]. The
+// shared rule supplies the suffix vocabulary, the dotted-initialism handling
+// ("Acme L.L.C.") and the MIN_STEM_CHARS floor, so "HP Inc." yields nothing and
+// never searches for a bare "hp". Names written without spaces are one token
+// and have no shorter run, so Chinese and Japanese cells are unaffected.
+function corporateFormStems(company) {
+  const tokens = normalizeTextKey(company, ' ').split(' ').filter(Boolean);
+  const stems = [];
+  for (let k = tokens.length - 1; k >= 1; k--) {
+    const stem = tokens.slice(0, k).join(' ');
+    if (companiesMatchIgnoringCorporateForm(stem, company, LEGAL_FORM_WORDS)) stems.push(stem);
+  }
+  return stems;
+}
+
+// A URL with a scheme, removed whole up to the next space or bracket whatever
+// its host ("https://192.0.2.1/acme", "https://jobs.example:8443/acme"); an
+// email address ("no-reply@acme-partners.com"); or a bare hostname with its
+// port and path ("careers.acme.io", "jobs.example:8443/acme").
+const ADDRESS_OR_HOST_RE = /[a-z][a-z\d+.-]*:\/\/[^\s<>()"']*|[^\s<>()"',;]+@[^\s<>()"',;]+|(?:[\p{L}\p{M}\p{N}-]+\.)+\p{L}{2,}(?::\d+)?(?:[/?#][^\s<>()"']*)?/giu;
+
+// Whole-token match in the same key space as the stem, so "acme" is found in
+// "Thanks for applying to Acme!" but not inside "Acmecorp". A stem is shorter
+// and more generic than the cell it came from, so it gets no substring path,
+// and addresses and hostnames are removed first: normalizing
+// "no-reply@acme-partners.com" yields the token "acme", and a domain that only
+// shares a tracked company's first word is not evidence for that company.
+// Domains are the sender-domain signal's job.
+function textHasTokenRun(text, stem) {
+  const words = text.replace(ADDRESS_OR_HOST_RE, ' ');
+  const tokens = normalizeTextKey(words, ' ').split(' ').filter(Boolean).join(' ');
+  return ` ${tokens} `.includes(` ${stem} `);
 }
 
 // Generic recruiting/HR vocabulary. These words are common enough in unrelated
@@ -467,6 +513,28 @@ function companyKey(raw) {
   return normalizeStr(normalizeChinese(String(raw ?? ''))).replace(/[^\p{L}\p{M}\p{N}]+/gu, '');
 }
 
+function sameCompany(a, b) {
+  const ka = companyKey(a);
+  return Boolean(ka) && (ka === companyKey(b) || companiesMatchIgnoringCorporateForm(a, b));
+}
+
+// Tied rows count as one employer only when every pair is the same company
+// cell, either by key or by companiesMatchIgnoringCorporateForm() ("Acme" and
+// "Acme Inc."). Pairwise rather than against the first row: "Acme Solutions"
+// and "Acme Technologies" each match "Acme" but not each other, and must stay
+// two employers. Returns 1 for one employer, 0 when none has a key, and 2 for
+// "more than one".
+function countDistinctCompanies(companies) {
+  const named = companies.filter(c => companyKey(c));
+  if (named.length === 0) return 0;
+  for (let i = 0; i < named.length; i++) {
+    for (let j = i + 1; j < named.length; j++) {
+      if (!sameCompany(named[i], named[j])) return 2;
+    }
+  }
+  return 1;
+}
+
 function companyWideEligible(app, emailRange) {
   if (!emailRange || !['applied', 'evaluated'].includes(canonicalStatus(app?.status))) return false;
   const appliedRange = comparableDateRange(app?.date);
@@ -605,12 +673,12 @@ export function matchCandidates(candidates, apps, followups = []) {
       const tiedApps = bestMatches
         .map(match => apps.find(app => app.num === match.application_num))
         .filter(Boolean);
-      const tiedCompanies = new Set(tiedApps.map(app => companyKey(app.company)).filter(Boolean));
+      const tiedCompanyCount = countDistinctCompanies(tiedApps.map(app => app.company));
       const emailRange = candidateReceivedAt(cand);
       const isRejection = classifyReply(cand).type === 'Rejected';
       const eligible = tiedApps.filter(app => companyWideEligible(app, emailRange));
 
-      if (isRejection && !anyRoleMatch && tiedCompanies.size === 1 && eligible.length > 0) {
+      if (isRejection && !anyRoleMatch && tiedCompanyCount === 1 && eligible.length > 0) {
         results.push({
           message_id: cand.message_id,
           company_hint: eligible[0].company,

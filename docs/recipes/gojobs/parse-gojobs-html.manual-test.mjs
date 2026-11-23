@@ -104,3 +104,62 @@ test('fails loudly on a saved Radware challenge', () => {
 test('fails loudly when only the bare search form was saved', () => {
   assert.throws(() => parseSavedHtml('<form action="Search.aspx"></form>', 'form.html'), /no GO Jobs result rows found/);
 });
+
+// Runs fn with the given env vars set (undefined deletes one) and cwd moved,
+// then restores both.
+function withEnvAndCwd(vars, cwd, fn) {
+  const saved = Object.fromEntries(Object.keys(vars).map((key) => [key, process.env[key]]));
+  const previousCwd = process.cwd();
+  try {
+    for (const [key, value] of Object.entries(vars)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    process.chdir(cwd);
+    return fn();
+  } finally {
+    process.chdir(previousCwd);
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+const ROW = '<a id="ctl00_Content_rptSearchResult_ctl01_lnkJobTitleEN" href="Preview.aspx?JobID=42&amp;Language=English">Role</a>';
+const NO_ROOT_OVERRIDE = { CAREER_OPS_ROOT: undefined, CAREER_OPS_DATA_DIR: undefined };
+
+test('reads captures from ~/career-ops-data when started from a plugin install copy', () => {
+  const parent = mkdtempSync(join(tmpdir(), 'gojobs-plugin-'));
+  const home = join(parent, 'home');
+  const pluginCopy = join(parent, 'plugins', 'cache', 'career-ops', 'career-ops', '1.0.0');
+  try {
+    mkdirSync(join(home, 'career-ops-data', 'data', 'gojobs'), { recursive: true });
+    mkdirSync(pluginCopy, { recursive: true });
+    writeFileSync(join(home, 'career-ops-data', 'data', 'gojobs', 'page.html'), ROW);
+    const jobs = withEnvAndCwd({
+      ...NO_ROOT_OVERRIDE,
+      CLAUDE_CODE_PLUGIN_CACHE_DIR: join(parent, 'plugins'),
+      HOME: home,
+      USERPROFILE: home,
+    }, pluginCopy, () => parseFiles(['data/gojobs']));
+    assert.equal(jobs.length, 1);
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test('reads captures from the cwd when it is a checkout and nothing names a data root', () => {
+  const checkout = mkdtempSync(join(tmpdir(), 'gojobs-checkout-'));
+  try {
+    mkdirSync(join(checkout, 'data', 'gojobs'), { recursive: true });
+    writeFileSync(join(checkout, 'data', 'gojobs', 'page.html'), ROW);
+    const jobs = withEnvAndCwd({
+      ...NO_ROOT_OVERRIDE,
+      CLAUDE_CODE_PLUGIN_CACHE_DIR: join(checkout, 'no-plugins-here'),
+    }, checkout, () => parseFiles(['data/gojobs']));
+    assert.equal(jobs.length, 1);
+  } finally {
+    rmSync(checkout, { recursive: true, force: true });
+  }
+});

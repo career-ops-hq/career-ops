@@ -80,6 +80,58 @@ try {
   if (jobs[1]?.url === 'https://acme.bamboohr.com/careers/22') pass('parseBambooHRResponse coerces numeric id to URL');
   else fail(`parseBambooHRResponse numeric-id url was ${jobs[1]?.url}`);
 
+  // Remote openings as live boards list them (2026-11-23): `locationType` is
+  // "1" and `isRemote` is null. A remote opening has no office, so `location`
+  // is empty and the place the hire must be in, if any, is in `atsLocation`.
+  // Reading only `location` and `isRemote` left these with an empty location.
+  {
+    const noPlace = { country: null, state: null, province: null, city: null };
+    const [remote, placeless, hybrid, province, remoteOffice, bothPlaces] = parseBambooHRResponse({
+      meta: { totalCount: 6 },
+      result: [
+        { id: '90', jobOpeningName: 'Lead Business Development Manager', location: { city: null, state: null },
+          atsLocation: { country: 'Canada', state: 'Ontario', province: null, city: 'London' }, isRemote: null, locationType: '1' },
+        { id: '340', jobOpeningName: 'Researcher', location: { city: null, state: null }, atsLocation: noPlace, isRemote: null, locationType: '1' },
+        { id: '83', jobOpeningName: 'Director - Commercial Sales', location: { city: 'London', state: 'Ontario' }, atsLocation: noPlace, isRemote: null, locationType: '2' },
+        { id: '91', jobOpeningName: 'Account Manager', location: { city: null, state: null },
+          atsLocation: { country: 'Germany', state: null, province: 'Bavaria', city: 'Munich' }, isRemote: null, locationType: '1' },
+        { id: '92', jobOpeningName: 'Support Engineer', location: { city: 'Remote', state: null }, atsLocation: noPlace, isRemote: null, locationType: '1' },
+        { id: '93', jobOpeningName: 'Field Engineer', location: { city: 'Toronto', state: 'Ontario' },
+          atsLocation: { country: 'Canada', state: 'Ontario', province: null, city: 'London' }, isRemote: null, locationType: '2' },
+      ],
+    }, 'Acme', 'https://acme.bamboohr.com');
+
+    if (remote?.location === 'London, Ontario, Canada, Remote') pass('parseBambooHRResponse reads a remote opening (locationType "1") with its place from atsLocation');
+    else fail(`remote opening location was ${JSON.stringify(remote?.location)}, expected "London, Ontario, Canada, Remote"`);
+
+    if (placeless?.location === 'Remote') pass('parseBambooHRResponse gives a remote opening with no place the location "Remote"');
+    else fail(`placeless remote opening location was ${JSON.stringify(placeless?.location)}, expected "Remote"`);
+
+    if (hybrid?.location === 'London, Ontario') pass('parseBambooHRResponse keeps the office of an opening that is not remote');
+    else fail(`hybrid opening location was ${JSON.stringify(hybrid?.location)}, expected "London, Ontario"`);
+
+    if (province?.location === 'Munich, Bavaria, Germany, Remote') pass('parseBambooHRResponse reads atsLocation.province when atsLocation.state is empty');
+    else fail(`atsLocation.province location was ${JSON.stringify(province?.location)}, expected "Munich, Bavaria, Germany, Remote"`);
+
+    if (remoteOffice?.location === 'Remote') pass('parseBambooHRResponse does not append Remote to a place that already says it');
+    else fail(`remote office location was ${JSON.stringify(remoteOffice?.location)}, expected "Remote"`);
+
+    if (bothPlaces?.location === 'Toronto, Ontario') pass('parseBambooHRResponse keeps the office when atsLocation names another place');
+    else fail(`office + atsLocation location was ${JSON.stringify(bothPlaces?.location)}, expected "Toronto, Ontario"`);
+
+    const { buildLocationFilter } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+    if (!buildLocationFilter({ block: ['Canada'] })(remote?.location, remote?.url, remote?.title, remote)) {
+      pass('location_filter block: [Canada] drops a remote opening whose place is in Canada');
+    } else {
+      fail(`location_filter block: [Canada] kept ${JSON.stringify(remote?.location)}`);
+    }
+    if (buildLocationFilter({ allow: ['Remote'], strict: true })(placeless?.location, placeless?.url, placeless?.title, placeless)) {
+      pass('location_filter strict allow: [Remote] keeps a remote opening with no place');
+    } else {
+      fail(`location_filter strict allow: [Remote] dropped ${JSON.stringify(placeless?.location)}`);
+    }
+  }
+
   // Empty vs broken (#6906, ADDING_A_PROVIDER.md "Defensive parsing"): only the
   // documented container, present and empty, is an empty board. Any other body
   // throws, naming the keys (or the type) it got.

@@ -203,6 +203,31 @@ test('slash dates read day first when the file proves it', () => {
   });
 });
 
+test('dotted dates read day first even when every day fits both orders', () => {
+  // DD.MM.YYYY is the day-first spelling (German, Swiss, Polish, Russian ...
+  // exports). Read month first, 05.11.2026 became 11 May and 12.09.2026 a date
+  // in December.
+  const csv = 'Company,Title,Date Applied\nAcme Example,Analyst,05.11.2026\nGlobex Example,Engineer,12.09.2026\n';
+  withRoot({ csv }, (fx) => {
+    const r = run(fx, ['--confirm']);
+    assert.equal(r.status, 0, describeSpawn(r));
+    const text = readFileSync(fx.trackerPath, 'utf-8');
+    assert.equal(rowFor(text, 'Acme Example')[2], '2026-11-05');
+    assert.equal(rowFor(text, 'Globex Example')[2], '2026-09-12');
+  });
+});
+
+test('a file mixing dotted dates and month-first slash dates is refused', () => {
+  const csv = 'Company,Title,Date Applied\nAcme Example,Analyst,05.11.2026\nGlobex Example,Engineer,11/25/2026\n';
+  withRoot({ csv }, (fx) => {
+    const before = readFileSync(fx.trackerPath, 'utf-8');
+    const r = run(fx, ['--confirm']);
+    assert.equal(r.status, 1, describeSpawn(r));
+    assert.match(r.stderr, /day\/month\/year and month\/day\/year/);
+    assert.equal(readFileSync(fx.trackerPath, 'utf-8'), before);
+  });
+});
+
 test('a date column mixing day-first and month-first dates is refused', () => {
   const csv = 'Company,Title,Date Applied\nAcme Example,Analyst,04/25/2026\nGlobex Example,Engineer,25/04/2026\n';
   withRoot({ csv }, (fx) => {

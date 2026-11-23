@@ -319,6 +319,7 @@ All of them share one router, `.agents/skills/career-ops/SKILL.md`, and the same
 | [`scan`](modes/scan.md) | Scan portals and discover new offers |
 | [`discover`](modes/discover.md) | Resolve a list of company names to scannable ATS boards. Previews by default; adds them to `portals.yml` only with `--write` (zero-token) |
 | [`pipeline`](modes/pipeline.md) | Process pending URLs from the inbox (`data/pipeline.md`) |
+| [`capture`](modes/capture.md) | Record a posting in the inbox (plus its JD text when you have it) without evaluating it. For "save this for later" |
 | [`triage`](modes/triage.md) | Fast first-pass go/no-go score from `modes/_brief.md`, before a full evaluation (writes no files) |
 | [`batch`](modes/batch.md) | Evaluate many postings with headless workers (parallel with Claude, one at a time with other CLIs) |
 | [`titles`](modes/titles.md) | Suggest adjacent job titles from your CV to broaden the search |

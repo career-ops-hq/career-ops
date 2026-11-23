@@ -13,6 +13,19 @@ import { htmlToText } from './_html-to-text.mjs';
 // private scanning, but don't redistribute this feed publicly without it.
 
 const FEED_URL = 'https://remoteok.com/api';
+const utf8Decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+
+/** Repair UTF-8 bytes that the feed exposed as Latin-1 code points. */
+function repairFeedText(value) {
+  if (!/[\u00c2-\u00f4][\u0080-\u00bf]/u.test(value) || /[^\u0000-\u00ff]/u.test(value)) return value;
+  try {
+    return utf8Decoder.decode(Buffer.from(value, 'latin1'));
+  } catch {
+    // A genuine Latin-1 character elsewhere in the value can make the bytes
+    // invalid UTF-8. Leave the entire value intact in that case.
+    return value;
+  }
+}
 
 /** Epoch ms for a feed date string, or undefined when absent or unparseable. */
 function toEpochMs(value) {
@@ -43,11 +56,12 @@ export default {
         && typeof j.position === 'string' && j.position.trim() !== ''
         && typeof j.url === 'string' && /^https?:\/\//i.test(j.url.trim()))
       .map(j => {
+        const company = typeof j.company === 'string' ? repairFeedText(j.company).trim() : '';
         const job = {
-          title: j.position.trim(),
+          title: repairFeedText(j.position).trim(),
           url: j.url.trim(),
-          company: typeof j.company === 'string' && j.company.trim() ? j.company.trim() : (entry.name || 'RemoteOK'),
-          location: typeof j.location === 'string' ? j.location.trim() : '',
+          company: company || entry.name || 'RemoteOK',
+          location: typeof j.location === 'string' ? repairFeedText(j.location).trim() : '',
         };
         // `date` is ISO 8601 with an offset; without it max_posting_age_days
         // can't judge the row.
@@ -58,10 +72,11 @@ export default {
         // read it, and formatScanHistoryRow() fingerprints it. Omitted when the
         // text is empty, the "no signal" path each of those filters handles.
         if (typeof j.description === 'string') {
-          const description = htmlToText(j.description);
+          const description = htmlToText(repairFeedText(j.description));
           if (description) job.description = description;
         }
         return job;
-      });
+      })
+      .filter(job => job.title !== '');
   },
 };
