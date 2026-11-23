@@ -92,6 +92,14 @@ test('a Turkish plan supports its own percentage and leaves completed work to ca
   assert.deepEqual(check(letter('Geçmişte dönüşümü %20 artırdım ve burada dönüşümü %20 artırmayı planlıyorum.'), [plan]).invented, ['20%']);
 });
 
+test('Turkish percentage plans allow a decimal comma and an explicit rate modifier', () => {
+  const plan = 'Dönüşüm oranını %20,5 oranında artırmayı planlıyorum.';
+  assert.deepEqual(check(letter(plan)).invented, ['20.5%']);
+  assert.equal(check(letter(plan), ['My target is 20.5%.']).verdict, 'pass');
+  assert.equal(check(letter(plan.replace(',', '.')), [plan]).verdict, 'pass');
+  assert.deepEqual(check(letter('Dönüşümü %20,5 artırdım. ' + plan), [plan]).invented, ['20.5%']);
+});
+
 test('a later percentage in the same sentence can still be the plan', () => {
   const result = check(
     letter('I grew revenue 40% and will grow it 50%.'),
