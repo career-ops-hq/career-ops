@@ -86,6 +86,7 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
 19. Run the fact gate against the generated HTML: `node verify-cv-facts.mjs {html-path}`
     - This is a hard gate before PDF rendering.
     - If it fails, stop and fix the generated HTML by removing invented metrics or adding verified evidence to `cv.md`, `article-digest.md`, or `config/cv-facts.json`.
+    - In a variant run (Step 1), `cv.md` is the sole fact source: run `node verify-cv-facts.mjs {html-path} --source cv.md`, and fix a failure only by removing the claim. Never justify a new claim from `article-digest.md` or `config/cv-facts.json` in that run.
     - A `drift` finding means a bullet kept its source bullet's keywords but opens a clause with a verb that source bullet does not use ("Used Kafka …" rendered as "Led a Kafka migration …"). Restore the source bullet's verb. A verb swap is declared only by the user: ask before adding a `"source verb -> CV verb"` entry to `allow_swaps` in `config/cv-facts.json`, and never add one to get past the gate.
 20. **Hiring-manager audit — off by default, opt-in only.** Run `modes/pdf/hm-audit.md` if and only if one of these is true; otherwise skip straight to Step 21 without prompting.
     - The invocation carried `--hm-audit` (`/career-ops pdf --hm-audit`, or the same flag on a natural-language request).
