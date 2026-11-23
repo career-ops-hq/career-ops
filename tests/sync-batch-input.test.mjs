@@ -16,7 +16,7 @@ console.log('\nsync-batch-input — pipeline "Pending" -> batch-input.tsv');
 
 try {
   const mod = await import(pathToFileURL(join(ROOT, 'sync-batch-input.mjs')).href);
-  const { parsePending, urlsFromTsv, maxTsvId, planBatchRows, buildNotes, lineUrl, lineCompany, extractLabels, isSafePublicHttpUrl } = mod;
+  const { parsePending, urlsFromTsv, maxTsvId, planBatchRows, buildNotes, lineUrl, lineCompany, extractLabels, isSafePublicHttpUrl, dropAggregatorDuplicates } = mod;
   const check = (label, cond) => (cond ? pass(label) : fail(label));
 
   // ── section-header matching (lib/pipeline-sections.mjs, shared with reconcile-pipeline) ──
@@ -141,6 +141,62 @@ try {
   ], new Set(), 3);
   check('embedded tabs/newlines are sanitized before TSV row construction', unsafeFieldRows[0].row === '3\thttps://fields.example/1\tpipeline\tline1 line2 line3');
   check('sanitized batch rows remain four columns', unsafeFieldRows[0].row.split('\t').length === 4);
+
+  // ── aggregator duplicates of a pending job (#7259) ──
+  const dedupe = (lines) => dropAggregatorDuplicates(parsePending(['## Pending', ...lines].join('\n'))).map((e) => e.url);
+  check('parsePending carries the title (third cell)', parsePending('## Pending\n- [ ] https://jobs.example.com/1 | Acme | Staff Engineer | Remote\n')[0].title === 'Staff Engineer');
+  check('a bare row has an empty title', parsePending('## Pending\n- [ ] https://jobs.example.com/2 | Acme\n')[0].title === '');
+  const withEmployer = dedupe([
+    '- [ ] https://www.linkedin.com/jobs/view/123 | Acme Inc. | Sr. Engineer',
+    '- [ ] https://jobs.example.com/acme/1 | acme inc | SR ENGINEER!',
+  ]);
+  check('an aggregator row is dropped next to an employer row for the same job', withEmployer.length === 1 && withEmployer[0] === 'https://jobs.example.com/acme/1');
+  const aggOnly = dedupe([
+    '- [ ] https://www.linkedin.com/jobs/view/1 | Acme | Engineer',
+    '- [ ] https://www.indeed.com/viewjob?jk=abc | Acme | Engineer',
+  ]);
+  check('an aggregator-only group keeps its first row', aggOnly.length === 1 && aggOnly[0] === 'https://www.linkedin.com/jobs/view/1');
+  const noKey = dedupe([
+    '- [ ] https://www.linkedin.com/jobs/view/5',
+    '- [ ] https://www.linkedin.com/jobs/view/6 | | Engineer',
+    '- [ ] https://www.linkedin.com/jobs/view/7 | Acme',
+    '- [ ] https://www.linkedin.com/jobs/view/8 | Acme',
+    '- [ ] https://jobs.example.com/acme/9 | Acme | Engineer',
+  ]);
+  check('rows with no company or no title are untouched', noKey.length === 5);
+  const diffTitle = dedupe([
+    '- [ ] https://www.linkedin.com/jobs/view/10 | Acme | Backend Engineer',
+    '- [ ] https://jobs.example.com/acme/11 | Acme | Frontend Engineer',
+  ]);
+  check('different titles at one company are both kept', diffTitle.length === 2);
+  const diffCompany = dedupe([
+    '- [ ] https://www.linkedin.com/jobs/view/12 | Acme | Engineer',
+    '- [ ] https://jobs.example.com/beta/13 | Beta | Engineer',
+  ]);
+  check('the same title at another company is kept', diffCompany.length === 2);
+  const employers = dedupe([
+    '- [ ] https://jobs.example.com/acme/14 | Acme | Engineer',
+    '- [ ] https://boards.example.org/acme/15 | Acme | Engineer',
+    '- [ ] https://www.linkedin.com/jobs/view/16 | Acme | Engineer',
+  ]);
+  check('two employer rows are both kept; only the aggregator row goes', employers.length === 2 && !employers.some((u) => new URL(u).hostname === 'www.linkedin.com'));
+  check('row order is preserved', dedupe([
+    '- [ ] https://jobs.example.com/z/1 | Zed | Role',
+    '- [ ] https://www.linkedin.com/jobs/view/2 | Zed | Role',
+    '- [ ] https://jobs.example.com/y/3 | Yar | Role',
+  ]).join() === 'https://jobs.example.com/z/1,https://jobs.example.com/y/3');
+
+  // Labeled segments (scan.mjs formatPipelineOffer, rank-pipeline.mjs) are not company/title cells.
+  const labeled = dedupe([
+    '- [ ] https://jobs.example.com/a/20 | posted: 2026-06-18 | trust: 80',
+    '- [ ] https://www.linkedin.com/jobs/view/21 | posted: 2026-06-18 | trust: 80',
+  ]);
+  check('labeled segments are not matched as company and title', labeled.length === 2);
+  const labeledTitle = dedupe([
+    '- [ ] https://jobs.example.com/a/22 | Acme | posted: 2026-06-18',
+    '- [ ] https://www.linkedin.com/jobs/view/23 | Acme | posted: 2026-06-18',
+  ]);
+  check('a labeled segment is not matched as a title', labeledTitle.length === 2);
 
   // ── SSRF: bracketed unspecified IPv6 address ──
   check('bracketed unspecified IPv6 ([::]) is rejected', !isSafePublicHttpUrl('http://[::]/'));
@@ -369,6 +425,25 @@ try {
 
     check('--url without a value exits with error', runCli(['--url', '--dry-run', ...paths]).exitCode !== 0);
     check('--url= with an empty value exits with error', runCli(['--url=', '--dry-run', ...paths]).exitCode !== 0);
+
+    // ── aggregator duplicates through the CLI (#7259) ──
+    const aggPipeline = join(URL_TMP, 'agg.md');
+    const aggInput = join(URL_TMP, 'agg-input.tsv');
+    writeFileSync(aggPipeline, [
+      '## Pending',
+      '- [ ] https://www.linkedin.com/jobs/view/77 | Acme | Engineer',
+      '- [ ] https://jobs.example.com/acme/77 | Acme | Engineer',
+    ].join('\n') + '\n', 'utf-8');
+    const queuedUrls = (file) => readFileSync(file, 'utf-8').split('\n')
+      .filter((l) => l && !l.startsWith('#')).map((l) => l.split('\t')[1]);
+    const aggRun = runCli(['--pipeline', aggPipeline, '--input', aggInput, '--state', urlState]);
+    check('a full sync queues the employer row and drops its aggregator duplicate',
+      aggRun.exitCode === 0 && /1 aggregator duplicate/.test(aggRun.stdout)
+      && queuedUrls(aggInput).length === 1
+      && queuedUrls(aggInput)[0] === 'https://jobs.example.com/acme/77');
+    rmSync(aggInput, { force: true });
+    const aggUrl = runCli(['--url', 'https://www.linkedin.com/jobs/view/77', '--pipeline', aggPipeline, '--input', aggInput, '--state', urlState]);
+    check('--url on an aggregator row still queues it', aggUrl.exitCode === 0 && queuedUrls(aggInput).some((u) => u === 'https://www.linkedin.com/jobs/view/77'));
 
     // A full sync with nothing to add still exits 0: the exit codes are --url only.
     writeFileSync(urlInput, 'id\turl\n1\thttps://only.example.com/1\n', 'utf-8');
