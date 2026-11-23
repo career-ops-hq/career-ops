@@ -762,7 +762,8 @@ if (process.platform === 'win32') {
         });
         let stdout = '';
         child.stdout.on('data', (d) => { stdout += d; });
-        child.on('exit', (c) => resolveExit({ c, stdout }));
+        // close, not exit: stdout can still be open when exit fires.
+        child.on('close', (c) => resolveExit({ c, stdout }));
       });
       const json = (() => { try { return JSON.parse(code.stdout); } catch { return null; } })();
       if (code.c === 4 && json?.code === 'lock-timeout' && readFileSync(pdfIndex, 'utf-8') === manifest) {
@@ -794,7 +795,9 @@ if (process.platform === 'win32') {
       });
       let stdout = '';
       child.stdout.on('data', (d) => { stdout += d; });
-      const done = new Promise((resolveExit) => child.on('exit', (c) => { exited = true; resolveExit(c); }));
+      child.on('exit', () => { exited = true; });
+      // close, not exit: stdout can still be open when exit fires.
+      const done = new Promise((resolveExit) => child.on('close', resolveExit));
 
       // Long enough for an unlocked prune to start, read and write.
       await new Promise((r) => setTimeout(r, 1500));
