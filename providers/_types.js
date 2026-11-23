@@ -357,6 +357,9 @@
  *   Hostname that fetch() requests, when that host is not detect().url.
  *   scan.mjs uses the string as the per-host concurrency key. Omit it when
  *   detect().url, api, or careers_url already names that host.
+ * @property {{limit: number}} [fetchConcurrencyGroup]                      Optional.
+ *   A parallel board scan limit shared by every entry for this provider,
+ *   including entries that use different hostnames.
  * @property {(entry: PortalEntry, ctx: Context) => Promise<Job[]>} fetch      Required.
  * @property {((job: Job) => (string | null))} [dedupKey]                     Optional. A
  *   provider-scoped identifier for a job, precise where URL normalization
