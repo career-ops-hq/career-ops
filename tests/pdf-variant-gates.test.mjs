@@ -32,3 +32,11 @@ test('variant gate commands resolve cv.md and the variant from the data root (#6
   for (const g of gates) assert.match(g, /--source \"\{DATA_ROOT\}\/cv\.md\" /);
   assert.doesNotMatch(PDF_MODE, /(?<!\{DATA_ROOT\}\/)data\/cv-variants\/<name>\.md/);
 });
+
+test('Step 1 picks the variant from the evaluated archetype and falls back to cv.md (#6792)', () => {
+  const step1 = PDF_MODE.split('\n').find((l) => l.startsWith('1. ')) ?? '';
+  assert.match(step1, /\*\*Archetype:\*\*/);
+  assert.match(step1, /cv-title-check\.mjs --archetype/);
+  assert.match(step1, /Variant: none \(cv\.md\)/);
+  assert.match(step1, /never fall back to `cv\.md`/);
+});

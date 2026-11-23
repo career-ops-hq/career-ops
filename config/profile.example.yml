@@ -238,6 +238,12 @@ cv:
   # templates/cv-template.html. You can also pick per-generation just by asking
   # (e.g. "use the modern template").
   # template: modern
+  # (Optional) CV content variants (#6792): map a variant file in
+  # {DATA_ROOT}/data/cv-variants/<name>.md to the archetypes it serves. `pdf`
+  # uses the variant for a report whose Archetype matches (case and spacing
+  # ignored), and cv.md otherwise. --variant=<name> still wins.
+  # variants:
+  #   backend: ["Backend Engineer", "Platform Engineer"]
   # For a restrained Chinese technical CV, use: template: zh-minimal
   #
   # (Optional) Section order for the generated CV (#2533). The sections you name
