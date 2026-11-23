@@ -438,6 +438,33 @@ try {
     if (named(probe) && !probe.err.truncated) pass('avature.fetch() propagates the challenge failure under a verify-portals probe');
     else fail(`challenge under probe: ${JSON.stringify(probe.jobs?.length ?? probe.err?.message)}`);
 
+    // The toolbar must be markup: an error page that only names the class in a script or a comment is still an error page.
+    const inScript = await run({ sleep: async () => {}, fetchText: async () => '<html><body><script>const markup = \'<div class="list-controls"></div>\';</script><p>Error</p></body></html>' });
+    const inComment = await run({ sleep: async () => {}, fetchText: async () => '<html><body><!-- <div class="list-controls"></div> --><p>Error</p></body></html>' });
+    if (named(inScript) && named(inComment)) pass('avature.fetch() does not count a list-controls class inside a script or a comment as the toolbar');
+    else fail(`toolbar in script/comment: ${JSON.stringify([inScript.jobs ?? inScript.err?.message, inComment.jobs ?? inComment.err?.message])}`);
+
+    // The page budget ending the walk on a full page is a partial board: marker and warning.
+    const endless = { sleep: async () => {}, fetchText: async (url) => page(Number(new URL(url).searchParams.get('jobOffset')) / 6) };
+    const capWarnings = [];
+    const capErr = console.error;
+    console.error = (m) => capWarnings.push(String(m));
+    let capped;
+    let ceiling;
+    try {
+      capped = await avature.fetch({ name: 'X', api: base, max_pages: 2 }, endless);
+      ceiling = await avature.fetch({ name: 'X', api: base, max_pages: 500 }, endless);
+    } finally {
+      console.error = capErr;
+    }
+    if (capped.length === 12 && capped.truncated?.reason === 'page-cap' && /raise max_pages/.test(capWarnings[0] ?? '')) pass('avature.fetch() marks page-cap and advises raising max_pages when the budget stops a full page');
+    else fail(`page cap: ${capped.length} jobs, ${JSON.stringify(capped.truncated)}, ${JSON.stringify(capWarnings[0])}`);
+    if (ceiling.length === 1200 && ceiling.truncated?.reason === 'page-cap' && /hard ceiling/.test(capWarnings[1] ?? '') && !/raise max_pages/.test(capWarnings[1] ?? '')) pass('avature.fetch() says the hard ceiling was reached instead of advising to raise max_pages');
+    else fail(`hard ceiling: ${ceiling.length} jobs, ${JSON.stringify(ceiling.truncated)}, ${JSON.stringify(capWarnings[1])}`);
+    const shortAtCap = await avature.fetch({ name: 'X', api: base, max_pages: 2 }, { sleep: async () => {}, fetchText: async (url) => (Number(new URL(url).searchParams.get('jobOffset')) === 0 ? page(0) : mkHtml([7, 8])) });
+    if (shortAtCap.length === 8 && !shortAtCap.truncated) pass('avature.fetch() leaves the board complete when its last page within max_pages is short');
+    else fail(`short page at the cap: ${shortAtCap.length} jobs, ${JSON.stringify(shortAtCap.truncated)}`);
+
     // A real no-results page: [] on page 0, a clean end on a later page.
     const none0 = await run({ sleep: async () => {}, fetchText: async () => noJobsPage });
     if (none0.jobs && none0.jobs.length === 0) pass('avature.fetch() returns [] for a real no-results page ("No jobs found" card)');

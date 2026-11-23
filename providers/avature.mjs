@@ -1,6 +1,7 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 import { decodeEntities } from './_html-entities.mjs';
+import { replaceScriptStyleBlocks, stripHtmlComments } from './_html-to-text.mjs';
 import { fetchTextWithRetry, isRetryableError, sleep } from './_http.mjs';
 import { markTruncated } from '../lib/board-truncation.mjs';
 
@@ -19,7 +20,8 @@ import { markTruncated } from '../lib/board-truncation.mjs';
 // Avature hard-caps the page at 6 results (a jobRecordsPerPage override is
 // ignored), and paginates via jobOffset in steps of 6 — so this is request-
 // heavy for large boards; max_pages (default 50 → ~300 postings) bounds it and
-// can be raised per entry.
+// can be raised per entry. A walk that the cap stops on a full page is marked
+// partial (`page-cap`) and warns.
 //
 // Pagination parameter name is `jobOffset` on classic tenants, but some branded
 // tenants ignore it and page via a bare `offset` instead (e.g. jobs.siemens.com:
@@ -104,8 +106,14 @@ function resolveConfig(entry) {
 
 // The result-list toolbar (`<div class="list-controls ...">`, sort and pagination),
 // rendered on every Avature listing page including one whose only card says
-// "No jobs found". Matched as a class token in an attribute, not in CSS or script.
+// "No jobs found". Matched as a class token in an attribute, outside <script>,
+// <style> and comments, so a page that only names the class in its code is not one.
 const LISTING_PAGE = /\sclass\s*=\s*(?:"[^"]*?|'[^']*?)(?<![\w-])list-controls(?![\w-])/i;
+
+/** @param {unknown} html */
+function isListingPage(html) {
+  return LISTING_PAGE.test(replaceScriptStyleBlocks(stripHtmlComments(String(html ?? '')), ' '));
+}
 
 /** @param {string} s */
 function clean(s) {
@@ -335,7 +343,7 @@ export default {
       });
       const articles = parseArticles(htmlText, cfg.origin);
       // Rows prove a listing page; without any, the page must still be one.
-      if (articles.length === 0 && !LISTING_PAGE.test(String(htmlText ?? ''))) {
+      if (articles.length === 0 && !isListingPage(htmlText)) {
         throw Object.assign(
           new Error(`avature: ${url} does not look like an Avature listing page (a challenge, login or error page?)`),
           { notListingPage: true },
@@ -366,6 +374,7 @@ export default {
     // not enough: a page of cards that parseArticles dropped is still progress.
     const stalled = (result, fresh) => result.cards === 0 || (fresh === 0 && result.articles.length > 0);
 
+    let capped = false;
     for (let page = 0; page < maxPages; page++) {
       if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
       let result;
@@ -411,10 +420,17 @@ export default {
       // dropped (non-http scheme, no title) still advanced, so the walk goes on.
       if (stalled(result, fresh)) break; // empty page / looped / offset ignored / last page
       if (result.cards < PAGE_SIZE) break; // last page (raw card count, not the parsed one)
+      if (page === maxPages - 1) capped = true; // a full page, and the budget is spent
     }
     if (fetchError) {
       console.error(`⚠️  avature: ${entry.name} stopped after a fetch error (${fetchError.message}); kept ${jobs.length} postings`);
       markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
+    } else if (capped && !probing) {
+      const advice = maxPages < HARD_MAX_PAGES
+        ? 'raise max_pages on this entry for more'
+        : `the hard ceiling of ${HARD_MAX_PAGES} pages was reached`;
+      console.error(`⚠️  avature: ${entry.name} truncated at max_pages=${maxPages} (${jobs.length} postings): ${advice}`);
+      markTruncated(jobs, 'page-cap', { fetched: jobs.length });
     }
     return jobs;
   },
