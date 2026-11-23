@@ -63,7 +63,7 @@
 {"ats":"personio","board":"willybognergmbh","careers_url":"https://willybognergmbh.jobs.personio.de","name":"Willy Bogner GmbH","source":"ats-directory","contribution":"2026-11-20-santifer","added":"2026-11-20"}
 {"ats":"personio","board":"win-ci","careers_url":"https://win-ci.jobs.personio.de","name":"WIN CI GmbH","source":"web-index:wayback@2026-11-18","contribution":"2026-11-18-santifer.10","added":"2026-11-18"}
 {"ats":"personio","board":"windhager","careers_url":"https://windhager.jobs.personio.de","name":"Windhager Home & Garden","source":"web-index:wayback@2026-11-18","contribution":"2026-11-18-santifer.10","added":"2026-11-18"}
-{"ats":"personio","board":"windhagerhomeandgarden","careers_url":"https://windhagerhomeandgarden.jobs.personio.de","name":"Windhager Home & Garden","source":"web-index:wayback@2026-11-18","contribution":"2026-11-18-santifer.10","added":"2026-11-18"}
+{"ats":"personio","board":"windhagerhomeandgarden","careers_url":"https://windhagerhomeandgarden.jobs.personio.de","name":"Windhager Home & Garden","source":"web-index:wayback@2026-11-18","contribution":"2026-11-18-santifer.10","added":"2026-11-18","retired":true,"retired_reason":"duplicate"}
 {"ats":"personio","board":"windotec","careers_url":"https://windotec.jobs.personio.de","name":"Windotec GmbH","source":"ats-directory","contribution":"2026-11-20-santifer","added":"2026-11-20"}
 {"ats":"personio","board":"windpunx","careers_url":"https://windpunx.jobs.personio.de","name":"Windpunx","source":"ats-directory","contribution":"2026-11-20-santifer","added":"2026-11-20"}
 {"ats":"personio","board":"wire-1","careers_url":"https://wire-1.jobs.personio.de","name":"Wire","source":"web-index:wayback@2026-11-18","contribution":"2026-11-18-santifer.10","added":"2026-11-18"}

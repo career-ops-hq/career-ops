@@ -93,7 +93,7 @@
 {"ats":"personio","board":"listan-gmbh","careers_url":"https://listan-gmbh.jobs.personio.de","name":"Listan GmbH","source":"web-index:wayback@2026-11-18","contribution":"2026-11-18-santifer.10","added":"2026-11-18"}
 {"ats":"personio","board":"litherm","careers_url":"https://litherm.jobs.personio.de","name":"Litherm Technologies GmbH","source":"ats-directory","contribution":"2026-11-20-santifer","added":"2026-11-20"}
 {"ats":"personio","board":"live-fast-die-young","careers_url":"https://live-fast-die-young.jobs.personio.de","name":"LIVE FAST DIE YOUNG","source":"ats-directory","contribution":"2026-11-20-santifer","added":"2026-11-20"}
-{"ats":"personio","board":"live-nation","careers_url":"https://live-nation.jobs.personio.de","name":"Live Nation","source":"web-index:wayback@2026-11-18","contribution":"2026-11-18-santifer.10","added":"2026-11-18"}
+{"ats":"personio","board":"live-nation","careers_url":"https://live-nation.jobs.personio.de","name":"Live Nation","source":"web-index:wayback@2026-11-18","contribution":"2026-11-18-santifer.10","added":"2026-11-18","retired":true,"retired_reason":"duplicate"}
 {"ats":"personio","board":"liveeo-gmbh","careers_url":"https://liveeo-gmbh.jobs.personio.de","name":"LiveEO GmbH","source":"web-index:wayback@2026-11-18","contribution":"2026-11-18-santifer.10","added":"2026-11-18"}
 {"ats":"personio","board":"livenation","careers_url":"https://livenation.jobs.personio.de","name":"Live Nation","source":"web-index:wayback@2026-11-18","contribution":"2026-11-18-santifer.10","added":"2026-11-18"}
 {"ats":"personio","board":"livendo","careers_url":"https://livendo.jobs.personio.de","name":"UlovDomov.cz","source":"ats-directory","contribution":"2026-11-20-santifer","added":"2026-11-20"}
