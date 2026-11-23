@@ -43,6 +43,7 @@ import { randomBytes } from 'node:crypto';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { captureJd } from './capture-jd.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { AGENT_CLIS } from './lib/agent-cli.mjs';
 
 const VERSION = '1.0.0';
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -161,6 +162,13 @@ export function startEvaluation({ url, dataRoot, cli, platform = process.platfor
   const promptArg = useShell ? `"${prompt}"` : prompt;
 
   const bin = cli || process.env.CAREER_OPS_CLI || 'opencode';
+  // Re-check at the spawn site what doctor.mjs only warns about. An
+  // operator-set (or inherited) CAREER_OPS_CLI that names an arbitrary binary
+  // must not be launched: every other guard here protects the URL, and this is
+  // the one value that decides which program runs.
+  if (!AGENT_CLIS.includes(bin)) {
+    return { started: false, reason: `evaluation CLI "${bin}" is not a recognized CLI. Valid: ${AGENT_CLIS.join(', ')}.`, log: logPath };
+  }
   const args = bin === 'opencode' ? ['run', promptArg] : ['-p', promptArg];
 
   try {
