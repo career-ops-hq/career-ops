@@ -132,3 +132,59 @@ test('a condensed variant (fewer bullets, one job) is clean', () => {
   const root = workspace({ 'a.md': '## Work Experience\n\n### Acme Corp -- Sydney\n\n**Senior Engineer**\n2020-2024\n\n- Led a team of 3 engineers\n' });
   assert.deepEqual(checkVariant('a', { root }).problems, []);
 });
+
+const PARTIAL = `## Work Experience
+
+### Acme Corp -- Sydney
+
+**Senior Engineer**
+2020-2024
+
+- Led a team of 3 engineers
+
+### Beta Ltd -- Remote
+
+Engineer, 2018-2020
+
+- Built an NLP pipeline with 94% accuracy
+`;
+
+test('a variant with one present job that does not parse is rejected, not trusted', () => {
+  const root = workspace({ 'p.md': PARTIAL });
+  assert.throws(() => resolveVariant('p', { root }), /Beta Ltd/);
+  const parse = checkVariant('p', { root }).problems.find((p) => p.type === 'parse');
+  assert.ok(parse, 'expected a parse problem');
+  assert.match(parse.detail, /Beta Ltd/);
+});
+
+test('an ambiguous title comparison (duplicate company and dates) is a problem with both titles', () => {
+  const dup = `${OMIT_AND_REORDER}
+### Acme Corp -- Sydney
+
+**Staff Engineer**
+2020-2024
+
+- Led a team of 3 engineers
+`;
+  const root = workspace({ 'a.md': dup });
+  const amb = checkVariant('a', { root }).problems.find((p) => p.type === 'ambiguous');
+  assert.ok(amb, 'expected an ambiguous problem');
+  assert.match(amb.detail, /Senior Engineer/);
+  assert.match(amb.detail, /Staff Engineer/);
+});
+
+test('a fact-check coverage gap is a non-blocking facts problem', () => {
+  const es = `## Experiencia
+
+### Acme Corp -- Sydney
+
+**Senior Engineer**
+2020-2024
+
+- Dirigi un equipo de ingenieros en la nube y mejore los procesos de entrega continua
+`;
+  const root = workspace({ 'a.md': es });
+  const problems = checkVariant('a', { root }).problems;
+  const cov = problems.find((p) => p.type === 'facts' && /could not cover/.test(p.detail));
+  assert.ok(cov, JSON.stringify(problems));
+});
