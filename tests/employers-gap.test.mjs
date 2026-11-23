@@ -5,7 +5,7 @@
 // Run:  node --test tests/employers-gap.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -161,4 +161,18 @@ test('a board too large to read in one page counts as live', async () => {
   const provider = { id: 'fake', fetch: async () => { throw new Error('body exceeded maxBytes (5242880)'); } };
   const out = await checkBoards([{ careers_url: 'https://x.test/big' }], { providers: new Map(), ctx: {}, resolveProvider: () => ({ provider }) });
   assert.equal(out.get('https://x.test/big').status, 'live');
+});
+
+test('a ClearCompany board, whose id is always a GUID, is not set aside as a UUID', async () => {
+  const { readBoard } = await import('../employers-gap.mjs');
+  const p = readBoard('https://careers-api.clearcompany.com/v1/3f2a9c1e-1234-4abc-9def-0123456789ab');
+  assert.ok(!('error' in p), JSON.stringify(p));
+  assert.equal(notPublicReason(p), null);
+  assert.ok(notPublicReason({ ats: 'ashby', board: '3f2a9c1e-1234-4abc-9def-0123456789ab' }));
+});
+
+test('the CLI reads the install through the data-root helper, not the working directory', () => {
+  const src = readFileSync(new URL('../employers-gap.mjs', import.meta.url), 'utf8');
+  assert.match(src, /getCareerOpsRoot\(\)/);
+  assert.doesNotMatch(src, /process\.cwd\(\)/);
 });

@@ -29,13 +29,16 @@
  * real employers such as sandboxaq or testgorilla are in the registry.
  */
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 import { parseBoardUrl } from './seeds/employers-import.mjs';
 import { boardIdentity, inboxLineProblems, loadAggregatorDomains } from './seeds/employers-validate.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+
+const UUID_REASON = 'id is a UUID, not a name';
 
 /** @type {ReadonlyArray<[RegExp, string]>} */
 export const NOT_PUBLIC_RULES = Object.freeze([
@@ -43,7 +46,7 @@ export const NOT_PUBLIC_RULES = Object.freeze([
   [/(internal(use)?only|internaluse|notexternal|employeesonly|employeeonly|staffonly)/i, 'internal board'],
   [/^internal|internal$/i, 'internal board'],
   [/(linkedin(jobs|limitedpostings|postings)?|liboard)$/i, 'copy of a board for LinkedIn'],
-  [/[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}/i, 'id is a UUID, not a name'],
+  [/[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}/i, UUID_REASON],
   [/^(example|placeholder|your-?company|acme|demo-?company|sample)([-_.]|$)/i, 'example or placeholder'],
 ]);
 
@@ -60,7 +63,11 @@ export const NOT_PUBLIC_NAME = /(\s[-–—|:]\s*(linkedin|indeed|glassdoor|zipr
  */
 export function notPublicReason(coords) {
   const slug = coords.ats === 'workday' ? coords.board.split('/')[0] : coords.board;
-  for (const [re, why] of NOT_PUBLIC_RULES) if (re.test(slug)) return why;
+  for (const [re, why] of NOT_PUBLIC_RULES) {
+    // A ClearCompany board id is always a GUID: there the UUID is the public board, not a placeholder.
+    if (coords.ats === 'clearcompany' && why === UUID_REASON) continue;
+    if (re.test(slug)) return why;
+  }
   return null;
 }
 
@@ -285,7 +292,7 @@ if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
   const flag = (/** @type {string} */ k) => args.includes(k);
   const value = (/** @type {string} */ k) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : undefined; };
-  const root = resolve(process.env.CAREER_OPS_ROOT ?? process.cwd());
+  const root = getCareerOpsRoot();
   const known = loadRegistryIdentities(join(HERE, 'employers/boards'));
   const templatePath = join(HERE, 'templates/portals.example.yml');
   const templateBoards = boardsIn(existsSync(templatePath) ? readFileSync(templatePath, 'utf8') : null);
