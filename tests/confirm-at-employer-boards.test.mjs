@@ -27,6 +27,7 @@ test('boardOfPosting resolves BambooHR, Breezy, Pinpoint, Rippling, HiBob, HireH
     ['https://acme.breezy.hr/p/abc123-engineer', 'https://acme.breezy.hr', 'breezy'],
     ['https://acme.pinpointhq.com/en/postings/11111111-2222-3333-4444-555555555555', 'https://acme.pinpointhq.com', 'pinpoint'],
     ['https://ats.rippling.com/acme/jobs/11111111-2222-3333-4444-555555555555', 'https://ats.rippling.com/acme/jobs', 'rippling'],
+    ['https://ats.rippling.com/acme-jobs/jobs/123', 'https://ats.rippling.com/acme-jobs/jobs', 'rippling'],
     ['https://acme.careers.hibob.com/jobs/11111111-2222-3333-4444-555555555555', 'https://acme.careers.hibob.com/jobs', 'hibob'],
     ['https://acme.hirehive.com/senior-engineer-abc123', 'https://acme.hirehive.com', 'hirehive'],
     ['https://acme.zohorecruit.eu/jobs/Careers/100000000001853029', 'https://acme.zohorecruit.eu/jobs/Careers', 'zoho-recruit'],
@@ -52,6 +53,9 @@ test('boardOfPosting rejects vendor non-tenant hosts, nested subdomains, and non
     'https://www.breezy.hr/pricing',
     'https://www.pinpointhq.com/features',
     'https://ats.rippling.com/api/v2/health',
+    'https://ats.rippling.com/acme.inc/jobs/123',
+    'https://ats.rippling.com/acme_inc/jobs/123',
+    'https://ats.rippling.com/-acme/jobs/123',
     'http://acme.jobs.personio.de/job/123',
     'ftp://join.com/companies/acme/1',
   ]) {

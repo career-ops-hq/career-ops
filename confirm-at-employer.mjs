@@ -98,6 +98,7 @@ const SUBDOMAIN_BOARD_HOSTS = {
 };
 const SUBDOMAIN_BOARD_RE = /^([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)\.(recruitee\.com|bamboohr\.com|breezy\.hr|pinpointhq\.com)$/;
 const NON_TENANT_SUBDOMAINS = new Set(['www', 'app', 'api']);
+const RIPPLING_SLUG_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/;
 
 /**
  * The careers URL of the board a posting URL belongs to, or '' when the URL is
@@ -133,7 +134,7 @@ export function boardOfPosting(url) {
   if (subMatch && !NON_TENANT_SUBDOMAINS.has(subMatch[1])) {
     return buildBoardUrl({ ats: SUBDOMAIN_BOARD_HOSTS[subMatch[2]], board: subMatch[1] }) || '';
   }
-  if (host === 'ats.rippling.com' && seg[0] && seg[0] !== 'api') {
+  if (host === 'ats.rippling.com' && seg[0] && seg[0].toLowerCase() !== 'api' && RIPPLING_SLUG_RE.test(seg[0])) {
     return buildBoardUrl({ ats: 'rippling', board: seg[0] }) || '';
   }
   if (host === 'join.com' && seg[0] === 'companies' && seg[1]) return buildBoardUrl({ ats: 'join', board: seg[1] }) || '';
