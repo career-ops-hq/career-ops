@@ -226,6 +226,19 @@ try {
       : fail(`google probe made ${calls.length} requests: ${calls.map((c) => c.url)}`);
   }
 
+  // A failed unrestricted request leaves a keyword-only, truncated result.
+  {
+    const { ctx } = recordingCtx(({ url }) => {
+      if (!qOf(url)) throw Object.assign(new Error('Not Found'), { status: 404 });
+      return linkPage(['5000']);
+    });
+    let jobs;
+    await captureErrors(async () => { jobs = await provider.fetch({ name: 'Google', google: { queries: ['', 'engineer'] } }, ctx); });
+    jobs.length === 1 && jobs.truncated?.reason === 'fetch-error' && JSON.stringify(jobs.queryScope?.queries) === '["engineer"]'
+      ? pass('google.fetch() reports keyword scope when the unrestricted request fails')
+      : fail('google.fetch() lost keyword scope or truncation after the unrestricted request failed');
+  }
+
   // ── error handling ──
   {
     // First request fails -> throws (broken board, not an empty one).
