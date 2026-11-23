@@ -22,7 +22,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
+          # The job only reads the diff. The comment it posts goes through the
+          # API with GH_TOKEN, so git does not need the credential.
+          persist-credentials: false
       - name: Validate diff shape + line format
         id: check
         env:

@@ -88,6 +88,7 @@ import { SCRATCH_PREFIX, markScratchOwner, sweepScratchDirs } from './lib/scratc
 import { MARKER_FILE } from './tests/data-root-guard.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { holdTestQueue } from './lib/test-queue.mjs';
+import { nodeFloor } from './lib/node-floor.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -693,6 +694,20 @@ if (WANTS_HELP) {
   process.exit(0);
 }
 
+// Below the project's Node floor (lib/node-floor.mjs, #4801) the tracker's
+// node:sqlite cannot load, so every suite that runs tracker.mjs or doctor.mjs
+// fails, each with the cause buried in its own output, and only after a full
+// run. Say so once, up front, the way doctor.mjs does, and run nothing. Called
+// where each kind of run starts, after its own flag checks, so a usage error
+// is still reported as one on any Node.
+function requireNodeFloor() {
+  const floor = nodeFloor(process.versions.node);
+  if (floor.pass) return;
+  console.log(`  ❌ ${floor.label}`);
+  for (const line of floor.fix ?? []) console.log(`     → ${line}`);
+  process.exit(1);
+}
+
 // Set in the process a run with more than one job starts for the inline
 // sections: the file its counters go to. See startInlineSections().
 const INLINE_CHILD = hasFlag(process.argv, '--inline-child') ? (flagValue(process.argv, '--inline-child') ?? '') : null;
@@ -789,6 +804,7 @@ if (NEEDS !== null) {
   }
   // Set before any suite starts: children inherit it, and toolRequired()
   // reads it on every call in this process.
+  requireNodeFloor();
   for (const tool of tools) process.env[REQUIRED_TOOL_ENV[tool]] = '1';
   console.log(`\n🧪 career-ops test suite (--needs ${tools.join(',')}${ONLY ? ` --only ${ONLY}` : ''})\n`);
   await runDiscovered(ONLY || null, tools);
@@ -800,6 +816,7 @@ if (ONLY !== null) {
     console.log('  ❌ --only requires a path substring, e.g. --only providers/themuse');
     process.exit(1);
   }
+  requireNodeFloor();
   console.log('\n🧪 career-ops test suite (--only ' + ONLY + ')\n');
   await runDiscovered(ONLY);
   finish();
@@ -810,6 +827,7 @@ if (ONLY !== null) {
 // lib/test-queue.mjs. Not in the inline sections' child, whose parent holds the
 // queue already.
 if (INLINE_CHILD === null) {
+  requireNodeFloor();
   try {
     await holdTestQueue();
   } catch (err) {
@@ -950,9 +968,11 @@ const scripts = [
   { name: 'reconcile-pipeline.mjs --dry-run', expectExit: 0 },
   { name: 'analyze-patterns.mjs --self-test', expectExit: 0 },
   { name: 'keyword-match.mjs --self-test', expectExit: 0 },
+  { name: 'verify-all.mjs --self-test', expectExit: 0 },
   { name: 'calibrate.mjs --self-test', expectExit: 0 },
   { name: 'check-table-freshness.mjs --self-test', expectExit: 0 },
   { name: 'check-jd-archive.mjs --self-test', expectExit: 0 },
+  { name: 'check-output-names.mjs --self-test', expectExit: 0 },
   { name: 'upskill.mjs --self-test', expectExit: 0 },
   { name: 'detect-reposts.mjs --self-test', expectExit: 0 },
   { name: 'rank-pipeline.mjs --self-test', expectExit: 0 },
@@ -968,6 +988,7 @@ const scripts = [
   { name: 'img-to-pdf.mjs --self-test', expectExit: 0 },
   { name: 'assessment-log.mjs --self-test', expectExit: 0 },
   { name: 'weekly-digest.mjs --self-test', expectExit: 0 },
+  { name: 'interview-jd-terms.mjs --self-test', expectExit: 0 },
   { name: 'build-cv-html.mjs --test', expectExit: 0 },
   { name: 'jd-skill-gap.mjs --self-test', expectExit: 0 },
   { name: 'story-provenance-check.mjs --self-test', expectExit: 0 },
@@ -16253,9 +16274,6 @@ try {
   if (r.present.includes('Python')) pass('keyword coverage: exact match (Python)');
   else fail('keyword coverage: Python should be present');
 
-  if (!r.thin.includes('Python')) pass('keyword coverage: count>1 keyword not flagged thin (Python x2)');
-  else fail('keyword coverage: Python appears twice and must not be thin');
-
   if (r.present.includes('Kubernetes')) pass('keyword coverage: synonym match (k8s -> Kubernetes)');
   else fail('keyword coverage: Kubernetes should match via k8s synonym');
 
@@ -16274,8 +16292,8 @@ try {
   if (r.missing.includes('gRPC')) pass('keyword coverage: genuine miss reported (gRPC)');
   else fail('keyword coverage: gRPC should be missing');
 
-  if (r.thin.includes('observability')) pass('keyword coverage: count-1 keyword flagged thin (observability)');
-  else fail('keyword coverage: observability should be thin');
+  if (r.present.includes('observability')) pass('keyword coverage: one occurrence counts as present (observability)');
+  else fail('keyword coverage: one mention of observability should count as present');
 
   if (r.coveragePct === 80) pass('keyword coverage: percentage computed correctly (8/10 = 80%)');
   else fail(`keyword coverage: percentage wrong: ${r.coveragePct} (expected 80)`);
@@ -17347,10 +17365,12 @@ try {
     const cadKeys = Object.keys(DEFAULT_CADENCE);
     const schemaOk = defaults && typeof defaults === 'object'
       && cadKeys.length > 0
-      && cadKeys.every((k) => Number.isInteger(defaults[k]) && defaults[k] >= 0)
+      && cadKeys.every((k) => k === 'interview_followups'
+        ? defaults[k] === true
+        : Number.isInteger(defaults[k]) && defaults[k] >= 0)
       && Object.keys(defaults).length === cadKeys.length;
     if (schemaOk) {
-      pass('followup-cadence --json emits a complete integer cadenceDefaults for the web to derive from (#2369)');
+      pass('followup-cadence --json emits a complete cadenceDefaults for the web to derive from (#2369)');
     } else {
       fail(`cadenceDefaults payload broken — the web cadence form loses its baseline (#2369): ${JSON.stringify(defaults)}`);
     }
@@ -17381,7 +17401,7 @@ try {
     // would be reverting to, which is the #2369 mistake exactly.
     const emptyOk = emptyDefaults && typeof emptyDefaults === 'object'
       && Object.keys(emptyDefaults).length === cadKeys.length
-      && cadKeys.every((k) => Number.isInteger(emptyDefaults[k]) && emptyDefaults[k] === DEFAULT_CADENCE[k]);
+      && cadKeys.every((k) => emptyDefaults[k] === DEFAULT_CADENCE[k]);
     if (emptyOk) {
       pass('followup-cadence emits cadenceDefaults even when the tracker is empty (#4005)');
     } else {

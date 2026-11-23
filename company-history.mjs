@@ -55,7 +55,7 @@ import { loadYaml } from './lib/yaml-document.mjs';
 
 import { parseScanHistory, detectReposts, companyKey, loadAggregatorCompanies, isKeyLookup } from './detect-reposts.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
-import { normalizeCompany, resolveTrackerPath } from './tracker-utils.mjs';
+import { normalizeCompany, resolveTrackerPath, companiesMatchIgnoringCorporateForm } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { validateFlags, flagValue } from './lib/cli-flags.mjs';
@@ -258,7 +258,9 @@ function rowsFromCompanyKeysTouchingCard(rows, companyName) {
   for (const group of groups.values()) {
     let onCard = false;
     for (const row of group) {
-      if (normalizeCompany(row.company) === cardKey) {
+      // The same variants getCompanyCard() accepts, or the card it falls back
+      // to would lose its clusters.
+      if (normalizeCompany(row.company) === cardKey || companiesMatchIgnoringCorporateForm(row.company, companyName)) {
         onCard = true;
         break;
       }
@@ -630,6 +632,12 @@ export function getCompanyCard(result, companyName, aggregators) {
   const key = normalizeCompany(String(companyName || ''));
   const found = result.companies.find(c => c.key === key);
   if (found) return found;
+  // Exact first, then the corporate-form variant, the order set-status and
+  // outcome resolve a company in: `--company Acme` finds the row stored as
+  // "Acme Inc.". Only a single variant is taken; two ("Acme Inc." and
+  // "Acme GmbH") are not one employer this lookup can choose between.
+  const variants = result.companies.filter(c => companiesMatchIgnoringCorporateForm(c.company, companyName));
+  if (variants.length === 1) return variants[0];
 
   // An aggregator the user never applied to has no tracker rows and no
   // clusters, so it lands here. It must still not claim `none-detected` — the

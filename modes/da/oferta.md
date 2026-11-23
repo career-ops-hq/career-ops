@@ -244,7 +244,7 @@ Feltnavnene i hovedet (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`)
 (liste med 15-20 nøgleord fra opslaget til ATS-optimering)
 
 ## Keyword Coverage
-(genereres af `keyword-match.mjs` (1b) -- dækning i %, present, thin, missing)
+(genereres af `keyword-match.mjs` (1b) -- dækning i %, present, missing)
 
 ## Job Description (archived verbatim)
 (opslagets fulde tekst, indsat ordret -- se kravet nedenfor)

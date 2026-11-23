@@ -219,9 +219,9 @@ _Scanned: cv-example.md._
 
 **Present (10):** ML platform, regression testing, model monitoring, drift detection, Kubernetes, AWS, Python, CI/CD, feature store, model registry
 
-**Thin — mentioned once, consider reinforcing (8):** regression testing, model monitoring, drift detection, Kubernetes, AWS, Python, CI/CD, model registry
-
 **Missing (6):** LLM serving, inference optimization, evaluation harness, alerting, observability, mentoring
+
+Missing means the keyword was not matched by this check. Your CV may describe the skill in other words.
 
 > Diagnostic only. Add a missing keyword **only** if it reflects real experience — reformulated from your background, never fabricated.
 

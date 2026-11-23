@@ -1,4 +1,5 @@
 import { gapHoldsEditor } from "./handoff-gate.mjs";
+import { sessionFollowUp } from "./session-result.mjs";
 
 /**
  * Consume full-fill NDJSON. Only a terminal record confirms completion; EOF is
@@ -9,7 +10,7 @@ import { gapHoldsEditor } from "./handoff-gate.mjs";
  * @param {() => boolean} isCurrent
  * @param {AbortSignal} [signal] Aborts the pending read when the session generation is dropped.
  *   A generation check alone cannot unblock `reader.read()` if no further chunk arrives.
- * @returns {Promise<{status: "done", filled: boolean, gaps?: {level: "warn", code: string, message: string, field?: string}[]} | {status: "ready", error: string} | null>}
+ * @returns {Promise<{status: "done", filled: boolean, gaps?: {level: "warn", code: string, message: string, field?: string}[]} | {status: "ready", error: string} | {status: "unsupported", message: string, postingUrl: string, checklistHref: string} | null>}
  */
 export async function readFillResult(response, onStep, isCurrent, signal) {
   const failed = (error) => ({ status: /** @type {const} */ ("ready"), error });
@@ -44,6 +45,14 @@ export async function readFillResult(response, onStep, isCurrent, signal) {
       const done = { status: /** @type {const} */ ("done"), filled: event.filled };
       if (Array.isArray(event.gaps) && event.gaps.length) done.gaps = event.gaps;
       return done;
+    }
+    // The drive reached a refused host (Workday, iCIMS, UKG or
+    // apply.handoff_hosts) and closed the window: show the refusal panel.
+    if (event?.t === "unsupported") {
+      const followUp = sessionFollowUp(event);
+      if (followUp.kind !== "unsupported") return unreadable();
+      const { kind: _kind, ...refusal } = followUp;
+      return { status: /** @type {const} */ ("unsupported"), ...refusal };
     }
     if (event?.t === "error") {
       return failed(typeof event.message === "string" && event.message.trim()

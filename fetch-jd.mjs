@@ -88,7 +88,8 @@ Options:
     return;
   }
 
-  const header = result.title ? `${result.title}\n\n` : '';
+  // The structured-page reader already includes the posting title in its text.
+  const header = result.title && result.method !== 'ld+json' ? `${result.title}\n\n` : '';
   process.stdout.write(header + markCappedAtsText(result.text, TEXT_CAP));
 }
 

@@ -340,13 +340,30 @@
 
 # -- Employment-type filter (optional) --
 # Keep only the employment types you want: full_time, part_time, contract,
-# temporary, internship. Applied right after the salary filter. Reads the
-# structured type a provider takes from the source's own field, never the title
-# or description. Providers that set it today: himalayas ("Full Time",
-# "Contractor", ...), weworkremotely (<type>), remotive (job_type; "freelance"
-# counts as contract), ashby (employmentType) and lever (categories.commitment,
-# free text per employer; "Permanent" says nothing about the hours and is left
-# unknown). Every other provider leaves it unknown.
+# temporary, internship. Applied right after the salary filter. It reads the
+# type a provider takes from the source's own field, never the title or
+# description. scan:full does not apply this filter yet.
+# Providers that set it, and the field each reads:
+#   ashby            employmentType
+#   himalayas        employmentType ("Full Time", "Contractor", ...)
+#   kula             employmentType
+#   lever            categories.commitment (free text per employer;
+#                    "Permanent" does not give the hours, so it stays unknown)
+#   personio         employment_type_slug and schedule_slug (careers page),
+#                    <employmentType> and <schedule> (XML feed); trainee
+#                    (an apprenticeship) stays unknown
+#   recruitee        employment_type_code (fixed term counts as temporary)
+#   remotive         job_type ("freelance" counts as contract)
+#   smartrecruiters  typeOfEmployment.label; an experienceLevel of
+#                    internship decides
+#   wellfound        jobType
+#   weworkremotely   <type>
+#   workable         employment_type (widget), the Type column (markdown
+#                    fallback), <jobtype> (scan:full's feed); an
+#                    experience level of Internship decides on the widget and
+#                    the feed, and the markdown fallback cannot see it
+#   wttj             contract_type ("freelance" counts as contract)
+# Every other provider leaves it unknown.
 #
 # Semantics:
 #   - a type in `allow` → kept; any other known type → removed
@@ -607,6 +624,11 @@
 # skip_tiers: [intern, entry]  # optional: skip listings by seniority tier (note: unrecognized/plain titles fall back to 'mid')
 #   A tracked_companies / job_boards entry can set its own skip_tiers, which replaces this list for
 #   that entry; skip_tiers: [] turns the tier filter off for it.
+#
+#   A tracked_companies / job_boards entry can carry its own title_filter, which replaces this
+#   global filter for that entry only (including replacing global negatives, so restate any
+#   negatives like junior or intern if that entry still wants them). An entry with negatives
+#   but no positives keeps the global positive keywords and replaces only the negative list.
 
 title_filter:
   # A `positive` entry is matched case-insensitively as a substring — except a
@@ -1372,6 +1394,7 @@ search_queries:
 #   deel            jobs.deel.com/<slug>                (Deel job board; a tenant that redirects off-host is not readable)
 #   inrecruiting    <tenant>.intervieweb.it             (Zucchetti InRecruiting career page; /en/career etc. picks the language)
 #   keka            <tenant>.keka.com                   (Keka careers page, /careers; the feed id is read off that page)
+#   velorahr        <tenant>.career.velorahr.com/<slug>-<siteId>   (Velora HR career site, any path under it; the site id ending the first path segment is required)
 #   kula            careers.kula.ai/<slug>              (Kula career site, any path under it; reads the tenant RSS feed /<slug>/feed)
 #   darwinbox       <tenant>.darwinbox.in/ms/candidatev2/<companyId>/careers/...   (or darwinbox.com; the company id is required; a bare tenant host is not claimed)
 #   turbohire       <tenant>.turbohire.co               (TurboHire careers page, any path; the org id is looked up from the subdomain)
@@ -1479,6 +1502,12 @@ search_queries:
 # claim. Set `provider: rexx` + `careers_url` pointed at the portal's job list
 # page (e.g. https://jobs.exampleco.com/stellenangebote.html).
 #
+# Bizneo HR is explicit-only too: its career sites run on the employer's own
+# domain (empleo.<company>.com, jobs.<company>.com), so there is no vendor host
+# to claim. Set `provider: bizneo` + `careers_url` pointed at the site (only the
+# host is used, and it must be a public named https host: no credentials, port,
+# IP address or local name; the provider reads its `/jobs` list).
+#
 # Eploy is also explicit-only: standard tenants use unrelated branded domains,
 # so a URL cannot be distinguished safely from a non-Eploy careers site. Set
 # `provider: eploy`; the provider reads the public `/live-jobs.xml` on that
@@ -1525,6 +1554,12 @@ search_queries:
 #   careers_url: https://exampleco.bamboohr.com/careers   # any *.bamboohr.com host
 #   enabled: true
 #
+# - name: Example Bizneo Co
+#   careers_url: https://empleo.exampleco.com/jobs        # Bizneo HR career site on the employer's own domain
+#   provider: bizneo       # required — branded domains cannot auto-detect
+#   max_pages: 30          # optional page cap (default 30, max 100)
+#   enabled: true
+#
 # - name: Example Homerun Co
 #   careers_url: https://exampleco.homerun.co            # any <slug>.homerun.co host
 #   # Branded careers domain: api: https://feed.homerun.co/exampleco (the feed the careers page links)
@@ -1541,6 +1576,10 @@ search_queries:
 #
 # - name: Example Keka Co
 #   careers_url: https://exampleco.keka.com/careers       # any <tenant>.keka.com host
+#   enabled: true
+#
+# - name: Example VeloraHR Co
+#   careers_url: https://exampleco.career.velorahr.com/exampleco-123   # any <tenant>.career.velorahr.com host; the number ending the first path segment is the site id
 #   enabled: true
 #
 # - name: Example Kula Co
@@ -1859,6 +1898,10 @@ search_queries:
 #   # host that proxies Avature (detect() won't auto-claim it), set
 #   # provider: avature + api: the SearchJobs URL explicitly instead.
 #   careers_url: https://exampleco.avature.net/careers/SearchJobs
+#   # A tenant with no SearchJobs lists postings per country; give that page
+#   # (provider: avature), the full URL in careers_url (or in api:, which wins over
+#   # careers_url), e.g. https://jobs.exampleco.com/en_US/careers/JobOpeningsSpain;
+#   # a bare origin in api: is requested as /careers/SearchJobs
 #   max_pages: 50          # optional page cap (only 6 jobs/page — Avature's hard
 #                          # limit — so ~300 postings by default, max 200 pages)
 #   # offset_param: offset  # optional — pins the pagination key for a tenant
@@ -1991,6 +2034,11 @@ search_queries:
 #   max_pages: 500                        # optional, 10 postings/page (default 500, max 1000); a whole list is
 #                                         # 2 requests per locale, since the API returns pages cumulatively
 #   enabled: true
+#
+# - name: Bolt                           # single-company; Next.js careers page, every position in one HTML response
+#   careers_url: https://bolt.eu/en/careers/positions/   # a branded domain: never auto-detected
+#   provider: bolt                        # required; always reads the English positions page, one request
+#   enabled: true                         # the whole worldwide board (~190 postings, one request); location is left to location_filter
 #
 # - name: Dassault Systèmes              # single-company; Exalead card_search_api
 #   careers_url: https://www.3ds.com/careers/jobs   # auto-detects on *.3ds.com
@@ -2256,7 +2304,7 @@ search_queries:
 # - name: Jobstreet — Indonesia          # SEEK aggregator
 #   provider: jobstreet
 #   searchKeywords: "Software Engineer"
-#   siteKey: ID-Main      # SEEK site key (ID-Main, SG-Main, MY-Main, AU-Main, NZ-Main)
+#   siteKey: ID-Main      # SEEK site key (ID-Main, SG-Main, MY-Main, PH-Main, AU-Main, NZ-Main)
 #   searchLocation: ""    # optional location filter
 #   enabled: true
 #
@@ -2521,7 +2569,8 @@ search_queries:
 # entry only (with dedup_include_language off).
 #
 # Teamtailor auto-detects from a <slug>.teamtailor.com careers host and reads
-# the public no-auth /jobs.rss feed — e.g.:
+# the public no-auth /jobs.rss feed (100 postings per request, so it is paged
+# with ?offset= up to max_pages, default 20, hard ceiling 100) — e.g.:
 #
 #   - name: Example Co
 #     careers_url: https://example.teamtailor.com
@@ -2618,6 +2667,25 @@ search_queries:
 #   - name: BigCo
 #     careers_url: https://jobs.lever.co/bigco
 #     timeout_ms: 60000
+
+# ── title_filter (optional, per entry) ─────────────────────────────────
+# When an entry defines its own title_filter, it replaces the top-level
+# title_filter for that entry only. This replaces the global positive and
+# negative lists entirely, allowing you to target titles that a global negative
+# would normally drop, or customize keywords for specific employers.
+# An entry with negatives but no positives keeps the global positive keywords
+# and replaces only the negative list.
+#
+#   - name: Example County
+#     careers_url: https://www.governmentjobs.com/careers/examplecounty
+#     title_filter:
+#       positive: ["Librarian", "Library"]
+#       negative: ["Page", "Custodian"]
+#
+#   - name: Example Tech
+#     careers_url: https://example.invalid/jobs
+#     title_filter:
+#       negative: ["Contractor", "Intern"]
 
 tracked_companies:
 
@@ -3316,9 +3384,8 @@ tracked_companies:
 
   - name: Bolt
     careers_url: https://bolt.eu/en/careers/positions/
-    scan_method: websearch
-    scan_query: 'site:bolt.eu/en/careers/positions'
-    notes: "Tallinn. Ride-hailing/mobility. Lists its roles on its own site, which no provider reads; the Ashby board named Bolt has no postings."
+    provider: bolt
+    notes: "Tallinn. Ride-hailing/mobility. Lists its roles on its own site, which the scanner reads directly (every position is in one page); the Ashby board named Bolt has no postings."
     enabled: true
 
   - name: Bosch
@@ -3444,6 +3511,14 @@ tracked_companies:
     notes: "Madrid/Barcelona and Latin America. Energy utility. SAP-hosted classic SuccessFactors board (27 postings on 2026-11-18, Spanish and Brazilian); no place in the list, so filter by title."
     enabled: true
 
+  # -- Spain (Bizneo HR career pages) --
+
+  - name: Bit2Me
+    careers_url: https://empleo.bit2me.com/jobs
+    provider: bizneo
+    notes: "Madrid / Remote. Crypto exchange. Bizneo HR career site on its own domain (3 postings on 2026-11-18)."
+    enabled: true
+
   # -- Spain (Viterbit career sites) --
 
   - name: Prosegur
@@ -3457,6 +3532,13 @@ tracked_companies:
   - name: Maggioli
     careers_url: https://maggioli.intervieweb.it/it/career
     notes: "Santarcangelo di Romagna IT. Software and services for public administration; developer, data and analyst roles across Italy."
+    enabled: false
+
+  # -- Spain (Velora HR career sites) --
+
+  - name: Calidad Pascual
+    careers_url: https://pascual.career.velorahr.com/calidad-pascual-248
+    notes: "Madrid. Food and dairy group (Pascual, Cafés Saula, Priégola); a few dozen offers at most, mostly operations, supply chain and administration. Velora HR is a Spanish ATS."
     enabled: false
 
   # -- AI / Developer Tools --

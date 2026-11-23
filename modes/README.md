@@ -18,6 +18,7 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `ofertas.md` | `ofertas` | Multi-job comparison |
 | `auto-pipeline.md` | (paste a JD/URL) | Full automatic pipeline (evaluate + PDF + tracker) on a pasted JD/URL |
 | `pipeline.md` | `pipeline` | Process the URL inbox (`data/pipeline.md`) |
+| `capture.md` | `capture` | Record a posting in the inbox without evaluating it |
 | `scan.md` | `scan` | Portal scanner (job discovery) |
 | `discover.md` | `discover` | Resolve company names to scannable ATS boards for `portals.yml` |
 | `triage.md` | `triage` | Fast first-pass quick score before full evaluation |

@@ -106,7 +106,10 @@ export default {
   },
 
   async fetch(entry, ctx) {
+    /** @type {Awaited<ReturnType<Provider['fetch']>>} */
     const jobs = [];
+    const keyword = new URL(buildQuery(entry, 0)).searchParams.get('base_query')?.trim();
+    if (keyword) jobs.queryScope = { config: 'amazon.base_query', queries: [keyword] };
     const seen = new Set();
     // MAX_PAGES caps a walk only while the total is unknown. The API reports
     // `hits` for the filtered query, and once page 0 answers, that total sizes

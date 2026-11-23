@@ -74,7 +74,8 @@ test("a clean exit with no stdout streams the CLI's own stderr reason through /a
   const events = await streamedEvents(t, { stderr: [AGY_LINE], code: 0 });
   const error = events.find((event) => event.type === "error");
   assert.ok(error, `expected an error event, got ${JSON.stringify(events)}`);
-  assert.match(error.msg, /^The CLI produced no output — is it installed and authenticated\? \(jetski: no output produced/);
+  assert.match(error.msg, /^The CLI returned nothing\. \(jetski: no output produced/);
+  assert.doesNotMatch(error.msg, /authenticated/);
   assert.match(error.msg, /headless mode cannot prompt for/);
   assert.equal(events.some((event) => event.type === "done"), false, "a run with no output is never reported as done");
 });
@@ -85,6 +86,6 @@ test("a clean exit with no stdout and no stderr keeps the generic message", asyn
   assert.ok(error, `expected an error event, got ${JSON.stringify(events)}`);
   assert.equal(
     error.msg,
-    "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)",
+    "The CLI returned nothing. (career-ops is best on Claude Code.)",
   );
 });
