@@ -196,3 +196,26 @@ test('a fact-check coverage gap is a non-blocking facts problem', () => {
   const cov = problems.find((p) => p.type === 'facts' && /could not cover/.test(p.detail));
   assert.ok(cov, JSON.stringify(problems));
 });
+
+test('a warn_phrases hit surfaces as a non-blocking advisory problem (#6792)', () => {
+  const root = workspace({ 'a.md': OMIT_AND_REORDER });
+  writeFileSync(join(root, 'config', 'cv-facts.json'), JSON.stringify({ warn_phrases: ['NLP'] }));
+  const types = checkVariant('a', { root }).problems.map((p) => p.type);
+  assert.deepEqual(types, ['advisory']);
+});
+
+const BULLET_AS_DATES = `# Jane Doe
+
+## Work Experience
+
+### Acme Corp -- Sydney
+
+**CTO**
+- Led a team of 3 engineers
+`;
+
+test('a job whose line after the title is a bullet, not dates, is rejected (#6792)', () => {
+  const root = workspace({ 'bad.md': BULLET_AS_DATES });
+  assert.throws(() => resolveVariant('bad', { root }), /could not be parsed/);
+  assert.equal(checkVariant('bad', { root }).problems[0].type, 'parse');
+});
