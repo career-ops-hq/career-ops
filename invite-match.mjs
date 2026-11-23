@@ -41,7 +41,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
-import { resolveColumns, parseTrackerRow, extractReqNumber } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, extractReqNumber, trackerRowIdentity } from './tracker-parse.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -1050,14 +1050,18 @@ export function analyzeInvite(text, trackerRows = null, options = {}) {
  * reaching this function.
  *
  * @param {number} appNumber - Tracker # to update (must be unambiguous).
- * @param {{appsFile?: string}} [options] - appsFile overrides CAREER_OPS_TRACKER for the child process (tests only).
+ * @param {{appsFile?: string, expectedRow?: object}} [options] - expectedRow is the matched tracker snapshot. appsFile overrides CAREER_OPS_TRACKER for tests.
  * @returns {object} set-status.mjs's own --json result (or its structured error).
  */
 export function applyRejectionStatus(appNumber, options = {}) {
   const scriptPath = join(CAREER_OPS_CODE_ROOT, 'set-status.mjs');
   const env = options.appsFile ? { ...process.env, CAREER_OPS_TRACKER: options.appsFile } : process.env;
+  const args = [scriptPath, String(appNumber), 'Rejected', '--json'];
+  if (options.expectedRow) {
+    args.push('--expect-row', trackerRowIdentity(options.expectedRow));
+  }
   try {
-    const out = execFileSync(process.execPath, [scriptPath, String(appNumber), 'Rejected', '--json'], {
+    const out = execFileSync(process.execPath, args, {
       encoding: 'utf-8', env,
       // Capture the child's stderr instead of letting execFileSync's default
       // inherit it. set-status.mjs's failWith writes the machine payload to
@@ -1255,7 +1259,8 @@ if (isMainModule(import.meta.url)) {
       text = readFileSync(0, 'utf-8'); // stdin
     }
 
-    const result = analyzeInvite(text, null, { clarificationDraft: !noClarificationDraft });
+    const rows = loadTracker();
+    const result = analyzeInvite(text, rows, { clarificationDraft: !noClarificationDraft });
 
     if (applyMode) {
       // Scoped strictly to the Rejected transition (#2098) — never applies
@@ -1286,8 +1291,10 @@ if (isMainModule(import.meta.url)) {
         process.exit(selection.code);
       }
       const target = selection.target;
-
-      const applyResult = applyRejectionStatus(target.appNumber);
+      const matchingRows = rows.filter(row => row.num === target.appNumber);
+      const applyResult = matchingRows.length === 1
+        ? applyRejectionStatus(target.appNumber, { expectedRow: matchingRows[0] })
+        : { error: `#${target.appNumber} is shared by multiple tracker rows; resolve the duplicate before retrying`, code: 'ambiguous' };
       const output = { ...result, applied: applyResult };
       if (summaryMode) {
         printSummary(result);

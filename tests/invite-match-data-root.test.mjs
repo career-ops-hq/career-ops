@@ -15,7 +15,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const CODE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -39,10 +39,10 @@ function seedDataRoot() {
 }
 
 /** Run invite-match.mjs with the data root detached from the code checkout. */
-function runInviteMatchApply(dataRoot, tracker, stdin) {
+function runInviteMatchApply(dataRoot, tracker, stdin, preload = []) {
   const env = { ...process.env, CAREER_OPS_ROOT: dataRoot, CAREER_OPS_TRACKER: tracker };
   delete env.CAREER_OPS_DATA_DIR;
-  const result = spawnSync(process.execPath, [join(CODE_ROOT, 'invite-match.mjs'), '--apply', '--id', '1'], {
+  const result = spawnSync(process.execPath, [...preload, join(CODE_ROOT, 'invite-match.mjs'), '--apply', '--id', '1'], {
     cwd: CODE_ROOT,
     env,
     input: stdin,
@@ -83,3 +83,45 @@ test('--apply resolves set-status.mjs from the code root, not the data root', ()
     rmSync(dataRoot, { recursive: true, force: true });
   }
 });
+
+for (const change of ['replaced', 'removed', 'unrelated']) {
+  test(`--apply handles a tracker row ${change} after matching`, () => {
+    const { dataRoot, tracker } = seedDataRoot();
+    try {
+      const original = readFileSync(tracker, 'utf8');
+      const other = '| 2 | 2026-01-02 | Litware | Designer | 4.0/5 | Applied | ❌ | [1](../reports/001-litware.md) | seeded |\n';
+      const changed = change === 'replaced'
+        ? original.replace('Fabrikam | Engineer', 'Litware | Designer')
+        : (change === 'removed' ? original.slice(0, original.indexOf('| 1 |')) : original) + other;
+      const staged = join(dataRoot, 'updated-applications.md');
+      const preload = join(dataRoot, 'publish-tracker-update.mjs');
+      writeFileSync(staged, changed);
+      // Publish the competing fixture update after matching and before the real
+      // set-status child acquires the tracker lock.
+      writeFileSync(preload, `import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+import { renameSync } from 'node:fs';
+const run = childProcess.execFileSync;
+childProcess.execFileSync = (exe, args, options) => {
+  if (args[0].endsWith('set-status.mjs')) renameSync(${JSON.stringify(staged)}, ${JSON.stringify(tracker)});
+  return run(exe, args, options);
+};
+syncBuiltinESMExports();
+`);
+      const result = runInviteMatchApply(dataRoot, tracker, REJECTION, ['--import', pathToFileURL(preload).href]);
+      const actual = readFileSync(tracker, 'utf8');
+      if (change === 'unrelated') {
+        assert.equal(result.status, 0, describeSpawn(result));
+        assert.ok(actual.includes(other), 'unrelated application changed');
+        assert.equal(JSON.parse(result.stdout).applied.company, 'Fabrikam');
+        assert.equal(JSON.parse(result.stdout).applied.newStatus, 'Rejected');
+      } else {
+        assert.equal(result.status, 1, describeSpawn(result));
+        assert.equal(actual, changed, 'a different application was updated');
+        assert.equal(JSON.parse(result.stdout).applied.code, change === 'replaced' ? 'row-changed' : 'not-found');
+      }
+    } finally {
+      rmSync(dataRoot, { recursive: true, force: true });
+    }
+  });
+}
