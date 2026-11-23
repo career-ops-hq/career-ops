@@ -316,6 +316,94 @@ try {
       : fail(`google probe rejection: ${threw?.message}`);
   }
 
+  // ── posted date: read from the page's inline AF_initDataCallback data block ──
+  // Shape observed live 2026-11-23: data = [jobs[], null, total, pageSize], each
+  // job [0] id, [1] title, …, [12] [postedEpochSeconds, nanos].
+  const dataRow = (id, epochS) => {
+    const row = Array(13).fill(null);
+    row[0] = id; row[1] = `Role ${id}`;
+    row[12] = epochS === undefined ? null : [epochS, 116000000];
+    return row;
+  };
+  const dataBlock = (rows, key = 'ds:1') =>
+    `<script>AF_initDataCallback({key: '${key}', hash: '2', data:${JSON.stringify([rows, null, rows.length, 20])}, sideChannel: {}});</script>`;
+  const NOV_20 = 1795190400; // 2026-11-20T00:00:00Z
+  {
+    // A row's date attaches to the card with the same id, as epoch ms; a card
+    // whose row has no date gets no postedAt (unknown, not stale).
+    const html = `${dataBlock([dataRow('111', NOV_20), dataRow('222')])}${linkPage(['111', '222'])}`;
+    const { ctx } = recordingCtx(() => html);
+    const jobs = await provider.fetch({ name: 'Google', google: { queries: ['x'] } }, ctx);
+    const a = jobs.find((j) => j.externalId === '111');
+    const b = jobs.find((j) => j.externalId === '222');
+    a?.postedAt === NOV_20 * 1000 && b && !('postedAt' in b)
+      ? pass('google.fetch() sets postedAt (epoch ms) from the data block, and omits it for a row with no date')
+      : fail(`google postedAt: ${JSON.stringify(jobs)}`);
+  }
+  {
+    // No data block, or a block that does not parse: cards still come back, undated.
+    const broken = `<script>AF_initDataCallback({key: 'ds:1', hash: '2', data:[[["111", sideChannel: {}});</script>`;
+    for (const [label, html] of [['no block', linkPage(['111'])], ['malformed block', `${broken}${linkPage(['111'])}`]]) {
+      const { ctx } = recordingCtx(() => html);
+      const jobs = await provider.fetch({ name: 'Google', google: { queries: ['x'] } }, ctx);
+      jobs.length === 1 && !('postedAt' in jobs[0])
+        ? pass(`google.fetch() keeps the card without postedAt when the page has ${label}`)
+        : fail(`google ${label}: ${JSON.stringify(jobs)}`);
+    }
+  }
+  {
+    // The block is found by shape, not by key, and an implausible epoch is dropped.
+    const { parsePostedDates } = mod;
+    const other = `<script>AF_initDataCallback({key: 'ds:0', hash: '1', data:["config", 1], sideChannel: {}});</script>`;
+    const dates = typeof parsePostedDates === 'function'
+      ? parsePostedDates(`${other}${dataBlock([dataRow('111', NOV_20), dataRow('222', 5), dataRow('abc', NOV_20)], 'ds:7')}`)
+      : new Map();
+    dates.get('111') === NOV_20 * 1000 && !dates.has('222') && !dates.has('abc') && dates.size === 1
+      ? pass('parsePostedDates() finds the block by shape under any key and drops pre-2000 epochs and non-numeric ids')
+      : fail(`parsePostedDates: ${JSON.stringify([...dates])}`);
+  }
+  {
+    // Descriptions ride in the block, so ", sideChannel:" inside a JSON string
+    // must not cut the block short and cost every date on the page.
+    const { parsePostedDates } = mod;
+    const tricky = dataRow('111', NOV_20);
+    tricky[3] = 'Own the build, sideChannel: attacks and all';
+    const dates = typeof parsePostedDates === 'function'
+      ? parsePostedDates(dataBlock([tricky, dataRow('222', NOV_20)]))
+      : new Map();
+    dates.size === 2
+      ? pass('parsePostedDates() reads past ", sideChannel:" inside a description string')
+      : fail(`parsePostedDates early cut: ${JSON.stringify([...dates])}`);
+  }
+  {
+    // Future epochs (milliseconds read as seconds, say) are dropped; a digit-string
+    // epoch is read; a later block is used when the first shaped one has no dates.
+    const { parsePostedDates } = mod;
+    const NOW = (NOV_20 + 3 * 86_400) * 1000;
+    const rows = [dataRow('111', NOV_20 * 1000), dataRow('222', NOV_20 + 30 * 86_400), dataRow('333')];
+    rows[2][12] = [String(NOV_20), 0];
+    const undated = dataBlock([dataRow('999')], 'ds:0');
+    const dates = typeof parsePostedDates === 'function'
+      ? parsePostedDates(`${undated}${dataBlock(rows)}`, NOW)
+      : new Map();
+    dates.size === 1 && dates.get('333') === NOV_20 * 1000
+      ? pass('parsePostedDates() drops future and ms-scale epochs, reads a digit-string epoch, and moves past an undated block')
+      : fail(`parsePostedDates bounds: ${JSON.stringify([...dates])}`);
+  }
+  {
+    // Cards with no dates anywhere: one warning, because max_posting_age_days has
+    // silently stopped applying. Dated cards: no warning.
+    const run = async (html) => {
+      const { ctx } = recordingCtx(() => html);
+      return captureErrors(() => provider.fetch({ name: 'Google', google: { queries: ['x', 'y'] } }, ctx));
+    };
+    const undatedLog = await run(linkPage(['111']));
+    const datedLog = await run(`${dataBlock([dataRow('111', NOV_20)])}${linkPage(['111'])}`);
+    undatedLog.filter((l) => /no posting dates/.test(l)).length === 1 && !datedLog.some((l) => /no posting dates/.test(l))
+      ? pass('google.fetch() warns once when a board returns jobs but no posting dates, and not when it has dates')
+      : fail(`google no-dates warning: undated=${JSON.stringify(undatedLog)} dated=${JSON.stringify(datedLog)}`);
+  }
+
 } catch (e) {
   fail(`google provider tests crashed: ${e.message}`);
 }
