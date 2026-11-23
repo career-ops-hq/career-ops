@@ -68,6 +68,8 @@ copyFileSync(join(ROOT, 'lib', 'page-format.mjs'), join(sandbox, 'lib', 'page-fo
 copyFileSync(join(ROOT, 'lib', 'browser-launch.mjs'), join(sandbox, 'lib', 'browser-launch.mjs'));
 // pipeline-lock.mjs runs the shared lock protocol from lib/dir-lock.mjs (#5358).
 copyFileSync(join(ROOT, 'lib', 'dir-lock.mjs'), join(sandbox, 'lib', 'dir-lock.mjs'));
+// tracker-utils.mjs imports its rename retry from lib/rename-retry.mjs.
+copyFileSync(join(ROOT, 'lib', 'rename-retry.mjs'), join(sandbox, 'lib', 'rename-retry.mjs'));
 // ...and resolves the lock path through lib/lock-path.mjs, which it imports
 // itself, so the sandbox needs that module for the same reason.
 copyFileSync(join(ROOT, 'lib', 'lock-path.mjs'), join(sandbox, 'lib', 'lock-path.mjs'));

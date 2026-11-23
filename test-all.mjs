@@ -10096,6 +10096,8 @@ try {
       // ...and pipeline-lock.mjs runs the shared lock protocol from
       // lib/dir-lock.mjs (#5358), so the fixture carries that too.
       copyFileSync(join(ROOT, 'lib', 'dir-lock.mjs'), join(e2eTmp, 'lib', 'dir-lock.mjs'));
+      // ...and tracker-utils imports its rename retry from lib/rename-retry.mjs.
+      copyFileSync(join(ROOT, 'lib', 'rename-retry.mjs'), join(e2eTmp, 'lib', 'rename-retry.mjs'));
       copyFileSync(join(ROOT, 'lib', 'yaml-document.mjs'), join(e2eTmp, 'lib', 'yaml-document.mjs'));
       // ...and followup-cadence now delegates flag validation to the shared
       // lib/cli-flags.mjs helper, so the fixture carries that too.
