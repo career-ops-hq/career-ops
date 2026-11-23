@@ -365,7 +365,11 @@ try {
   if (!res.ok) {
     const body = await res.text();
     console.error(`❌  API error: HTTP ${res.status}`);
-    console.error(`    ${body.slice(0, 300)}`);
+    // The body is the gateway's own text, and the one place this request's key
+    // can come back out. gemini-eval.mjs redacts its key from error text the
+    // same way; redact before truncating so a long key cannot survive in pieces.
+    const shown = apiKey ? body.split(apiKey).join('[REDACTED]') : body;
+    console.error(`    ${shown.slice(0, 300)}`);
     if (res.status === 402) {
       console.error(`    → Not enough credit at ${endpointHost} for the prompt plus the ${maxTokens}-token output cap.`);
       console.error(`      Top up, or lower CAREER_OPS_MAX_TOKENS.`);
