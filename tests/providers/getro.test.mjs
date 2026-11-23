@@ -229,7 +229,7 @@ try {
   if (getroModes[0]?.workplaceType === 'remote')
     pass('getro.fetch() sets workplaceType remote from work_mode "remote"');
   else fail(`getro.fetch() workplaceType = ${JSON.stringify(getroModes.map((j) => j.workplaceType))}`);
-  if (getroModes.slice(1).every((j) => !('workplaceType' in j)))
+  if (getroModes.length === 4 && getroModes.slice(1).every((j) => j && !('workplaceType' in j)))
     pass('getro.fetch() leaves workplaceType unset for on_site, an unknown or a null work_mode');
   else fail(`getro.fetch() other work_mode = ${JSON.stringify(getroModes.slice(1).map((j) => j.workplaceType))}`);
 
