@@ -468,21 +468,12 @@ async function main() {
     return; // advisory even with --strict; no providers loaded or network calls
   }
 
-  const providers = await loadProviders(PROVIDERS_DIR);
-  // Fold in enabled provider plugins as scan.mjs does (#4026). Without them
-  // every `provider: <plugin-id>` entry audits as `no-provider` while the
-  // scanner scans it. No-op when config/plugins.yml is absent.
-  await mergeProviderPlugins(providers, { root: CODE_ROOT, dataRoot: ROOT });
-  const rows = await auditCompanies(companies, { providers, smallThreshold });
-
-  // From here on, a failure sets process.exitCode and returns instead of
-  // calling process.exit(1). On Windows, Node 24 aborts when process.exit()
-  // runs right after a request (nodejs/node#56645): it prints a libuv assertion
-  // and exits with a crash code instead of 1. Measured 2026-11-05 on Node
-  // 24.14.1: --strict on a Greenhouse, Ashby, SmartRecruiters or Workday board
-  // that does not exist aborted 4 times out of 4, and so did a missing
-  // --baseline file. Returning lets the process exit 1 once the event loop drains.
-  let drops = [];
+  // Read the --baseline file before any board is fetched. It used to be read
+  // after the audit, so a wrong path cost one request per board and then threw
+  // the audit away: 200 requests and 35 s on templates/portals.example.yml
+  // (measured 2026-11-22). A file without a rows array, such as another
+  // command's JSON, compared nothing and passed --strict.
+  let baseline = null;
   const baselinePath = flagValue(args, '--baseline');
   if (baselinePath) {
     if (!existsSync(baselinePath)) {
@@ -492,13 +483,34 @@ async function main() {
     }
     try {
       const prev = JSON.parse(readFileSync(baselinePath, 'utf-8'));
-      drops = diffAgainstBaseline(rows, Array.isArray(prev) ? prev : prev.rows, {});
+      baseline = Array.isArray(prev) ? prev : prev?.rows;
     } catch (err) {
       console.error(`Error: could not read baseline ${baselinePath}: ${err.message}`);
       process.exitCode = 1;
       return;
     }
+    if (!Array.isArray(baseline)) {
+      console.error(`Error: baseline ${baselinePath} has no rows: pass a file written by audit-portals.mjs --json`);
+      process.exitCode = 1;
+      return;
+    }
   }
+
+  const providers = await loadProviders(PROVIDERS_DIR);
+  // Fold in enabled provider plugins as scan.mjs does (#4026). Without them
+  // every `provider: <plugin-id>` entry audits as `no-provider` while the
+  // scanner scans it. No-op when config/plugins.yml is absent.
+  await mergeProviderPlugins(providers, { root: CODE_ROOT, dataRoot: ROOT });
+  const rows = await auditCompanies(companies, { providers, smallThreshold });
+
+  // From here on, a failure sets process.exitCode instead of calling
+  // process.exit(1). On Windows, Node 24 aborts when process.exit()
+  // runs right after a request (nodejs/node#56645): it prints a libuv assertion
+  // and exits with a crash code instead of 1. Measured 2026-11-05 on Node
+  // 24.14.1: --strict on a Greenhouse, Ashby, SmartRecruiters or Workday board
+  // that does not exist aborted 4 times out of 4. The process then exits 1
+  // once the event loop drains.
+  const drops = baseline ? diffAgainstBaseline(rows, baseline, {}) : [];
 
   if (asJson) {
     console.log(JSON.stringify(drops.length ? { rows, drops } : rows, null, 2));

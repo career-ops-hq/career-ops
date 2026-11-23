@@ -25,7 +25,7 @@ const MAX_JOBS = 500; // generous cap; the board is tiny
 
 /** @param {string} s */
 function clean(s) {
-  return decodeEntities(s.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(s.replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 }
 
 /** Resolve the vacancy-list URL from api:/careers_url; default the DE list. */

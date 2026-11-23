@@ -79,7 +79,7 @@ const AGGREGATOR_SUPPLEMENT = [
   'glassdoor.com',   // primary board; employers post directly
   'ziprecruiter.com', // primary board; employers post directly
   'dice.com',        // primary board for tech; employers post directly
-  'wellfound.com',   // primary board for startups; employers post directly
+  'wellfound.com',   // primary board for startups; employers post directly; providers/wellfound.mjs
   // Boards this repository's own scanner reads (#3652). Each host is emitted by
   // the provider named beside it, so a row arriving through scan, pipeline and
   // evaluate carries one of these URLs rather than an employer-controlled one.
@@ -198,6 +198,8 @@ function foldHostname(host) {
 // feeds: every Himalayas `guid` is /companies/{companySlug}/jobs/{jobSlug} and
 // the feed's `applicationLink` is that URL plus utm params; every Jobicy `url`
 // is /jobs/{id}-{slug} where {id} equals the feed item's numeric `id`.
+// Wellfound is read by providers/wellfound.mjs, whose job URLs are
+// /jobs/{id}-{slug} with the listing's numeric `id`.
 //
 // Extractors are keyed on the DOMAIN, never on the path: `/jobs/view/{id}` is
 // also Workable's employer-board shape, where it means something else.
@@ -225,6 +227,12 @@ const AGGREGATOR_POSTING_ID = {
   // jobicy.com/jobs/{id}-{slug}: the leading number is the feed's job `id`. A
   // slug-only path carries no id and stays UNKNOWN.
   'jobicy.com': (u) => /^\/jobs\/(\d+)-[^/]+\/?$/.exec(u.pathname)?.[1] ?? null,
+  // wellfound.com/jobs/{id}-{slug}: the leading number is the listing `id`,
+  // and the id alone names the posting (one id is served under one slug at a
+  // time; any other slug answers 404). /company/{slug}/jobs/{id}-{slug}
+  // answers a redirect to /jobs/{id}-{slug} and is never a posting URL
+  // itself, so it is not read here.
+  'wellfound.com': (u) => /^\/jobs\/(\d+)-[^/]+\/?$/.exec(u.pathname)?.[1] ?? null,
 };
 
 /**
@@ -315,6 +323,38 @@ export function promoteKnownFragmentIdentity(url) {
 }
 
 /**
+ * Give one Microsoft requisition one URL shape. Microsoft's careers site
+ * (Eightfold) serves a posting at `/careers/job/{pid}` and at
+ * `/careers?pid={pid}&domain=microsoft.com`; the scanner writes the second and
+ * pasted or older rows carry the first. Keyed on the full URL the two spellings
+ * are two postings, so a role already in the tracker in one shape is added
+ * again from the feed in the other.
+ *
+ * The pid is the posting's own id, so everything else in the query (`hl`,
+ * `start`, `sort_by`, ...) is dropped. Only the `apply.careers.microsoft.com`
+ * host is read, and a `/careers` URL with no pid (a results page) is left
+ * alone. Mutates the URL used for the comparison key only. The hostname is
+ * folded here (a trailing dot, `apply.careers.microsoft.com.`), so a caller
+ * that keys on the parsed URL without folding it first, like scan.mjs's
+ * normalizeUrlForDedup, still gets the same key.
+ *
+ * @param {URL} url - A parsed posting URL.
+ */
+export function canonicalizeKnownPostingUrl(url) {
+  const host = foldHostname(url.hostname);
+  if (host !== 'apply.careers.microsoft.com') return;
+  const match = /^\/careers(?:\/job\/(\d+))?\/?$/i.exec(url.pathname);
+  if (!match) return;
+  const pid = match[1] ?? url.searchParams.get('pid');
+  if (!pid || !/^\d+$/.test(pid)) return;
+  url.hostname = host;
+  url.pathname = '/careers';
+  url.search = '';
+  url.searchParams.set('pid', pid);
+  url.searchParams.set('domain', 'microsoft.com');
+}
+
+/**
  * Google Careers' job id, or null when the URL is not a Google Careers posting.
  *
  * The id is the number after `/jobs/results/` on
@@ -367,6 +407,7 @@ export function normalizeUrl(raw) {
   u.protocol = 'https:';            // http vs https is the same posting
   u.hostname = foldHostname(u.hostname);
   promoteKnownFragmentIdentity(u);
+  canonicalizeKnownPostingUrl(u);
   u.hash = '';                      // unrecognized fragments do not identify it
 
   // Drop tracking params, keep functional ones, sort for order-independence.
@@ -574,7 +615,7 @@ export function relatePostingLanguageKeys(a, b) {
   return a.language && b.language ? 'distinct' : 'one-sided-language';
 }
 
-const PATH_FOLD_HOSTS = /^(?:jobs\.(?:eu\.)?lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com|[\w-]+\.wd[\w-]*\.myworkdayjobs\.com)$/;
+const PATH_FOLD_HOSTS = /^(?:jobs\.(?:eu\.)?lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com|[\w-]+\.wd[\w-]*\.myworkdayjobs\.com|wd[\w-]*\.myworkdaysite\.com)$/;
 
 /**
  * Two normalizeUrl() keys that canonicalJobKey() reads as one posting: an id
@@ -696,6 +737,10 @@ export function canonicalJobKey(raw) {
   try { u = new URL(s); } catch { return ''; }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
   u.hostname = foldHostname(u.hostname);
+  // A known posting shape is folded first, so its own id wins over a stray
+  // query id (a Microsoft `/careers/job/{pid}?gh_jid=…` link is the pid's
+  // posting, not a Greenhouse one).
+  canonicalizeKnownPostingUrl(u);
 
   const indeed = indeedJobId(u);
   if (indeed) return `indeed.com:${indeed}`;
@@ -730,6 +775,9 @@ export function canonicalJobKey(raw) {
   }
   if (/^[\w-]+\.wd[\w-]*\.myworkdayjobs\.com$/.test(out.hostname)) {
     out.pathname = out.pathname.replace(/^\/[a-z]{2}-[a-z]{2}(?=\/[^/]+\/job\/)/, '');
+  }
+  if (/^wd[\w-]*\.myworkdaysite\.com$/.test(out.hostname)) {
+    out.pathname = out.pathname.replace(/^\/[a-z]{2}-[a-z]{2}(?=\/recruiting\/[^/]+\/[^/]+\/job\/)/, '');
   }
   return out.toString();
 }

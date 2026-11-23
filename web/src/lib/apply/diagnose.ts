@@ -4,6 +4,9 @@ import type { ApplyIssue } from "./issue";
 import { pickComboboxOption } from "./option-match.mjs";
 import { checkboxSelections } from "./checkbox-options.mjs";
 import { unsupportedAtsMessage, unsupportedInAppAts } from "./unsupported-ats.mjs";
+import { isApplicationHref } from "./apply-link.mjs";
+import { factsOf } from "./drive-action.mjs";
+import { isSubmitControl } from "./submit-guard.mjs";
 
 export type { ApplyIssue };
 
@@ -88,8 +91,12 @@ export async function dropNewTabs(page: Page): Promise<void> {
   }
 }
 
-/** Absolute posting URL when this href is Workday, iCIMS, or UKG. */
-async function blockedTriggerHref(page: Page, href: string | null): Promise<string | null> {
+/**
+ * Absolute posting URL when this href is Workday, iCIMS, UKG, or a host in
+ * apply.handoff_hosts. `handoffHosts` is the list openSession read once before
+ * the window opened; without it the profile is read here.
+ */
+async function blockedTriggerHref(page: Page, href: string | null, handoffHosts?: string[]): Promise<string | null> {
   if (!href) return null;
   let abs = href;
   try {
@@ -97,7 +104,7 @@ async function blockedTriggerHref(page: Page, href: string | null): Promise<stri
   } catch {
     return null;
   }
-  const hit = await unsupportedInAppAts(abs);
+  const hit = await unsupportedInAppAts(abs, { handoffHosts });
   return hit ? hit.postingUrl : null;
 }
 
@@ -127,13 +134,13 @@ function urlSnapshot(page: Page): Map<OpenPage, string> {
   return snap;
 }
 
-async function blockedAmong(page: Page, candidates: OpenPage[]): Promise<string | null> {
+async function blockedAmong(page: Page, candidates: OpenPage[], handoffHosts?: string[]): Promise<string | null> {
   const seen = new Set<string>();
   for (const candidate of candidates) {
     const landed = pageUrl(candidate);
     if (!landed || seen.has(landed)) continue;
     seen.add(landed);
-    const blocked = await blockedTriggerHref(page, landed);
+    const blocked = await blockedTriggerHref(page, landed, handoffHosts);
     if (blocked) return blocked;
   }
   return null;
@@ -142,7 +149,7 @@ async function blockedAmong(page: Page, candidates: OpenPage[]): Promise<string 
 // Consent can leave another tab open. Only the main page, a new tab, or a tab
 // whose URL changed during this Apply action can refuse the posting. A click
 // can open its popup after click() returns, so that path looks a second time.
-export async function blockedAfterAction(page: Page, before: Map<OpenPage, string>, retry: boolean): Promise<string | null> {
+export async function blockedAfterAction(page: Page, before: Map<OpenPage, string>, retry: boolean, handoffHosts?: string[]): Promise<string | null> {
   const read = () => {
     const now = [page, ...contextPages(page)];
     const seen = new Set<OpenPage>();
@@ -152,7 +159,7 @@ export async function blockedAfterAction(page: Page, before: Map<OpenPage, strin
       seen.add(candidate);
       if (candidate === page || !before.has(candidate) || before.get(candidate) !== pageUrl(candidate)) changed.push(candidate);
     }
-    return blockedAmong(page, changed);
+    return blockedAmong(page, changed, handoffHosts);
   };
   const first = await read();
   if (first || !retry) return first;
@@ -179,19 +186,33 @@ export async function waitForBlankPopup(page: Page, before: Map<OpenPage, string
  *  (NEVER a submit) to reveal the form. If it's an <a> with an application href,
  *  NAVIGATE there directly (robust vs popups). Returns true if it acted.
  *  A Workday, iCIMS, or UKG href is returned as `{ blocked }` and is not opened. */
-export async function tryApplyTrigger(page: Page): Promise<boolean | { blocked: string } | { followed: Map<OpenPage, string> }> {
+export async function tryApplyTrigger(page: Page, handoffHosts?: string[]): Promise<boolean | { blocked: string } | { followed: Map<OpenPage, string> }> {
   try {
     // 1) Most reliable: an <a> linking straight to a known ATS application (e.g.
     //    openai.com → jobs.ashbyhq.com/…/application). Navigate there in-tab.
-    const atsLink = page.locator('a[href*="ashbyhq"], a[href*="greenhouse"], a[href*="lever.co"], a[href*="smartrecruiters"], a[href*="workable"], a[href*="recruitee"], a[href*="bamboohr"], a[href*="jobvite"], a[href*="teamtailor"], a[href*="myworkdayjobs"], a[href*="myworkdaysite"], a[href*="icims.com"], a[href*="ultipro.com"], a[href*="ultipro.ca"], a[href*="/apply"], a[href*="/application"]').first();
-    if (await atsLink.count().catch(() => 0)) {
-      const href = await atsLink.getAttribute("href").catch(() => null);
-      if (href && /^https?:\/\//i.test(href) && !/submit/i.test(href)) {
-        const blocked = await blockedTriggerHref(page, href);
-        if (blocked) return { blocked };
-        const before = urlSnapshot(page);
-        await page.goto(href, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
-        const landed = await blockedAfterAction(page, before, false);
+    //    A link that fails isApplicationHref (a "Powered by" logo pointing at
+    //    the vendor's homepage) is skipped, and the next one is checked.
+    const atsLinks = page.locator('a[href*="ashbyhq"], a[href*="greenhouse"], a[href*="lever.co"], a[href*="smartrecruiters"], a[href*="workable"], a[href*="recruitee"], a[href*="bamboohr"], a[href*="jobvite"], a[href*="teamtailor"], a[href*="myworkdayjobs"], a[href*="myworkdaysite"], a[href*="icims.com"], a[href*="ultipro.com"], a[href*="ultipro.ca"], a[href*="/apply"], a[href*="/application"]');
+    //    The hrefs are read in one pass, so a list that changes in between
+    //    cannot skip a link or wait out a locator timeout per index.
+    const hrefs = await atsLinks
+      .evaluateAll((links) => links.slice(0, 20).map((a) => a.getAttribute("href")))
+      .catch(() => [] as (string | null)[]);
+    const href = hrefs.find((h): h is string => !!h && isApplicationHref(h)) ?? null;
+    if (href) {
+      const blocked = await blockedTriggerHref(page, href, handoffHosts);
+      if (blocked) return { blocked };
+      const before = urlSnapshot(page);
+      // A link that fails to load can leave the posting in place, and then
+      // the Apply control below is still the way in. A marker on the posting's
+      // window tells that apart from an error page that replaced it: Chrome's
+      // error page still reports the posting's URL.
+      const mark = `co-${Date.now()}-${Math.random()}`;
+      await page.evaluate((m) => { (window as unknown as { __coPosting?: string }).__coPosting = m; }, mark).catch(() => {});
+      const failed = await page.goto(href, { waitUntil: "domcontentloaded", timeout: 30_000 }).then(() => false, () => true);
+      const stayed = failed && (await page.evaluate(() => (window as unknown as { __coPosting?: string }).__coPosting).catch(() => null)) === mark;
+      if (!stayed) {
+        const landed = await blockedAfterAction(page, before, false, handoffHosts);
         if (landed) return { blocked: landed };
         return { followed: before };
       }
@@ -205,12 +226,17 @@ export async function tryApplyTrigger(page: Page): Promise<boolean | { blocked: 
     if ((await t.count().catch(() => 0)) && (await t.isVisible().catch(() => false))) {
       const label = (await t.innerText().catch(() => "")).toLowerCase();
       if (/submit|applied|withdraw/.test(label)) return false;
+      // The wording test misses a form's own <button type="submit">Apply</button>,
+      // and clicking that would file the form. Same guard as the drive loop;
+      // a control whose facts cannot be read is not clicked either.
+      const facts = await t.evaluate(factsOf, null).catch(() => null);
+      if (!facts || isSubmitControl(facts)) return false;
       const href = await t.getAttribute("href").catch(() => null);
-      const blocked = await blockedTriggerHref(page, href);
+      const blocked = await blockedTriggerHref(page, href, handoffHosts);
       if (blocked) return { blocked };
       const before = urlSnapshot(page);
       await t.click({ timeout: 3000 }).catch(() => {});
-      const landed = await blockedAfterAction(page, before, true);
+      const landed = await blockedAfterAction(page, before, true, handoffHosts);
       if (landed) return { blocked: landed };
       return { followed: before };
     }
@@ -225,7 +251,7 @@ export const LOGIN_WALL_MESSAGE =
 
 /** When extraction yields 0 fields, classify WHY so we abort with the RIGHT
  *  message (bot-challenge vs login wall vs closed posting vs unsupported). */
-export async function classifyEmpty(page: Page, url: string): Promise<ApplyIssue> {
+export async function classifyEmpty(page: Page, url: string, handoffHosts?: string[]): Promise<ApplyIssue> {
   const sig = await page
     .evaluate(() => {
       const t = (document.title || "").toLowerCase();
@@ -259,9 +285,9 @@ export async function classifyEmpty(page: Page, url: string): Promise<ApplyIssue
   } catch {
     landedUrl = "";
   }
-  const blockedAts = (await unsupportedInAppAts(landedUrl)) || (await unsupportedInAppAts(url));
+  const blockedAts = (await unsupportedInAppAts(landedUrl, { handoffHosts })) || (await unsupportedInAppAts(url, { handoffHosts }));
   if (blockedAts) {
-    return { level: "block", code: blockedAts.vendor, message: unsupportedAtsMessage(blockedAts.label, true) };
+    return { level: "block", code: blockedAts.vendor, message: unsupportedAtsMessage(blockedAts, true) };
   }
   if (/^(jobs|careers|empleos|empregos|all jobs|open (positions|roles)|search jobs|current openings)/i.test(sig.t) || /\/(jobs|careers|search|positions)\/?(\?|$)/.test(u)) {
     return { level: "block", code: "listing-page", message: "This looks like the careers listing, not a single application — the posting may have moved or closed. Open the specific job and paste its “Apply” URL." };

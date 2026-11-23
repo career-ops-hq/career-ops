@@ -1,6 +1,7 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 import { decodeEntities } from './_html-entities.mjs';
+import { isClassicCareerUrl } from './successfactors-classic.mjs';
 
 // SAP SuccessFactors provider — Recruiting Marketing (RMK, ex-jobs2web) career
 // sites (Career Site Builder's branded job boards). These are the portals big
@@ -48,6 +49,10 @@ import { decodeEntities } from './_html-entities.mjs';
 // entire tenants, so we DISCOVER each tenant's advertised locales from the
 // language switcher on {origin}/search/ (the `locale=xx_XX` links), query every
 // one, and dedup by job id. CSB carries a real posting date, so postedAt is set.
+//
+// The classic career site (career<N>.successfactors.eu/career?company=<ID>) is
+// neither RMK nor CSB: providers/successfactors-classic.mjs reads it, and
+// detect() below leaves its URLs to that provider.
 //
 // Strategy selection: `sfVariant: csb` on the portal entry forces CSB directly;
 // otherwise the RMK tile path runs first and, only if it yields zero postings
@@ -149,7 +154,7 @@ export function resolveConfig(entry) {
 
 /** @param {string} s */
 function clean(s) {
-  return decodeEntities(s.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(s.replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 }
 
 // RMK job paths encode the city as the leading slug segment:
@@ -545,6 +550,9 @@ export default {
 
   detect(entry) {
     const url = entry.api || entry.careers_url || '';
+    // The classic career site (career<N>.successfactors.eu/career?company=) is a
+    // different app that answers 404 here: successfactors-classic.mjs reads it.
+    if (isClassicCareerUrl(url)) return null;
     if (/successfactors\.(eu|com)|jobs2web\.com/i.test(url)) return { url };
     return null;
   },

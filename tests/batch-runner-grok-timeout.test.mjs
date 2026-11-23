@@ -40,6 +40,7 @@ function stub(bin, name, body) {
 
 if (dispatchBlock && runWorker) {
   const work = mkdtempSync(join(tmpdir(), 'batch-grok-'));
+  const taskFiles = [];
   try {
     const bin = join(work, 'bin');
     mkdirSync(bin);
@@ -65,6 +66,7 @@ if (dispatchBlock && runWorker) {
         '    break',
         '  done',
         '  printf \'EXIT:%s\\n\' "$exit_code"',
+        '  if [[ -n "${grok_task:-}" ]]; then printf \'TASK:%s\\n\' "$grok_task"; fi',
         '}',
         'wrapper',
       ].join('\n'));
@@ -78,21 +80,27 @@ if (dispatchBlock && runWorker) {
       'if IFS= read -r line; then echo "STDIN:$line"; else echo "STDIN:eof"; fi',
     ].join('\n'));
     const grok = run('grok', 600);
+    for (const line of grok.out.split('\n')) if (line.startsWith('TASK:')) taskFiles.push(line.slice(5));
     const args = grok.log.split('\n').filter(l => l.startsWith('ARG:')).map(l => l.slice(4));
     if (/EXIT:0/.test(grok.out) && args[0] === '--always-approve' && args.includes('-p')) pass('--cli grok launches `grok --always-approve ... -p <prompt>`');
     else fail(`unexpected grok launch: ${JSON.stringify({ out: grok.out, args })}`);
-    if (args.at(-1) === 'SYSTEM PROMPT\n\nJOB PROMPT' || grok.log.includes('ARG:SYSTEM PROMPT\n\nJOB PROMPT')) pass('grok gets the system prompt and job prompt as one argument');
-    else fail(`grok prompt drifted: ${JSON.stringify(grok.log.slice(0, 160))}`);
+    const promptArg = args[args.indexOf('-p') + 1] || '';
+    const taskFile = promptArg.match(/"([^"]+)"/)?.[1];
+    const taskText = taskFile && existsSync(taskFile) ? readFileSync(taskFile, 'utf8') : '';
+    if (promptArg && !promptArg.includes('SYSTEM PROMPT') && taskText.includes('SYSTEM PROMPT') && taskText.includes('JOB PROMPT')) pass('grok reads the system prompt and the job from a file, not from one huge -p argument');
+    else fail(`grok prompt drifted: ${JSON.stringify(promptArg.slice(0, 160))}`);
     if (/STDIN:eof/.test(grok.log)) pass('the worker reads EOF, not the runner\'s stdin');
     else fail(`the worker read the runner's stdin: ${JSON.stringify(grok.log.match(/STDIN:.*/)?.[0])}`);
 
     stub(bin, 'grok', 'sleep 30');
     const slow = run('grok', 2);
+    for (const line of slow.out.split('\n')) if (line.startsWith('TASK:')) taskFiles.push(line.slice(5));
     if (/EXIT:124/.test(slow.out) && slow.seconds < 20) pass(`a worker past --worker-timeout is stopped with exit 124 (${slow.seconds.toFixed(1)}s)`);
     else fail(`slow worker: ${JSON.stringify({ out: slow.out, seconds: slow.seconds })}`);
     if (/worker timed out after 2s/.test(slow.log)) pass('the timeout is written to the worker log, where the failure message is read from');
     else fail(`no timeout line in the worker log: ${JSON.stringify(slow.log.slice(-160))}`);
   } finally {
+    for (const file of taskFiles) rmSync(file, { force: true });
     rmSync(work, { recursive: true, force: true });
   }
 }

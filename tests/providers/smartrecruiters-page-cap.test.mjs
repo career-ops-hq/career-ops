@@ -98,7 +98,18 @@ try {
   }
 
   {
-    const { ctx, offsets } = board(20000);
+    // A board past 10,000 postings, read whole when its entry asks for enough pages.
+    const { ctx, offsets } = board(25125);
+    const { jobs, errors } = await walk({ ...bosch, max_pages: 300 }, ctx);
+    if (jobs.length === 25125 && boardTruncation(jobs) === null && errors.length === 0 && offsets.length === 252) {
+      pass('max_pages: 300 reads a board of 25,125 whole, in 252 requests');
+    } else {
+      fail(`max_pages 300: ${jobs.length} jobs in ${offsets.length} requests, errors ${JSON.stringify(errors)}`);
+    }
+  }
+
+  {
+    const { ctx, offsets } = board(40000);
     const { jobs } = await walk({ ...bosch, max_pages: 1000 }, ctx);
     const t = boardTruncation(jobs);
     if (offsets.length === mod.SR_HARD_MAX_PAGES && t?.fetched === mod.SR_HARD_MAX_PAGES * 100) {

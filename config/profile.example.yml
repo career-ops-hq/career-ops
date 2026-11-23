@@ -151,6 +151,7 @@ language:
 #   responded_initial_days: 1
 #   responded_subsequent_days: 3
 #   interview_thankyou_days: 1
+#   interview_followups: false  # Optional: omit interview rows; defaults to true
 
 # (Optional) Rename the session after the posting it handles, e.g.
 # "VP Infrastructure, Acme Health", in hosts that let the agent set its own
@@ -278,6 +279,13 @@ cv:
   # unless a flag passed for that render overrides the key.
   # max_pages: 1
   # strict_pages: true
+  #
+  # (Optional) For CVs you attach by hand (LinkedIn Easy Apply, email): every
+  # single-file CV render also writes a copy named for the recruiter,
+  # output/upload/{pdf name}/First-Last-Role-CV.pdf, from candidate.full_name
+  # and the tracker row's role. The canonical PDF and data/pdf-index.tsv are
+  # untouched. Same as passing --upload-copy to generate-pdf.mjs.
+  # upload_copy: true
 
   # Sections that the AI must never remove, shorten, or paraphrase during CV generation or tailoring.
   # (Enforced programmatically in HTML/PDF pipeline via build-cv-html and generate-pdf; LaTeX pipeline is not covered yet.)
@@ -375,6 +383,28 @@ cover_letter:
 #   # message" instead of printing a concrete email address from candidate.email.
 #   # default_sender_note: "the email used to send this message"
 #   # signature_name: "Jane Smith"
+
+# ── Proposal Drafts ─────────────────────────────────────────────────────────
+#
+# Used by `/career-ops proposal` to choose where draft markdown files are saved.
+# Optional — when unset, the mode uses a house rule in modes/_custom.md or asks
+# interactively (and stops with a needs_confirmation line in headless runs).
+#
+# proposals:
+#   output_dir: "proposals"
+
+# ── In-app Apply: sites you sign in to yourself ─────────────────────────────
+#
+# Application forms behind your own login (often a social or Google sign-in)
+# cannot be filled by the in-app Apply browser, which never carries your
+# session. List those hosts and Apply skips the browser: it shows the posting
+# link, to open in your own browser where you are signed in, and the CV path
+# and answers. A host also covers its subdomains ("gupy.io" covers
+# "acme.gupy.io"). Only the first 200 hosts are read; later entries are
+# ignored. Absent means no change.
+#
+# apply:
+#   handoff_hosts: ["gupy.io", "linkedin.com", "apply.workable.com"]
 
 # ── Scan / JD extractor ─────────────────────────────────────────────────────
 #

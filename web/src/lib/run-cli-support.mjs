@@ -6,6 +6,14 @@
 // specified.
 import { isReservedReportFile } from "./report-files.mjs";
 import { claudeUsageTokens } from "./claude-usage.mjs";
+import {
+  AUTH_FAILURE_RE,
+  CLAUDE_CODE_TIP,
+  KEY_FAILURE_RE,
+  KEY_STATUS_RE,
+  RATE_LIMIT_RE,
+  SIGN_IN_REQUEST_RE,
+} from "./cli-failure-patterns.mjs";
 
 /**
  * Dashboard-friendly shape both `parseCodexEvent` and `parseClaudeEvent` return.
@@ -147,7 +155,7 @@ export function isFatalGenericStderr(line) {
 }
 
 const GENERIC_FATAL_STDERR_RE =
-  /\berror\b|\bdenied\b|\bfatal\b|not found|\bunauthorized\b|\bforbidden\b|not authenticated|authentication failed|\blogin\b|log in|\bcredentials?\b|api[ -]?key|\bquota\b|rate limit/i;
+  /\berror\b|\bdenied\b|\bfatal\b|not found|\bunauthorized\b|\bforbidden\b|not authenticated|authentication failed|\blogin\b|log in|\bcredentials?\b|api[ -]?key|\bquota\b|rate limit|too many requests|(?<![\w-])429(?![\w-])/i;
 
 /**
  * The argv that makes `codex exec` emit the JSONL `parseCodexEvent` reads.
@@ -343,6 +351,13 @@ export function parseGrokEvent(line) {
     return { tool: typeof name === "string" && name ? name : "Working" };
   }
 
+  if (ev.type === "error") {
+    const message = typeof ev.message === "string" && ev.message
+      ? ev.message
+      : (typeof ev.error === "string" && ev.error ? ev.error : "Grok failed before finishing");
+    return { error: message };
+  }
+
   if (ev.type === "usage" || ev.type === "end") {
     const usage = ev.usage;
     // No usage block means nothing to report — null rather than {tokens: 0}, so
@@ -350,9 +365,13 @@ export function parseGrokEvent(line) {
     // total an earlier frame already established.
     if (!usage || typeof usage !== "object") return null;
     // Same subtraction as Codex: cached input is billed at a different rate, so
-    // counting it at full rate overstates the run. Clamped at 0 so a malformed
-    // usage block can never report negative tokens.
-    const fresh = Math.max(0, tokenCount(usage.input_tokens) - tokenCount(usage.cached_input_tokens));
+    // counting it at full rate overstates the run. Cache is a subset of input.
+    // A frame where cache is larger than input is not a total: clamping the
+    // fresh input at 0 and then replacing the running total wipes it.
+    const input = tokenCount(usage.input_tokens);
+    const cached = tokenCount(usage.cached_input_tokens);
+    if (cached > input) return null;
+    const fresh = input - cached;
     /** @type {ParsedEvent} */
     const result = { tokens: fresh + tokenCount(usage.output_tokens), tokensAreTotal: true };
     // Last NUMERIC cost wins upstream, so emitting null here would not erase a
@@ -454,16 +473,41 @@ export function killMsForKind(kind) {
  * prompt for" to stderr, exits cleanly and writes nothing to stdout, and that
  * line used to be dropped, leaving only "is it installed and authenticated?".
  *
- * With no snippet the text is exactly what it was before this existed.
+ * A rate limit, an empty reply, and any other non-login failure say what they
+ * are. The sign-in sentence is only for a stderr line that is actually about
+ * signing in, so the worker hint does not tell you to sign in for those.
  *
  * @param {{emittedText: boolean, sawError: boolean, cleanExit: boolean, stderrSnippet?: string | null}} state
  * @returns {string | null}
  */
+const SIGN_IN_CORE_RE = /authenticat\w*|please log ?in|sign[ -]?in|unauthorized/i;
+const KEY_MENTION_RE = /(?:credentials?|api[ -]?key)/i;
+
+/** A stderr line asks for sign-in when sign-in failed, not when a key merely loaded. */
+function stderrIsSignIn(line) {
+  if (SIGN_IN_REQUEST_RE.test(line) || AUTH_FAILURE_RE.test(line)) return true;
+  if (SIGN_IN_CORE_RE.test(line)) {
+    if (KEY_STATUS_RE.test(line) && !KEY_FAILURE_RE.test(line)) return false;
+    return true;
+  }
+  if (!KEY_MENTION_RE.test(line)) return false;
+  if (KEY_STATUS_RE.test(line) && !KEY_FAILURE_RE.test(line)) return false;
+  return true;
+}
+
 export function noOutputError({ emittedText, sawError, cleanExit, stderrSnippet }) {
   if (emittedText || sawError) return null;
   const detail = stderrSnippet ? ` (${stderrSnippet})` : "";
-  if (!cleanExit) return `The CLI exited with an error — is it installed and authenticated?${detail}`;
-  return `The CLI produced no output — is it installed and authenticated?${detail} (career-ops is best on Claude Code.)`;
+  if (stderrSnippet && RATE_LIMIT_RE.test(stderrSnippet)) {
+    return `Rate limit. Wait and try again.${detail}`;
+  }
+  if (!cleanExit) {
+    if (stderrSnippet && stderrIsSignIn(stderrSnippet)) {
+      return `The CLI exited with an error — is it installed and authenticated?${detail}`;
+    }
+    return `The CLI exited with an error.${detail}`;
+  }
+  return `The CLI returned nothing.${detail}${CLAUDE_CODE_TIP}`;
 }
 
 // Message for a run the route stopped at its own time limit. It names the limit,

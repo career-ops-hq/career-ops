@@ -38,7 +38,9 @@
 // carries every tenant's postings at once (loadWorkableFeed). scan.mjs never
 // uses it; scan-ats-full.mjs does, as its Workable source.
 
+import { sourceLabel } from './_department-team.mjs';
 import { decodeEntities } from './_html-entities.mjs';
+import { replaceScriptStyleBlocks } from './_html-to-text.mjs';
 import { BROWSER_LIKE_USER_AGENT, fetchTextStream, isRetryableError, parseRetryAfterMs, sleep } from './_http.mjs';
 
 const ALLOWED_WORKABLE_HOSTS = new Set(['apply.workable.com']);
@@ -119,12 +121,16 @@ function assertWorkableUrl(url) {
   return url;
 }
 
+const API_ACCOUNT_RE = /^\/api\/v\d+\/(?:widget\/)?accounts\/([^/]+)/i;
+
 /**
- * Extract the account slug from a tracked_companies entry's careers_url.
+ * Extract the account slug from a tracked_companies entry's api or careers_url.
  * @returns {string|null}
  */
 export function resolveWorkableSlug(entry) {
-  const raw = entry && typeof entry.careers_url === 'string' ? entry.careers_url : '';
+  const rawApi = typeof entry?.api === 'string' ? entry.api.trim() : '';
+  const rawCareers = typeof entry?.careers_url === 'string' ? entry.careers_url.trim() : '';
+  const raw = rawApi || rawCareers;
   if (!raw) return null;
   let parsed;
   try {
@@ -134,7 +140,10 @@ export function resolveWorkableSlug(entry) {
   }
   if (parsed.protocol !== 'https:') return null;
   if (parsed.hostname !== 'apply.workable.com') return null;
-  const slug = parsed.pathname.split('/').filter(Boolean)[0];
+  const segs = parsed.pathname.split('/').filter(Boolean);
+  const first = segs[0]?.toLowerCase();
+  if (!first || first === 'j') return null;
+  const slug = first === 'api' ? parsed.pathname.match(API_ACCOUNT_RE)?.[1] : segs[0];
   if (!slug || !SLUG_RE.test(slug)) return null;
   return slug;
 }
@@ -239,11 +248,10 @@ function formatLocation(job) {
 function toPlainText(html) {
   if (typeof html !== 'string' || !html) return '';
   return decodeEntities(
-    html
-      .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    replaceScriptStyleBlocks(html, ' ', { wordBoundary: true })
       .replace(/<br\s*\/?>/gi, '\n')
       .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
-      .replace(/<[^>]+>/g, ' '),
+      .replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag)),
   ).replace(/[ \t ]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }
 
@@ -354,6 +362,9 @@ export function parseWorkableWidget(payload, companyName, boardSlug) {
 
     const stamp = Date.parse(raw?.published_on || raw?.created_at || '');
     if (Number.isFinite(stamp)) job.postedAt = stamp;
+
+    const department = sourceLabel(raw?.department);
+    if (department) job.department = department;
 
     jobs.push(job);
     byUrl.set(url, { job, locations: new Set(location ? [location] : []), tele, shortcode: raw?.shortcode });

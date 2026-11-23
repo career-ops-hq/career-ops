@@ -217,6 +217,12 @@ const APPLY_PATTERNS = [
   // Spanish (HiringRoom): "Postularse". The label, not the verb: every HiringRoom
   // posting also links a help article, "¿Cómo me postulo?" ("how do I apply?").
   /\bpostularse\b/i,
+  // Spanish (Computrabajo): "Postularme". Only at the start of the label, like the
+  // Bulgarian noun below: a help link such as "¿Cómo postularme?" is not Apply.
+  // Without it every live Computrabajo posting read no_apply_control and
+  // scan --verify dropped it (16 of 83 on 2026-11-18, most of them infrastructure
+  // roles in Argentina).
+  /^postularme\b/i,
   // Chinese MokaHR and Feishu Jobs detail pages use these exact control texts.
   // Keep them narrow: bare “申请” appears in descriptive prose, while longer
   // labels containing “投递” can be status/history controls rather than Apply.

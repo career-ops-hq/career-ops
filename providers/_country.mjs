@@ -95,6 +95,10 @@ const COUNTRY_ALIASES = [
   ['US', 'usa'], ['US', 'u.s.'], ['US', 'u.s.a.'], ['US', 'united states of america'],
   ['GB', 'uk'], ['GB', 'u.k.'], ['GB', 'great britain'], ['GB', 'england'],
   ['ES', 'espana'], ['ES', 'esp'],
+  // CLDR's long or local names ("Türkiye", "Czechia", "Côte d’Ivoire",
+  // "Hong Kong SAR China") miss the everyday English spelling that boards
+  // write, so "Remote - Turkey" would name no country at all.
+  ['TR', 'turkey'], ['CZ', 'czech republic'], ['CI', 'ivory coast'], ['AE', 'uae'], ['HK', 'hong kong'], ['MO', 'macau'], ['MO', 'macao'], ['PS', 'palestine'], ['MM', 'myanmar'], ['MM', 'burma'],
 ].map(([code, name]) => ({ code, name, match: word(name) }));
 const PROSE_WORD_CODES = new Set(['in', 'as', 'at', 'be', 'is', 'it', 'no', 'so', 'to', 'do', 'me', 'my', 'am']);
 // A USPS code in "City, ST", before a US country token, or before a
@@ -269,7 +273,7 @@ export function isCountryKeyword(value) {
 // cities are listed. Cities that are also US place names (London, Paris,
 // Dublin) count only with no US marker in the same string.
 const PLACE_ALIASES = [
-  ['HK', 'hong kong'], ['MO', 'macau'], ['TW', 'taiwan'], ['CZ', 'czech republic'], ['TR', 'turkey'], ['CI', 'ivory coast'], ['AE', 'uae'], ['KR', 'korea'], ['RU', 'russia'], ['VN', 'vietnam'], ['PS', 'palestine'], ['MM', 'myanmar'], ['MM', 'burma'], ['GB', 'scotland'], ['GB', 'wales'],
+  ['TW', 'taiwan'], ['KR', 'korea'], ['RU', 'russia'], ['VN', 'vietnam'], ['GB', 'scotland'], ['GB', 'wales'],
   ['CA', 'toronto'], ['CA', 'vancouver'], ['CA', 'montreal'], ['CA', 'ottawa'], ['CA', 'calgary'], ['IN', 'bangalore'], ['IN', 'bengaluru'], ['IN', 'hyderabad'], ['IN', 'mumbai'], ['IN', 'pune'], ['IN', 'delhi'], ['IN', 'gurgaon'], ['IN', 'gurugram'], ['IN', 'chennai'], ['IN', 'noida'], ['IN', 'kolkata'],
   ['JP', 'tokyo'], ['AU', 'sydney'], ['AU', 'melbourne'], ['NL', 'amsterdam'], ['ES', 'madrid'], ['PL', 'warsaw'], ['PL', 'krakow'], ['PH', 'manila'], ['CN', 'shanghai'], ['CN', 'beijing'], ['CN', 'shenzhen'], ['KR', 'seoul'], ['IL', 'tel aviv'], ['MX', 'mexico city'], ['BR', 'sao paulo'], ['AR', 'buenos aires'],
   ['AE', 'dubai'], ['CH', 'zurich'], ['DE', 'munich'], ['SE', 'stockholm'], ['PT', 'lisbon'], ['CZ', 'prague'], ['HU', 'budapest'], ['RO', 'bucharest'], ['MY', 'kuala lumpur'], ['ID', 'jakarta'], ['TH', 'bangkok'],
@@ -333,14 +337,17 @@ export function namesPlaceOutsideHome(location, home, namesUsState = false) {
   return named.length > 0 && !named.some(codes => codes.some(code => home.has(code)));
 }
 
-const REMOTE = /\b(?:remote|work from (?:home|anywhere)|distributed)\b/;
+// "Home based - Worldwide" is how some Greenhouse boards (Canonical) label
+// remote roles; Greenhouse sends no workplaceType to say so. "Office based"
+// stays an office marker (OFFICE below).
+const REMOTE = /\b(?:remote|work from (?:home|anywhere)|home[ -]?based|distributed)\b/;
 // Mirror scan.mjs's titleSignalsRemote marker: "Remote Sensing" describes a
 // discipline, not a work arrangement. The policy must not convert an office
 // job outside onsite_locations into an eligible country-wide remote role.
 const REMOTE_TITLE = /(?<![a-z])remote(?=$|\s*[^a-z\s]|\s+in\b)/;
 const NOT_REMOTE = /\b(?:non|not|no)[^a-z]*remote\b/;
 const OFFICE = /\b(?:hybrid|on[ -]?site|in[ -]?office|office[ -]?based)\b/;
-const plain = (v) => fold(v).replace(/<[^>]*>/g, ' ').replace(/&nbsp;|&#160;/g, ' ').replace(/\s+/g, ' ');
+const plain = (v) => fold(v).replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag)).replace(/&nbsp;|&#160;/g, ' ').replace(/\s+/g, ' ');
 
 function excludedHome(text, homes) {
   return homes.some(h => [

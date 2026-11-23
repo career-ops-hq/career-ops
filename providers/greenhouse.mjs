@@ -8,6 +8,7 @@
 // country_eligibility filter and visa_filter all read that field, and without
 // it every Greenhouse board passed those filters blind.
 
+import { departmentTeamFields, sourceLabels } from './_department-team.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 import { coerceId } from './_ids.mjs';
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
@@ -411,6 +412,7 @@ export default {
         // from an empty string downstream.
         ...(description ? { description } : {}),
         postedAt: toEpochMs(j.first_published),
+        ...departmentTeamFields(sourceLabels(Array.isArray(j.departments) ? j.departments.map(d => d?.name) : undefined)),
       };
     });
     const probing = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0;

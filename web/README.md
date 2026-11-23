@@ -67,6 +67,47 @@ and `keywords`. Omitting it preserves the full evaluation; `[]` requests the
 required assessment without optional sections. Invalid selections return 400
 before starting an AI run.
 
+### Role Change Radar
+
+Open a tracked application in **Pipeline**, then **Check for changes**. Fetch the
+public posting or paste its complete text. Radar compares it with a preserved
+baseline, shows categorized before/after excerpts and full original texts, and
+keeps a selectable history with review status for each comparison. It uses no LLM,
+paid service, or background monitoring.
+
+Existing report-embedded archives and report-number/company-matched `jds/*.md`
+or `.txt` captures supply the baseline. They are labeled **Earliest saved
+description**, never assumed to be application-time snapshots. Explicit capture
+dates in JD filenames are used; evaluation dates and filesystem modification
+times are not capture dates. When dates are missing, ordering is uncertain and
+the UI says so. PDF-only archives cannot supply text in this version. The existing
+mutable `output/*/jd/current.md` and `previous.md` reuse inputs are not evidence of
+an application-time snapshot. If no suitable archive exists, explicitly save the
+current description for future checks.
+
+The baseline never changes. Public capture reuses `browser-extract.mjs`, including
+its URL and redirect guards, with a 25-second process deadline and a 60,000-character
+text ceiling. Blocked, empty, truncated or suspiciously short captures fail with a
+paste fallback. Extraction completeness and posting identity cannot be proven by
+heuristics: verify original excerpts, especially after large rewrites. Explicit
+identity conflicts and descriptions with almost no common text are refused.
+Pastes are labeled unverified. Rules categorize English wording conservatively;
+other languages and unmatched changes remain visible under **Other text changes**.
+Missing salary or remote wording does not establish reduced pay or an on-site role.
+
+State is stored under the configured data root in `data/role-change-radar/` using
+the core lock and atomic writer. Successful captures are deduplicated by exact
+text hash and provenance. Returning to an older revision creates a new unreviewed
+comparison; repeating the current revision preserves its review state. Failed
+checks retain the last successful result. Deleting this directory deletes Radar
+history and manually saved baselines, but does not change the tracker or reports.
+
+Focused verification: run `node --test tests/role-change-radar.test.mjs` from the
+repository root. After building the web app, run
+`npm run test:browser -- role-change-radar` from `web/`; it uses fictional data
+and verifies the real API, keyboard controls, mobile layout, safe text rendering,
+and history/review persistence without live posting requests.
+
 ## Safety
 
 - **Local-first:** the local web app runs entirely on your machine — no cloud,

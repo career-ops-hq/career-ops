@@ -434,6 +434,13 @@ function listEntry(dataRoot, entry, { include, onError, onSkip = () => {} }) {
       // Nested checkouts (a git-cloned plugin under plugins.local/) are the
       // user's own work, so they are copied rather than skipped.
       allowNestedCheckouts: true,
+      // A symlink nested in a copied directory is skipped (see the default
+      // above), and skipping it silently makes the backup report success while
+      // omitting the user's files. The top-level entry already warns; this makes
+      // the nested case say so too. It goes through the callback `listEntry`
+      // already receives, because `result` belongs to the caller and is not in
+      // scope here.
+      onSkip: (skipped) => onSkip(relative(dataRoot, skipped)),
       skip: (dirent, dir) => {
         const p = join(dir, dirent.name);
         if (isExcluded(relative(dataRoot, p), include)) return true;

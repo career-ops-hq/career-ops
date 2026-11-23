@@ -14,6 +14,7 @@ import { BackLink } from "@/components/back-link";
 import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
 import { HeroGlow } from "@/components/hero-glow";
 import { Badge } from "@/components/ui/badge";
+import { CoverAnswers } from "@/components/jobs/cover-answers";
 
 export default function JobPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -99,6 +100,8 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
           </li>
         )}
       </ol>
+
+      {job.kind === "cover" && <CoverAnswers brief={job.brief} />}
 
       {job.text && (
         <div className="mt-8">

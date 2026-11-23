@@ -7,7 +7,9 @@
 
 import { classifyLiveness, jobIdToken, JOB_ID_PATTERN } from './liveness-core.mjs';
 import { BROWSER_LIKE_USER_AGENT } from './user-agent.mjs';
-import { SINKHOLE_ADDRESSES } from './providers/_ip-guard.mjs';
+import { isIP } from 'node:net';
+import { SINKHOLE_ADDRESSES, isBlockedAddress } from './providers/_ip-guard.mjs';
+import { isPrivateUseName } from './lib/egress-proxy.mjs';
 import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 const NAVIGATE_TIMEOUT_MS = 15_000;
@@ -147,8 +149,8 @@ export function createHostSpacer(baseMs, { now = Date.now, delay = jitteredDelay
 // portals.yml entry or a hijacked feed shouldn't be able to point Playwright at
 // internal infrastructure. Only allow http(s) and reject loopback/private/link-local.
 //
-// The hostname coming out of `new URL(...)` needs normalization before the regex
-// pass, because the WHATWG URL parser surfaces several encodings that bypass a
+// The hostname coming out of `new URL(...)` needs normalization before the
+// check, because the WHATWG URL parser surfaces several encodings that bypass a
 // naive match against `parsed.hostname`:
 //   1. IPv6 hosts are serialized with brackets — `new URL('http://[::1]/').hostname`
 //      is `'[::1]'`, so a regex like `/^::1$/` never fires unless brackets are stripped.
@@ -157,25 +159,18 @@ export function createHostSpacer(baseMs, { now = Date.now, delay = jitteredDelay
 //   3. IPv4-mapped IPv6 (`::ffff:127.0.0.1` or the hex form `::ffff:7f00:1`)
 //      routes to the embedded IPv4 in Chromium, so the embedded address must
 //      also be matched against the IPv4 block list.
-// `0.0.0.0` and the all-zeros IPv6 `::` both reach loopback on Linux and need
-// explicit entries; the original list omitted them.
+// Every IP literal, and every address a name resolves to, is judged by
+// isBlockedAddress in providers/_ip-guard.mjs: the list the provider layer
+// uses, so the two cannot drift apart. This file used to keep its own regex
+// list, which missed 100.64.0.0/10 (CGNAT: Alibaba Cloud's metadata service at
+// 100.100.100.200, Tailscale addresses), 198.18.0.0/15, multicast and reserved space. isBlockedAddress
+// also unwraps both spellings of IPv4-mapped IPv6 (`::ffff:127.0.0.1` and
+// `::ffff:7f00:1`), which Chromium routes to the embedded IPv4.
 //
-// IPv6 ULA is fc00::/7 (RFC 4193): both fc00::/8 and fd00::/8. IPv6
-// link-local is fe80::/10 (RFC 4291): fe80–febf, not only the fe80: prefix.
-const PRIVATE_HOST_PATTERNS = [
-  /^localhost$/,
-  /^localhost\.localdomain$/,
-  /^0\.0\.0\.0$/,
-  /^127\./,
-  /^10\./,
-  /^192\.168\./,
-  /^172\.(1[6-9]|2\d|3[01])\./,
-  /^169\.254\./,
-  /^::1$/,
-  /^::$/,
-  /^f[cd][0-9a-f]{2}:/,
-  /^fe[89ab][0-9a-f]:/,
-];
+// Names are judged by isPrivateUseName (lib/egress-proxy.mjs), the rule the
+// browser's egress filter applies: localhost and *.localhost, which Chromium
+// resolves to loopback itself, and the private-use suffixes .local, .internal
+// and .home.arpa.
 
 // Lowercase, strip IPv6 brackets, strip FQDN trailing dot. The `hostname`
 // returned by `new URL(...)` is already percent-decoded and IDNA-normalized,
@@ -188,20 +183,9 @@ function normalizeHost(rawHostname) {
   return h;
 }
 
-// IPv4-mapped IPv6 (RFC 4291 §2.5.5.2): `::ffff:0:0/96` routes to the embedded
-// IPv4 address. Two textual forms — dotted (`::ffff:127.0.0.1`) and pure-hex
-// (`::ffff:7f00:1`). Return the embedded IPv4 in dotted-decimal form, or null
-// if `host` is not an IPv4-mapped IPv6.
-function extractMappedIPv4(host) {
-  const dotted = host.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
-  if (dotted) return dotted[1];
-  const hex = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-  if (hex) {
-    const a = parseInt(hex[1], 16);
-    const b = parseInt(hex[2], 16);
-    return `${(a >> 8) & 0xff}.${a & 0xff}.${(b >> 8) & 0xff}.${b & 0xff}`;
-  }
-  return null;
+// Is this (already normalized) host one the browser must never be sent to?
+function isPrivateHost(host) {
+  return isIP(host) ? isBlockedAddress(host) : isPrivateUseName(host);
 }
 
 // Returns null when the URL is safe to fetch, otherwise a structured guard
@@ -220,13 +204,8 @@ export function rejectPrivateOrInvalid(url) {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     return { code: 'unsupported_protocol', reason: `unsupported protocol ${parsed.protocol}` };
   }
-  const host = normalizeHost(parsed.hostname);
-  const mappedIPv4 = extractMappedIPv4(host);
-  const candidates = mappedIPv4 ? [host, mappedIPv4] : [host];
-  for (const candidate of candidates) {
-    if (PRIVATE_HOST_PATTERNS.some((pattern) => pattern.test(candidate))) {
-      return { code: 'blocked_host', reason: `blocked host ${parsed.hostname}` };
-    }
+  if (isPrivateHost(normalizeHost(parsed.hostname))) {
+    return { code: 'blocked_host', reason: `blocked host ${parsed.hostname}` };
   }
   return null;
 }
@@ -324,10 +303,7 @@ export async function validateUrlSecurity(urlString) {
   const blocked = [];
   for (const ip of addresses) {
     const norm = normalizeHost(ip);
-    const mapped = extractMappedIPv4(norm);
-    const candidates = mapped ? [norm, mapped] : [norm];
-    const hit = candidates.find((candidate) => PRIVATE_HOST_PATTERNS.some((pattern) => pattern.test(candidate)));
-    if (hit) blocked.push({ ip, hit });
+    if (isBlockedAddress(norm)) blocked.push({ ip, hit: norm });
   }
   if (blocked.length > 0) {
     const denied = new Error(`Access denied: Egress guard blocked private target IP ${blocked[0].ip}`);

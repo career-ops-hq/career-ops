@@ -434,6 +434,71 @@ try {
     }
   }
 
+  // Fanned-out location rows and country folding (live Rippling board shape):
+  // Rippling emits one items[] row per location sharing the same posting id/url,
+  // and puts the country in `country` while `name` is often just "New York, NY"
+  // or "Remote, US".
+  {
+    const sharedUrl = 'https://ats.rippling.com/rippling/jobs/51ec1407-4563-4927-8b39-ee89d589dc7c';
+    const fanned = parseRipplingPage({
+      items: [
+        { id: '51ec1407', name: 'Engineering Manager, HRIS Flow Platform', url: sharedUrl, locations: [{ name: 'New York, NY', country: 'United States', workplaceType: 'ON_SITE' }] },
+        { id: '51ec1407', name: 'Engineering Manager, HRIS Flow Platform', url: sharedUrl, locations: [{ name: 'Toronto, Canada', country: 'Canada', workplaceType: 'ON_SITE' }] },
+        { id: '51ec1407', name: 'Engineering Manager, HRIS Flow Platform', url: sharedUrl, locations: [{ name: 'Remote (United States)', country: 'United States', workplaceType: 'REMOTE' }] },
+        { id: '51ec1407', name: 'Engineering Manager, HRIS Flow Platform', url: sharedUrl, locations: [{ name: 'new york, ny', country: 'United States', workplaceType: 'ON_SITE' }] },
+        { id: 'ad23b635', name: 'Claims Lead', url: 'https://ats.rippling.com/rippling/jobs/ad23b635', locations: [{ name: 'Remote, US', country: 'United States', workplaceType: 'REMOTE' }] },
+        { id: 'remote-uk', name: 'Payroll Engineer', url: 'https://ats.rippling.com/rippling/jobs/remote-uk', locations: [{ name: 'London, United Kingdom', country: 'United Kingdom', workplaceType: 'REMOTE' }] },
+      ],
+    }, 'Rippling', 'rippling');
+
+    if (fanned.rawCount === 6 && fanned.jobs.length === 3) {
+      pass('parseRipplingPage folds fanned-out sibling items sharing a posting URL while keeping rawCount exact');
+    } else {
+      fail(`parseRipplingPage fanned-out counts = rawCount:${fanned.rawCount}, jobs:${fanned.jobs.length} (expected 6 and 3)`);
+    }
+
+    if (fanned.jobs[0]?.location === 'New York, NY, United States · Toronto, Canada · Remote (United States)'
+        && fanned.jobs[0]?.listingIdentity?.posting_id === '51ec1407') {
+      pass('parseRipplingPage joins distinct sibling locations in order and appends missing country names without duplicating existing ones');
+    } else {
+      fail(`parseRipplingPage folded row 0 = ${JSON.stringify(fanned.jobs[0])}`);
+    }
+
+    if (fanned.jobs[1]?.location === 'Remote, US, United States'
+        && fanned.jobs[2]?.location === 'London, United Kingdom, Remote') {
+      pass('parseRipplingPage appends full country to ISO-abbreviated names and marks REMOTE workplaceType when absent from name');
+    } else {
+      fail(`parseRipplingPage country/remote rows = ${JSON.stringify([fanned.jobs[1]?.location, fanned.jobs[2]?.location])}`);
+    }
+
+    // Cross-page sibling folding: when a posting's fanned-out rows straddle a
+    // page boundary, fetch() folds them into one Job rather than emitting two.
+    const crossUrl = 'https://ats.rippling.com/bigco/jobs/straddle-uuid';
+    let straddlePage = 0;
+    const straddleJobs = await rippling.fetch(bigEntry, {
+      sleep: async () => {},
+      fetchJson: async () => {
+        straddlePage++;
+        if (straddlePage === 1) {
+          const p0 = pageOf(0, 999);
+          p0.items.push({ id: 'straddle-uuid', name: 'Staff Engineer', url: crossUrl, locations: [{ name: 'Seattle, WA', country: 'United States' }] });
+          return p0;
+        }
+        return {
+          page: 1, pageSize: 1000, totalItems: 1001, totalPages: 2,
+          items: [{ id: 'straddle-uuid', name: 'Staff Engineer', url: crossUrl, locations: [{ name: 'Toronto, Canada', country: 'Canada' }] }],
+        };
+      },
+    });
+    const straddled = straddleJobs.filter((j) => j.url === crossUrl);
+    if (straddleJobs.length === 1000 && straddled.length === 1
+        && straddled[0].location === 'Seattle, WA, United States · Toronto, Canada') {
+      pass('rippling.fetch() folds fanned-out sibling rows across page boundaries');
+    } else {
+      fail(`rippling.fetch() cross-page fold: total=${straddleJobs.length}, straddled=${JSON.stringify(straddled)}`);
+    }
+  }
+
 } catch (e) {
   fail(`rippling provider tests crashed: ${e.message}`);
 }
