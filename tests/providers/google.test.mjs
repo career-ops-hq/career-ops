@@ -208,6 +208,15 @@ try {
       : fail(`google decoded markup: ${JSON.stringify(j && [j.title, j.company, j.location])}`);
   }
 
+  for (const queries of [[''], ['   '], ['', 'business strategy'], ['alpha', 'beta']]) {
+    const { ctx } = recordingCtx(() => linkPage([]));
+    const jobs = await provider.fetch({ name: 'Google', google: { queries } }, ctx);
+    const expected = queries.every(q => q.trim()) ? { config: 'google.queries', queries } : undefined;
+    JSON.stringify(jobs.queryScope) === JSON.stringify(expected)
+      ? pass('Google query scope agrees with ' + JSON.stringify(queries))
+      : fail('Unexpected query scope for ' + JSON.stringify(queries));
+  }
+
   // ── probe: ctx.maxPages walks one query, one page, one request ──
   {
     const { ctx, calls } = recordingCtx(() => linkPage(fullPageIds(100))); // a full page
