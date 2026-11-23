@@ -2963,7 +2963,7 @@ function countShapedSpans(text) {
  * @param {string} targetText
  * @returns {{reason: string, message: string, spans: string[]}|null}
  */
-export function diagnoseCoverage(targetText) {
+export function diagnoseCoverage(targetText, { strictSource = false } = {}) {
   const spans = countShapedSpans(targetText);
   if (spans.length < 2) return null;
   // RAW matches on purpose. This asks "could the extractor read any count here?",
@@ -2982,8 +2982,10 @@ export function diagnoseCoverage(targetText) {
     message:
       `${spans.length} count-like claims are present but none matched the metric extractor, whose noun ` +
       'list covers English, German and French only — so no count in this document was checked against your sources. ' +
-      'Percentages, currency and multipliers were still checked. Verify the counts by hand, or add ' +
-      'them to allow_metrics in config/cv-facts.json once confirmed.',
+      'Percentages, currency and multipliers were still checked. ' +
+      (strictSource
+        ? 'Compare the counts with the selected source by hand.'
+        : 'Verify the counts by hand, or add them to allow_metrics in config/cv-facts.json once confirmed.'),
     spans,
   };
 }
@@ -3386,7 +3388,7 @@ export function verifyFacts(targetText, {
   // 'pass' into 'warn' so the caller is told the gate could not read it.
   // One coverage object, so callers that read `coverage.reason` keep working.
   // A count gap keeps its reason and gains the scope sentence.
-  const countGap = diagnoseCoverage(targetText);
+  const countGap = diagnoseCoverage(targetText, { strictSource });
   const priorCoverage = !languageGap ? countGap
     : countGap ? { ...countGap, message: `${countGap.message} ${languageGap}` }
       : { reason: 'scope-not-checked', message: languageGap, spans: [] };

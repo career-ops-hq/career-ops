@@ -105,3 +105,12 @@ test('CLI: strict-source scope advice names no allowance, and default still name
   assert.match(strict, /weaker verb than the CV\. Use the source's verb/);
   assert.doesNotMatch(strict, /allow_(metrics|facts|swaps)|config\/cv-facts\.json/);
 });
+
+test('strict-source coverage message names no allowance, and default still names allow_metrics (#6792)', () => {
+  const line = 'Atendí 30 pacientes y coordiné 12 turnos.';
+  const strict = run(line, cfg({}), true);
+  assert.ok(strict.coverage, 'expected a coverage gap');
+  assert.doesNotMatch(strict.coverage.message, /allow_|cv-facts\.json/);
+  assert.match(strict.coverage.message, /by hand/);
+  assert.match(run(line, cfg({}), false).coverage.message, /allow_metrics/);
+});
