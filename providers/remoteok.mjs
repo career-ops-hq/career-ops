@@ -34,6 +34,16 @@ function toEpochMs(value) {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
+/**
+ * A salary bound, or undefined. The feed gives 0 when a posting has no salary,
+ * and 0 is no value.
+ * @param {unknown} value
+ */
+function salaryBound(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 /** @type {Provider} */
 export default {
   id: 'remoteok',
@@ -67,6 +77,19 @@ export default {
         // can't judge the row.
         const postedAt = toEpochMs(j.date);
         if (postedAt !== undefined) job.postedAt = postedAt;
+        // `salary_min` / `salary_max` are USD per year, and 0 when the poster
+        // gave none. A one-sided range fills the other bound, as ashby.mjs does.
+        const lo = salaryBound(j.salary_min);
+        const hi = salaryBound(j.salary_max);
+        if (lo !== undefined || hi !== undefined) {
+          job.salary = {
+            min: Math.min(lo ?? hi, hi ?? lo),
+            max: Math.max(lo ?? hi, hi ?? lo),
+            currency: 'USD',
+            period: 'year',
+            posted: { ...(lo !== undefined ? { min: lo } : {}), ...(hi !== undefined ? { max: hi } : {}) },
+          };
+        }
         // Every row carries the posting's HTML in `description`, so it costs no
         // request. content_filter, country_eligibility_filter and visa_filter
         // read it, and formatScanHistoryRow() fingerprints it. Omitted when the
