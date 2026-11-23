@@ -248,3 +248,28 @@ test("an explicit retry can complete after an interrupted attempt", async () => 
   assert.equal(first.status, "ready");
   assert.deepEqual(retry, { status: "done", filled: true });
 });
+
+test("a drive that reached a refused host returns the refusal panel's details", async () => {
+  const refusal = {
+    t: "unsupported",
+    unsupported: true,
+    vendor: "handoff",
+    label: "gupy.io",
+    postingUrl: "https://acme.gupy.io/jobs/123",
+    message: "This site needs your own login.",
+    checklistHref: "/pipeline/42/apply",
+  };
+  const result = await read(responseFor([record(step), record(refusal)]));
+  assert.deepEqual(result, {
+    status: "unsupported",
+    message: refusal.message,
+    postingUrl: refusal.postingUrl,
+    checklistHref: refusal.checklistHref,
+  });
+});
+
+test("an unsupported record without the refusal flag is unreadable, not a refusal", async () => {
+  const result = await read(responseFor([record({ t: "unsupported", message: "x" })]));
+  assert.equal(result.status, "ready");
+  assert.match(result.error, /unreadable/);
+});

@@ -291,6 +291,82 @@ try {
     fail('parseOracleResponse should be empty-safe on malformed bodies');
   }
 
+  // ── secondaryLocations: every place a requisition is open in ────────
+  // buildApiUrl() expands requisitionList.secondaryLocations, where a
+  // requisition open in several places lists the ones besides its
+  // PrimaryLocation, each with its own Name (seen on JPMorgan Chase and Uber
+  // boards). Reading PrimaryLocation alone dropped them, so a location_filter
+  // that names only a secondary place rejected the posting.
+  const multiSample = {
+    items: [{
+      requisitionList: [
+        {
+          Id: '1001',
+          Title: 'Machine Learning Engineer',
+          PrimaryLocation: 'Sunnyvale, CA, United States',
+          secondaryLocations: [
+            { Name: 'San Francisco, CA, United States', CountryCode: 'US' },
+            { Name: 'Seattle, WA, United States', CountryCode: 'US' },
+            { Name: 'Sunnyvale, CA, United States', CountryCode: 'US' },
+            { Name: ' ', CountryCode: 'US' },
+            { CountryCode: 'US' },
+            null,
+          ],
+        },
+        {
+          Id: '1002',
+          Title: 'Operations Manager',
+          PrimaryLocation: 'Paris, Ile-de-France, France',
+          WorkplaceTypeCode: 'ORA_HYBRID',
+          secondaryLocations: [{ Name: 'Madrid, Spain', CountryCode: 'ES' }],
+        },
+        { Id: '1003', Title: 'Client Associate', PrimaryLocation: 'Newark, DE, United States', secondaryLocations: [] },
+        {
+          Id: '1004',
+          Title: 'Support Engineer',
+          PrimaryLocation: 'Austin, TX, United States',
+          secondaryLocations: [{ Name: 'Remote', CountryCode: 'US' }],
+        },
+      ],
+    }],
+  };
+  const [multi, hybrid, single, workModel] = parseOracleResponse(multiSample, site, 'Acme');
+
+  if (multi?.location === 'Sunnyvale, CA, United States · San Francisco, CA, United States · Seattle, WA, United States'
+      && JSON.stringify(multi?.locations) === JSON.stringify(['Sunnyvale, CA, United States', 'San Francisco, CA, United States', 'Seattle, WA, United States'])) {
+    pass('parseOracleResponse adds each secondary location once, after the primary one');
+  } else {
+    fail(`multi-location row = location: ${JSON.stringify(multi?.location)}, locations: ${JSON.stringify(multi?.locations)}`);
+  }
+
+  if (hybrid?.location === 'Paris, Ile-de-France, France · Madrid, Spain · Hybrid'
+      && JSON.stringify(hybrid?.locations) === JSON.stringify(['Paris, Ile-de-France, France', 'Madrid, Spain'])) {
+    pass('parseOracleResponse puts the work-model hint after every place and leaves it out of locations');
+  } else {
+    fail(`hybrid row = location: ${JSON.stringify(hybrid?.location)}, locations: ${JSON.stringify(hybrid?.locations)}`);
+  }
+
+  if (single?.location === 'Newark, DE, United States'
+      && JSON.stringify(single?.locations) === JSON.stringify(['Newark, DE, United States'])) {
+    pass('parseOracleResponse keeps the location of a requisition with no secondary locations');
+  } else {
+    fail(`single-location row = location: ${JSON.stringify(single?.location)}, locations: ${JSON.stringify(single?.locations)}`);
+  }
+
+  if (workModel?.location === 'Austin, TX, United States · Remote'
+      && JSON.stringify(workModel?.locations) === JSON.stringify(['Austin, TX, United States'])) {
+    pass('parseOracleResponse keeps a work-model-only secondary name out of locations');
+  } else {
+    fail(`work-model row = location: ${JSON.stringify(workModel?.location)}, locations: ${JSON.stringify(workModel?.locations)}`);
+  }
+
+  const { buildLocationFilter } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  if (buildLocationFilter({ allow: ['Seattle'] })(multi?.location, multi?.url, multi?.title)) {
+    pass('location_filter allow: [Seattle] keeps a requisition whose secondary location is Seattle');
+  } else {
+    fail(`location_filter allow: [Seattle] rejected ${JSON.stringify(multi?.location)}`);
+  }
+
   // ── fetch: normalization + redirect:error + trusted host ────────────
   let capturedUrl = null;
   let capturedOpts = null;

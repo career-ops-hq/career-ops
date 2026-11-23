@@ -62,6 +62,7 @@ export const DEFAULT_CADENCE = {
   responded_initial: 1,
   responded_subsequent: 3,
   interview_thankyou: 1,
+  interview_followups: true,
 };
 
 const PROFILE_CADENCE_KEYS = {
@@ -95,6 +96,9 @@ export function loadProfileCadence(profilePath = PROFILE_FILE) {
   for (const [profileKey, cadenceKey] of Object.entries(PROFILE_CADENCE_KEYS)) {
     const parsed = positiveInteger(source[profileKey]);
     if (parsed !== null) cadence[cadenceKey] = parsed;
+  }
+  if (typeof source.interview_followups === 'boolean') {
+    cadence.interview_followups = source.interview_followups;
   }
   return cadence;
 }
@@ -251,7 +255,7 @@ const APPLIED_DATE_RE = new RegExp(APPLIED_DATE_SOURCE, 'gi');
 //     row must not fail a whole report.
 //
 // @param {string} notes
-// @param {{requireValidCalendarDate?: boolean}} [options]
+// @param {{requireValidCalendarDate?: boolean, requireExactDate?: boolean, requireUnambiguousDate?: boolean}} [options]
 export function parseAppliedDate(notes, options = {}) {
   if (!notes) return null;
   const validateCalendar = options.requireValidCalendarDate === true;
@@ -267,7 +271,7 @@ export function parseAppliedDate(notes, options = {}) {
   // own measured date.
   const matches = [];
   for (const m of text.matchAll(APPLIED_DATE_RE)) {
-    matches.push({ date: m[1], index: m.index, end: m.index + m[0].length });
+    matches.push({ date: m[1], index: m.index, end: m.index + m[0].length, approximate: m[0].endsWith(`~${m[1]}`) });
   }
   if (matches.length === 0) return null;
 
@@ -278,14 +282,16 @@ export function parseAppliedDate(notes, options = {}) {
   // is as often written in prose ("...(row 51, 4.6/5)"), and it can sit before,
   // inside or after the match it belongs to, so attribution is decided by the
   // clause model below rather than by scanning outward from each date (#4953).
-  const cited = citedDateOffsets(text, matches);
+  const cited = citedDateOffsets(text, matches, options.requireUnambiguousDate === true);
   const own = matches.filter(m => !cited.has(m.index)
     && (!validateCalendar || isRealCalendarDate(m.date)));
 
   // First-wins is preserved among a row's OWN dates: a later status date must
   // not displace the submission date (see the fixture in test-all.mjs).
   // Cross-reference filtering is orthogonal to that ordering rule.
-  if (own.length > 0) return own[0].date;
+  // Certainty belongs to the selected own mention, not another date in the
+  // note. An estimated first date must not fall through to a later exact one.
+  if (own.length > 0) return options.requireExactDate && own[0].approximate ? null : own[0].date;
 
   // Every apply-date in the note belongs to another row, so this note does not
   // state when THIS row was submitted. Returning null is the honest answer —
@@ -541,7 +547,7 @@ function pointerOwner(text, pointer, dates) {
 
 // The apply-dates in `text` that are being cited about ANOTHER row, as a Set of
 // their offsets.
-function citedDateOffsets(text, matches) {
+function citedDateOffsets(text, matches, requireUnambiguousDate = false) {
   const cited = new Set();
   const clauses = splitClauses(text).map(c => ({
     ...c,
@@ -587,9 +593,19 @@ function citedDateOffsets(text, matches) {
     // misattributions of its own -- including discarding a real date from
     // "Applied 2026-08-04 for this role", where the wording names the CURRENT
     // row. One documented limit in the cheaper direction beats three bugs.
-    const previous = clauses[i - 1];
+    // Excluding a reply candidate requires stronger evidence than reporting a
+    // cadence date. In that opt-in path, an undated sibling subject remains
+    // uncertain across undated soft clauses. Stop at a date or sentence break;
+    // do not guess whether prose such as "to that sibling" changes the subject.
+    let previousIndex = i - 1;
+    if (requireUnambiguousDate) {
+      while (previousIndex >= 0 && clauses[previousIndex + 1].sepBefore === 'soft'
+        && clauses[previousIndex].dates.length === 0
+        && clauses[previousIndex].pointers.length === 0) previousIndex -= 1;
+    }
+    const previous = clauses[previousIndex];
     if (
-      clause.sepBefore === 'soft'
+      clauses[previousIndex + 1].sepBefore === 'soft'
       && previous
       && previous.pointers.length > 0
       && previous.dates.length === 0
@@ -1033,6 +1049,7 @@ export function computeUrgency(status, daysSinceApp, daysSinceLastFollowup, foll
     return 'waiting';
   }
   if (status === 'interview') {
+    if (CADENCE.interview_followups === false) return 'waiting';
     if (daysSinceLastFollowup !== null) {
       return daysSinceLastFollowup >= CADENCE.responded_subsequent ? 'overdue' : 'waiting';
     }
@@ -1054,6 +1071,7 @@ export function computeNextFollowupDate(status, appDate, lastFollowupDate, follo
     return addDays(parseDate(appDate), CADENCE.responded_initial);
   }
   if (status === 'interview') {
+    if (CADENCE.interview_followups === false) return null;
     // After the thank-you is logged, subsequent touches follow the responded
     // cadence (modes/followup.md: "Every 3 days · No limit").
     if (lastFollowupDate) return addDays(parseDate(lastFollowupDate), CADENCE.responded_subsequent);
@@ -1122,6 +1140,9 @@ export function analyzeFromContent(trackerContent, followupsContent = '', { enab
   for (const app of apps) {
     const normalized = normalizeStatus(app.status);
     if (!ACTIONABLE_STATUSES.includes(normalized)) continue;
+    // Interview scheduling can be managed separately from follow-up cadence.
+    // Exclude before pins so an old next-date cannot revive a disabled row.
+    if (normalized === 'interview' && CADENCE.interview_followups === false) continue;
 
     // appDateSource travels with the entry so a consumer can tell a measured
     // age from one inferred off the evaluation date.

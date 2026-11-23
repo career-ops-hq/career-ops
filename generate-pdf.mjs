@@ -4,7 +4,7 @@
  * generate-pdf.mjs — HTML → PDF via Playwright
  *
  * Usage:
- *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check]
+ *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check] [--upload-copy] [--upload-role="Role"]
  *   node career-ops/generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--country=XX] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check]
  *
  * --batch renders every document in a JSON manifest (an array of
@@ -56,13 +56,25 @@
  * means no gate, and combining the two is rejected rather than silently
  * honouring one over the other. A `block` verdict already fails without it.
  *
+ * --upload-copy also writes a copy of a CV under the name an employer should
+ * see, for uploads made by hand (LinkedIn Easy Apply, email):
+ * {output dir}/upload/{output stem}/First-Last-Role-CV.pdf. The name comes from
+ * candidate.full_name in config/profile.yml and the role: --upload-role="…",
+ * else the tracker row linked to --report, else the CV's printed headline
+ * (lib/upload-name.mjs, the builder the web apply flow uses, #6399).
+ * --upload-role implies --upload-copy. The copy
+ * is never indexed in data/pdf-index.tsv and never replaces the output; one
+ * folder per output file means two applications for the same role never
+ * collide, and a re-render refreshes its own copy. `cv.upload_copy: true` in
+ * config/profile.yml turns it on for every single-file CV render.
+ *
  * Requires: @playwright/test (or playwright) installed.
  * Uses Chromium headless to render the HTML and produce a clean, ATS-parseable PDF.
  */
 
-import { resolve, dirname, relative, sep, isAbsolute, basename } from 'path';
+import { resolve, dirname, relative, sep, isAbsolute, basename, join } from 'path';
 import { readFile } from 'fs/promises';
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'fs';
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
@@ -71,6 +83,7 @@ import { loadYaml } from './lib/yaml-document.mjs';
 import { validateCvExperienceOrder } from './cv-experience-order.mjs';
 import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRootFor, writeFileAtomic } from './tracker-utils.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
+import { linkedReportNumbers, parseTrackerRow, resolveColumns } from './tracker-parse.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { stripEmptyRenderedSections } from './cv-sections-core.mjs';
@@ -402,7 +415,7 @@ function normalizeTextForATS(html) {
  *
  * Only used for alias lookup — display titles keep their diacritics.
  */
-function foldDiacritics(text) {
+export function foldDiacritics(text) {
   return text
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -419,8 +432,10 @@ function foldDiacritics(text) {
  * every CV rendered in those modes, and cv.sections resolves no block at all.
  *
  * Keys are folded on construction so authored diacritics match stripped input.
+ * Exported, with foldDiacritics(), for tests/section-aliases-unique.test.mjs,
+ * which checks that no two entries fold to the same key.
  */
-const SECTION_ALIASES = new Map([
+export const SECTION_ALIAS_ENTRIES = [
   // Japanese (modes/ja) and Korean (modes/ko) — the same failure as the blocks
   // below: no title in either resolved here, so cv.sections matched no section of
   // such a CV and the order guard compared raw titles. The skills and
@@ -582,7 +597,7 @@ const SECTION_ALIASES = new Map([
   // to the English keys and already resolve, so they are not repeated.
   ['résumé', 'summary'],
   ['résumé professionnel', 'summary'],
-  ['profil', 'summary'],
+  // "Profil" is in the German block above.
   ['profil professionnel', 'summary'],
   ['à propos', 'summary'],
   ['à propos de moi', 'summary'],
@@ -614,6 +629,55 @@ const SECTION_ALIASES = new Map([
   ['centres d’intérêts', 'interests'],
   ['intérêts', 'interests'],
   ['loisirs', 'interests'],
+  // Hindi (modes/hi) — the same failure as the blocks around it: no Hindi title
+  // resolved here, so cv.sections matched no section of a CV written in Hindi,
+  // which modes/hi/README.md lists as a reason to use those modes, and the order
+  // guard compared raw titles. "कौशल" and "करियर इतिहास" are the skills and
+  // career-history terms in its glossary; the rest are each section's everyday
+  // headings. Plurals are listed in both the anusvara spelling (दक्षताएं,
+  // रुचियां) and the chandrabindu one (दक्षताएँ, रुचियाँ), and "प्रोफ़ाइल" with
+  // and without the nukta: both are in common use, and foldDiacritics folds
+  // neither onto the other.
+  ['सारांश', 'summary'],
+  ['पेशेवर सारांश', 'summary'],
+  ['व्यावसायिक सारांश', 'summary'],
+  ['करियर सारांश', 'summary'],
+  ['प्रोफ़ाइल', 'summary'],
+  ['प्रोफाइल', 'summary'],
+  ['परिचय', 'summary'],
+  ['मुख्य दक्षताएं', 'competencies'],
+  ['मुख्य दक्षताएँ', 'competencies'],
+  ['प्रमुख दक्षताएं', 'competencies'],
+  ['प्रमुख दक्षताएँ', 'competencies'],
+  ['दक्षताएं', 'competencies'],
+  ['दक्षताएँ', 'competencies'],
+  ['अनुभव', 'experience'],
+  ['कार्य अनुभव', 'experience'],
+  ['पेशेवर अनुभव', 'experience'],
+  ['व्यावसायिक अनुभव', 'experience'],
+  ['करियर इतिहास', 'experience'],
+  ['परियोजनाएं', 'projects'],
+  ['परियोजनाएँ', 'projects'],
+  ['प्रमुख परियोजनाएं', 'projects'],
+  ['प्रमुख परियोजनाएँ', 'projects'],
+  ['प्रोजेक्ट्स', 'projects'],
+  ['शिक्षा', 'education'],
+  ['शैक्षिक योग्यता', 'education'],
+  ['शैक्षणिक योग्यता', 'education'],
+  ['शैक्षिक पृष्ठभूमि', 'education'],
+  ['प्रमाणपत्र', 'certifications'],
+  ['प्रमाण पत्र', 'certifications'],
+  ['प्रमाणन', 'certifications'],
+  ['पुरस्कार', 'awards'],
+  ['सम्मान', 'awards'],
+  ['पुरस्कार और सम्मान', 'awards'],
+  ['पुरस्कार एवं सम्मान', 'awards'],
+  ['कौशल', 'skills'],
+  ['तकनीकी कौशल', 'skills'],
+  ['स्किल्स', 'skills'],
+  ['रुचियां', 'interests'],
+  ['रुचियाँ', 'interests'],
+  ['शौक', 'interests'],
   // Spanish — the same failure again: with no entries here, a Spanish CV
   // rendered in the documented modes/pdf.md order (Experiencia before Formación)
   // was rejected against a cv.md listing Formación first, and --allow-reorder was
@@ -658,7 +722,7 @@ const SECTION_ALIASES = new Map([
   // section's everyday headings. Lower-casing turns "İ" into "i" plus a dot that
   // foldDiacritics drops, so "İş" folds to "is"; the dotless "ı" stays as written.
   ['özet', 'summary'],
-  ['profil', 'summary'],
+  // "Profil" is in the German block above.
   ['profesyonel özet', 'summary'],
   ['kariyer özeti', 'summary'],
   ['hakkımda', 'summary'],
@@ -680,6 +744,37 @@ const SECTION_ALIASES = new Map([
   ['yetenekler', 'skills'],
   ['ilgi alanları', 'interests'],
   ['hobiler', 'interests'],
+  // Vietnamese (modes/vi) — the same failure as the blocks around it: no
+  // Vietnamese title resolved here, so cv.sections matched no section of a
+  // Vietnamese CV and the order guard compared raw titles. "Kỹ năng" and "Lịch sử
+  // nghề nghiệp" are the skills and career-history terms in modes/vi/README.md;
+  // the rest are each section's everyday headings. foldDiacritics drops the tone
+  // and vowel marks on both sides of the lookup; "đ" has no decomposition and
+  // stays as written.
+  ['tóm tắt', 'summary'],
+  ['tóm tắt bản thân', 'summary'],
+  ['giới thiệu bản thân', 'summary'],
+  ['mục tiêu nghề nghiệp', 'summary'],
+  ['năng lực cốt lõi', 'competencies'],
+  ['năng lực chính', 'competencies'],
+  ['kinh nghiệm làm việc', 'experience'],
+  ['kinh nghiệm', 'experience'],
+  ['lịch sử nghề nghiệp', 'experience'],
+  ['quá trình làm việc', 'experience'],
+  ['dự án', 'projects'],
+  ['dự án tiêu biểu', 'projects'],
+  ['dự án nổi bật', 'projects'],
+  ['học vấn', 'education'],
+  ['trình độ học vấn', 'education'],
+  ['quá trình học tập', 'education'],
+  ['chứng chỉ', 'certifications'],
+  ['chứng nhận', 'certifications'],
+  ['giải thưởng', 'awards'],
+  ['danh hiệu', 'awards'],
+  ['kỹ năng', 'skills'],
+  ['kỹ năng chuyên môn', 'skills'],
+  ['kỹ năng kỹ thuật', 'skills'],
+  ['sở thích', 'interests'],
   // Italian (modes/it) — the same failure as the blocks around it: no Italian
   // title resolved here, so cv.sections matched no section of an Italian CV and
   // the order guard compared raw titles. A bare "Competenze" is the key-skills
@@ -722,8 +817,7 @@ const SECTION_ALIASES = new Map([
   // Karriereforløb, Erhvervserfaring; Kompetanse, Arbeidserfaring, Yrkeserfaring);
   // the rest are each section's everyday headings, listed once where the two
   // languages share a spelling (Erfaring, Priser, Interesser).
-  ['profil', 'summary'],
-  ['resumé', 'summary'],
+  // "Profil" is in the German block and "Resumé" folds to the French "résumé", both above.
   ['sammenfatning', 'summary'],
   ['om mig', 'summary'],
   ['sammendrag', 'summary'],
@@ -756,6 +850,36 @@ const SECTION_ALIASES = new Map([
   ['tekniske ferdigheter', 'skills'],
   ['interesser', 'interests'],
   ['fritidsinteresser', 'interests'],
+  // Indonesian (modes/id) — the same failure as the blocks around it: no
+  // Indonesian title resolved here, so cv.sections matched no section of an
+  // Indonesian CV and the order guard compared raw titles. "Keahlian",
+  // "Kompetensi" and "Riwayat karier" are the skills and career-history terms
+  // in modes/id/README.md; the rest are each section's everyday headings.
+  // "Profil" is already in the German block above.
+  ['ringkasan', 'summary'],
+  ['ringkasan profesional', 'summary'],
+  ['tentang saya', 'summary'],
+  ['kompetensi inti', 'competencies'],
+  ['kompetensi utama', 'competencies'],
+  ['pengalaman kerja', 'experience'],
+  ['pengalaman', 'experience'],
+  ['pengalaman profesional', 'experience'],
+  ['riwayat karier', 'experience'],
+  ['riwayat pekerjaan', 'experience'],
+  ['proyek', 'projects'],
+  ['proyek pilihan', 'projects'],
+  ['pendidikan', 'education'],
+  ['riwayat pendidikan', 'education'],
+  ['sertifikasi', 'certifications'],
+  ['sertifikat', 'certifications'],
+  ['penghargaan', 'awards'],
+  ['keahlian', 'skills'],
+  ['kompetensi', 'skills'],
+  ['keterampilan', 'skills'],
+  ['keahlian teknis', 'skills'],
+  ['keterampilan teknis', 'skills'],
+  ['minat', 'interests'],
+  ['hobi', 'interests'],
   // Chinese — the same failure the Polish block above fixes, for the two Chinese
   // markets this repo ships modes for: Traditional (modes/zh-TW) and Simplified
   // (modes/zh), rendered through templates/cv-template.zh-minimal.html. Both
@@ -822,6 +946,40 @@ const SECTION_ALIASES = new Map([
   ['技术栈', 'skills'],
   ['興趣', 'interests'],
   ['兴趣', 'interests'],
+  // Arabic (modes/ar) — the same failure as the blocks around it: no Arabic
+  // title resolved here, so cv.sections matched no section of an Arabic CV and
+  // the order guard compared raw titles. "مهارات" and "التاريخ المهني" /
+  // "الخبرات المهنية" are the skills and career-history terms in
+  // modes/ar/README.md; the rest are each section's everyday headings, with and
+  // without the definite article where both are common.
+  ['ملخص', 'summary'],
+  ['الملخص', 'summary'],
+  ['ملخص مهني', 'summary'],
+  ['نبذة', 'summary'],
+  ['نبذة عني', 'summary'],
+  ['الملف الشخصي', 'summary'],
+  ['الكفاءات الأساسية', 'competencies'],
+  ['الكفاءات', 'competencies'],
+  ['الخبرات المهنية', 'experience'],
+  ['الخبرة المهنية', 'experience'],
+  ['الخبرة العملية', 'experience'],
+  ['الخبرات العملية', 'experience'],
+  ['التاريخ المهني', 'experience'],
+  ['الخبرة', 'experience'],
+  ['المشاريع', 'projects'],
+  ['مشاريع', 'projects'],
+  ['التعليم', 'education'],
+  ['المؤهلات العلمية', 'education'],
+  ['المؤهل العلمي', 'education'],
+  ['الشهادات', 'certifications'],
+  ['الشهادات المهنية', 'certifications'],
+  ['الجوائز', 'awards'],
+  ['الجوائز والتكريمات', 'awards'],
+  ['المهارات', 'skills'],
+  ['مهارات', 'skills'],
+  ['المهارات التقنية', 'skills'],
+  ['الاهتمامات', 'interests'],
+  ['الهوايات', 'interests'],
   // Dutch (modes/nl) — the same failure as the blocks around it: no Dutch title
   // resolved here, so cv.sections matched no section of a Dutch CV and the
   // order guard compared raw titles. "Interesses" folds to the Portuguese key
@@ -872,7 +1030,7 @@ const SECTION_ALIASES = new Map([
   ['projetos selecionados', 'projects'],
   ['formação', 'education'],
   ['formação acadêmica', 'education'],
-  ['formação académica', 'education'],
+  // "Formação académica" (pt-PT) folds to the key above.
   ['educação', 'education'],
   ['escolaridade', 'education'],
   ['certificações', 'certifications'],
@@ -921,7 +1079,8 @@ const SECTION_ALIASES = new Map([
   ['хобби', 'interests'],
   ['інтереси', 'interests'],
   ['хобі', 'interests'],
-].map(([alias, key]) => [foldDiacritics(alias), key]));
+];
+const SECTION_ALIASES = new Map(SECTION_ALIAS_ENTRIES.map(([alias, key]) => [foldDiacritics(alias), key]));
 
 function normalizeSectionTitle(text) {
   return text
@@ -1269,6 +1428,117 @@ export function warnLongPortalFields(html, outputPath, limit = PORTAL_LENGTH_LIM
   }
   for (const w of warnings) console.warn(`⚠️  ${w}`);
   return warnings;
+}
+
+/**
+ * The manual-upload copy of a CV: {output dir}/upload/{output stem}/{name},
+ * where {name} is `First-Last-Role-CV.pdf` (lib/upload-name.mjs) from the
+ * profile's full name and the role: the caller's (--upload-role, else the
+ * tracker row), else the CV's printed headline. A name over the portal limit
+ * (#5629) drops the role. Exported for tests.
+ *
+ * The name builder loads only when a copy is asked for, so a render that
+ * wants none needs nothing beyond what it needed before.
+ *
+ * @param {string} outputPath - The canonical PDF path.
+ * @param {{ fullName?: string, role?: string, html?: string }} opts
+ * @returns {Promise<string>}
+ */
+export async function uploadCopyPath(outputPath, { fullName = '', role = '', html = '' } = {}) {
+  const { cvUploadName } = await import('./lib/upload-name.mjs');
+  let name = cvUploadName({ fullName, role: role || headlineText(html) });
+  if ([...name].length > PORTAL_LENGTH_LIMIT) name = cvUploadName({ fullName });
+  const stem = basename(outputPath).replace(/\.pdf$/i, '');
+  return join(dirname(outputPath), 'upload', stem, name);
+}
+
+/**
+ * What config/profile.yml says about the upload copy: the candidate's full
+ * name, and whether `cv.upload_copy` turns the copy on. A value that is not
+ * true or false is reported, not guessed at. Exported for tests.
+ *
+ * @param {string} profilePath
+ * @returns {{ fullName: string, uploadCopy: boolean, invalid?: string }}
+ */
+export function readUploadCopySettings(profilePath) {
+  let doc;
+  try {
+    if (!existsSync(profilePath)) return { fullName: '', uploadCopy: false };
+    doc = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
+  } catch {
+    return { fullName: '', uploadCopy: false };
+  }
+  const fullName = typeof doc?.candidate?.full_name === 'string' ? doc.candidate.full_name.trim() : '';
+  const raw = doc?.cv?.upload_copy;
+  if (raw == null || typeof raw === 'boolean') return { fullName, uploadCopy: raw === true };
+  return { fullName, uploadCopy: false, invalid: `cv.upload_copy "${raw}" is not true or false` };
+}
+
+/**
+ * The Role cell of the tracker row whose report link is `reportNum`, or ''.
+ * The posting's own title, which is what the web apply flow names its upload
+ * after (#6399); a CV headline often joins two titles. Exported for tests.
+ *
+ * @param {string} reportNum
+ * @param {string} trackerFile
+ * @returns {string}
+ */
+export function trackerRoleForReport(reportNum, trackerFile) {
+  if (!reportNum) return '';
+  let lines;
+  try {
+    lines = readFileSync(trackerFile, 'utf-8').split(/\r?\n/);
+  } catch {
+    return '';
+  }
+  const colmap = resolveColumns(lines);
+  for (const line of lines) {
+    const row = parseTrackerRow(line, colmap);
+    if (row && linkedReportNumbers(row.report, row.notes).some((n) => Number(n) === Number(reportNum))) return row.role;
+  }
+  return '';
+}
+
+/**
+ * Copy a rendered CV to its manual-upload path. Only a plain file copy: the
+ * canonical PDF and data/pdf-index.tsv are left as they are. Exported for
+ * tests.
+ *
+ * @param {string} outputPath - The canonical PDF, already written.
+ * @param {{ fullName?: string, role?: string, html?: string, workspaceRoot?: string }} opts
+ * @returns {Promise<string>} The copy's path. Rejects when the copy would land outside the workspace.
+ */
+export async function writeUploadCopy(outputPath, opts = {}) {
+  const target = await uploadCopyPath(outputPath, opts);
+  // Checked before mkdirSync: the canonical PDF's own check ran before
+  // upload/ existed, so a symlinked output/upload would escape it.
+  if (!isWorkspaceOutputPath(target, opts.workspaceRoot)) {
+    throw new Error(`${target} is outside the tracker workspace`);
+  }
+  mkdirSync(dirname(target), { recursive: true });
+  copyFileSync(outputPath, target);
+  return target;
+}
+
+/**
+ * writeUploadCopy for a render that already wrote its PDF and index row. A
+ * failed copy is a warning, as a failed manifest update is: failing the run
+ * here would make a caller such as CV Studio restore the old HTML beside the
+ * new PDF, two revisions on disk. Exported for tests.
+ *
+ * @param {string} outputPath - The canonical PDF, already written.
+ * @param {{ fullName?: string, role?: string, html?: string, workspaceRoot?: string }} opts
+ * @returns {Promise<string|null>} The copy's path, or null when none was written.
+ */
+export async function writeUploadCopyOrWarn(outputPath, opts = {}) {
+  try {
+    const copy = await writeUploadCopy(outputPath, opts);
+    console.log(`📎 Upload copy: ${copy}`);
+    return copy;
+  } catch (err) {
+    console.error(`⚠️  Upload copy not written: ${err.message}. The PDF itself is fine.`);
+    return null;
+  }
 }
 
 /**
@@ -2221,6 +2491,7 @@ async function generatePDF() {
   const args = process.argv.slice(2);
   let skipFactCheck = false;
   let strictFactCheck = false;
+  let uploadCopyFlag = false, uploadRole = '';
 
   // Parse arguments
   // Empty, not 'cv': an omitted --kind must fall through to inference from the
@@ -2231,11 +2502,17 @@ async function generatePDF() {
   // No flag seen yet: null, not a paper size. The default belongs to
   // lib/page-format.mjs, which ranks it below the user's config/profile.yml.
   let inputPath, outputPath, format = null, country = null, reportNum = '', allowReorder = false, allowNonChronological = false;
-  let maxPages = 2, maxPagesInput = '2', maxPagesSupplied = false, strictPages = false, batchManifestPath = null;
+  let maxPages = 2, maxPagesInput = '2', maxPagesSupplied = false, strictPages = false, batchManifestPath = null, batchSupplied = false;
 
   for (const arg of args) {
     if (arg.startsWith('--format=')) {
       format = arg.split('=')[1].toLowerCase();
+    } else if (arg === '--format') {
+      // A flag missing its operand, like the bare --country below. Left alone it
+      // falls through to the positional arms and is dropped, so `--format letter`
+      // printed the PDF on the profile's sheet instead of the one asked for.
+      // The empty value fails the format check below before any work.
+      format = '';
     } else if (arg.startsWith('--country=')) {
       country = arg.slice('--country='.length);
     } else if (arg === '--country') {
@@ -2264,7 +2541,14 @@ async function generatePDF() {
       kindSupplied = true;
       kindFlag = arg.slice('--kind='.length).trim();
     } else if (arg.startsWith('--batch=')) {
+      batchSupplied = true;
       batchManifestPath = arg.slice('--batch='.length);
+    } else if (arg === '--batch') {
+      // The same missing-operand case. Dropped, `in.html out.pdf --batch m.json`
+      // rendered the two positional paths and never read the manifest. Marked
+      // supplied, because the batch branch below treats an empty path as absent.
+      batchSupplied = true;
+      batchManifestPath = '';
     } else if (arg === '--max-pages') {
       // A flag missing its operand, not an absent flag. Left alone it falls
       // through to the positional arms, and cv.max_pages from the profile would
@@ -2287,6 +2571,11 @@ async function generatePDF() {
       strictFactCheck = true;
     } else if (arg === '--skip-fact-check') {
       skipFactCheck = true;
+    } else if (arg === '--upload-copy') {
+      uploadCopyFlag = true;
+    } else if (arg.startsWith('--upload-role=')) {
+      uploadCopyFlag = true;
+      uploadRole = arg.slice('--upload-role='.length).trim();
     } else if (!inputPath) {
       inputPath = arg;
     } else if (!outputPath) {
@@ -2304,6 +2593,11 @@ async function generatePDF() {
   // substitution the flag exists to prevent.
   if (reportSupplied && !reportNum) {
     console.error('Invalid --report "". Use a numeric report number, e.g. --report=42.');
+    process.exit(1);
+  }
+
+  if (batchSupplied && !batchManifestPath) {
+    console.error('Invalid --batch "". Name the manifest, e.g. --batch=output/batch.json.');
     process.exit(1);
   }
 
@@ -2383,11 +2677,17 @@ async function generatePDF() {
       console.error('--kind is not valid with --batch. Set "kind" per entry in the manifest instead.');
       process.exit(1);
     }
+    // A batch renders many CVs for many applications in one go; the upload
+    // copy is for the one CV a person is about to attach by hand.
+    if (uploadCopyFlag) {
+      console.error('--upload-copy is not valid with --batch. Render the CV you are about to upload on its own.');
+      process.exit(1);
+    }
     return runBatchFromManifest(batchManifestPath, { format, flagFormat, country, flagBudget, profileBudget, allowReorder, allowNonChronological, skipFactCheck, strictFactCheck });
   }
 
   if (!inputPath || !outputPath) {
-    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check]');
+    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check] [--upload-copy] [--upload-role="Role"]');
     console.error('   or: node generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--country=XX] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check]');
     console.error('');
     console.error('Batch mode renders every document in the JSON manifest (an array of');
@@ -2496,7 +2796,7 @@ async function generatePDF() {
     else warnFactGateNotRun();
   }
 
-  return renderHtmlToPdf(html, outputPath, {
+  const result = await renderHtmlToPdf(html, outputPath, {
     format,
     baseDir: dirname(inputPath),
     reportNum,
@@ -2506,6 +2806,21 @@ async function generatePDF() {
     strictPages: budget.strictPages,
     styleTokens: readStyleTokens(workspaceProfilePath()),
   });
+
+  // The manual-upload copy: a CV only, and only once the output path holds
+  // the render (an overflow draft is not the CV anyone should send).
+  const upload = readUploadCopySettings(workspaceProfilePath());
+  if (upload.invalid) console.warn(`⚠️  ${upload.invalid}; no upload copy from config/profile.yml. Pass --upload-copy for this render.`);
+  if ((uploadCopyFlag || upload.uploadCopy) && !result.draftPath) {
+    if (resolveArtifactKind(kindFlag, outputPath).kind === 'cv') {
+      const role = uploadRole || trackerRoleForReport(reportNum, trackerPath);
+      const copy = await writeUploadCopyOrWarn(result.outputPath || outputPath, { fullName: upload.fullName, role, html });
+      if (copy) result.uploadCopyPath = copy;
+    } else if (uploadCopyFlag) {
+      console.warn('⚠️  --upload-copy applies to a CV only; no copy written for this document.');
+    }
+  }
+  return result;
 }
 
 /**

@@ -44,6 +44,7 @@ process.env.TMPDIR = fs.realpathSync(os.tmpdir());
 // "disposable data" get blank: no tracker, and the fictional cv.md
 // assistant-focus needs.
 const SUITES = {
+  "role-change-radar": { url: "RADAR_TEST_URL", fixture: "pipeline-status" },
   "accessible-names": { url: "ACCESSIBLE_NAMES_TEST_URL", fixture: "pipeline-status" },
   "analytics-views": { url: "ANALYTICS_TEST_URL", root: "ANALYTICS_TEST_ROOT", fixture: "pipeline-status" },
   "apply-field-accessibility": { url: "APPLY_FIELDS_TEST_URL", fixture: "blank" },
@@ -84,6 +85,7 @@ const SUITES = {
   "tracker-search": { url: "TRACKER_SEARCH_TEST_URL", root: "TRACKER_SEARCH_TEST_ROOT", fixture: "pipeline-status" },
   "worker-feedback": { url: "WORKER_FEEDBACK_TEST_URL", fixture: "blank" },
   "worker-gates": { url: "WORKER_GATE_TEST_URL", fixture: "blank" },
+  "worker-navigation": { url: "WORKER_NAVIGATION_TEST_URL", fixture: "inbox-undo" },
 };
 
 // Every var any suite reads, so a value from the caller's shell cannot point a

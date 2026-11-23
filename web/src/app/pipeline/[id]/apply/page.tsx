@@ -82,7 +82,7 @@ export default async function ApplyPage({
   const blockedAts = await unsupportedInAppAts(postingUrl);
   const blockedTip = blockedAts ? PORTAL_TIPS.find((tip) => tip.portal === blockedAts.label)?.tip ?? "" : "";
   const blocked = blockedAts
-    ? { label: blockedAts.label, message: unsupportedAtsMessage(blockedAts.label), tip: blockedTip }
+    ? { label: blockedAts.label, message: unsupportedAtsMessage(blockedAts), tip: blockedTip }
     : null;
   return (
     <ApplyChecklist

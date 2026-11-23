@@ -36,7 +36,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { BOARD_ATS, DNS_LABEL_ATS, REGIONAL_BOARD_URL_BUILDERS, SUBDOMAIN_ATS, buildBoardUrl } from '../lib/ats-board-url.mjs';
+import { BOARD_ATS, DNS_LABEL_ATS, ORACLECLOUD_HOST_RE, REGIONAL_BOARD_URL_BUILDERS, SUBDOMAIN_ATS, buildBoardUrl } from '../lib/ats-board-url.mjs';
 import { isMainModule } from '../lib/is-main-module.mjs';
 import { INBOX_DIR, INBOX_MAX_LINES, parseInboxName } from './employers-inbox.mjs';
 import {
@@ -194,6 +194,13 @@ function readCoords(u) {
   }
   // SuccessFactors' classic career page: <label>.successfactors.<eu|com>/career?company=<id>, the one form its
   // provider reads. The company id keeps its case; any other parameter is not part of the board.
+  // Oracle Recruiting Cloud: <tenant>.fa.[region.][ocs.]oraclecloud[N].com/hcmUI/CandidateExperience/<lang>/sites/<site>/…
+  if (ORACLECLOUD_HOST_RE.test(host)) {
+    const ce = segs.indexOf('CandidateExperience');
+    const site = ce >= 0 && segs[ce + 2] === 'sites' ? segs[ce + 3] : undefined;
+    if (!site) return { error: 'an Oracle Recruiting Cloud board is <host>/hcmUI/CandidateExperience/<lang>/sites/<site>' };
+    return { ats: 'oraclecloud', board: `${host}/${site}` };
+  }
   const sf = SF_CLASSIC_HOST_RE.exec(host);
   if (sf) {
     if (!/^\/career\/?$/.test(u.pathname)) return { error: 'a SuccessFactors classic board is <label>.successfactors.<eu|com>/career?company=<id>' };
@@ -329,7 +336,8 @@ export function readList(text) {
  * @param {BoardCoords} coords
  */
 export function nameFromBoard(coords) {
-  const id = coords.ats === 'workday' ? coords.board.split('/')[0] : coords.ats === 'successfactors-classic' ? coords.board.split('/')[2] : coords.board;
+  const id = coords.ats === 'workday' ? coords.board.split('/')[0] : coords.ats === 'successfactors-classic' ? coords.board.split('/')[2]
+    : coords.ats === 'oraclecloud' ? coords.board.split('.')[0] : coords.board;
   return id.split(/[-_.]+/).filter(Boolean)
     .map((w) => (w === w.toLowerCase() ? w.charAt(0).toUpperCase() + w.slice(1) : w))
     .join(' ');

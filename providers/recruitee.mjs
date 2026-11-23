@@ -8,6 +8,7 @@
 // regex match on `<safe-slug>.recruitee.com` rather than a static
 // allowlist.
 
+import { departmentTeamFields } from './_department-team.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 
 const RECRUITEE_HOST_RE = /^[a-z0-9][a-z0-9-]*\.recruitee\.com$/;
@@ -509,6 +510,7 @@ export function parseRecruiteeResponse(json, companyName, { allLanguages = false
         url: version.language ? withLanguage(url, version.language) : url,
         location,
         company: companyName,
+        ...departmentTeamFields(j.department),
         ...(version.description ? { description: version.description } : {}),
         ...(postedAt !== undefined ? { postedAt } : {}),
         ...(salary ? { salary } : {}),

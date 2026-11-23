@@ -17368,10 +17368,12 @@ try {
     const cadKeys = Object.keys(DEFAULT_CADENCE);
     const schemaOk = defaults && typeof defaults === 'object'
       && cadKeys.length > 0
-      && cadKeys.every((k) => Number.isInteger(defaults[k]) && defaults[k] >= 0)
+      && cadKeys.every((k) => k === 'interview_followups'
+        ? defaults[k] === true
+        : Number.isInteger(defaults[k]) && defaults[k] >= 0)
       && Object.keys(defaults).length === cadKeys.length;
     if (schemaOk) {
-      pass('followup-cadence --json emits a complete integer cadenceDefaults for the web to derive from (#2369)');
+      pass('followup-cadence --json emits a complete cadenceDefaults for the web to derive from (#2369)');
     } else {
       fail(`cadenceDefaults payload broken — the web cadence form loses its baseline (#2369): ${JSON.stringify(defaults)}`);
     }
@@ -17402,7 +17404,7 @@ try {
     // would be reverting to, which is the #2369 mistake exactly.
     const emptyOk = emptyDefaults && typeof emptyDefaults === 'object'
       && Object.keys(emptyDefaults).length === cadKeys.length
-      && cadKeys.every((k) => Number.isInteger(emptyDefaults[k]) && emptyDefaults[k] === DEFAULT_CADENCE[k]);
+      && cadKeys.every((k) => emptyDefaults[k] === DEFAULT_CADENCE[k]);
     if (emptyOk) {
       pass('followup-cadence emits cadenceDefaults even when the tracker is empty (#4005)');
     } else {

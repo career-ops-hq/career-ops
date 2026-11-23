@@ -40,7 +40,10 @@
 //   empty/absent requisitionList (verified live against JPMC).
 //   Response: items[0].requisitionList[] (jobs), items[0].TotalJobsCount (total),
 //   top-level hasMore. Per item: Id, Title, PostedDate, PrimaryLocation,
-//   WorkplaceTypeCode, ShortDescriptionStr, and (sometimes) ExternalURL.
+//   WorkplaceTypeCode, ShortDescriptionStr, and (sometimes) ExternalURL. The
+//   expand adds workLocation[] (the primary place's address parts) and
+//   secondaryLocations[] (one { Name, CountryCode, ... } for each place the
+//   requisition is open in besides PrimaryLocation).
 //
 // Known limitation: some tenants front the API with a WAF (e.g. Imperva) that
 // 403s datacenter/cloud egress IPs. That's an environment/IP issue, not a
@@ -49,6 +52,7 @@
 
 import { decodeEntities } from './_html-entities.mjs';
 import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, sleep } from './_http.mjs';
+import { isWorkModelOnly } from './greenhouse.mjs';
 
 // `oraclecloud(?:[1-9][0-9]?)?` = oraclecloud.com plus oraclecloud1.com …
 // oraclecloud99.com. No leading zero, at most two digits — a bounded family,
@@ -197,20 +201,39 @@ export function buildJobUrl(site, id) {
 }
 
 /**
- * Assemble a location string for a requisition. Prefers PrimaryLocation; else
- * builds from the expanded workLocation object; appends a remote/hybrid hint
- * from WorkplaceTypeCode. Returns "" when nothing is available.
+ * Every place a requisition is open in, each once, in the API's order:
+ * PrimaryLocation (else built from the expanded workLocation object), then
+ * the Name of each expanded secondaryLocations entry, which is where a
+ * multi-location requisition lists its other places. No work-model hint.
  * @param {any} req
+ * @returns {string[]}
  */
-function assembleLocation(req) {
-  let base = typeof req.PrimaryLocation === 'string' ? req.PrimaryLocation.trim() : '';
-  if (!base && Array.isArray(req.workLocation) && req.workLocation.length) {
+function resolvePlaces(req) {
+  let primary = typeof req.PrimaryLocation === 'string' ? req.PrimaryLocation.trim() : '';
+  if (!primary && Array.isArray(req.workLocation) && req.workLocation.length) {
     const wl = req.workLocation[0] || {};
-    base = [wl.TownOrCity, wl.Region, wl.Country].filter((v) => typeof v === 'string' && v.trim()).join(', ');
+    primary = [wl.TownOrCity, wl.Region, wl.Country].filter((v) => typeof v === 'string' && v.trim()).join(', ');
   }
+  const places = primary ? [primary] : [];
+  for (const loc of Array.isArray(req.secondaryLocations) ? req.secondaryLocations : []) {
+    const name = typeof loc?.Name === 'string' ? loc.Name.trim() : '';
+    if (name && !places.includes(name)) places.push(name);
+  }
+  return places;
+}
+
+/**
+ * Assemble a location string for a requisition: its places joined with " · ",
+ * the separator providers share for a multi-place posting, then a
+ * remote/hybrid hint from WorkplaceTypeCode. Returns "" when nothing is
+ * available.
+ * @param {any} req
+ * @param {string[]} places - from resolvePlaces(req)
+ */
+function assembleLocation(req, places) {
   const wt = req.WorkplaceTypeCode;
   const remoteHint = wt === 'ORA_REMOTE' ? 'Remote' : wt === 'ORA_HYBRID' ? 'Hybrid' : '';
-  return [base, remoteHint].filter(Boolean).join(' · ');
+  return [...places, remoteHint].filter(Boolean).join(' · ');
 }
 
 /**
@@ -221,7 +244,7 @@ function assembleLocation(req) {
  * @param {any} json
  * @param {{host:string, lang:string, siteNumber:string}} site
  * @param {string} companyName
- * @returns {Array<{title:string, url:string, company:string, location:string, description?:string, postedAt?:number}>}
+ * @returns {Array<{title:string, url:string, company:string, location:string, locations?:string[], description?:string, postedAt?:number}>}
  */
 export function parseOracleResponse(json, site, companyName) {
   const item = Array.isArray(json?.items) ? json.items[0] : null;
@@ -234,11 +257,16 @@ export function parseOracleResponse(json, site, companyName) {
     const externalUrl = typeof req.ExternalURL === 'string' && req.ExternalURL.trim() ? req.ExternalURL.trim() : '';
     const url = externalUrl || (id ? buildJobUrl(site, id) : '');
     if (!url) continue; // dedup key — drop rows we can't link to
+    const places = resolvePlaces(req);
+    // Job.locations holds places only, so a work-model name ("Remote") stays
+    // in the location string but not in the list, as ashby/lever do.
+    const locations = places.filter((p) => !isWorkModelOnly(p));
     const job = {
       title: typeof req.Title === 'string' ? req.Title : '',
       url,
       company: companyName,
-      location: assembleLocation(req),
+      location: assembleLocation(req, places),
+      ...(locations.length > 0 ? { locations } : {}),
     };
     if (typeof req.ShortDescriptionStr === 'string' && req.ShortDescriptionStr.trim()) {
       job.description = decodeEntities(req.ShortDescriptionStr);
