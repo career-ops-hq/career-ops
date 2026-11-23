@@ -56,6 +56,11 @@ import {
   ownDomainBoardUrl,
   REGIONS,
   SF_CLASSIC_COMPANY_RE,
+  CSOD_CORP_RE,
+  CSOD_RESERVED_TENANTS,
+  CSOD_SITE_RE,
+  CSOD_TENANT_RE,
+  CSOD_TENANT_TEST_RE,
   SF_CLASSIC_DOMAINS,
   SF_CLASSIC_LABEL_RE,
   SLUG_RE,
@@ -228,6 +233,7 @@ export function boardProblem(ats, board) {
   if (typeof board !== 'string' || board === '') return 'board must be a non-empty string';
   if (ats === 'workday') return workdayBoardProblem(board);
   if (ats === 'successfactors-classic') return sfClassicBoardProblem(board);
+  if (ats === 'csod') return csodBoardProblem(board);
   if (ats === 'oraclecloud') return oraclecloudBoardProblem(board);
   if (OWN_DOMAIN_ATS.includes(ats)) {
     if (ownDomainBoardUrl(ats, board) === null) {
@@ -291,6 +297,18 @@ function oraclecloudBoardProblem(board) {
   const site = board.slice(cut + 1);
   if (!ORACLECLOUD_HOST_RE.test(host)) return `oraclecloud host ${show(host)} must be a tenant host on Oracle's cloud, in lowercase (<tenant>.fa.[region.][ocs.]oraclecloud[N].com)`;
   if (!ORACLECLOUD_SITE_RE.test(site)) return `oraclecloud site ${show(site)} must be 1 to 64 letters, digits, "_" or "-"`;
+  return null;
+}
+
+/** @param {string} board */
+function csodBoardProblem(board) {
+  const parts = board.split('/');
+  if (parts.length !== 3) return `csod board is "tenant/site/corp", got ${show(board)}`;
+  const [tenant, site, corp] = parts;
+  if (!CSOD_TENANT_RE.test(tenant)) return `csod tenant ${show(tenant)} must be one lowercase host label`;
+  if (CSOD_RESERVED_TENANTS.includes(tenant) || CSOD_TENANT_TEST_RE.test(tenant)) return `csod tenant ${show(tenant)} is reserved or a test tenant, not a board`;
+  if (!CSOD_SITE_RE.test(site)) return `csod site ${show(site)} must be a whole number from 1 to 999, without leading zeros`;
+  if (!CSOD_CORP_RE.test(corp)) return `csod corp ${show(corp)} must be 1 to 60 letters, digits, "_" or "-"`;
   return null;
 }
 
