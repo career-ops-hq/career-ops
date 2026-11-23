@@ -92,3 +92,16 @@ test('CLI: strict-source scope and drift advice names no allowance', () => {
   assert.match(out(), /allow_facts|allow_swaps/);
   assert.doesNotMatch(out('--strict-source'), /allow_(metrics|facts|swaps)/);
 });
+
+test('CLI: strict-source scope advice names no allowance, and default still names allow_facts', () => {
+  const src = join(dir, 'scope2.md');
+  writeFileSync(src, '# CV\n\n## Experience\n\n### Acme\n\n- Contributed to the Kafka migration for event streaming.\n');
+  const target = doc('<li>Led the Kafka migration for event streaming.</li>');
+  const config = cfg({});
+  const out = (...extra) => { const r = spawnSync(process.execPath, [join(ROOT, 'verify-cv-facts.mjs'), target, '--source', src, '--config', config, ...extra], { encoding: 'utf-8' }); return `${r.stdout}${r.stderr}`; };
+  assert.match(out(), /weaker verb than the CV\. If the CV is right, add ".*" to allow_facts/);
+  const strict = out('--strict-source');
+  assert.match(strict, /scope: /);
+  assert.match(strict, /weaker verb than the CV\. Use the source's verb/);
+  assert.doesNotMatch(strict, /allow_(metrics|facts|swaps)|config\/cv-facts\.json/);
+});
