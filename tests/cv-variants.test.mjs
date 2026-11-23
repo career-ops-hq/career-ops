@@ -219,3 +219,8 @@ test('a job whose line after the title is a bullet, not dates, is rejected (#679
   assert.throws(() => resolveVariant('bad', { root }), /could not be parsed/);
   assert.equal(checkVariant('bad', { root }).problems[0].type, 'parse');
 });
+
+test('a job whose line after the title is prose, not dates, is rejected (#6792)', () => {
+  const root = workspace({ 'bad.md': BULLET_AS_DATES.replace('- Led a team of 3 engineers', 'Built a pipeline') });
+  assert.throws(() => resolveVariant('bad', { root }), /could not be parsed/);
+});
