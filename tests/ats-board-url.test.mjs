@@ -212,6 +212,15 @@ test('a csod board is tenant/site/corp; reserved and test tenants, a bad site or
   }
 });
 
+test('a csod test token is a whole hyphen-separated part, never a substring', () => {
+  for (const board of ['devon/1/devon', 'trainline/2/trainline', 'contest/1/contest', 'transdev/3/transdev', 'cuatrecasas/1/cuatrecasas']) {
+    assert.match(buildBoardUrl({ ats: 'csod', board }), /^https:\/\//, board);
+  }
+  for (const board of ['acme-pilot/1/acme', 'acme-stg/1/acme', 'dev-acme/1/acme', 'acme-training/1/acme', 'test/1/acme']) {
+    assert.equal(buildBoardUrl({ ats: 'csod', board }), null, board);
+  }
+});
+
 test('anything that does not fit returns null, never a guessed URL', () => {
   const bad = [
     {},
