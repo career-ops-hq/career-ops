@@ -124,7 +124,11 @@ function resolveQuery(entry) {
  */
 function resolveSettings(entry) {
   const cfg = entry?.a16z_speedrun_talent;
-  return cfg && typeof cfg === 'object' && !Array.isArray(cfg) ? cfg : {};
+  if (cfg == null) return {};
+  if (typeof cfg !== 'object' || Array.isArray(cfg)) {
+    throw new Error(`a16z-speedrun-talent: ${entry?.name || 'a16z speedrun talent network'} — a16z_speedrun_talent must be a map of settings`);
+  }
+  return cfg;
 }
 
 /**
@@ -146,7 +150,8 @@ function resolveFilters(entry) {
   for (const [key, raw] of Object.entries(filters)) {
     if (raw == null || raw === '') continue;
     if (LIST_FILTERS.has(key)) {
-      const items = Array.isArray(raw) ? raw : String(raw).split(',');
+      if (!Array.isArray(raw) && typeof raw !== 'string') throw bad(key, 'must be a string or a list of strings');
+      const items = Array.isArray(raw) ? raw : raw.split(',');
       if (items.some((v) => typeof v !== 'string')) throw bad(key, 'must be a string or a list of strings');
       const values = items.map((v) => v.trim()).filter(Boolean);
       // `loc` takes city names ("San Francisco", "O'Fallon"): letters, marks,
@@ -166,7 +171,7 @@ function resolveFilters(entry) {
       if (typeof raw !== 'string' || !ENUM_FILTERS[key].includes(raw.trim())) throw bad(key, `must be one of ${ENUM_FILTERS[key].join(', ')}`);
       pairs.push([key, raw.trim()]);
     } else if (key === 'company') {
-      if (typeof raw !== 'string' || !raw.trim() || raw.length > 120) throw bad(key, 'must be a company key string');
+      if (typeof raw !== 'string' || !raw.trim() || raw.trim().length > 120) throw bad(key, 'must be a company key string');
       pairs.push([key, raw.trim()]);
     } else {
       throw new Error(`a16z-speedrun-talent: ${name} — unknown filter "${key}" (use a parameter of the feed's searchJobs operation)`);
@@ -182,10 +187,17 @@ function resolveFilters(entry) {
  */
 function resolveDetails(entry) {
   const cfg = resolveSettings(entry);
-  const limit = cfg.detailLimit;
+  const name = entry?.name || 'a16z speedrun talent network';
+  const { fetchDetails, detailLimit } = cfg;
+  if (fetchDetails != null && typeof fetchDetails !== 'boolean') {
+    throw new Error(`a16z-speedrun-talent: ${name} — fetchDetails must be true or false`);
+  }
+  if (detailLimit != null && !(Number.isInteger(detailLimit) && detailLimit > 0)) {
+    throw new Error(`a16z-speedrun-talent: ${name} — detailLimit must be a positive integer`);
+  }
   return {
-    fetchDetails: cfg.fetchDetails === true,
-    detailLimit: Number.isInteger(limit) && limit > 0 ? Math.min(limit, MAX_DETAIL_LIMIT) : DEFAULT_DETAIL_LIMIT,
+    fetchDetails: fetchDetails === true,
+    detailLimit: detailLimit != null ? Math.min(detailLimit, MAX_DETAIL_LIMIT) : DEFAULT_DETAIL_LIMIT,
   };
 }
 
@@ -375,6 +387,8 @@ export default {
     const pagesToFetch = probing ? Math.min(maxPages, ctx.maxPages) : maxPages;
     const q = resolveQuery(entry);
     const filters = resolveFilters(entry);
+    // read before any request, so a bad detail setting fails the scan up front
+    const { fetchDetails, detailLimit } = resolveDetails(entry);
     const fallbackCompany = entry?.name;
     const out = [];
 
@@ -438,7 +452,6 @@ export default {
 
     // Detail enrichment answers "what does this job say", not "is this feed
     // alive": skipped while probing, like smartrecruiters and vdab.
-    const { fetchDetails, detailLimit } = resolveDetails(entry);
     if (fetchDetails && !probing) await enrichFromDetails(out, detailLimit, ctx, fallbackCompany);
     return out;
   },

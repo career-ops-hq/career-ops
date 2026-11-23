@@ -593,7 +593,7 @@ try {
     { bogus: 'x' }, { page: 3 }, { source: 'x' }, { q: 'x' },
     { posted: '1y' }, { scope: 'galaxy' }, { sort: 'oldest' }, { stealth: 'maybe' },
     { comp: -1 }, { comp: '150000' }, { comp: 1.5 }, { remote: 'yes' }, { ai: 2 },
-    { sen: ['senior', false] }, { sen: ['senior', 7] }, { loc: 'San Francisco, a\nb' }, { loc: ['x;y'] }, { fn: ['San Francisco'] }, { fn: 'a&page=3' }, { fn: [' ', ''] }, { fn: ['ok', 'bad value'] }, { fn: {} },
+    { sen: ['senior', false] }, { sen: ['senior', 7] }, { loc: 'San Francisco, a\nb' }, { loc: ['x;y'] }, { fn: ['San Francisco'] }, { fn: 'a&page=3' }, { fn: [' ', ''] }, { fn: ['ok', 'bad value'] }, { fn: {} }, { sen: false }, { wp: 7 }, { loc: true },
     { metro: 'sf,nyc,la,sv,dc,chi' }, { company: 5 }, { company: 'x'.repeat(121) },
   ];
   let refused = 0;
@@ -604,6 +604,13 @@ try {
   for (const filters of ['fn=engineering', ['fn'], 7]) {
     try { await provider.fetch({ name: 'sr', a16z_speedrun_talent: { filters } }, recordCtx(refusedCalls)); } catch (e) { if (/filters must be a map/.test(e.message)) refused++; }
   }
+  const badSettings = ['x', ['filters'], { fetchDetails: 'true' }, { fetchDetails: 1 }, { detailLimit: 0 }, { detailLimit: '50' }, { detailLimit: 2.5 }];
+  let refusedSettings = 0;
+  for (const settings of badSettings) {
+    try { await provider.fetch({ name: 'sr', a16z_speedrun_talent: settings }, recordCtx(refusedCalls)); } catch (e) { if (/a16z-speedrun-talent: sr — /.test(e.message)) refusedSettings++; }
+  }
+  if (refusedSettings === badSettings.length && refusedCalls.length === 0) pass('fetch() throws on settings that are not a map, a fetchDetails that is not a boolean or a detailLimit that is not a positive integer, before any request');
+  else fail(`bad settings refused ${refusedSettings} of ${badSettings.length}, requests made: ${refusedCalls.length}`);
   if (refused === badFilters.length + 3 && refusedCalls.length === 0) pass('fetch() throws on an unknown filter, an invalid value or a filters that is not a map, before any request');
   else fail(`bad filters refused ${refused} of ${badFilters.length + 3}, requests made: ${refusedCalls.length}`);
 
@@ -689,10 +696,9 @@ try {
 
   const defaultLimit = await detailRun({ a16z_speedrun_talent: { fetchDetails: true } });
   const bigLimit = await detailRun({ a16z_speedrun_talent: { fetchDetails: true, detailLimit: 5000 } });
-  const badLimit = await detailRun({ a16z_speedrun_talent: { fetchDetails: true, detailLimit: 0 } });
-  if (defaultLimit.detailCalls.length === 12 && bigLimit.detailCalls.length === 12 && badLimit.detailCalls.length === 12)
-    pass('fetch() accepts a missing, oversized or invalid detailLimit and reads at most the jobs listed');
-  else fail(`detailLimit variants = ${JSON.stringify([defaultLimit, bigLimit, badLimit].map((r) => r.detailCalls.length))}`);
+  if (defaultLimit.detailCalls.length === 12 && bigLimit.detailCalls.length === 12)
+    pass('fetch() accepts a missing or oversized detailLimit and reads at most the jobs listed');
+  else fail(`detailLimit variants = ${JSON.stringify([defaultLimit, bigLimit].map((r) => r.detailCalls.length))}`);
 
   const manyJobs = Array.from({ length: 150 }, (_, i) => ({ id: `m-${i}`, title: `M${i}`, url: srUrl(1000 + i) }));
   const limitCalls = [];
