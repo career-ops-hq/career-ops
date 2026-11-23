@@ -1,5 +1,3 @@
-// locateApplyReport padded the number and took the first filename with that
-// prefix, so report 100 opened 1000-globex.md when that file was listed first.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
