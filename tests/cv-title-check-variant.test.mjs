@@ -44,7 +44,7 @@ test('--variant=<name> selects the variant too', () => {
   assert.match(r.stdout, /"CTO"/);
 });
 
-for (const form of [['--variant'], ['--variant=']]) {
+for (const form of [['--variant'], ['--variant='], ['--variant', '--summary']]) {
   test(`${form[0]} with no name and a payload argument exits 1, not payload mode`, () => {
     const dir = mkdtempSync(join(tmpdir(), 'co-title-var-'));
     writeFileSync(join(dir, 'p.json'), '{"experience":[{"company":"Acme Corp","role":"Engineer","dates":"2020-2024"}]}');
