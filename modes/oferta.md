@@ -794,7 +794,7 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 (list of 15-20 keywords from the JD for ATS optimization)
 
 ## Keyword Coverage
-(printed by the `keyword-match.mjs` command in step 1b — coverage %, present, thin, missing)
+(printed by the `keyword-match.mjs` command in step 1b — coverage %, present, missing)
 
 ## Job Description (archived verbatim)
 (the posting's full text, pasted verbatim — see requirement below)
@@ -848,7 +848,7 @@ process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1
 
 By default this scans the base `cv.md` — read it as a **pre-tailoring gap list** (which JD keywords to weave in while tailoring), not a verdict on the document you will send; the output labels what it scanned. To verify the final tailored CV, add `"cv": "{path}"` to the JSON file (the `pdf` mode does this against the generated HTML).
 
-**Diagnostic only:** it flags missing/thin keywords so the user can decide what to reinforce. Never fabricate — add a keyword only if it reflects the user's real experience (see `modes/_shared.md`).
+**Diagnostic only:** It lists keywords the check did not match. The CV may describe the same skill in other words. Never fabricate — add a keyword only if it reflects the user's real experience (see `modes/_shared.md`).
 
 ### 2. Record in tracker
 
