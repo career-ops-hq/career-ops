@@ -217,14 +217,16 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if err != nil {
 			// A sidecar failure can follow a successful tracker write. Reflect
 			// the persisted status, retaining the old one if it cannot be read
-			// or the report identity is no longer unique.
-			if msg.App.ReportNumber != "" {
+			// or the row's identity is no longer unique. Re-find the row by the
+			// same identity the write addressed it with, which for a row with no
+			// report link is its tracker #.
+			if data.HasTrackerIdentity(msg.App) {
 				savedStatus, matches := "", 0
 				// A failed re-read leaves matches at 0, so the displayed status
 				// stays as it was — which is what the comment above promises.
 				saved, _ := data.ParseApplications(m.careerOpsPath)
 				for _, app := range saved {
-					if app.ReportNumber == msg.App.ReportNumber {
+					if data.SameTrackerRow(app, msg.App) {
 						savedStatus = app.Status
 						matches++
 					}
@@ -302,6 +304,17 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case screens.PipelineSkipMsg:
 		return m, runInboxSkip(msg)
+
+	case screens.PipelineRankMsg:
+		return m, runInboxRank(msg)
+
+	case screens.PipelineRankDoneMsg:
+		// Re-read the Inbox first, so the new scores show and the screen can
+		// count what the run ranked, then let it flash the outcome.
+		m.reloadPendingRows()
+		pm, cmd := m.pipeline.Update(msg)
+		m.pipeline = pm
+		return m, cmd
 
 	case screens.PipelineSkipDoneMsg:
 		// Re-read the Inbox first, so a skipped row leaves it and a restored
@@ -413,13 +426,15 @@ func runGeneratePDF(msg screens.PipelineGeneratePDFMsg) tea.Cmd {
 }
 
 // Exit statuses the Inbox scripts give besides 0 and 1. They must equal
-// URL_EXIT in sync-batch-input.mjs and SKIP_EXIT in inbox-skip.mjs;
-// inbox_exit_codes_test.go reads both scripts and fails when they differ.
+// URL_EXIT in sync-batch-input.mjs, SKIP_EXIT in inbox-skip.mjs and RANK_EXIT
+// in rank-pipeline.mjs; inbox_exit_codes_test.go reads the scripts and fails
+// when they differ.
 const (
 	queueExitAlreadyQueued = 3 // URL_EXIT.ALREADY_QUEUED
 	queueExitNotPending    = 4 // URL_EXIT.NOT_PENDING
 	skipExitUnchanged      = 3 // SKIP_EXIT.UNCHANGED
 	skipExitNotPending     = 4 // SKIP_EXIT.NOT_PENDING
+	rankExitNotPending     = 4 // RANK_EXIT.NOT_PENDING
 )
 
 // queueEvalTimeout bounds a queue request. The script takes the batch-input
@@ -520,6 +535,62 @@ func runInboxSkip(msg screens.PipelineSkipMsg) tea.Cmd {
 			done.Unchanged = true
 		case errors.As(err, &exitErr) && exitErr.ExitCode() == skipExitNotPending:
 			done.Unreadable = true
+		default:
+			done.Err = summarizeCmdError(err, out)
+		}
+		return done
+	}
+}
+
+// inboxRankTimeout bounds a rank run. rank-pipeline.mjs calls the CLI once per
+// ten rows, each call bounded by CAREER_OPS_RANK_TIMEOUT_MS (180 s by
+// default), so twenty rows take two calls.
+var inboxRankTimeout = 15 * time.Minute
+
+// runInboxRank ranks Inbox rows (#5269) by running the checkout's
+// rank-pipeline.mjs: with --url the one row, otherwise up to msg.Limit
+// unranked rows. The script asks the agent CLI for one answer, with tools
+// off where the CLI has a switch for it, and writes each `rank:` cell into data/pipeline.md under the pipeline lock. The
+// screen has asked before sending this, because the run spends tokens.
+func runInboxRank(msg screens.PipelineRankMsg) tea.Cmd {
+	return func() tea.Msg {
+		done := screens.PipelineRankDoneMsg{URL: msg.URL}
+		script, err := data.CheckoutScriptPath("rank-pipeline.mjs")
+		if err != nil {
+			done.Err = err.Error()
+			return done
+		}
+		root, err := filepath.Abs(msg.CareerOpsPath)
+		if err != nil {
+			done.Err = err.Error()
+			return done
+		}
+		// The equals form keeps a value that starts with "-" from being read
+		// as a flag. The script reads data/pipeline.md under CAREER_OPS_ROOT,
+		// the file the Inbox shows.
+		args := []string{script}
+		if msg.URL != "" {
+			args = append(args, "--url="+msg.URL)
+		} else {
+			args = append(args, fmt.Sprintf("--limit=%d", msg.Limit))
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), inboxRankTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "node", args...)
+		cmd.Dir = filepath.Dir(script)
+		cmd.Env = append(cmd.Environ(), "CAREER_OPS_ROOT="+root)
+		out, err := cmd.CombinedOutput()
+		if ctx.Err() != nil {
+			done.Err = "rank-pipeline.mjs timed out; reload to see which rows were ranked"
+			return done
+		}
+		// The script's --url exit status (RANK_EXIT in rank-pipeline.mjs): 4
+		// no unranked Pending row has that URL as its first cell.
+		var exitErr *exec.ExitError
+		switch {
+		case err == nil:
+		case msg.URL != "" && errors.As(err, &exitErr) && exitErr.ExitCode() == rankExitNotPending:
+			done.NotPending = true
 		default:
 			done.Err = summarizeCmdError(err, out)
 		}

@@ -49,7 +49,7 @@ const SORT = 'pubExternalDate_tdt'; // newest first; see header for why not `sco
 
 /** @param {string} s */
 function clean(s) {
-  return decodeEntities(s.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(s.replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 }
 
 // Resolve the search-config base from api:/careers_url. Accepts either a full

@@ -520,3 +520,13 @@ test('an ATS CV is never matched as a cover (#6667)', async () => {
   const { matchesTailoredCover } = await import('../../src/lib/apply/cv-match.mjs');
   assert.equal(matchesTailoredCover('024-zep-cv-avery-cover-2026-11-07.ats.pdf', 'zep'), false);
 });
+
+test("a numeric report fallback never lets another company's standard cover through (#6667)", async () => {
+  await withFixture(
+    [['031-other-engineer-cover-dana-quinn-2026-11-09.pdf']],
+    async () => {
+      assert.equal(await resolveTailoredCover(undefined, '31'), null);
+    },
+    [{ n: '31', company: 'Acme', role: 'Engineer', reportCell: '—', reportFile: '031-other-engineer-2026-11-09.md' }]
+  );
+});

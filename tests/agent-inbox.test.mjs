@@ -673,7 +673,7 @@ console.log('12. --expect guards the target');
   // bare one after it and the command resolved.
   const trailing = runFail(inbox, ['resolve', '2', '--expect', 'Change.org', '--expect', '--result', 'oops']);
   check('a bare --expect after a valid one still exits 1', trailing.status === 1, `exit=${trailing.status}`);
-  check('error names the missing substring', /--expect needs a substring/.test(trailing.stderr), trailing.stderr.trim());
+  check('error names the missing substring', /--expect requires a value/.test(trailing.stderr), trailing.stderr.trim());
   const last = runFail(inbox, ['resolve', '2', '--result', 'oops', '--expect', 'Change.org', '--expect']);
   check('a bare --expect at the end of the line exits 1', last.status === 1, `exit=${last.status}`);
   const both = runFail(inbox, ['resolve', '2', '--expect', 'Change.org', '--expect', 'Dana-Farber', '--result', 'oops']);

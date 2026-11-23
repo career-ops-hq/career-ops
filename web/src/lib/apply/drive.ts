@@ -6,6 +6,7 @@ import { dropNewTabs } from "./diagnose";
 import { isSubmitControl, snapshotLabel } from "./submit-guard.mjs";
 import { executeAction, factsOf, listedFieldLabel, snapshotChoiceLine } from "./drive-action.mjs";
 import { listedDriveClick, listedDriveText } from "./blank-unknown.mjs";
+import { driveGoalText } from "./drive-goal.mjs";
 import type { DriveStep } from "./issue";
 import { CAPS } from "../worker-capabilities.mjs";
 import { scopeFrom } from "../claude-invocation.mjs";
@@ -29,7 +30,9 @@ export type { DriveStep };
 // to deterministic fill+verify. FULL = keep driving (fill the fields too).
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type DriveResult = { reached: boolean; turns: number; reason: string; steps: DriveStep[] };
+// unsupported: the page moved onto a refused host (Workday, iCIMS, UKG or
+// apply.handoff_hosts); the drive stopped there and its window is closed.
+export type DriveResult = { reached: boolean; turns: number; reason: string; steps: DriveStep[]; unsupported?: { vendor: string; label: string; postingUrl: string } };
 
 /** Controls tagged per turn. The planner reads every one of them. */
 const MAX_REFS = 70;
@@ -177,9 +180,18 @@ export async function driveSession(
   emit: (s: DriveStep) => void,
   budget = 10,
   answers?: { label: string; value: string }[],
+  refused?: () => Promise<{ vendor: string; label: string; postingUrl: string } | null>,
 ): Promise<DriveResult> {
-  const resolved = resolveCli(cliId);
   const steps: DriveStep[] = [];
+  // A page on a refused host is never driven: checked before the first step,
+  // before each later one (the last action may have navigated), and at the end.
+  const stopIfRefused = async (turns: number): Promise<DriveResult | null> => {
+    const hit = await refused?.();
+    return hit ? { reached: false, turns, reason: "unsupported", steps, unsupported: hit } : null;
+  };
+  const refusedAtStart = await stopIfRefused(0);
+  if (refusedAtStart) return refusedAtStart;
+  const resolved = resolveCli(cliId);
   if (!resolved || cliId !== "claude") {
     return { reached: false, turns: 0, reason: "Agentic drive currently needs Claude Code (browser-driving CLI).", steps };
   }
@@ -190,18 +202,15 @@ export async function driveSession(
       return undefined;
     }
   };
-  const answersBlock = (answers ?? []).filter((a) => a.value?.trim()).map((a) => `- "${a.label}": ${a.value.replace(/\s+/g, " ")}`).join("\n");
-  const goalText =
-    goal === "reach"
-      ? `Your goal: navigate to the actual fillable JOB APPLICATION form (click 'Apply', pass any interstitial/pre-screen, reach the page with the Name/Email/Resume fields). Do NOT fill anything yet. Reply {"action":"reached_form"} once the form with those fields is visible.`
-      : `Your goal: FILL this job application with the candidate's answers below, matching each answer to its field by label, across all pages (click 'Next'/'Continue' between pages). Skip any field already correctly filled, and skip file-uploads (handled separately). NEVER submit — when everything is filled and you're on the final page, reply {"action":"done"}.
-Leave blank any field whose answer is not listed below. Never guess or infer a value.
-ANSWERS (match by the field's label):
-${answersBlock || "(no answers provided — just reach/observe)"}`;
+  const goalText = driveGoalText(goal, answers);
   let resumeId: string | null = null;
 
   const stopVerb = goal === "reach" ? '{"action":"reached_form"}            STOP — the fillable application form is now visible' : '{"action":"done"}                    STOP — every answer is filled (you NEVER submit; the human does)';
   for (let turn = 1; turn <= budget; turn++) {
+    if (turn > 1) {
+      const refusedNow = await stopIfRefused(turn - 1);
+      if (refusedNow) return refusedNow;
+    }
     if (goal === "reach" && (await isFormReady().catch(() => false))) return { reached: true, turns: turn - 1, reason: "form-reached", steps };
     await dropNewTabs(page); // any "Apply" link/popup navigates in OUR tab, not a new one
     const frame = page.mainFrame();
@@ -229,6 +238,10 @@ ${snap.text}
 Reply ONE action JSON.`;
 
     const { out, sessionId } = await plannerTurn(resolved.binPath, prompt, resumeId);
+    // The page can move while the planner thinks: check it before acting on
+    // the reply, or before a "stuck" or "done" reply ends the drive.
+    const refusedAfterPlanning = await stopIfRefused(turn - 1);
+    if (refusedAfterPlanning) return refusedAfterPlanning;
     if (sessionId) resumeId = sessionId;
     const act = parseAction(out);
     if (!act) {
@@ -284,5 +297,7 @@ Reply ONE action JSON.`;
     steps.push(s);
     emit(s);
   }
+  const refusedAtEnd = await stopIfRefused(budget);
+  if (refusedAtEnd) return refusedAtEnd;
   return { reached: await isFormReady().catch(() => false), turns: budget, reason: "budget-exhausted", steps };
 }

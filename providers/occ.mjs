@@ -79,7 +79,7 @@ const INTER_REQUEST_DELAY_MS = 750;
 
 /** Strip tags, decode entities, collapse whitespace. */
 function text(html) {
-  return decodeEntities(String(html).replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(String(html).replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 }
 
 /**

@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolveCodeRoot, resolveRootScript } from "../core/code-root.mjs";
 import { checklistHrefFor } from "./checklist-href.mjs";
+import { matchHandoffHost, readHandoffHosts } from "./handoff-hosts.mjs";
 
 export { checklistHrefFor };
 
@@ -49,27 +50,40 @@ function loadAtsVendor() {
 }
 
 /**
- * @param {string} label
+ * @param {string | { vendor?: string, label: string }} hit The refused hit, or just its label.
  * @param {boolean} [opened] True when a window was opened and then closed.
  */
-export function unsupportedAtsMessage(label, opened = false) {
+export function unsupportedAtsMessage(hit, opened = false) {
+  const label = typeof hit === "string" ? hit : hit.label;
+  if (typeof hit === "object" && hit.vendor === "handoff") {
+    const lead = `This posting is on ${label}, which you listed in apply.handoff_hosts (config/profile.yml) as a site you sign in to yourself. Career-ops does not drive it in the app`;
+    return opened ? `${lead}. The window was closed.` : `${lead}, so no browser was opened.`;
+  }
   const lead = `This posting is on ${label}. Career-ops cannot fill Workday, iCIMS, or UKG forms in the app`;
   return opened ? `${lead}. The window was closed.` : `${lead}, so no browser was opened.`;
 }
 
 /**
+ * Workday, iCIMS and UKG, plus any host the user listed in
+ * config/profile.yml → apply.handoff_hosts (handoff-hosts.mjs).
+ *
  * @param {unknown} url
- * @returns {Promise<{ vendor: "workday" | "icims" | "ultipro", label: string, postingUrl: string } | null>}
+ * @param {{ handoffHosts?: string[] }} [opts] Hosts to use instead of the profile's (tests).
+ * @returns {Promise<{ vendor: "workday" | "icims" | "ultipro" | "handoff", label: string, postingUrl: string } | null>}
  */
-export async function unsupportedInAppAts(url) {
+export async function unsupportedInAppAts(url, opts = {}) {
   const { atsVendorOf } = await loadAtsVendor();
   const vendor = atsVendorOf(url);
-  if (typeof vendor !== "string" || !Object.hasOwn(LABELS, vendor)) return null;
-  return {
-    vendor: /** @type {"workday" | "icims" | "ultipro"} */ (vendor),
-    label: LABELS[vendor],
-    postingUrl: new URL(String(url).trim()).href,
-  };
+  if (typeof vendor === "string" && Object.hasOwn(LABELS, vendor)) {
+    return {
+      vendor: /** @type {"workday" | "icims" | "ultipro"} */ (vendor),
+      label: LABELS[vendor],
+      postingUrl: new URL(String(url).trim()).href,
+    };
+  }
+  const host = matchHandoffHost(url, opts.handoffHosts ?? readHandoffHosts());
+  if (!host) return null;
+  return { vendor: "handoff", label: host, postingUrl: new URL(String(url).trim()).href };
 }
 
 /**
@@ -86,7 +100,7 @@ export function unsupportedSessionJson(hit, applicationNumber, opened = false) {
     vendor: hit.vendor,
     label: hit.label,
     postingUrl: hit.postingUrl,
-    message: unsupportedAtsMessage(hit.label, opened),
+    message: unsupportedAtsMessage(hit, opened),
   };
   const checklistHref = checklistHrefFor(applicationNumber);
   if (checklistHref) body.checklistHref = checklistHref;

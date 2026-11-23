@@ -1,0 +1,18 @@
+{
+  "id": "2026-11-21-santifer.8",
+  "contributor": "santifer",
+  "signed_by": "career-ops maintainers",
+  "rows": 2,
+  "source": "ats-directory",
+  "origin": "Board addresses from ATS Career Page URLs by Latmay (CC BY 4.0, https://latmay.com), each observed live by one request per board between 2026-11-20 and 2026-11-20 (UTC), recorded by an automated job of the maintainers; the label is the one each board's page title gives, with only the fixed template taken off, and checked against the employer by an automated, AI-assisted review of public sources.",
+  "no_conflicting_contract": true,
+  "personal_data": false,
+  "exclusive": false,
+  "license": "CC-BY-4.0",
+  "also_permits": [
+    "ODbL-1.0",
+    "CC0-1.0"
+  ],
+  "attribution": "ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com",
+  "date": "2026-11-21"
+}

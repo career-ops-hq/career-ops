@@ -49,6 +49,18 @@ try {
     fail(`personio.detect() with slug pin returned ${JSON.stringify(pinned)}`);
   }
 
+  const mixedPin = personio.detect({
+    name: 'N26',
+    provider: 'personio',
+    personio: 'N26',
+    careers_url: 'https://n26.com/en/careers/',
+  });
+  if (mixedPin && mixedPin.url === 'https://n26.jobs.personio.de/') {
+    pass('personio.detect() lowercases a mixed-case personio: <slug> pin');
+  } else {
+    fail(`personio.detect() with mixed-case slug pin returned ${JSON.stringify(mixedPin)}`);
+  }
+
   // The pin must not become an injection point for an arbitrary host.
   const badPin = personio.detect({
     name: 'Evil',

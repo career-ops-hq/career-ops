@@ -17,7 +17,7 @@ Per source (each row: fetched = source + title + location + age + other + seen +
   - `fetched`: offers the source returned, plus the ones its provider dropped itself.
   - `source`: dropped inside the provider by its own settings, for example through a `workplace` setting on its entry.
   - `title`, `location`, `age`: removed by the matching filter.
-  - `other`: removed by the tier, declared field, salary, content, country, visa, cooldown or blacklist filters.
+  - `other`: removed by the tier, declared field, salary, workplace, employment type, content, country, visa, experience, cooldown or blacklist filters.
   - `seen`: already in your scan history.
   - `new`: kept as new offers.
   - `verify`: appears only with `--verify`. It counts offers that passed the filters but that liveness verification then dropped, so `new` is what survives verification.

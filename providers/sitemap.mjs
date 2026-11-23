@@ -77,8 +77,69 @@ const DEFAULT_MAX_SITEMAPS = 50;
 const MAX_SITEMAPS_CAP = 1000;
 const DEFAULT_DETAIL_LIMIT = 25;
 const DETAIL_LIMIT_CAP = 200;
-const DETAIL_BATCH = 3;
+/**
+ * A view of the transport that leaves the stated gap before every request.
+ *
+ * The pace a robots.txt states is a property of the host, not of one kind of
+ * request: the root sitemap, each child sitemap and each detail page all count.
+ * Spacing only the details left the child fetches and the first detail fetch
+ * closer together than the host asked for.
+ *
+ * @param {object} ctx - Transport context, with `fetchText` and `sleep`.
+ * @param {number} paceMs - Minimum gap between two requests, in milliseconds.
+ * @returns {object} A context whose `fetchText` waits first.
+ */
+export function paceRequests(ctx, paceMs) {
+  let last = 0;
+  return {
+    ...ctx,
+    async fetchText(url, opts) {
+      const waitMs = last + paceMs - Date.now();
+      if (waitMs > 0) await sleep(waitMs, ctx);
+      try {
+        return await ctx.fetchText(url, opts);
+      } finally {
+        last = Date.now();
+      }
+    },
+  };
+}
+
 const DETAIL_PACE_MS = 250;
+// Longest robots.txt Crawl-delay this provider will honour, in seconds, matching
+// harvest-buildlist.mjs. Beyond it the delay is not shortened: the host asked for
+// a pace, and fetching faster than it asked is how a user agent gets blocked. The
+// board is refused instead, which is what that script does.
+export const MAX_CRAWL_DELAY_S = 60;
+
+/**
+ * Why the Crawl-delay a robots.txt states cannot be honoured, or null when it can.
+ *
+ * @param {{ crawlDelay?: number | null }} [rootVerdict]
+ * @returns {string | null}
+ */
+export function crawlDelayRefusal(rootVerdict) {
+  const stated = Number(rootVerdict?.crawlDelay);
+  if (!Number.isFinite(stated) || stated <= MAX_CRAWL_DELAY_S) return null;
+  return `robots.txt asks for ${stated}s between requests, more than the ${MAX_CRAWL_DELAY_S}s this provider will wait`;
+}
+
+/**
+ * The delay between detail requests, given what the root robots.txt said.
+ *
+ * `robotsAllows()` already returns the Crawl-delay it parsed for our product
+ * token; ignoring it paced every host at DETAIL_PACE_MS while the policy said
+ * otherwise. The stated value is used as given, never shortened: see
+ * crawlDelayRefusal for the value too long to honour.
+ *
+ * @param {{ crawlDelay?: number | null }} [rootVerdict]
+ * @returns {number} Milliseconds.
+ */
+export function detailPaceMs(rootVerdict) {
+  const stated = Number(rootVerdict?.crawlDelay);
+  if (!Number.isFinite(stated) || stated <= 0) return DETAIL_PACE_MS;
+  return Math.max(DETAIL_PACE_MS, Math.ceil(stated * 1000));
+}
 const SITEMAP_TIMEOUT_MS = 30_000;
 const DETAIL_TIMEOUT_MS = 15_000;
 
@@ -385,7 +446,20 @@ export function createSitemapProvider({ robotsGate = robotsAllows } = {}) {
         throw err;
       }
 
-      const root = await readSitemap(ctx, cfg.url);
+      // A pace too long to honour stops the host here, before the root sitemap is
+      // fetched at all: trimming it would fetch faster than the host agreed to,
+      // and fetching first only to refuse afterwards would make the error read as
+      // if the root had been read.
+      const delayRefusal = crawlDelayRefusal(rootVerdict);
+      if (delayRefusal) {
+        throw new Error(`sitemap: ${name}: ${delayRefusal}; not fetching ${cfg.url.href}`);
+      }
+      const paceMs = detailPaceMs(rootVerdict);
+      // Every request this provider makes goes through the paced view, so the root
+      // sitemap, the child sitemaps and the detail pages all keep the stated gap.
+      const paced = paceRequests(ctx, paceMs);
+
+      const root = await readSitemap(paced, cfg.url);
       /** @type {string[]} */
       let locs = [];
       if (root.kind === 'urlset') {
@@ -417,7 +491,7 @@ export function createSitemapProvider({ robotsGate = robotsAllows } = {}) {
           }
           let doc;
           try {
-            doc = await readSitemap(ctx, child);
+            doc = await readSitemap(paced, child);
           } catch (err) {
             if (probing) throw err;
             warn(`${name}: child sitemap ${child.href} failed (${/** @type {Error} */ (err).message}); its jobs are missing from this scan`);
@@ -459,25 +533,30 @@ export function createSitemapProvider({ robotsGate = robotsAllows } = {}) {
         warn(`${name}: ${wanted.length} postings qualify for detail enrichment; enriched ${candidates.length}, raise sitemap.detailLimit on this entry for the rest`);
       }
       let denied = 0;
-      for (let i = 0; i < candidates.length; i += DETAIL_BATCH) {
-        const batch = candidates.slice(i, i + DETAIL_BATCH);
-        await Promise.all(batch.map(async (job) => {
-          try {
-            const detailUrl = new URL(job.url);
-            if (!isSameSiteUrl(detailUrl, cfg.url)) return;
+      // One request at a time. `paced` leaves the stated gap before each of them,
+      // and the retry backoff is floored at the same value so a retry cannot come
+      // sooner than the host allows.
+      const detailRetry = { baseDelayMs: paceMs, maxDelayMs: Math.max(8_000, paceMs) };
+      for (let i = 0; i < candidates.length; i++) {
+        const job = candidates[i];
+        try {
+          const detailUrl = new URL(job.url);
+          if (isSameSiteUrl(detailUrl, cfg.url)) {
             const verdict = await robotsGate(detailUrl.href);
-            if (!verdict.allowed) { denied++; return; }
-            const html = await fetchTextWithRetry(ctx, detailUrl.href, { redirect: 'error', timeoutMs: DETAIL_TIMEOUT_MS });
-            const detail = parseJobPostingJsonLd(html);
-            if (detail.title) job.title = detail.title;
-            if (detail.location) job.location = detail.location;
-            if (detail.description) job.description = detail.description;
-            if (Number.isFinite(detail.postedAt)) job.postedAt = detail.postedAt;
-          } catch {
-            // Enrichment is opt-in: keep the sitemap row on any failure.
+            if (!verdict.allowed) {
+              denied++;
+            } else {
+              const html = await fetchTextWithRetry(paced, detailUrl.href, { redirect: 'error', timeoutMs: DETAIL_TIMEOUT_MS }, detailRetry);
+              const detail = parseJobPostingJsonLd(html);
+              if (detail.title) job.title = detail.title;
+              if (detail.location) job.location = detail.location;
+              if (detail.description) job.description = detail.description;
+              if (Number.isFinite(detail.postedAt)) job.postedAt = detail.postedAt;
+            }
           }
-        }));
-        if (i + DETAIL_BATCH < candidates.length) await sleep(DETAIL_PACE_MS, ctx);
+        } catch {
+          // Enrichment is opt-in: keep the sitemap row on any failure.
+        }
       }
       if (denied > 0) warn(`${name}: robots.txt disallows ${denied} detail page(s); those rows keep their sitemap title`);
       return jobs;

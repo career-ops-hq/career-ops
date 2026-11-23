@@ -32,12 +32,12 @@ Process multiple job offers via headless workers. By default (`--mode full`) eac
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--cli NAME` | `claude` | Worker CLI: `claude`, `opencode`, `gemini`, `qwen` or `grok`. Only `claude` runs in parallel and retries; the others run one offer at a time, one attempt each |
+| `--cli NAME` | `claude` | Worker CLI: `claude`, `opencode`, `gemini`, `qwen` or `grok`. Only `claude` runs in parallel. Claude and `grok` retry a rate limit. The others run one offer at a time, one attempt each |
 | `--model NAME` | per CLI | Model for the worker CLI. For `claude`, overrides the model resolved from `spend_tier` in `config/profile.yml` |
 | `--parallel N` | `3` for `claude`, `1` otherwise | Number of concurrent headless workers; after a rate limit the rest of the batch runs on 1 |
 | `--dry-run` | off | Preview pending offers without processing |
 | `--retry-failed` | off | Only retry offers marked as `failed` in state |
-| `--resume-paused` | off | Resume offers paused after a Claude session/rate limit |
+| `--resume-paused` | off | Resume offers paused after a session or rate limit |
 | `--start-from N` | `0` | Skip offers with ID below N |
 | `--company A,B` | off | Only process offers whose company matches one of the comma-separated names (case- and punctuation-insensitive substring of the URL or of the company in `notes`, i.e. the part before ` - ` in `Company - Role`); applied before `--limit` |
 | `--limit N` | no limit | Max number of offers to process in this run; must be a positive integer (`0` is rejected), so omit the flag for no limit |
@@ -50,7 +50,7 @@ Process multiple job offers via headless workers. By default (`--mode full`) eac
 | `--thin-action MODE` | `webfetch` | What to do when no usable JD text could be fetched (JS-rendered page, empty shell). `webfetch`: the worker tries WebFetch. `skip`: record the offer as skipped (`needs-playwright`), spawn no worker. `browser-extract`: render the page with `browser-extract.mjs` (headless Chromium, no model tokens) and give the text to the worker. Retryable outcomes are recorded as `failed` and picked up again by `--retry-failed` (each spends one of `--max-retries`): no HTTP response from the fetch (DNS, refused, timeout, TLS), and for `browser-extract` a missing Playwright, `empty_text` or `navigation_error`. Anything else is terminal `skipped` |
 | `--rate-limit-sleep N` | `300` | Maximum adaptive retry delay in seconds (0–2147483647); use `0` to pause the batch immediately |
 
-### Adaptive rate-limit retries (Claude only)
+### Adaptive rate-limit retries (Claude and Grok)
 
 Transient rate limits start at `min(30, N)` seconds, double for each retry
 already consumed by the offer (including persisted retries on resume), and

@@ -7,6 +7,18 @@ import { applyLineLabel, flaggedPosting } from "../report-sections.mjs";
 // otherwise this narrows the very case the existing suite already pins.
 const baseStatus = (s) => String(s ?? "").replace(/\s+\d{4}-\d{2}-\d{2}\s*$/, "").trim();
 
+// Same calendar day as lib/local-today.mjs. today-dashboard.tsx is a client
+// component and imports this file, so this copy stays free of the checkout module.
+export function localDay(now = new Date()) {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
+}
+
+function alreadyClosed(row, today) {
+  const day = row?.closesAt;
+  return typeof day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(day) && day < today;
+}
+
 /**
  * Which scored-but-undecided applications the Today page shows, and in what
  * order.
@@ -93,18 +105,21 @@ export function groupAwaiting(awaiting, legitimacyOf = () => undefined) {
  * The one-click target. The stored call decides. Score and date order match
  * the cards and pick which Apply. A Skip, Research first, Consider, or
  * missing call is not a target. A legitimacy-flagged posting is not a target
- * either. The next unflagged Apply is. The score cell is not rewritten.
+ * either. A posting whose closesAt is a real day before today is not a
+ * target. The card stays. A missing or unreadable close day is not a close.
+ * The next open unflagged Apply is. The score cell is not rewritten.
  *
- * @template {{date?: string, score?: string, status?: string, n?: string}} T
+ * @template {{date?: string, score?: string, status?: string, n?: string, closesAt?: string}} T
  * @param {T[]} applications
  * @param {(score: string) => number} scoreOf
  * @param {(row: T) => string | null | undefined} [decisionOf]
  * @param {(row: T) => string | null | undefined} [legitimacyOf]
+ * @param {string} [today] local calendar day, YYYY-MM-DD
  * @returns {T | null}
  */
-export function pickApplyNext(applications, scoreOf, decisionOf = () => "", legitimacyOf = () => "") {
+export function pickApplyNext(applications, scoreOf, decisionOf = () => "", legitimacyOf = () => "", today = localDay()) {
   const ordered = pickAwaitingDecision(applications, scoreOf, Infinity);
-  return ordered.find((row) => decisionOf(row) === "Apply" && !flaggedPosting(legitimacyOf(row))) ?? null;
+  return ordered.find((row) => decisionOf(row) === "Apply" && !flaggedPosting(legitimacyOf(row)) && !alreadyClosed(row, today)) ?? null;
 }
 
 /**

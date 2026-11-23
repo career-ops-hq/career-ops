@@ -5,9 +5,11 @@ import { ArrowDown, ArrowUp, Eye, EyeOff, Loader2, Pencil, Plus, Sparkles, Trian
 import { readSavedCliId } from "@/lib/saved-cli";
 import { cn } from "@/lib/cn";
 import { arrange } from "@/lib/cv-studio/html-blocks.mjs";
-import { bulletShown, wordDiff, type StudioAction, type StudioBullet, type StudioEdits, type StudioItem, type StudioSection } from "@/lib/cv-studio/studio.mjs";
+import { bulletShown, restoredId, wordDiff, type StudioAction, type StudioBullet, type StudioEdits, type StudioItem, type StudioSection } from "@/lib/cv-studio/studio.mjs";
 
 type Dispatch = (a: StudioAction) => void;
+/** A bullet the tailor dropped and the user added back; `index` points into the item's `restorable`. */
+type AddedRow = { id: string; index: number; text: string };
 
 // Below this overlap a word diff is mostly red and green; the original reads better as its own line.
 const REWRITE_FLOOR = 0.45;
@@ -75,8 +77,12 @@ export function SectionCard({ section, siblings, first, last, ...common }: Commo
 function ItemBlock({ item, section, siblings, first, last, ...common }: Common & { item: StudioItem; section: StudioSection; siblings: string[]; first: boolean; last: boolean }) {
   const { hidden, dispatch, edits } = common;
   const isHidden = hidden.has(item.id);
-  const bullets = arrange(item.bullets, edits.order[item.id]);
   const restored = edits.restored[item.id] ?? [];
+  // Added-back bullets join the tailored ones in one ordered list, so they move like any other.
+  const added: AddedRow[] = restored.filter((idx) => item.restorable[idx]).map((idx) => ({ id: restoredId(item.id, idx), index: idx, text: item.restorable[idx].text }));
+  const rows = arrange([...item.bullets, ...added] as (StudioBullet | AddedRow)[], edits.order[item.id]);
+  const rowIds = rows.map((r) => r.id);
+  const movable = item.kind === "entry";
   const showHeader = item.kind === "entry";
   return (
     <div className={cn("py-2", isHidden && "opacity-50")}>
@@ -89,18 +95,21 @@ function ItemBlock({ item, section, siblings, first, last, ...common }: Common &
       )}
       {!isHidden && (
         <ul className="mt-1 space-y-1.5">
-          {bullets.map((b, k) => (
-            <BulletRow key={b.id} bullet={b} parent={item.id} siblings={bullets.map((x) => x.id)} first={k === 0} last={k === bullets.length - 1} movable={item.kind === "entry"} {...common} />
-          ))}
-          {item.restorable.map((r, idx) =>
-            restored.includes(idx) ? (
-              <li key={`r${idx}`} className="flex items-start gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-sm">
-                <span className="flex-1 text-foreground">{r.text}</span>
-                <button className={iconButton} aria-label="Remove the added-back bullet" onClick={() => dispatch({ type: "unrestore", item: item.id, index: idx })}>
+          {rows.map((b, k) =>
+            "index" in b ? (
+              <li key={b.id} data-bullet={b.id} className="flex items-start gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-sm">
+                <span className="flex-1 text-foreground">{b.text}</span>
+                {movable && <MoveButtons parent={item.id} id={b.id} siblings={rowIds} first={k === 0} last={k === rows.length - 1} dispatch={dispatch} label="added-back bullet" />}
+                <button className={iconButton} aria-label="Remove the added-back bullet" onClick={() => dispatch({ type: "unrestore", item: item.id, index: b.index })}>
                   <Undo2 className="size-3.5" />
                 </button>
               </li>
             ) : (
+              <BulletRow key={b.id} bullet={b} parent={item.id} siblings={rowIds} first={k === 0} last={k === rows.length - 1} movable={movable} {...common} />
+            ),
+          )}
+          {item.restorable.map((r, idx) =>
+            restored.includes(idx) ? null : (
               <li key={`r${idx}`} className="flex items-start gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-sm text-faint">
                 <span className="flex-1">
                   <span className="mr-1.5 text-[10px] font-medium uppercase tracking-wide">Dropped by the tailor</span>

@@ -647,6 +647,19 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
         }
       }
 
+      // #7244. Per-entry title_filter replaces top-level title_filter for this entry.
+      if (entry.title_filter !== undefined) {
+        if (!isObject(entry.title_filter)) {
+          add(errors, `${base}.title_filter`, 'title_filter must be an object');
+        } else {
+          rejectUnknownFields(entry.title_filter, `${base}.title_filter`, TITLE_FILTER_FIELDS, errors);
+          warnBareStringKeywords(entry.title_filter, `${base}.title_filter`, warnings);
+          validateKeywordList(entry.title_filter.positive, `${base}.title_filter.positive`, errors);
+          validateKeywordList(entry.title_filter.negative, `${base}.title_filter.negative`, errors);
+          validateKeywordList(entry.title_filter.seniority_boost, `${base}.title_filter.seniority_boost`, errors);
+        }
+      }
+
       validateParser(entry.parser, `${base}.parser`, errors);
     }
   };

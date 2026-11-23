@@ -109,7 +109,7 @@ const LISTING_PAGE = /\sclass\s*=\s*(?:"[^"]*?|'[^']*?)(?<![\w-])list-controls(?
 
 /** @param {string} s */
 function clean(s) {
-  return decodeEntities(s.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(s.replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 }
 
 // "Posted 02-May-2026" → epoch ms (UTC midnight). Undefined when absent/unparseable.

@@ -174,3 +174,23 @@ test('conditional hiring-presence regions need independent home-country eligibil
   assert.equal(gate('Remote EMEA', '', { description: description + ' You can work remotely from Spain.' }).eligible, true);
   assert.equal(buildWorkplacePolicy(undefined)('Remote EMEA', '', { description }).eligible, true);
 });
+
+// A Turkey-based candidate: CLDR names TR "Türkiye", so the everyday English
+// "Turkey" must resolve to the same code in location geography.
+const TR_GATE = buildWorkplacePolicy({ onsite_locations: ['Istanbul'], remote_countries: ['TR'], remote_regions: ['Europe', 'EMEA', 'Worldwide'] });
+for (const location of ['Remote - Turkey', 'Remote, Turkey', 'Istanbul, Turkey (Remote)', 'Remote - Türkiye', 'Home based - Worldwide', 'Home based - EMEA', 'Home-based - Europe', 'Homebased, Worldwide']) {
+  test(`TR policy admits: ${location}`, () => assert.equal(TR_GATE(location).eligible, true));
+}
+test('TR policy: everyday English country names restrict like CLDR names', () => {
+  assert.equal(TR_GATE('Remote - Czech Republic').reason, 'remote_country_restricted');
+  assert.equal(TR_GATE('Remote - Germany').reason, 'remote_country_restricted');
+  assert.equal(TR_GATE('Remote', '', { description: 'You can work remotely from Turkey.' }).eligible, true);
+  assert.equal(TR_GATE('Remote Europe', '', { description: 'Turkey-based candidates are not eligible.' }).eligible, false);
+});
+test('home based is remote; office based stays onsite', () => {
+  assert.equal(TR_GATE('Office Based - London').eligible, false);
+  assert.equal(TR_GATE('Office Based - London').reason, 'onsite_outside_allowed_locations');
+  assert.equal(TR_GATE('Home based - Americas').eligible, false);
+  assert.equal(TR_GATE('Home based - Germany').reason, 'remote_country_restricted');
+  assert.equal(gate('Home based - Worldwide').eligible, true);
+});

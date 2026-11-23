@@ -858,7 +858,11 @@ test("driveSession hands every action to executeAction, with this turn's actiona
   const calls = DRIVE_CODE.match(/\bexecuteAction\(/g) ?? [];
   assert.equal(calls.length, 1, "drive.ts must execute planner actions in exactly one place");
   assert.match(DRIVE_CODE, /await executeAction\(page, frame, act, snap\.actionable\)/);
-  assert.match(DRIVE, /Leave blank any field whose answer is not listed below\. Never guess or infer a value\./);
+  // The goal text lives in drive-goal.mjs (#7193); drive.ts must still use it.
+  assert.match(DRIVE_CODE, /driveGoalText\(goal, answers\)/);
+  const DRIVE_GOAL = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../src/lib/apply/drive-goal.mjs"), "utf8");
+  assert.match(DRIVE_GOAL, /Leave blank any field whose answer is not listed below\. Never guess or infer a value\./);
+  assert.doesNotMatch(DRIVE_GOAL, /slice\(0,\s*300\)/);
   assert.match(DRIVE_CODE, /listedDriveText\(/);
   assert.match(DRIVE_CODE, /listedDriveClick\(/);
   assert.match(DRIVE_CODE, /act\.ensureChecked = true/);

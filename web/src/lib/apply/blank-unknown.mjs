@@ -5,10 +5,15 @@
  * blank. It still returns a guess, and the fill posts any non-empty string.
  * This gate runs on the draft and again on the fill body. A value stays only
  * when the profile states that fact, or when the person edited the field.
+ *
+ * A question addressed to an AI filling the form (#7193) has no profile
+ * answer at all: on the fill body it keeps a value only when the person
+ * edited the field, so a planner draft never reaches the form through it.
  */
 import fs from "node:fs";
 import * as yaml from "js-yaml";
 import { getProfilePath } from "../core/profile-path.mjs";
+import { isAiDirectedField } from "./ai-directed-field.mjs";
 
 /**
  * @param {string} root
@@ -261,6 +266,10 @@ export function prepareFillAnswers({ fields = [], answers = {}, profile = {}, ed
   const out = { ...answers };
   for (const field of fields) {
     if (!field?.id || keep.has(field.id)) continue;
+    if (isAiDirectedField(field)) {
+      out[field.id] = "";
+      continue;
+    }
     const category = classifyApplyQuestion(field);
     if (!category) continue;
     out[field.id] = statedAnswer(category, field, profile) ?? "";
@@ -373,6 +382,7 @@ export function prepareLabeledAnswers(answers, profile, editedLabels = [], field
     if (edited.has(label.toLowerCase())) return [row];
     const known = answer?.id ? byId.get(String(answer.id)) : undefined;
     const field = known || { id: label, type: "text", label };
+    if (isAiDirectedField(field)) return [];
     const category = classifyApplyQuestion(field);
     if (!category) return [row];
     const stated = statedAnswer(category, field, profile);

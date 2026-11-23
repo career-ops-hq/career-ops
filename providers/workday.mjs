@@ -319,7 +319,10 @@ export function chooseSplitFacet(facets, { exclude = [], locationHints } = {}) {
       .filter(({ values }) => values.length > 0);
     if (locationCandidates.length > 0) {
       locationCandidates.sort((a, b) => b.values.length - a.values.length);
-      return locationCandidates[0];
+      // locationScoped: the slices deliberately cover only the configured
+      // locations, so postings outside them are out of scope by config, not
+      // unread. The split's coverage check must not count them as missing.
+      return { ...locationCandidates[0], locationScoped: true };
     }
   }
 
@@ -359,8 +362,11 @@ const CXS_RE = /^https:\/\/([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/wday\/cxs\/
 // threw "cannot derive CXS endpoint".
 const SITE_RE = /^https:\/\/([\w-]+)\.myworkdaysite\.com\/recruiting\/([\w-]+)\/([^/?#]+)/;
 
-function makeEndpoint(origin, tenant, site) {
+function makeEndpoint(origin, tenant, site, instance) {
   return {
+    // The board's id in the employer registry, `<tenant>/<wdN>/<site>`: what a
+    // posting's listingIdentity names as its board.
+    boardSlug: `${tenant}/${instance}/${site}`,
     api: `${origin}/wday/cxs/${tenant}/${site}/jobs`,
     // externalPath is relative to the site, not the host root — without the
     // site segment the URL 404s.
@@ -377,9 +383,10 @@ function makeEndpoint(origin, tenant, site) {
 // myworkdaysite's public posting path is /recruiting/{tenant}/{site}{externalPath},
 // unlike myworkdayjobs' /{site}{externalPath} — so jobBase differs even though
 // the CXS shape is identical.
-function makeSiteEndpoint(host, tenant, site) {
+function makeSiteEndpoint(host, tenant, site, instance) {
   const origin = `https://${host}`;
   return {
+    boardSlug: `${tenant}/${instance}/${site}`,
     api: `${origin}/wday/cxs/${tenant}/${site}/jobs`,
     jobBase: `${origin}/recruiting/${tenant}/${site}`,
     cxsBase: `${origin}/wday/cxs/${tenant}/${site}`,
@@ -402,17 +409,17 @@ function resolveEndpoint(entry) {
     const cxs = url.match(CXS_RE);
     if (cxs) {
       const [, host, instance, tenant, site] = cxs;
-      return makeEndpoint(`https://${host}.${instance}.myworkdayjobs.com`, tenant, site);
+      return makeEndpoint(`https://${host}.${instance}.myworkdayjobs.com`, tenant, site, instance);
     }
     const siteMatch = url.match(SITE_RE);
     if (siteMatch) {
       const [, instance, tenant, siteName] = siteMatch;
-      return makeSiteEndpoint(`${instance}.myworkdaysite.com`, tenant, siteName);
+      return makeSiteEndpoint(`${instance}.myworkdaysite.com`, tenant, siteName, instance);
     }
     const m = url.match(CAREERS_RE);
     if (!m) continue;
     const [, tenant, instance, site] = m;
-    return makeEndpoint(`https://${tenant}.${instance}.myworkdayjobs.com`, tenant, site);
+    return makeEndpoint(`https://${tenant}.${instance}.myworkdayjobs.com`, tenant, site, instance);
   }
   return null;
 }
@@ -465,6 +472,26 @@ function validReqToken(segment) {
 function reqTokenFromPath(externalPath) {
   if (typeof externalPath !== 'string') return undefined;
   return validReqToken(externalPath.split('/').filter(Boolean).pop() || '') || undefined;
+}
+
+// The posting's own id within its site: the requisition token of the last path
+// segment, taken by the rule requisitionId uses (after the FIRST underscore) but
+// WITH its "-N" suffix, then ":" and the place segment of the path, as the path
+// writes it: `/job/<place>/<title>_<token>` -> `<token>:<place>`. One requisition
+// open in two places is two postings, as a candidate sees them; two postings of
+// one site that still share an id are the collector's to quarantine, not to pick
+// between. A path that is not `/job/<place>/<segment>`, or a segment with no
+// valid token, gives no identity.
+export function workdayPostingId(externalPath) {
+  if (typeof externalPath !== 'string') return undefined;
+  const parts = externalPath.split('/').filter(Boolean);
+  if (parts.length !== 3 || parts[0] !== 'job' || !parts[1]) return undefined;
+  const segment = parts[2];
+  const underscoreIdx = segment.indexOf('_');
+  if (underscoreIdx === -1) return undefined;
+  const token = segment.slice(underscoreIdx + 1);
+  if (token.length < 3 || !REQ_TOKEN_CHARS_RE.test(token) || !REQ_SHAPE_RE.test(token)) return undefined;
+  return `${token}:${parts[1]}`;
 }
 
 // bulletFields is deliberately NOT consulted. It is tenant-configurable free text
@@ -776,6 +803,13 @@ export function postedAtFromDetail(detail) {
   return Number.isFinite(ms) ? ms : undefined;
 }
 
+/** `{ listingIdentity }` for a posting with a site and a valid posting id, else nothing. */
+function listingIdentityOf(ep, externalPath) {
+  const postingId = workdayPostingId(externalPath);
+  if (!ep?.boardSlug || !postingId) return {};
+  return { listingIdentity: { ats_provider: 'workday', board_slug: ep.boardSlug, posting_id: postingId } };
+}
+
 export function parseWorkdayResponse(json, entry) {
   const ep = resolveEndpoint(entry);
   const jobBase = ep?.jobBase || '';
@@ -799,6 +833,7 @@ export function parseWorkdayResponse(json, entry) {
       // (the "-1"/"-2" suffix stripped above), so it cannot be the per-posting key
       // externalId promises (CodeRabbit, #4297).
       requisitionId: reqFromWorkday(j),
+      ...(listingIdentityOf(ep, j.externalPath)),
       location: withFullyRemote(j.locationsText || locationFromPath(j.externalPath), j.remoteType),
       postedAt: parsePostedOn(j.postedOn),
     });
@@ -1075,7 +1110,12 @@ export default {
         // would inflate the bar to exactly the gap it should be judged against.
         const chosenCoverage = facet.values.reduce((sum, v) => sum + v.count, 0);
         const trueTotal = trueTotalFromFacets(result.facets, { exclude: Object.keys(applied) });
-        if (trueTotal !== null) {
+        // A location-scoped split covers less than the board on purpose (Citi:
+        // the US slice is 1,461 of ~4,200 worldwide postings). Judging it
+        // against the whole board flagged every such tenant "still incomplete"
+        // although every in-scope posting was read. Each slice's own clamp is
+        // still checked recursively below, so a truly short slice is caught.
+        if (trueTotal !== null && !facet.locationScoped) {
           const others = [];
           for (const f of Array.isArray(result.facets) ? result.facets : []) {
             if (f?.facetParameter === facet.facetParameter) continue;
