@@ -84,6 +84,25 @@
  *                               literal to get that. Read by scan.mjs's
  *                               employment_type_filter and written to
  *                               scan-history.tsv's `employment_type` column.
+ * @property {string} [department] The department name the source gives in a
+ *                               dedicated field: Ashby posting API
+ *                               `department`, Lever `categories.department`,
+ *                               Greenhouse `departments[].name`, Workable
+ *                               widget `department`, SmartRecruiters
+ *                               `department.label`, Recruitee `department`.
+ *                               Whitespace runs collapse to one space and the
+ *                               ends are trimmed. When the source lists several
+ *                               (Greenhouse), the distinct names, sorted, joined
+ *                               with " · ". Set ONLY from a dedicated field,
+ *                               never read out of the title or description.
+ *                               Omitted when the source has no such field or
+ *                               its value is not a non-empty string. Spread
+ *                               `...departmentTeamFields(department, team)`
+ *                               from `_department-team.mjs` into a Job literal.
+ * @property {string} [team]     The team name the source gives in a dedicated
+ *                               field: Ashby posting API `team`, Lever
+ *                               `categories.team`. Normalized and omitted as
+ *                               `department` is.
  * @property {number} [postedAt] Epoch ms when the posting was published.
  *                               Omitted when the source doesn't expose a
  *                               usable date. scan.mjs ignores it; consumers
