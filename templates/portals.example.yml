@@ -2186,6 +2186,13 @@ search_queries:
 #   provider: a16z-speedrun-talent
 #   max_pages: 3          # optional page cap (50 jobs/page, default 3)
 #   q: machine learning   # optional server-side full-text search (synonyms expand)
+#   a16z_speedrun_talent:
+#     filters:            # optional feed filters (documented parameters only)
+#       scope: everywhere # speedrun | portfolio | everywhere
+#       fn: engineering   # list values as a string or a YAML list
+#       wp: remote
+#       sen: [senior, staff, founding, _]   # _ = roles with no stated level
+#       posted: 7d        # 24h | 7d | 30d
 #   enabled: true
 #
 # - name: Arbeitnow                       # EU/DACH-heavy board, newest-first

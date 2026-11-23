@@ -549,6 +549,52 @@ try {
     if (fastFailed && attempts === 1) pass('fetch() does not retry a non-retryable 4xx (#2506)');
     else fail(`4xx retry behaviour wrong: threw=${fastFailed}, attempts=${attempts}`);
   }
+
+  // ── Feed filters ──────────────────────────────────────────────────────────
+  // `a16z_speedrun_talent.filters` is passed to the feed's query on every page,
+  // for documented parameters only; a typo or an invalid value throws before any
+  // request, so the scan does not quietly read the whole board.
+  const srUrl = (i) => `https://speedrun-talent-network.com/jobs/f${i}`;
+  const oneJob = (extra = {}) => ({ id: 'f-1', title: 'T', url: srUrl(1), ...extra });
+  const recordCtx = (calls, body = { jobs: [oneJob()], total_pages: 1 }) => ({ fetchJson: async (url) => { calls.push(url); return body; } });
+  const filterCalls = [];
+  await provider.fetch({
+    name: 'sr', q: 'engineer',
+    a16z_speedrun_talent: { filters: {
+      scope: 'everywhere', fn: 'engineering', wp: 'remote', sen: ['senior', 'staff', '_'], posted: '7d', sort: 'new',
+      comp: 150000, remote: true, ai: 1, founding: false, loc: 'remote, berlin', stealth: 'hide', fn_unknown_blank: '', cohort: null,
+    } },
+  }, recordCtx(filterCalls)).catch(() => {});
+  const q0 = filterCalls[0] ? new URL(filterCalls[0]).searchParams : null;
+  const got = q0 ? Object.fromEntries(q0) : null;
+  if (got && JSON.stringify(got) === JSON.stringify({
+    page: '0', source: 'career-ops', q: 'engineer', scope: 'everywhere', fn: 'engineering', wp: 'remote', sen: 'senior,staff,_', posted: '7d',
+    sort: 'new', comp: '150000', remote: '1', ai: '1', loc: 'remote,berlin', stealth: 'hide',
+  })) pass('fetch() passes documented filters to the feed query: lists joined, flags as 1, blank and false skipped, page, source and q kept');
+  else fail(`filters query = ${JSON.stringify(got)}`);
+
+  const plainCalls = [];
+  await provider.fetch({ name: 'sr' }, recordCtx(plainCalls));
+  if (plainCalls.length === 1 && [...new URL(plainCalls[0]).searchParams.keys()].join() === 'page,source') pass('fetch() sends only page and source when the entry has no filters');
+  else fail(`default query = ${JSON.stringify(plainCalls)}`);
+
+  const badFilters = [
+    { bogus: 'x' }, { page: 3 }, { source: 'x' }, { q: 'x' },
+    { posted: '1y' }, { scope: 'galaxy' }, { sort: 'oldest' }, { stealth: 'maybe' },
+    { comp: -1 }, { comp: '150000' }, { comp: 1.5 }, { remote: 'yes' }, { ai: 2 },
+    { fn: 'a&page=3' }, { fn: [' ', ''] }, { fn: ['ok', 'bad value'] }, { fn: {} },
+    { metro: 'sf,nyc,la,sv,dc,chi' }, { company: 5 }, { company: 'x'.repeat(121) },
+  ];
+  let refused = 0;
+  const refusedCalls = [];
+  for (const filters of badFilters) {
+    try { await provider.fetch({ name: 'sr', a16z_speedrun_talent: { filters } }, recordCtx(refusedCalls)); } catch (e) { if (/a16z-speedrun-talent: sr — /.test(e.message)) refused++; }
+  }
+  for (const filters of ['fn=engineering', ['fn'], 7]) {
+    try { await provider.fetch({ name: 'sr', a16z_speedrun_talent: { filters } }, recordCtx(refusedCalls)); } catch (e) { if (/filters must be a map/.test(e.message)) refused++; }
+  }
+  if (refused === badFilters.length + 3 && refusedCalls.length === 0) pass('fetch() throws on an unknown filter, an invalid value or a filters that is not a map, before any request');
+  else fail(`bad filters refused ${refused} of ${badFilters.length + 3}, requests made: ${refusedCalls.length}`);
 } catch (e) {
   fail(`a16z-speedrun-talent provider test crashed: ${e?.stack || e}`);
 }

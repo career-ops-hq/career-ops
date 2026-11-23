@@ -20,6 +20,12 @@ import { markTruncated } from '../lib/board-truncation.mjs';
 // server-side with `q:` (the feed runs full-text search with synonym
 // expansion, e.g. "ml", "swe", "nyc").
 //
+// Optional feed filters, passed through to the same query (documented
+// parameters only; see FILTER_PARAMS below for each name and its values):
+//
+//   a16z_speedrun_talent:
+//     filters: { scope: everywhere, fn: engineering, wp: remote, sen: [senior, staff, _], posted: 7d }
+//
 // Every request carries `source=career-ops` — the feed's documented optional
 // attribution param, echoed in the response; it does not change results.
 //
@@ -38,6 +44,28 @@ const DEFAULT_MAX_PAGES = 6; // × PER_PAGE = the 300-job default scan
 // sits well above plausible board size (~353 pages / ~17.6k jobs as of
 // 2026-08), same policy as workday.mjs's cap.
 const MAX_PAGES_CAP = 1000;
+
+// The feed's documented filter parameters (/api/v1/openapi.json, searchJobs),
+// minus `q`, `page` and `source`, which this provider sets itself. An unknown
+// name throws, so a typo does not read the whole board unfiltered.
+//   list: comma-separated values, given as a string or an array of strings
+//   flag: the feed takes only `1`; true or 1 on the entry sends it
+//   int:  a non-negative integer
+//   enum: one of the listed values
+const LIST_FILTERS = new Set([
+  'fn', 'spec', 'sen', 'lvl', 'yoe', 'eng', 'emp', 'loc', 'wp', 'metro', 'stage', 'size', 'industry', 'portfolio',
+  'cohort',
+]);
+const FLAG_FILTERS = new Set(['founding', 'ai', 'remote', 'comp_any', 'lab', 'bigtech']);
+const INT_FILTERS = new Set(['comp', 'comp_max']);
+const ENUM_FILTERS = /** @type {Record<string, string[]>} */ ({
+  posted: ['24h', '7d', '30d'],
+  scope: ['speedrun', 'portfolio', 'everywhere'],
+  sort: ['rel', 'new', 'comp'],
+  stealth: ['only', 'hide'],
+});
+// `metro` takes at most 5 keys, per the feed's documentation.
+const MAX_METROS = 5;
 
 /** @param {string} url */
 function assertFeedUrl(url) {
@@ -69,6 +97,61 @@ function resolveQuery(entry) {
     if (joined) return joined;
   }
   return null;
+}
+
+/**
+ * The entry's `a16z_speedrun_talent` settings, or an empty object.
+ * @param {any} entry
+ * @returns {Record<string, any>}
+ */
+function resolveSettings(entry) {
+  const cfg = entry?.a16z_speedrun_talent;
+  return cfg && typeof cfg === 'object' && !Array.isArray(cfg) ? cfg : {};
+}
+
+/**
+ * The feed filters of the entry as [name, value] pairs, validated against the
+ * documented parameters. Throws on an unknown name or an invalid value.
+ * @param {any} entry
+ * @returns {Array<[string, string]>}
+ */
+function resolveFilters(entry) {
+  const filters = resolveSettings(entry).filters;
+  if (filters == null) return [];
+  const name = typeof entry?.name === 'string' && entry.name ? entry.name : 'a16z speedrun talent network';
+  const bad = (key, why) => new Error(`a16z-speedrun-talent: ${name} — filters.${key} ${why}`);
+  if (typeof filters !== 'object' || Array.isArray(filters)) {
+    throw new Error(`a16z-speedrun-talent: ${name} — filters must be a map of feed parameters`);
+  }
+  /** @type {Array<[string, string]>} */
+  const pairs = [];
+  for (const [key, raw] of Object.entries(filters)) {
+    if (raw == null || raw === '') continue;
+    if (LIST_FILTERS.has(key)) {
+      const values = (Array.isArray(raw) ? raw : String(raw).split(','))
+        .map((v) => (typeof v === 'string' ? v.trim() : ''))
+        .filter(Boolean);
+      if (!values.length || values.some((v) => !/^[A-Za-z0-9_.-]+$/.test(v))) throw bad(key, 'must be a string or a list of plain values');
+      if (key === 'metro' && values.length > MAX_METROS) throw bad(key, `takes at most ${MAX_METROS} values`);
+      pairs.push([key, values.join(',')]);
+    } else if (FLAG_FILTERS.has(key)) {
+      if (raw === false || raw === 0 || raw === '0') continue;
+      if (raw !== true && raw !== 1 && raw !== '1') throw bad(key, 'must be true');
+      pairs.push([key, '1']);
+    } else if (INT_FILTERS.has(key)) {
+      if (!Number.isInteger(raw) || raw < 0) throw bad(key, 'must be a non-negative integer');
+      pairs.push([key, String(raw)]);
+    } else if (Object.hasOwn(ENUM_FILTERS, key)) {
+      if (typeof raw !== 'string' || !ENUM_FILTERS[key].includes(raw.trim())) throw bad(key, `must be one of ${ENUM_FILTERS[key].join(', ')}`);
+      pairs.push([key, raw.trim()]);
+    } else if (key === 'company') {
+      if (typeof raw !== 'string' || !raw.trim() || raw.length > 120) throw bad(key, 'must be a company key string');
+      pairs.push([key, raw.trim()]);
+    } else {
+      throw new Error(`a16z-speedrun-talent: ${name} — unknown filter "${key}" (use a parameter of the feed's searchJobs operation)`);
+    }
+  }
+  return pairs;
 }
 
 // NaN-safe Date.parse — `|| undefined` would also coerce a valid epoch 0.
@@ -169,12 +252,14 @@ export default {
     const probing = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0;
     const pagesToFetch = probing ? Math.min(maxPages, ctx.maxPages) : maxPages;
     const q = resolveQuery(entry);
+    const filters = resolveFilters(entry);
     const fallbackCompany = entry?.name;
     const out = [];
 
     for (let page = 0; page < pagesToFetch; page++) {
       const params = new URLSearchParams({ page: String(page), source: 'career-ops' });
       if (q) params.set('q', q);
+      for (const [key, value] of filters) params.set(key, value);
       const url = `${FEED_BASE}?${params}`;
       // redirect:'error' prevents SSRF via server-side redirects.
       // Retried on transient upstream failures (429/5xx/timeout): this board
