@@ -1139,7 +1139,8 @@ export function isAtsPosting(url) {
 // description, responsibilities, requirements and benefits.
 // Workable canonical and share links expose description, requirements and benefits
 // on the per-posting v2 API, after the existing guarded account-resolution hop.
-// HireHive's per-posting API carries the description HTML.
+// HireHive, BambooHR and Himalayas expose the description in per-posting APIs.
+// The last two also have JD-specific routes in resolveJdApi().
 // Microsoft and LinkedIn are on ATS_PROVIDERS
 // for liveness only — their public endpoints answer search/status, never body
 // text — so they are deliberately excluded here; see fetch-jd.mjs / the
@@ -1149,9 +1150,11 @@ export function isAtsPosting(url) {
 // touch different lines, which reduces merge conflicts.
 export const JD_TEXT_API_ATS = new Set([
   'ashby',
+  'bamboohr',
   'greenhouse',
   'greenhouse-embedded',
   'hibob',
+  'himalayas',
   'hirehive',
   'lever',
   'smartrecruiters',
