@@ -8,19 +8,89 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/santifer/career-ops/dashboard/internal/model"
 )
 
 // pendingRepairs remembers Applied saves that returned a partial-success error,
 // so only an explicit retry of the same row asks set-status.mjs to repair the
 // missing lifecycle records. A routine Applied save never requests repair.
+//
+// Entries are owned by the application that filed them, not keyed by selector:
+// two rows may legitimately share one tracker # (#1704), so `--row 32` names a
+// selector, not an application.
 var (
 	pendingRepairsMu sync.Mutex
-	pendingRepairs   = map[string]struct{ ledger, followup bool }{}
+	pendingRepairs   []*pendingRepair
 )
+
+// pendingRepair is one partial Applied save, filed against the row that made
+// it: the tracker file, the row's company and role, and every selector the row
+// answered to when it filed.
+type pendingRepair struct {
+	tracker          string
+	company, role    string
+	ids              []trackerIdentity
+	ledger, followup bool
+}
+
+// ownedBy reports whether p was filed by the row now saving. Company and role
+// say which application it is, because a shared tracker # makes `--row 32` name
+// two of them. An identity must still match, so two requisitions sharing one
+// company and title stay apart; a merge that adds a report link leaves the
+// tracker # it filed under, and that is what the retry matches on.
+func (p *pendingRepair) ownedBy(tracker string, app model.CareerApplication, ids []trackerIdentity) bool {
+	if p.tracker != tracker || !sameRowLabel(p.company, app.Company) || !sameRowLabel(p.role, app.Role) {
+		return false
+	}
+	// Reports 7 and 9 under one company, title and tracker #32 are two
+	// applications, and their shared `--row 32` must not join them. Only a
+	// filed report identity rules: without one, the tracker # still owns the
+	// retry, which is how a merge may add the report link later.
+	if mine, ok := reportIdentity(p.ids); ok {
+		if theirs, ok := reportIdentity(ids); ok && mine != theirs {
+			return false
+		}
+	}
+	for _, mine := range p.ids {
+		for _, theirs := range ids {
+			if mine == theirs {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// reportIdentity returns the report selector among ids, if it carries one.
+func reportIdentity(ids []trackerIdentity) (trackerIdentity, bool) {
+	for _, id := range ids {
+		if strings.HasPrefix(id.flag, "--report") {
+			return id, true
+		}
+	}
+	return trackerIdentity{}, false
+}
+
+func sameRowLabel(a, b string) bool {
+	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
+}
+
+// mergeIdentities unions add into have, so a row that files again under a new
+// selector stays findable under the old one too.
+func mergeIdentities(have, add []trackerIdentity) []trackerIdentity {
+	for _, id := range add {
+		if !slices.Contains(have, id) {
+			have = append(have, id)
+		}
+	}
+	return have
+}
 
 // CheckoutScriptPath resolves system scripts, even when --path points at a data-only root.
 // The executable fallback also supports launching the built TUI from elsewhere.
@@ -44,7 +114,14 @@ func CheckoutScriptPath(name string) (string, error) {
 	return "", fmt.Errorf("dashboard actions need %s in the career-ops checkout", name)
 }
 
-func runStatusWriter(dataRoot, report, status, note string) error {
+// runStatusWriter runs set-status.mjs against the row named by the first of
+// app's trackerIdentities. The remaining ones name the same row through the
+// other selector and are used for the pending-repair bookkeeping only.
+func runStatusWriter(dataRoot string, app model.CareerApplication, status, note string) error {
+	ids := trackerIdentities(app)
+	if len(ids) == 0 {
+		return fmt.Errorf("status write needs a row selector")
+	}
 	script, err := CheckoutScriptPath("set-status.mjs")
 	if err != nil {
 		return err
@@ -60,13 +137,26 @@ func runStatusWriter(dataRoot, report, status, note string) error {
 	// --detach-jd-archive: a move into Interview may start a JD archive that can
 	// outlast the 30s budget below, and this runs inside Bubble Tea's Update, so
 	// waiting froze the TUI and then reported a saved status as timed out.
-	args := []string{script, "--report-link", report, status, "--detach-jd-archive", "--json"}
-	repairKey := tracker + "\x00" + report
+	args := []string{script, ids[0].flag, ids[0].value, status, "--detach-jd-archive", "--json"}
+	// The flag keeps the two number spaces apart, so report #32 and row #32 are
+	// never one row — but two rows may share tracker #32 (#1704), and both then
+	// answer to `--row 32`, so ownedBy decides whose repair this is. A repair is
+	// filed under the selector the failed write used and found again under every
+	// identity its own row carries now: a merge can add report #7 to the row
+	// saved as row #32, and the retry must still find it. Two reports on the
+	// two sides disagreeing is proof they are not one row.
 	if strings.EqualFold(status, "applied") {
 		// Only a retry after a partial Applied save may repair missing
 		// lifecycle observations even though the tracker is already Applied.
 		pendingRepairsMu.Lock()
-		pending := pendingRepairs[repairKey]
+		var pending struct{ ledger, followup bool }
+		for _, p := range pendingRepairs {
+			if !p.ownedBy(tracker, app, ids) {
+				continue
+			}
+			pending.ledger = pending.ledger || p.ledger
+			pending.followup = pending.followup || p.followup
+		}
 		pendingRepairsMu.Unlock()
 		if pending.ledger {
 			args = append(args, "--repair-status-log")
@@ -78,10 +168,18 @@ func runStatusWriter(dataRoot, report, status, note string) error {
 	markPending := func(ledger, followup bool) {
 		pendingRepairsMu.Lock()
 		defer pendingRepairsMu.Unlock()
-		p := pendingRepairs[repairKey]
-		p.ledger = p.ledger || ledger
-		p.followup = p.followup || followup
-		pendingRepairs[repairKey] = p
+		for _, p := range pendingRepairs {
+			if p.ownedBy(tracker, app, ids) {
+				p.ledger = p.ledger || ledger
+				p.followup = p.followup || followup
+				p.ids = mergeIdentities(p.ids, ids)
+				return
+			}
+		}
+		pendingRepairs = append(pendingRepairs, &pendingRepair{
+			tracker: tracker, company: app.Company, role: app.Role,
+			ids: ids, ledger: ledger, followup: followup,
+		})
 	}
 	if note != "" {
 		args = append(args, "--note="+note)
@@ -147,8 +245,16 @@ func runStatusWriter(dataRoot, report, status, note string) error {
 		markPending(false, true)
 		return fmt.Errorf("status saved, but follow-up seeding failed: %s", seed.Error)
 	}
+	// Clear only what this row owns: another application sharing its tracker #
+	// may be holding a repair the system still owes (#1704).
 	pendingRepairsMu.Lock()
-	delete(pendingRepairs, repairKey)
+	kept := pendingRepairs[:0]
+	for _, p := range pendingRepairs {
+		if !p.ownedBy(tracker, app, ids) {
+			kept = append(kept, p)
+		}
+	}
+	pendingRepairs = kept
 	pendingRepairsMu.Unlock()
 	return nil
 }

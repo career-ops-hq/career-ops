@@ -28,7 +28,7 @@ import { join, basename, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
-import { getCareerOpsRoot, resolveBatchStatePaths } from './path-resolver.mjs';
+import { getCareerOpsRoot, resolveBatchStatePaths, resolveTrackerPathForWrite, canonicalizeTrackerPath } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { parsePdfIndex, livePdfIndex, normNum } from './find.mjs';
 import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, isUnsetUrlCell, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, parseScore, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE, extractReqNumber, extractCellUrl, parseMarkdownLinks } from './tracker-parse.mjs';
@@ -41,9 +41,34 @@ import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerL
 import { normalizeUrl, isAggregatorUrl, aggregatorPostingId, postingUrlRelation } from './url-key.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { loadYaml } from './lib/yaml-document.mjs';
+import { machineSummarySection } from './lib/machine-summary-section.mjs';
 import { syncTrackerPdfFlags } from './sync-pdf-flags.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { occupiedTrackerNumbersFromLedgers } from './reserve-report-num.mjs';
+
+/**
+ * The line index a new tracker row is inserted at.
+ *
+ * Directly after the separator that belongs to the TRACKER header, not after the
+ * first separator in the file. `applications.md` is a user-authored document, so
+ * a preamble table above the applications table is legitimate, and inserting at
+ * the first separator put the new row above that table's header, where no reader
+ * parses it, while the run still printed "➕ Add #N" and archived the TSV.
+ *
+ * The index is the line AFTER the separator, because the caller inserts with
+ * `splice(index, 0, ...)`, which places the row before `index`: returning the
+ * separator's own index would splice the row between the header and the `|---|`
+ * line and malform the table.
+ *
+ * @param {string[]} lines - applications.md split into lines.
+ * @returns {number} Insert index, or -1 when there is no readable tracker table.
+ */
+export function mergeInsertIndex(lines) {
+  const headerIdx = lines.findIndex((line) => isHeaderRow(line));
+  if (headerIdx < 0) return -1;
+  return SEPARATOR_ROW_RE.test(lines[headerIdx + 1] || '') ? headerIdx + 2 : -1;
+}
 
 const MERGE_TRACKER_USAGE = `Usage: node merge-tracker.mjs [options]
 
@@ -565,6 +590,33 @@ export async function mergeTracker(options = {}) {
     return normalizeUrl(raw) ? { url: raw, reason: 'ok' } : { url: '', reason: 'no-url' };
   }
 
+  /**
+   * The work location the linked report records in its Machine Summary
+   * (`posting_location`, the JD's own words), or '' when there is no report,
+   * no summary, or the value is null (remote, or no location stated).
+   *
+   * Evaluations write this field but not the TSV `location` field, so without
+   * this read a new row never carries its city, and the dashboard's LOCATION
+   * column shows only the work mode.
+   *
+   * @param {string} reportField - Report cell, e.g. `[42](reports/042-acme.md)`.
+   * @returns {string}
+   */
+  function reportPostingLocation(reportField) {
+    const reportPath = resolveReportPath(reportField);
+    if (!reportPath) return '';
+    const fence = machineSummarySection(readFileSync(reportPath, 'utf-8'))
+      .match(/^##\s*Machine Summary\s*\n+```(?:yaml|yml)?\s*\n([\s\S]*?)\n```/i);
+    if (!fence) return '';
+    try {
+      const location = loadYaml(fence[1])?.posting_location;
+      return typeof location === 'string' ? location.trim() : '';
+    } catch {
+      // A malformed optional summary should not prevent the tracker merge.
+      return '';
+    }
+  }
+
   // A row's posting URL for the URL guards: its URL cell, else the URL its
   // report names, the same key an addition gets from its own report. The
   // default nine-column tracker has no URL cell, so without the report the
@@ -662,6 +714,9 @@ export async function mergeTracker(options = {}) {
     const isRepeat = incoming !== '' && prev.split(/\.\s+/).map(clause)
       .some(c => c === incomingClause || c.endsWith(`: ${incomingClause}`));
     const tail = incoming && !isRepeat ? `${marker}: ${incoming}` : marker;
+    // The dashboard reads a Location label through the next semicolon.
+    // Preserve the entire place name, including punctuation such as "D.C.".
+    if (/\blocation:[^;]*$/i.test(prevRaw)) return `${prevRaw}; ${tail}`;
     return prev ? `${prev}. ${tail}` : tail;
   }
 
@@ -939,7 +994,8 @@ export async function mergeTracker(options = {}) {
     put('company', cell(o.company));
     put('via', cell(o.via) || '—');
     put('role', cell(o.role));
-    put('location', cell(o.location) || '—');
+    const location = cell(o.location);
+    const locationWritten = put('location', location || '—');
     put('score', o.score);
     put('status', o.status);
     put('pdf', o.pdf);
@@ -958,6 +1014,13 @@ export async function mergeTracker(options = {}) {
       const link = String(o.report).trim();
       if (notes && !notes.includes(link)) notes = `${notes.replace(/\s*$/, '')} Report: ${link}.`;
       else if (!notes) notes = `Report: ${link}.`;
+    }
+    // Same for a layout with no Location column: the value goes into Notes as a
+    // `Location:` segment, the label the dashboard already reads there. It goes
+    // last and unterminated, since the dashboard's reader takes everything up to
+    // the next `;` or the end of the cell.
+    if (!locationWritten && location && location !== '—' && !/\blocation:/i.test(notes)) {
+      notes = notes ? `${notes.replace(/[\s;]*$/, '')}; Location: ${location}` : `Location: ${location}`;
     }
     put('notes', notes);
 
@@ -1419,13 +1482,45 @@ export async function mergeTracker(options = {}) {
 
   // ---- Main ----
 
-  async function mergeUnderLock() {
-    // Read applications.md
-    if (!existsSync(APPS_FILE)) {
-      console.log('No applications.md found. Nothing to merge into.');
-      return 0;
+  /**
+   * First-run tracker: the header from AGENTS.md onboarding step 4, plus the URL
+   * column so posting-URL dedup is active from the first merge. Returns the new
+   * content (written unless --dry-run), or null when nothing is pending.
+   */
+  function createMissingTracker() {
+    const pending = existsSync(ADDITIONS_DIR)
+      ? readdirSync(ADDITIONS_DIR).filter(f => f.endsWith('.tsv')).length
+      : 0;
+    if (pending === 0) {
+      console.log('No applications.md found and no pending additions. Nothing to merge.');
+      return null;
     }
-    const appContent = readFileSync(APPS_FILE, 'utf-8');
+    const content = [
+      '# Applications Tracker',
+      '',
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |',
+      '|---|------|---------|------|-------|--------|-----|--------|-------|-----|',
+      '',
+    ].join('\n');
+    if (DRY_RUN) {
+      console.log(`🔎 Dry-run: no tracker yet; would create ${APPS_FILE} for ${pending} pending addition(s).`);
+      return content;
+    }
+    mkdirSync(dirname(APPS_FILE), { recursive: true });
+    writeFileAtomic(APPS_FILE, content);
+    console.log(`🆕 Created ${APPS_FILE} (no tracker existed; ${pending} pending addition(s)).`);
+    return content;
+  }
+
+  async function mergeUnderLock() {
+    // Read applications.md, creating it on the first merge. A missing tracker
+    // with pending additions used to exit 0 having merged nothing, which callers
+    // such as the web evaluate flow read as success: the score showed and the
+    // Pipeline tab stayed empty. With nothing pending, no file is created.
+    const appContent = existsSync(APPS_FILE)
+      ? readFileSync(APPS_FILE, 'utf-8')
+      : createMissingTracker();
+    if (appContent === null) return 0;
     // Test-only synchronization hook: the concurrent merge test waits for the
     // first worker to read the tracker while still holding the lock, then starts a
     // second worker to prove the lock prevents the old lost-update race.
@@ -2383,7 +2478,11 @@ export async function mergeTracker(options = {}) {
           // the existing role, since there the pairing is only a guess.
           role: (reportNumMatched || dupReason === 'url') ? addition.role : duplicate.role,
           via: addition.via || duplicate.via || '—',
-          location: addition.location || duplicate.location || '—',
+          // A value already on the row (typed by hand, or an earlier merge) wins
+          // over the report's; the report only fills a row that has none.
+          location: addition.location
+            || (duplicate.location && duplicate.location !== '—' ? duplicate.location : '')
+            || reportPostingLocation(addition.report) || '—',
           score: addition.score, status: duplicate.status, pdf,
           report: addition.report,
           notes: updatedNotes,
@@ -2446,7 +2545,7 @@ export async function mergeTracker(options = {}) {
         const newLine = buildRow({
           num: entryNum, date: addition.date, company: addition.company, role: addition.role,
           via: addition.via || '—',
-          location: addition.location || '—',
+          location: addition.location || reportPostingLocation(addition.report) || '—',
           score: addition.score, status: addition.status, pdf,
           report: addition.report, notes: addition.notes,
           // Write the key on the way in. Backfill is the one-time EXPAND phase for
@@ -2478,18 +2577,10 @@ export async function mergeTracker(options = {}) {
       }
     }
 
-    // Insert new lines after the header (line index of first data row)
+    // Insert new lines after the tracker header's separator (see mergeInsertIndex:
+    // the row's own table decides, so a preamble table cannot swallow the batch).
     if (newLines.length > 0) {
-      // Find header separator (|---|...) and insert after it. Match the row's
-      // structure rather than a bare `---` substring, so a data row carrying three
-      // hyphens in its free text can never be mistaken for the separator.
-      let insertIdx = -1;
-      for (let i = 0; i < appLines.length; i++) {
-        if (SEPARATOR_ROW_RE.test(appLines[i])) {
-          insertIdx = i + 1;
-          break;
-        }
-      }
+      const insertIdx = mergeInsertIndex(appLines);
       if (insertIdx < 0) {
         // #2394: no separator row means no insert point. The old code left
         // insertIdx at -1, skipped the splice with no else, then carried on to
@@ -2617,7 +2708,14 @@ if (isMainModule(import.meta.url)) {
   // (original). CAREER_OPS_TRACKER overrides the path (used by tests and
   // non-standard layouts). Resolution lives in tracker-utils.mjs so every tracker
   // writer agrees on the same canonical path (and therefore the same lock).
-  const appsFile = resolveTrackerPath(DATA_ROOT);
+  // When no tracker exists yet, the read path falls back to the legacy
+  // root-level applications.md; a first merge creates the tracker, so it must
+  // target the canonical write path instead (AGENTS.md: first-run creation
+  // goes to {DATA_ROOT}/data/applications.md).
+  const readPath = resolveTrackerPath(DATA_ROOT);
+  const appsFile = existsSync(readPath)
+    ? readPath
+    : canonicalizeTrackerPath(resolveTrackerPathForWrite(DATA_ROOT));
   const code = await mergeTracker({
     appsFile,
     dataRoot: DATA_ROOT,

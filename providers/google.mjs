@@ -142,6 +142,7 @@ export default {
     let requestsMade = 0;
     let truncated = false;
     let fetchFailed = false;
+    let unrestrictedPageReturned = false;
     let firstPageFailures = 0;
     let firstPageError;
 
@@ -177,6 +178,7 @@ export default {
           break;
         }
         requestsMade += 1;
+        if (!String(q).trim()) unrestrictedPageReturned = true;
         const cards = parseResultsPage(html);
         let newThisQuery = 0;
         for (const { id, slug, title, employer, locations } of cards) {
@@ -207,6 +209,9 @@ export default {
     if (fetchFailed) {
       jobs = markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
     }
-    return jobs;
+    if (unrestrictedPageReturned) return jobs;
+    return Object.assign(jobs, {
+      queryScope: { config: 'google.queries', queries: queriesToRun.map(String).filter(q => q.trim()) },
+    });
   },
 };

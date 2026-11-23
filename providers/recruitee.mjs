@@ -8,6 +8,8 @@
 // regex match on `<safe-slug>.recruitee.com` rather than a static
 // allowlist.
 
+import { employmentTypeField } from './_employment-type.mjs';
+import { departmentTeamFields } from './_department-team.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 
 const RECRUITEE_HOST_RE = /^[a-z0-9][a-z0-9-]*\.recruitee\.com$/;
@@ -271,10 +273,9 @@ function containsWholeWord(text, word) {
  * multi-place postings (`grep -l "' · '" providers/*.mjs`), so scan.mjs's
  * location_filter sees every place a multi-location role is open to.
  *
- * Falls back to the single-place logic — explicit `location` (with the
- * top-level `country` appended when the location doesn't already name it),
- * else assembled from city/country, appending "Remote" when `remote` is true
- * — when `locations` yields 0 or 1 distinct names.
+ * Falls back to the single-place logic — explicit `location` (folding top-level
+ * `city`, `country` and `remote` when not already named), else assembled from
+ * `city`, `country` and `remote` — when `locations` yields 0 or 1 distinct names.
  *
  * The joined multi-place path also honors the top-level `remote` flag: it is
  * a separate signal from the named places (a "remote in Germany" entry names
@@ -304,19 +305,15 @@ function assembleLocation(j) {
     const hasRemote = distinctNames.some(n => n.toLowerCase().includes('remote'));
     return j.remote && !hasRemote ? [...distinctNames, 'Remote'].join(' · ') : distinctNames.join(' · ');
   }
-  const city = j.city || '';
-  const country = j.country || '';
-  const remote = j.remote ? 'Remote' : '';
-  // The flat `location` gets the same country fold every `locations[]` entry
-  // gets above — without it a primary place spelled as a city or subdivision
-  // ("London, England") hides the country location_filter matches on.
-  if (typeof j.location === 'string' && j.location.trim()) {
-    const loc = j.location.trim();
-    return typeof country === 'string' && country.trim() && !containsWholeWord(loc, country.trim())
-      ? `${loc}, ${country.trim()}`
-      : loc;
-  }
-  return [city, country, remote].filter(Boolean).join(', ');
+  const city = typeof j.city === 'string' ? j.city.trim() : '';
+  const country = typeof j.country === 'string' ? j.country.trim() : '';
+  const parts = typeof j.location === 'string' && j.location.trim()
+    ? [j.location.trim()]
+    : [];
+  if (city && !parts.some(p => containsWholeWord(p, city))) parts.push(city);
+  if (country && !parts.some(p => containsWholeWord(p, country))) parts.push(country);
+  if (j.remote && !parts.some(p => p.toLowerCase().includes('remote'))) parts.push('Remote');
+  return parts.join(', ');
 }
 
 // Recruitee publishes a timestamp as `YYYY-MM-DD HH:MM:SS UTC`, which is not an
@@ -514,11 +511,14 @@ export function parseRecruiteeResponse(json, companyName, { allLanguages = false
         url: version.language ? withLanguage(url, version.language) : url,
         location,
         company: companyName,
+        ...departmentTeamFields(j.department),
         ...(version.description ? { description: version.description } : {}),
         ...(postedAt !== undefined ? { postedAt } : {}),
         ...(salary ? { salary } : {}),
         ...(version.language ? { language: version.language } : {}),
         ...(listingIdentity ? { listingIdentity } : {}),
+        // employment_type_code: "fulltime_permanent", "parttime_fixed_term", "contract", "internship", "freelance"
+        ...employmentTypeField(j.employment_type_code),
       });
     }
   }

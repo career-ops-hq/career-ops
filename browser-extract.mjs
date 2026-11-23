@@ -50,6 +50,9 @@ import { loadYaml } from './lib/yaml-document.mjs';
 import { LIVENESS_CONTEXT_OPTIONS, rejectPrivateOrInvalid } from './liveness-browser.mjs';
 import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { resolveAtsApi, JD_TEXT_API_ATS } from './liveness-api.mjs';
+import { resolveHimalayasPosting, retrieveHimalayasPosting } from './himalayas-posting.mjs';
+import { fetchJdFromPage } from './lib/jd-page-fetch.mjs';
+import { fetchJson } from './providers/_http.mjs';
 import { classifyLiveness, cloudflareInterstitial } from './liveness-core.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
 import { HTML_TAG_RE, stripHtmlComments } from './providers/_html-to-text.mjs';
@@ -1021,6 +1024,60 @@ async function fetchWorkableJd(resolved, postingUrl, textCap, timeoutMs) {
   }
 }
 
+/** JD-only sources leave the liveness resolver and its classifications unchanged. */
+export function resolveJdApi(url) {
+  const himalayas = resolveHimalayasPosting(url);
+  if (himalayas) return { ats: 'himalayas', apiUrl: himalayas.apiUrl };
+
+  let parsed;
+  try { parsed = new URL(url); } catch { return null; }
+  const bambooHost = /^[a-z0-9][a-z0-9-]*\.bamboohr\.com$/.test(parsed.hostname);
+  if (bambooHost && parsed.protocol === 'https:' && !parsed.port && !parsed.username && !parsed.password) {
+    const posting = /^\/careers\/(\d+)\/?$/.exec(parsed.pathname);
+    if (posting) {
+      const postingPath = parsed.origin + '/careers/' + posting[1];
+      return { ats: 'bamboohr', apiUrl: postingPath + '/detail', postingPath };
+    }
+  }
+
+  return resolveAtsApi(url);
+}
+
+async function fetchBambooHrJd(resolved, url, textCap, timeoutMs) {
+  try {
+    const data = await fetchJson(resolved.apiUrl, {
+      headers: { accept: 'application/json' },
+      redirect: 'error',
+      timeoutMs,
+      maxBytes: 1024 * 1024,
+    });
+    const job = data?.result?.jobOpening;
+    if (job?.jobOpeningStatus !== 'Open' || typeof job.jobOpeningShareUrl !== 'string') return null;
+    const shareUrl = new URL(job.jobOpeningShareUrl);
+    const postingPath = shareUrl.origin + shareUrl.pathname.replace(/\/$/, '');
+    if (shareUrl.username || shareUrl.password || postingPath !== resolved.postingPath) return null;
+    const text = jdHtmlToText(job.description);
+    if (!text) return null;
+    return { url, title: compactText(jdHtmlToText(job.jobOpeningName), 300), text: compactText(text, textCap) };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchHimalayasJd(_resolved, url, textCap, timeoutMs) {
+  const result = await retrieveHimalayasPosting(url, { timeoutMs });
+  if (result.publisherStatus !== 'open') return null;
+  const text = jdHtmlToText(result.job.description);
+  if (!text) return null;
+  return { url, title: compactText(result.job.title, 300), text: compactText(text, textCap) };
+}
+
+function isJobicyPosting(url) {
+  const parsed = new URL(url); // jd mode has already validated the URL.
+  return parsed.protocol === 'https:' && !parsed.port && !parsed.username && !parsed.password
+    && /^(?:www\.)?jobicy\.com$/.test(parsed.hostname) && /^\/jobs\/[a-z0-9-]+\/?$/.test(parsed.pathname);
+}
+
 /**
  * ats id → fetcher. THE routing table `fetchJdViaKnownApi` dispatches through,
  * exported so the owned test can assert its key set IS `JD_TEXT_API_ATS`.
@@ -1036,6 +1093,8 @@ async function fetchWorkableJd(resolved, postingUrl, textCap, timeoutMs) {
  * entries rather than widening the shared signature.
  */
 export const JD_FETCHERS = {
+  bamboohr: fetchBambooHrJd,
+  himalayas: fetchHimalayasJd,
   workable: fetchWorkableJd,
   'workable-short': fetchWorkableJd,
   workday: (resolved, url, textCap, timeoutMs) =>
@@ -1074,7 +1133,7 @@ export const JD_FETCHERS = {
  *   caller should fall through to a browser-backed read.
  */
 export async function fetchJdViaKnownApi(url, textCap = JD_TEXT_CAP, timeoutMs = WORKDAY_TIMEOUT_MS) {
-  const resolved = resolveAtsApi(url);
+  const resolved = resolveJdApi(url);
   if (!resolved || !JD_TEXT_API_ATS.has(resolved.ats)) return null;
   const fetcher = JD_FETCHERS[resolved.ats];
   if (!fetcher) return null;
@@ -1408,11 +1467,24 @@ async function main() {
       emitJd(apiResult, maxChars);
       return;
     }
+    // Jobicy exposes its description as structured data on the posting page.
+    if (isJobicyPosting(url)) {
+      const result = await fetchJdFromPage(url, maxChars, timeout);
+      if (result?.closed) {
+        console.error(JSON.stringify({ error: result.evidence, code: 'unavailable', url }));
+        process.exitCode = 1;
+        return;
+      }
+      if (result) {
+        emitJd({ url, title: result.title, text: result.text }, maxChars);
+        return;
+      }
+    }
   }
 
   let chromium;
   try {
-    ({ chromium } = await import('playwright'));
+    ({ chromium } = await import('./lib/hardened-chromium.mjs'));
   } catch {
     console.error(JSON.stringify({ error: 'playwright not installed', code: 'no_playwright' }));
     process.exit(1);

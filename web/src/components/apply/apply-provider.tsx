@@ -10,7 +10,7 @@ import { issuesAfterAgent, issuesAfterFill } from "@/lib/apply/handoff-gate.mjs"
 import { sessionFollowUp } from "@/lib/apply/session-result.mjs";
 
 export type FillStep = { fieldId: string; label: string; ok: boolean; thumb?: string };
-type Meta = { needsConfirmation?: boolean };
+type Meta = { needsConfirmation?: boolean; reason?: string };
 type Status = "idle" | "opening" | "driving" | "prefilling" | "ready" | "filling" | "done" | "error";
 
 type ApplyCtx = {
@@ -114,13 +114,25 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   // session response or a navigation.
   const pendingPrefill = useRef(false);
 
+  // The refusal panel for Workday, iCIMS, UKG and apply.handoff_hosts, from the
+  // session open or from a drive that reached one of them. Its window is closed
+  // by then, so the session is dropped too.
+  const showRefusal = useCallback((refusal: { message: string; postingUrl: string; checklistHref: string }) => {
+    sessionId.current = null;
+    setBlockedAts({ message: refusal.message, postingUrl: refusal.postingUrl, checklistHref: refusal.checklistHref });
+    if (refusal.postingUrl) setUrl(refusal.postingUrl);
+    setError(refusal.message);
+    setStatus("error");
+    pendingPrefill.current = false;
+  }, []);
+
   // Stream the agentic drive (the AI reaching the form live) and finalize the
   // session when it succeeds → fields ready → auto-prefill fires.
   const drive = useCallback(async (id: string) => {
     const gen = generation.current;
     setDriveSteps([]);
     try {
-      const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: id, cliId: cliId(), goal: "reach" }) });
+      const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: id, cliId: cliId(), goal: "reach", application: nRef.current }) });
       if (generation.current !== gen) return; // left mid-drive
       if (!r.body) {
         setError("The agent couldn't start.");
@@ -148,7 +160,13 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
             continue;
           }
           if (ev.t === "step") setDriveSteps((p) => [...p, ev as DriveStep]);
-          else if (ev.t === "done") {
+          else if (ev.t === "unsupported") {
+            const followUp = sessionFollowUp(ev);
+            if (followUp.kind === "unsupported") {
+              finished = true;
+              showRefusal(followUp);
+            }
+          } else if (ev.t === "done") {
             finished = true;
             setFields(ev.fields ?? []);
             if (ev.title) setTitle(ev.title);
@@ -216,11 +234,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       }
       const followUp = sessionFollowUp(d);
       if (followUp.kind === "unsupported") {
-        setBlockedAts({ message: followUp.message, postingUrl: followUp.postingUrl, checklistHref: followUp.checklistHref });
-        if (followUp.postingUrl) setUrl(followUp.postingUrl);
-        setError(followUp.message);
-        setStatus("error");
-        pendingPrefill.current = false;
+        showRefusal(followUp);
         return;
       }
       if (d.error) {
@@ -259,12 +273,12 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setStatus("prefilling");
     setError("");
     setPrefillLog([]);
-    const applyAnswers = (raw: Record<string, { value?: string; needs_confirmation?: boolean }>) => {
+    const applyAnswers = (raw: Record<string, { value?: string; needs_confirmation?: boolean; reason?: string }>) => {
       const a: Record<string, string> = {};
       const m: Record<string, Meta> = {};
       for (const [id, v] of Object.entries(raw)) {
         a[id] = v?.value ?? "";
-        m[id] = { needsConfirmation: !!v?.needs_confirmation };
+        m[id] = { needsConfirmation: !!v?.needs_confirmation, ...(typeof v?.reason === "string" ? { reason: v.reason } : {}) };
       }
       setAnswers(a);
       editedRef.current = new Set();
@@ -295,7 +309,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
           const line = buf.slice(0, nl).trim();
           buf = buf.slice(nl + 1);
           if (!line) continue;
-          let ev: { t?: string; m?: string; el?: number; raw?: string; answers?: Record<string, { value?: string; needs_confirmation?: boolean }>; count?: number; truncated?: boolean };
+          let ev: { t?: string; m?: string; el?: number; raw?: string; answers?: Record<string, { value?: string; needs_confirmation?: boolean; reason?: string }>; count?: number; truncated?: boolean };
           try {
             ev = JSON.parse(line);
           } catch {
@@ -357,6 +371,11 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       // Also stops the escalation below from starting an agent drive on a
       // session the user has already walked away from.
       if (generation.current !== gen) return; // left mid-fill
+      const refusal = sessionFollowUp(d);
+      if (refusal.kind === "unsupported") {
+        showRefusal(refusal);
+        return;
+      }
       if (d.error) {
         setError(d.error);
         setStatus("error");
@@ -409,6 +428,10 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       if (controller.signal.aborted || generation.current !== gen) return; // left mid-fill
       const result = await readFillResult(r, (step) => setDriveSteps((p) => [...p, step]), () => generation.current === gen, controller.signal);
       if (!result || controller.signal.aborted || generation.current !== gen) return; // left mid-fill
+      if (result.status === "unsupported") {
+        showRefusal(result);
+        return;
+      }
       const outcome = screenForFill(result);
       const gaps = "gaps" in outcome && outcome.gaps?.length ? outcome.gaps : [];
       if (gaps.length || outcome.status === "done") {

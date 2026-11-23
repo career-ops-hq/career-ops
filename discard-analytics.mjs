@@ -31,6 +31,7 @@ import { join } from 'path';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { parseDate } from './lib/parse-date.mjs';
 
 /**
  * Parse a discard log's contents into entries.
@@ -193,7 +194,15 @@ if (isMainModule(import.meta.url)) {
   const filterReason = argValue('--reason');
   const parsedTopN = Number(argValue('--top') || '10');
   const topN = Number.isInteger(parsedTopN) && parsedTopN > 0 ? parsedTopN : 10;
-  const sinceDate = argValue('--since');
+  const sinceArg = argValue('--since');
+  // The filter compares --since with each ISO timestamp as text, so a value that
+  // is not a real YYYY-MM-DD date filtered silently wrong: "2026-11-1" dropped
+  // November 1-9, "2026/11/01" dropped every entry and "11/01/2026" kept them all.
+  if (sinceArg !== null && !parseDate(sinceArg)) {
+    console.error(`Error: --since expects a date as YYYY-MM-DD, got "${sinceArg}"\n${USAGE}`);
+    process.exit(1);
+  }
+  const sinceDate = sinceArg?.trim() ?? null;
   const customLog = argValue('--log');
 
   const logFile = customLog || join(getCareerOpsRoot(), 'data/discard.log');

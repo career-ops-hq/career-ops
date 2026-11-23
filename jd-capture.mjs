@@ -15,7 +15,8 @@
  * report 64 never picks up report 640's capture.
  */
 
-import { readdirSync, statSync } from 'fs';
+import { createHash } from 'crypto';
+import { lstatSync, readdirSync, statSync } from 'fs';
 import { join, extname } from 'path';
 
 const SLUG_MAX = 60;
@@ -148,5 +149,120 @@ export function findCaptureForReport(jdsDir, reportNum, { companySlug } = {}) {
     filename: chosen.name,
     ext: extname(chosen.name),
     candidates: byRecency.map(e => e.name),
+  };
+}
+
+const CAPTURE_EXTENSIONS = new Set(['.md', '.txt', '.html', '.pdf']);
+
+/** Shared allow-list for generated names and URL-based capture lookup. */
+export function isSupportedCaptureExtension(extension) {
+  return CAPTURE_EXTENSIONS.has(extension);
+}
+
+/**
+ * Validate and return the raw posting URL, trimmed only at its outer edges.
+ * URL identity deliberately hashes this value without serializing the URL object.
+ *
+ * @param {string} value
+ * @returns {string}
+ */
+export function validateCaptureUrl(value) {
+  const raw = String(value ?? '').trim();
+  if (!/^https?:\/\//i.test(raw) || /[\\|\s\p{Cc}]/u.test(raw) || /%(?![\da-f]{2})/i.test(raw)) {
+    throw new TypeError('url must be a valid absolute http(s) URL without internal whitespace, controls, backslashes, pipes, or malformed escapes');
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new TypeError('url must be a valid absolute http(s) URL');
+  }
+  const authority = /^https?:\/\/([^/?#]*)/i.exec(raw)?.[1] || '';
+  if (!['http:', 'https:'].includes(parsed.protocol) || !authority || !parsed.hostname ||
+      parsed.username || parsed.password || authority.includes('@')) {
+    throw new TypeError('url must be an absolute http(s) URL with a hostname and no credentials');
+  }
+  return raw;
+}
+
+/**
+ * The URL identity every capture filename carries.
+ *
+ * `archive-posting.mjs` writes `{date}_{company}_{role}_{sha256(url)[0:16]}` and
+ * `capture-jd.mjs` writes the same identity with a `.md` extension, so a capture
+ * can be found from the URL alone — no report number, no date, no re-scraped
+ * company or role. Hashing the raw URL string (not a normalized form) is
+ * deliberate: it is what the existing captures on disk already contain, and
+ * changing it would orphan every one of them.
+ *
+ * @param {string} url
+ * @returns {string} 16 lowercase hex characters.
+ */
+export function captureIdentity(url) {
+  return createHash('sha256').update(String(url ?? '')).digest('hex').slice(0, 16);
+}
+
+/**
+ * Find the capture written for `url`, if one exists.
+ *
+ * Used by `auto-pipeline` Step 0 to read a JD the user already captured instead
+ * of opening a browser for it. Text captures are preferred over PDFs because
+ * they are what the model reads directly; among equals the most recent wins.
+ *
+ * @param {string} jdsDir            Directory holding captures (usually jds/).
+ * @param {string} url               The posting URL as it was captured.
+ * @param {object} [opts]
+ * @param {string[]} [opts.extensions] Supported extensions to consider, in preference order.
+ * @returns {{path: string, filename: string, ext: string, candidates: string[]}|null}
+ *   null when the URL is invalid or no regular non-symlink capture carries its identity.
+ */
+export function findCaptureForUrl(jdsDir, url, { extensions = ['.md', '.txt', '.html', '.pdf'] } = {}) {
+  let raw;
+  try {
+    raw = validateCaptureUrl(url);
+  } catch {
+    return null;
+  }
+
+  const identity = captureIdentity(raw);
+  let entries;
+  try {
+    entries = readdirSync(jdsDir);
+  } catch {
+    return null; // No captures directory yet — nothing to resolve, not an error.
+  }
+
+  const preferredExtensions = extensions
+    .map(extension => String(extension).toLowerCase())
+    .filter(extension => CAPTURE_EXTENSIONS.has(extension));
+  const identitySuffix = new RegExp(`_${identity}(?:-(?:[2-9]|[1-9]\\d+))?$`);
+  const matches = entries.filter(name => {
+    const extension = extname(name).toLowerCase();
+    if (!CAPTURE_EXTENSIONS.has(extension) || !preferredExtensions.includes(extension)) return false;
+    const stem = name.slice(0, -extname(name).length);
+    return identitySuffix.test(stem);
+  });
+  if (matches.length === 0) return null;
+
+  const rank = (name) => preferredExtensions.indexOf(extname(name).toLowerCase());
+  const byPreference = matches
+    .map(name => {
+      try {
+        const fileStat = lstatSync(join(jdsDir, name));
+        if (!fileStat.isFile() || fileStat.isSymbolicLink()) return null;
+        return { name, mtimeMs: fileStat.mtimeMs };
+      } catch { return null; } // Missing or inaccessible files are not candidates.
+    })
+    .filter(Boolean)
+    .sort((a, b) => rank(a.name) - rank(b.name) || b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name));
+  if (byPreference.length === 0) return null;
+
+  const chosen = byPreference[0];
+  return {
+    path: join(jdsDir, chosen.name),
+    filename: chosen.name,
+    ext: extname(chosen.name),
+    candidates: byPreference.map(e => e.name),
   };
 }

@@ -146,9 +146,19 @@ const FIXTURE_AVATAR = join(ROOT, 'tests', 'fixtures', 'avatar-8x8.png');
     pass('hiredRows finds exactly the Hired tracker rows');
   } else fail(`hiredRows: ${JSON.stringify(rows)}`);
 
-  const weeks = weeksFromScanHistory('2026-07-01\tx\ty\n2026-07-15\tx\ty\n', '2026-08-20');
-  if (weeks === 7) pass('weeks derive from the EARLIEST scan date (7 weeks)');
+  // scan-history.tsv puts the url first and first_seen second. A fixture with
+  // the date first passed while every real file gave no weeks at all.
+  const history = 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\n'
+    + 'https://jobs.example.com/2\t2026-07-15\tgreenhouse\tEngineer\tGlobex\tadded\n'
+    + 'https://jobs.example.com/1\t2026-07-01\tashby\tEngineer\tAcme\tadded\n';
+  const weeks = weeksFromScanHistory(history, '2026-08-20');
+  if (weeks === 7) pass('weeks derive from the EARLIEST first_seen date (7 weeks)');
   else fail(`weeks math wrong: ${weeks}`);
+  // The oldest row goes first here, so dropping the first data row changes
+  // the answer (the July 15 row alone gives 5 weeks, not 7).
+  const headerless = weeksFromScanHistory(history.split('\n').slice(1, 3).reverse().join('\n') + '\n', '2026-08-20');
+  if (headerless === 7) pass('a headerless scan-history keeps its first row');
+  else fail(`headerless scan-history gave ${headerless}`);
 
   const url = buildIssueUrl({ role: 'Data Engineer', story: 'a & b', feature: '', timeToHire: '7 weeks', anonymity: 'role' });
   if (url.startsWith('https://github.com/career-ops-hq/career-ops/issues/new?') &&

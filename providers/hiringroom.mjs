@@ -99,7 +99,7 @@ export function parseHiringRoomJobs(html, origin, company = 'HiringRoom') {
 
     const titleM = block.match(/name__vacancy[^>]*>([\s\S]*?)<\/h4>/i);
     if (!titleM) continue;
-    const title = decodeEntities(titleM[1].replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+    const title = decodeEntities(titleM[1].replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag))).replace(/\s+/g, ' ').trim();
     if (!title) continue;
 
     const url = origin + href;
@@ -119,7 +119,7 @@ const VACANCY_PATH_RE = /^\/jobs\/get_vacancy\/[a-f0-9]+$/i;
 
 /** @param {string} s */
 function htmlToText(s) {
-  return decodeEntities(s.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').replace(/\s+([.,;:])/g, '$1').trim();
+  return decodeEntities(s.replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag))).replace(/\s+/g, ' ').replace(/\s+([.,;:])/g, '$1').trim();
 }
 
 /** @param {unknown} loc */

@@ -747,7 +747,7 @@ Importance измеряет, насколько требование весом�
 (список из 15-20 ключевых слов из вакансии для ATS-оптимизации)
 
 ## Keyword Coverage
-(генерируется `keyword-match.mjs` (1b) — покрытие в %, present, thin, missing)
+(генерируется `keyword-match.mjs` (1b) — покрытие в %, present, missing)
 
 ## Job Description (archived verbatim)
 (полный текст вакансии, вставленный дословно — см. требование ниже)

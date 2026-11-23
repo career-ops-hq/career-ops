@@ -10,7 +10,7 @@
  * is that place: an append-only queue the agent drains at the start of a
  * session.
  *
- *   data/agent-inbox.md
+ *   <data root>/data/agent-inbox.md   (CAREER_OPS_INBOX overrides)
  *     - [ ] <stamp> — <request>          (pending)
  *     - [x] <stamp> — <request> → result: <one line>   (resolved)
  *
@@ -36,12 +36,25 @@ import {
   readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync,
   openSync, fstatSync, readSync, closeSync, realpathSync, statSync,
 } from 'fs';
-import { dirname } from 'path';
+import { dirname, join, resolve as resolvePath } from 'path';
+import { fileURLToPath } from 'url';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { writeFileAtomic } from './tracker-utils.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const PATH = process.env.CAREER_OPS_INBOX || 'data/agent-inbox.md';
+const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
+const DEFAULT_REL = 'data/agent-inbox.md';
+// The inbox is user data, so it lives under the data root like every other
+// data/ file (learn.mjs reads it from there). It used to be relative to the
+// working directory, so a plugin install, whose scripts run from the plugin
+// copy, queued items into a folder Claude Code replaces on update.
+// CAREER_OPS_INBOX still wins, and a relative value resolves against the
+// working directory like the other path overrides.
+const INBOX_OVERRIDE = process.env.CAREER_OPS_INBOX?.trim();
+const DATA_ROOT = INBOX_OVERRIDE ? null : getCareerOpsRoot();
+const PATH = INBOX_OVERRIDE ? resolvePath(INBOX_OVERRIDE) : join(DATA_ROOT, DEFAULT_REL);
 
 const HEADER = [
   '# Agent Inbox',
@@ -67,13 +80,19 @@ function stamp(now = new Date()) {
 function ensureGitignored() {
   // The inbox is personal data. On installs whose .gitignore predates this
   // feature, make sure the default path is ignored so a first `add` can't
-  // accidentally commit it. Only manages the default, non-overridden path.
-  if (process.env.CAREER_OPS_INBOX || PATH !== 'data/agent-inbox.md') return;
+  // accidentally commit it. Only manages the default, non-overridden path, and
+  // only when the data root is the code checkout: a separate data root (an
+  // environment variable, the marker, a plugin install) is not that checkout's
+  // working tree, and a plugin copy's .gitignore is not ours to edit. Compare
+  // real paths: CAREER_OPS_ROOT may name a symlink to the checkout itself.
+  if (!DATA_ROOT) return;
   try {
-    if (!existsSync('.gitignore')) return; // not a git checkout we should touch
-    const text = readFileSync('.gitignore', 'utf8');
-    if (text.split('\n').some((l) => l.trim() === PATH)) return; // already ignored
-    writeFileSync('.gitignore', text.replace(/\s*$/, '') + `\n${PATH}\n`);
+    if (realpathSync(DATA_ROOT) !== realpathSync(CODE_ROOT)) return;
+    const gitignore = join(DATA_ROOT, '.gitignore');
+    if (!existsSync(gitignore)) return; // not a git checkout we should touch
+    const text = readFileSync(gitignore, 'utf8');
+    if (text.split('\n').some((l) => l.trim() === DEFAULT_REL)) return; // already ignored
+    writeFileSync(gitignore, text.replace(/\s*$/, '') + `\n${DEFAULT_REL}\n`);
   } catch { /* best effort — never block queuing on this */ }
 }
 
@@ -146,21 +165,26 @@ function parseItems() {
 }
 
 function opt(name, def = '') {
-  const i = process.argv.indexOf('--' + name);
-  if (i < 0) return def;
-  const v = process.argv[i + 1];
-  return v && !v.startsWith('--') ? v : def;
+  const [first] = optAll(name);
+  return first || def;
 }
 
-// Every value given for a repeatable flag, in argv order. An occurrence with no
-// value yields '' rather than being dropped, so the caller can reject it:
-// opt() reads only the first occurrence and would never see a later bare one.
+// Every value given for a repeatable flag, in argv order, in both spellings:
+// `--expect Acme` and `--expect=Acme`. Matching only the bare token dropped the
+// second: the guard was skipped and `--result=...` recorded nothing, at exit 0.
+// An occurrence with no value yields '' rather than being dropped, so the
+// caller can reject it: reading only the first occurrence would never see a
+// later bare one.
 function optAll(name) {
+  const flag = '--' + name;
   const values = [];
   process.argv.forEach((arg, i) => {
-    if (arg !== '--' + name) return;
-    const v = process.argv[i + 1];
-    values.push(v && !v.startsWith('--') ? v : '');
+    if (arg.startsWith(`${flag}=`)) {
+      values.push(arg.slice(flag.length + 1));
+    } else if (arg === flag) {
+      const v = process.argv[i + 1];
+      values.push(v && !v.startsWith('--') ? v : '');
+    }
   });
   return values;
 }
@@ -242,6 +266,14 @@ function list() {
 async function resolve() {
   const n = Number(process.argv[3]);
   if (!Number.isInteger(n) || n < 1) fail('resolve needs a 1-based item number (see `list`)');
+  // Before the lock and before anything is written: a flag resolve does not
+  // know (a mistyped --expect among them) was skipped, so the item was
+  // resolved with the guard the caller meant to set turned off. A flag with no
+  // value is refused too: a bare --result recorded nothing at exit 0.
+  validateFlags(process.argv.slice(4), ['--expect', '--result', '--help', '-h'], USAGE, {
+    valueFlags: ['--expect', '--result'],
+    requireOperand: true,
+  });
   const outcome = await withPipelineLock(PATH, () => {
     // The item snapshot, line lookup, and rewrite are one transaction. An
     // add between the old read and write was acknowledged, then overwritten by

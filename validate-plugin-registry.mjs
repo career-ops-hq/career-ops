@@ -220,7 +220,8 @@ if (isMainModule(import.meta.url)) {
     const { auditRegistryEntry } = await import('./plugin-install.mjs');
     const { loadRegistry } = await import('./plugins/_registry.mjs');
     for (const e of loadRegistry(root).plugins) {
-      for (const p of auditRegistryEntry(e.repo, e.sha, e.id)) problems.push(`${e.name}: ${p}`);
+      const warn = (w) => console.log(`⚠ ${e.name}: ${w}`);
+      for (const p of auditRegistryEntry(e.repo, e.sha, e.id, warn)) problems.push(`${e.name}: ${p}`);
     }
   }
   // --check-stale: compare each pin against the plugin's latest published

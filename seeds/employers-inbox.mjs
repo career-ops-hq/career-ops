@@ -36,7 +36,7 @@ export const INBOX_DIR = 'employers/inbox';
 export const INBOX_MAX_LINES = 5000;
 
 /** The keys an inbox line may have, in the order the importer writes them. */
-export const INBOX_LINE_KEYS = Object.freeze(['ats', 'region', 'board', 'workday_host', 'name', 'website']);
+export const INBOX_LINE_KEYS = Object.freeze(['ats', 'region', 'board', 'workday_host', 'name', 'website', 'own_domain_mark']);
 export const INBOX_LINE_REQUIRED = Object.freeze(['ats', 'board', 'name']);
 
 /**
@@ -147,6 +147,7 @@ export function inboxLineToRow(line, { source, contribution, added }) {
   row.careers_url = buildBoardUrl(c);
   row.name = line.name;
   if (line.website !== undefined) row.website = line.website;
+  if (line.own_domain_mark !== undefined) row.own_domain_mark = line.own_domain_mark;
   row.source = source;
   row.contribution = contribution;
   row.added = added;

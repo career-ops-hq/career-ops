@@ -7,7 +7,7 @@ import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const UNAVAILABLE = { available: false, onboardingNeeded: false, missing: [], warnings: [] };
+const UNAVAILABLE = { available: false, onboardingNeeded: false, missing: [], unpersonalized: [], warnings: [] };
 
 // Orchestrates the core's own cold-start check (doctor.mjs --json) — the SAME
 // source of truth the CLI uses to decide onboarding. We never reimplement the
@@ -36,7 +36,7 @@ export async function GET() {
     // A payload without the verdict is not a verdict: `!!undefined` would read
     // it as "no onboarding needed", the same false all-clear by another road.
     if (typeof j?.onboardingNeeded !== "boolean") throw new Error("doctor --json without onboardingNeeded");
-    return Response.json({ available: true, onboardingNeeded: j.onboardingNeeded, missing: j.missing ?? [], warnings: j.warnings ?? [] });
+    return Response.json({ available: true, onboardingNeeded: j.onboardingNeeded, missing: j.missing ?? [], unpersonalized: j.unpersonalized ?? [], warnings: j.warnings ?? [] });
   } catch {
     return Response.json(UNAVAILABLE);
   }

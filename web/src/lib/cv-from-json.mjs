@@ -185,7 +185,7 @@ export async function materializeTailoredCv({
   const payload = {
     ...envelope.payload,
     experience: Array.isArray(envelope.payload.experience)
-      ? envelope.payload.experience.map((entry) => (entry && typeof entry === "object" ? { ...entry } : entry))
+      ? envelope.payload.experience.map(copyEntry)
       : envelope.payload.experience,
   };
   // The sheet is envelope.format. The body width is payload.page_format.
@@ -230,6 +230,25 @@ export async function materializeTailoredCv({
       return { ok: false, error: `The tailored CV HTML was not written: ${err.message}` };
     }
 
+    const repair = await restoreDriftedBullets({ coreRoot, dataRoot, payload, html });
+    if (repair.warnings.length) {
+      try {
+        fs.writeFileSync(scratch.json, JSON.stringify(payload));
+        const rebuilt = await runNode(dataRoot, [
+          path.join(coreRoot, "build-cv-html.mjs"),
+          scratch.json,
+          scratch.html,
+          template,
+        ]);
+        if (rebuilt.ok) {
+          html = fs.readFileSync(scratch.html, "utf8");
+          warnings.push(...repair.warnings);
+        }
+      } catch {
+        // Keep the first build. generate-pdf's fact gate still decides.
+      }
+    }
+
     const report = reportPath(dataRoot, reportFile);
     if (report && fs.existsSync(/* turbopackIgnore: true */ report)) {
       warnings.push(...await keywordWarnings(coreRoot, dataRoot, report, scratch.html));
@@ -247,6 +266,141 @@ export async function materializeTailoredCv({
   } finally {
     if (!keepScratch) fs.rmSync(scratch.dir, { recursive: true, force: true });
   }
+}
+
+function copyEntry(entry) {
+  if (!entry || typeof entry !== "object") return entry;
+  return Array.isArray(entry.bullets) ? { ...entry, bullets: [...entry.bullets] } : { ...entry };
+}
+
+// stripMarkup first, as the verifier does for drift.line: an entity, tag or
+// trademark sign left in the payload bullet would stop it matching its drift.
+function bulletKey(check, text) {
+  return check.normalizeClaim(check.stripMarkup(text)).replace(/[.;:,]+$/g, "").trim();
+}
+
+const LIST_ITEM_RE = /^\s*(?:[-*+•‣◦⁃∙]|\d+[.)])\s+/u;
+const BLOCK_START_RE = /^\s*(?:[-*+•‣◦⁃∙]\s|\d+[.)]\s|#|\||>|<)|^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/u;
+
+/**
+ * Whole bullets and paragraphs of a Markdown source, soft-wrapped lines joined,
+ * list markers dropped. drift.sourceLine is one sentence of one of these; the
+ * restore writes the whole block back so its other sentences are not lost.
+ */
+function sourceBlocks(text) {
+  const blocks = [];
+  let current = null;
+  for (const line of String(text ?? "").split(/\r?\n/)) {
+    if (!line.trim()) { current = null; continue; }
+    if (current === null || BLOCK_START_RE.test(line)) {
+      current = { heading: /^\s*#/.test(line), text: line.replace(LIST_ITEM_RE, "").trim() };
+      blocks.push(current);
+    } else {
+      current.text += ` ${line.trim()}`;
+    }
+  }
+  return blocks.filter((block) => !block.heading).map((block) => block.text);
+}
+
+function companyKey(cvMarkdown, name) {
+  return cvMarkdown.toPlainText(String(name ?? "")).toLowerCase().trim();
+}
+
+/**
+ * cv.md's experience blocks grouped by role, keyed by company. The roles come
+ * from the core's cv-markdown, the same reader parseBaseCv uses. Each role's
+ * lines then go through sourceBlocks rather than parseBaseCv, because
+ * parseBaseCv keeps only the first line of a bullet: a bullet soft-wrapped in
+ * cv.md (Pandoc wraps at 72 columns by default) would be restored cut short.
+ */
+function cvBlocksByRole(cvMarkdown, cvMd) {
+  const roles = new Map();
+  for (const lines of cvMarkdown.findExperienceSections(cvMd)) {
+    let current = null;
+    for (const line of lines) {
+      const heading = cvMarkdown.parseCompanyHeading(line)
+        ?? (cvMarkdown.headingText(line, 3) !== null ? { company: cvMarkdown.headingText(line, 3) } : null);
+      if (heading) {
+        const key = companyKey(cvMarkdown, heading.company);
+        current = roles.get(key) ?? [];
+        roles.set(key, current);
+        continue;
+      }
+      if (current) current.push(line);
+    }
+  }
+  return new Map([...roles].map(([key, lines]) => [key, sourceBlocks(lines.join("\n"))]));
+}
+
+/**
+ * The full cv.md bullet of this role that a drift's anchor sentence belongs
+ * to, or null. Only one role is searched, so a sentence two roles share with
+ * different figures never carries one role's figure into the other. Two
+ * different blocks matching inside the role is ambiguous: null, the gate decides.
+ */
+function fullSourceBullet(check, blocks, sourceLine) {
+  const key = bulletKey(check, sourceLine);
+  if (!key || !blocks) return null;
+  const matches = new Set(blocks.filter((block) => bulletKey(check, block).includes(key)).map((block) => check.stripMarkup(block)));
+  return matches.size === 1 ? [...matches][0] : null;
+}
+
+function clip(text, max = 160) {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+/**
+ * The fact gate blocks a bullet whose verb the model changed ("Worked with"
+ * became "Ran"). The CLI repairs that by restoring the cv.md wording; this does
+ * the same on the local payload copy, once. It only replaces whole bullets a
+ * blocking drift finding points at. It never edits config, and generate-pdf's
+ * gate stays the final check. Any failure here leaves the first build as is.
+ *
+ * @returns {Promise<{warnings: string[]}>}
+ */
+async function restoreDriftedBullets({ coreRoot, dataRoot, payload, html }) {
+  const warnings = [];
+  try {
+    const check = await loadCore(coreRoot, "verify-cv-facts.mjs");
+    const cvMarkdown = await loadCore(coreRoot, "lib/cv-markdown.mjs");
+    const cvPath = path.join(dataRoot, "cv.md");
+    // Detection reads both files, as the gate does; replacement text comes from cv.md only.
+    const result = check.verifyFacts(html, {
+      sourcePaths: [cvPath, path.join(dataRoot, "article-digest.md")],
+      configPath: path.join(dataRoot, "config", "cv-facts.json"),
+    });
+    const drifts = (result?.unsupportedFacts ?? []).filter((fact) => fact.kind === "drift" && fact.blocking === true);
+    if (!drifts.length) return { warnings };
+    const rolesBlocks = cvBlocksByRole(cvMarkdown, fs.readFileSync(/* turbopackIgnore: true */ cvPath, "utf8"));
+    const entries = Array.isArray(payload.experience) ? payload.experience : [];
+    const restored = new Set();
+    for (const drift of drifts) {
+      if (typeof drift.line !== "string" || typeof drift.sourceLine !== "string") continue;
+      const claim = bulletKey(check, drift.line);
+      if (!claim) continue;
+      const added = Array.isArray(drift.added) && drift.added.length ? ` (not in cv.md: "${drift.added.join('", "')}")` : "";
+      // verifyFacts reports identical bullets once, so every copy in every role is
+      // checked, each against its own role in cv.md.
+      entries.forEach((entry, entryIndex) => {
+        if (!Array.isArray(entry?.bullets)) return;
+        // Without the whole bullet from this role, leave it: writing the one
+        // anchor sentence would drop its other sentences, and another role's
+        // bullet could carry another figure. The gate decides.
+        const source = fullSourceBullet(check, rolesBlocks.get(companyKey(cvMarkdown, entry.company)), drift.sourceLine);
+        if (!source) return;
+        entry.bullets.forEach((bullet, index) => {
+          const slot = `${entryIndex}:${index}`;
+          if (restored.has(slot) || typeof bullet !== "string" || !bulletKey(check, bullet).includes(claim)) return;
+          entry.bullets[index] = source;
+          restored.add(slot);
+          warnings.push(`Restored the cv.md wording for a bullet the fact check would block${added}. Tailored: "${clip(bullet)}" → cv.md: "${clip(source)}"`);
+        });
+      });
+    }
+  } catch {
+    return { warnings: [] };
+  }
+  return { warnings };
 }
 
 function reportPath(dataRoot, reportFile) {
@@ -272,9 +426,6 @@ async function keywordWarnings(coreRoot, dataRoot, report, htmlPath) {
     const warnings = [];
     if (Array.isArray(coverage.missing) && coverage.missing.length) {
       warnings.push(`Keywords missing from the tailored CV: ${coverage.missing.join(", ")}.`);
-    }
-    if (Array.isArray(coverage.thin) && coverage.thin.length) {
-      warnings.push(`Keywords used only once: ${coverage.thin.join(", ")}.`);
     }
     return warnings;
   } catch {

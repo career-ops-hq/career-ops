@@ -35,6 +35,7 @@ import { join } from 'path';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { matchedTitleKeywords, seenJobKey, PORTALS_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
 import { foldTitle } from './title-keywords.mjs';
+import { normalizeCompanyName } from './invite-match.mjs';
 import { parseScanHistoryLine } from './lib/scan-history-columns.mjs';
 import { parseScore, unwrapReportUrlToken } from './tracker-parse.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -122,28 +123,74 @@ export function readScoresByUrl(reports) {
   return map;
 }
 
-export function audit(titleFilter, history, scoresByUrl) {
-  // Keywords that compile to the same matcher are one keyword. matchedTitleKeywords
-  // returns one hit per entry, so a duplicate ("AI" twice, or "AI" and "ai")
-  // gave one title two hits, zeroed `unique` for both and called a load-bearing
-  // keyword redundant. The first spelling is kept; the rest are reported.
-  const raw = Array.isArray(titleFilter?.positive) ? titleFilter.positive : [];
+// Keywords that compile to the same matcher are one keyword. matchedTitleKeywords
+// returns one hit per entry, so a duplicate ("AI" twice, or "AI" and "ai")
+// gave one title two hits, zeroed `unique` for both and called a load-bearing
+// keyword redundant. The first spelling is kept; the rest are reported.
+function dedupePositives(list) {
   const byKey = new Map();
   const duplicates = [];
-  for (const k of raw) {
+  for (const k of Array.isArray(list) ? list : []) {
     if (typeof k !== 'string' || !k.trim()) continue;
     const key = foldTitle(k).trim();
     if (byKey.has(key)) duplicates.push(k);
     else byKey.set(key, k);
   }
-  const positives = [...byKey.values()];
+  return { positives: [...byKey.values()], duplicates };
+}
+
+const newStat = (keyword) => ({ keyword, hits: 0, unique: 0, scored: 0, scoreSum: 0, examples: [] });
+
+/**
+ * The tracked_companies entries with their own title_filter.positive (#7244),
+ * keyed by normalized company name. An entry without a usable positive list
+ * keeps the global positives, so it is left out. Entries that normalize to one
+ * name pool their keywords. A row is matched to its entry by `company`, which a
+ * provider fills with the entry's name; job_boards entries are not covered, as
+ * an aggregator records each posting's own employer.
+ *
+ * @returns {Map<string, {company: string, positive: string[]}>}
+ */
+export function companyTitleFilters(cfg) {
+  const byCompany = new Map();
+  const entries = Array.isArray(cfg?.tracked_companies) ? cfg.tracked_companies : [];
+  for (const entry of entries) {
+    const own = entry?.title_filter;
+    if (!own || typeof own !== 'object' || Array.isArray(own)) continue;
+    const { positives } = dedupePositives(own.positive);
+    const key = normalizeCompanyName(entry.name);
+    if (!positives.length || !key) continue;
+    const prior = byCompany.get(key);
+    if (prior) prior.positive.push(...positives);
+    else byCompany.set(key, { company: String(entry.name), positive: [...positives] });
+  }
+  return byCompany;
+}
+
+export function audit(titleFilter, history, scoresByUrl, companyFilters = new Map()) {
+  const { positives, duplicates } = dedupePositives(titleFilter?.positive);
   const filter = { ...titleFilter, positive: positives };
 
-  const stats = new Map(positives.map((k) => [k, { keyword: k, hits: 0, unique: 0, scored: 0, scoreSum: 0, examples: [] }]));
+  const stats = new Map(positives.map((k) => [k, newStat(k)]));
+  // A company's own filter replaces the global one: its rows are replayed against it.
+  const scopes = new Map();
+  for (const [key, { company, positive }] of companyFilters) {
+    const own = dedupePositives(positive).positives;
+    scopes.set(key, {
+      filter: { positive: own },
+      stats: new Map(own.map((k) => [k, { company, ...newStat(k) }])),
+    });
+  }
+  const companyKeys = new Map();
+  const companyKey = (name) => {
+    if (!companyKeys.has(name)) companyKeys.set(name, normalizeCompanyName(name));
+    return companyKeys.get(name);
+  };
   let unmatched = 0;
 
   for (const row of history) {
-    const hit = matchedTitleKeywords(row.title, filter);
+    const scope = scopes.size && row.company ? scopes.get(companyKey(row.company)) : undefined;
+    const hit = matchedTitleKeywords(row.title, scope ? scope.filter : filter);
     if (hit.length === 0) {
       // Present in history but matched nothing: the filter changed since this
       // row was recorded. Worth surfacing rather than silently dropping.
@@ -152,7 +199,7 @@ export function audit(titleFilter, history, scoresByUrl) {
     }
     const score = row.url ? scoresByUrl.get(seenJobKey(row.url)) : undefined;
     for (const k of hit) {
-      const s = stats.get(k);
+      const s = (scope ? scope.stats : stats).get(k);
       if (!s) continue;
       s.hits++;
       if (hit.length === 1) s.unique++;
@@ -161,11 +208,13 @@ export function audit(titleFilter, history, scoresByUrl) {
     }
   }
 
-  const rows = [...stats.values()].map((s) => ({
+  const finish = (map) => [...map.values()].map((s) => ({
     ...s,
     avgScore: s.scored ? Number((s.scoreSum / s.scored).toFixed(2)) : null,
-  }));
-  rows.sort((a, b) => b.unique - a.unique || b.hits - a.hits || a.keyword.localeCompare(b.keyword));
+  })).sort((a, b) => b.unique - a.unique || b.hits - a.hits || a.keyword.localeCompare(b.keyword));
+  const rows = finish(stats);
+  const companyRows = [...scopes.values()].flatMap((scope) => finish(scope.stats))
+    .sort((a, b) => b.unique - a.unique || b.hits - a.hits || a.company.localeCompare(b.company) || a.keyword.localeCompare(b.keyword));
 
   return {
     offers: history.length,
@@ -179,6 +228,8 @@ export function audit(titleFilter, history, scoresByUrl) {
     // of these is a candidate someone might pay to evaluate.
     noisy: rows.filter((r) => r.hits >= 5 && r.avgScore !== null && r.avgScore < 2.5),
     rows,
+    // Keywords of a company's own title_filter, with that company's rows.
+    companyRows,
   };
 }
 
@@ -214,6 +265,12 @@ function printSummary(result) {
   for (const r of carrying) {
     console.log(`    ${String(r.unique).padStart(4)} unique  ${String(r.hits).padStart(4)} hits  ${r.avgScore !== null ? `avg ${r.avgScore}` : '  —  '}  ${r.keyword}`);
   }
+  if (result.companyRows.length) {
+    console.log('\n  COMPANY-LEVEL KEYWORDS — a company\'s own title_filter replaces the global one for its offers:');
+    for (const r of result.companyRows.filter((x) => x.hits > 0).slice(0, 12)) {
+      console.log(`    ${String(r.unique).padStart(4)} unique  ${String(r.hits).padStart(4)} hits  ${r.avgScore !== null ? `avg ${r.avgScore}` : '  —  '}  ${r.company}  ${r.keyword}`);
+    }
+  }
   console.log('\n  `unique` is the number to tune on. A keyword with hits but no unique can go;');
   console.log('  one with few hits and all of them unique is the only reason those were seen.');
 }
@@ -233,7 +290,7 @@ function main() {
       .filter((f) => f.endsWith('.md') && !f.includes('RESERVED'))
       .map((name) => ({ name, text: readFileSync(join(REPORTS_DIR, name), 'utf-8') }))
     : [];
-  const result = audit(cfg.title_filter, history, readScoresByUrl(reports));
+  const result = audit(cfg.title_filter, history, readScoresByUrl(reports), companyTitleFilters(cfg));
 
   if (args.includes('--summary')) printSummary(result);
   else console.log(JSON.stringify(result, null, 2));

@@ -18,6 +18,7 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `ofertas.md` | `ofertas` | Multi-job comparison |
 | `auto-pipeline.md` | (paste a JD/URL) | Full automatic pipeline (evaluate + PDF + tracker) on a pasted JD/URL |
 | `pipeline.md` | `pipeline` | Process the URL inbox (`data/pipeline.md`) |
+| `capture.md` | `capture` | Record a posting in the inbox without evaluating it |
 | `scan.md` | `scan` | Portal scanner (job discovery) |
 | `discover.md` | `discover` | Resolve company names to scannable ATS boards for `portals.yml` |
 | `triage.md` | `triage` | Fast first-pass quick score before full evaluation |
@@ -30,6 +31,7 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `text.md` | `text` | Tailored markdown CV (no PDF) |
 | `cover.md` | `cover` | Cover letter generator |
 | `email.md` | `email` | Application email drafts (draft-only) |
+| `proposal.md` | `proposal` | Job/Upwork proposal drafts as markdown files (draft-only; never submits) |
 | `contacto.md` | `contacto` | LinkedIn outreach messages |
 | `deep.md` | `deep` | Deep company-research prompt |
 | `gambit.md` | `gambit` | Create-a-role pitch for a role the company has not posted (records `Speculative`) |
@@ -68,7 +70,7 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `_files.md` | The main scripts and data files with what each does, and the `jds/` capture filenames |
 | `_headless.md` | Headless command per CLI, headless worker permissions, report-number reservation for fan-outs |
 | `_markets.md` | The market mode sets and how a `language.modes_dir` list works |
-| `_onboarding.md` | First-run setup steps, read when `doctor.mjs --json` reports `onboardingNeeded` (AGENTS.md → First Run) |
+| `_onboarding.md` | First-run setup steps, read when `doctor.mjs --json` reports `onboardingNeeded` and no `dataRootError` (AGENTS.md → First Run) |
 | `_tracker-tsv.md` | Tracker-addition TSV format, read before writing a TSV to `batch/tracker-additions/` |
 
 AGENTS.md is loaded into every session and stays under 40,000 characters, so reference only one workflow needs lives in these `_`-prefixed files and AGENTS.md points to them.

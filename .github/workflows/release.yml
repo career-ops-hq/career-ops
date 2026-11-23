@@ -58,6 +58,11 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing in this file pushes over git: release-please gets its own App
+          # token, and the Latest re-assertion uses `gh release edit`. Keep the
+          # checkout tokenless.
+          persist-credentials: false
       # A tag on the wrong commit would publish whatever version that commit
       # carries: stop unless the release and scaffolder/package.json agree.
       - name: Check the release tag matches the scaffolder version
@@ -103,6 +108,11 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing in this file pushes over git: release-please gets its own App
+          # token, and the Latest re-assertion uses `gh release edit`. Keep the
+          # checkout tokenless.
+          persist-credentials: false
       - name: Keep the career-ops release marked as Latest
         env:
           GH_TOKEN: ${{ github.token }}

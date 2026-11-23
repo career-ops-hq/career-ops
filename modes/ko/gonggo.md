@@ -246,7 +246,7 @@ report를 저장하고 tracker에 기록한 뒤, `modes/oferta.md` -> Cover Lett
 (ATS 최적화를 위한 공고 키워드 15-20개)
 
 ## Keyword Coverage
-(`keyword-match.mjs` (1b)가 생성 -- coverage %, present, thin, missing)
+(`keyword-match.mjs` (1b)가 생성 -- coverage %, present, missing)
 
 ## Job Description (archived verbatim)
 (공고 전문을 그대로 붙여넣음 -- 아래 요구 사항 참고)

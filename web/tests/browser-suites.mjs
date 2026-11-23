@@ -44,11 +44,13 @@ process.env.TMPDIR = fs.realpathSync(os.tmpdir());
 // "disposable data" get blank: no tracker, and the fictional cv.md
 // assistant-focus needs.
 const SUITES = {
+  "role-change-radar": { url: "RADAR_TEST_URL", fixture: "pipeline-status" },
   "accessible-names": { url: "ACCESSIBLE_NAMES_TEST_URL", fixture: "pipeline-status" },
   "analytics-views": { url: "ANALYTICS_TEST_URL", root: "ANALYTICS_TEST_ROOT", fixture: "pipeline-status" },
   "apply-field-accessibility": { url: "APPLY_FIELDS_TEST_URL", fixture: "blank" },
   "assistant-confirmation-accessibility": { url: "ASSISTANT_CONFIRM_TEST_URL", fixture: "blank" },
   "assistant-focus": { url: "ASSISTANT_FOCUS_TEST_URL", fixture: "blank" },
+  "assistant-conversation-focus": { url: "ASSISTANT_CONVERSATION_FOCUS_TEST_URL", fixture: "blank" },
   "assistant-markdown-lazy": { url: "ASSISTANT_MARKDOWN_LAZY_TEST_URL", fixture: "blank" },
   "assistant-request-feedback": { url: "ASSISTANT_FEEDBACK_TEST_URL", fixture: "blank" },
   "assistant-status-recovery": { url: "ASSISTANT_STATUS_TEST_URL", fixture: "blank" },
@@ -59,6 +61,7 @@ const SUITES = {
   "cv-preview-lines": { url: "CV_PREVIEW_LINES_TEST_URL", fixture: "blank" },
   "cv-studio-keep": { url: "CV_STUDIO_KEEP_TEST_URL", root: "CV_STUDIO_KEEP_TEST_ROOT", fixture: "cv-studio" },
   "cv-studio-preview": { url: "CV_STUDIO_PREVIEW_TEST_URL", fixture: "cv-studio-preview" },
+  "cv-studio-restore-move": { url: "CV_STUDIO_RESTORE_TEST_URL", root: "CV_STUDIO_RESTORE_TEST_ROOT", fixture: "cv-studio-restore" },
   "cv-studio-undo": { url: "CV_STUDIO_UNDO_TEST_URL", root: "CV_STUDIO_UNDO_TEST_ROOT", fixture: "cv-studio" },
   "cv-upload": { url: "CV_UPLOAD_TEST_URL", root: "CV_UPLOAD_TEST_ROOT", fixture: "cv-upload" },
   "dialog-focus": { url: "DIALOG_FOCUS_TEST_URL", fixture: "pipeline-status" },
@@ -82,6 +85,7 @@ const SUITES = {
   "tracker-search": { url: "TRACKER_SEARCH_TEST_URL", root: "TRACKER_SEARCH_TEST_ROOT", fixture: "pipeline-status" },
   "worker-feedback": { url: "WORKER_FEEDBACK_TEST_URL", fixture: "blank" },
   "worker-gates": { url: "WORKER_GATE_TEST_URL", fixture: "blank" },
+  "worker-navigation": { url: "WORKER_NAVIGATION_TEST_URL", fixture: "inbox-undo" },
 };
 
 // Every var any suite reads, so a value from the caller's shell cannot point a
@@ -105,13 +109,17 @@ function makeRoot(fixture) {
   return result.stdout.trim();
 }
 
+const WINDOWS = process.platform === "win32";
+
 // detached, so the server and the next process server.mjs spawns share a
-// process group that stop() can signal in one call.
+// process group that stop() can signal in one call. Not on Windows: there
+// detached gives the child a console window of its own, one per suite, and
+// there is no process group to signal; stop() kills the tree instead.
 function startServer(root, port, log) {
   const env = { ...process.env, CAREER_OPS_ROOT: root, NEXT_TELEMETRY_DISABLED: "1" };
   for (const name of ["CAREER_OPS_DATA_DIR", "CAREER_OPS_TRACKER", "CAREER_OPS_WEB_ALLOWED_HOSTS", ...SUITE_VARS]) delete env[name];
   const child = spawn(process.execPath, ["server.mjs", "start", "-p", String(port)], {
-    cwd: WEB, env, detached: true, stdio: ["ignore", log, log],
+    cwd: WEB, env, detached: !WINDOWS, windowsHide: true, stdio: ["ignore", log, log],
   });
   const exited = new Promise((resolve) => child.once("exit", (code, signal) => resolve({ code, signal })));
   return { child, exited };
@@ -133,7 +141,16 @@ async function waitReady(url, server) {
   throw new Error(`server did not answer ${url} within ${READY_TIMEOUT_MS / 1000}s`);
 }
 
+// A negative pid (the process group) is POSIX only. On Windows that kill
+// throws, the server and its next child kept running after every suite, so
+// taskkill /T ends the tree from the server's pid down.
 async function stop(server) {
+  if (WINDOWS) {
+    if (server.child.exitCode !== null || server.child.signalCode !== null) return;
+    spawnSync("taskkill", ["/PID", String(server.child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+    await Promise.race([server.exited, new Promise((resolve) => setTimeout(resolve, 10_000))]);
+    return;
+  }
   try { process.kill(-server.child.pid, "SIGTERM"); } catch { return; }
   const timer = setTimeout(() => { try { process.kill(-server.child.pid, "SIGKILL"); } catch { /* gone */ } }, 10_000);
   await server.exited;

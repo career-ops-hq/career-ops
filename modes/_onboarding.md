@@ -34,7 +34,7 @@ Create `cv.md` from whatever they provide — clean markdown with standard secti
 #### Step 2: Profile (required)
 If `node doctor.mjs --json` `warnings` says the data-root `.env` sets `CAREER_OPS_PROFILE`, do not copy the example profile. Ask the user to export that variable in the shell (or shell profile) that starts the agent, then restart the session from it, or to remove the line from `.env`. A shell export does not reach an agent session that is already running, so run doctor again only after that.
 
-If `config/profile.yml` is missing, ask:
+If `config/profile.yml` is missing or doctor lists it in `unpersonalized` with no settings, ask:
 > "I need a few details to personalize the system:
 > - Your full name and email
 > - Your location and timezone
@@ -51,10 +51,12 @@ If `config/profile.yml` is missing, ask:
 Keep the answers for the writer in Step 3. Archetypes and targeting narrative go to `modes/_profile.md` or `config/profile.yml` — never `modes/_shared.md`.
 
 #### Step 3: Portals (recommended)
-If `portals.yml` is missing:
+If `portals.yml` is missing or doctor lists it in `unpersonalized` with no settings:
 > "I'll set up the job scanner with 180+ pre-configured companies. Want me to customize the search keywords for your target roles?"
 
-Then write both files in one run. Do not copy or hand-edit the templates. `templates/portals.example.yml` is about 160 KB, and the writer changes only the answered fields:
+When the profile already has settings and only portals need setup, read the configured profile. Take the candidate's full name, email and location from `candidate`, salary target and currency from `compensation`, country and timezone from `location`, and the target roles from `target_roles.primary`. Ask only for required values that are missing. Combine those values with the portal answers in the JSON below. Use `--only portals` for a missing portal file or `--force --only portals` after confirming the existing file still has no settings.
+
+When both files need setup, write both in one run. Do not copy or hand-edit the templates. `templates/portals.example.yml` is about 160 KB, and the writer changes only the answered fields:
 
 ```bash
 node onboard-write.mjs --answers - <<'JSON'
@@ -82,7 +84,7 @@ JSON
 - When `candidate.years_of_experience` is under 2 (or, when they gave none, `cv.md` shows under 2 years of work), or the archetypes they target are entry level (`level` Entry, Junior or Graduate), also ask whether every CV should fit on one page. A yes becomes `"cv": { "max_pages": 1 }`. Add `"strict_pages": true` only if they want a CV that runs over to fail rather than warn. Never set it without asking: with no answer, a CV may run to two pages.
 - `max_posting_age_days` defaults to 45. Tell them it also hides long-open roles on a company's own board. Set 0 only when they ask for older postings.
 - Contact fields they did not give are blanked, so the example person never reaches a CV.
-- Existing files are kept. Pass `--force` only when the user asks to redo setup. `node onboard-write.mjs --help` shows every field.
+- Existing files are kept by default. For each YAML prerequisite that doctor still reports as empty or comments-only, rerun `node onboard-write.mjs --answers - --force --only profile` or `node onboard-write.mjs --answers - --force --only portals` with the same answers JSON on stdin. Recheck that specific file immediately before replacing it and keep it if settings have since been added. Use the same data-root and file overrides as doctor, so the writer repairs the configured file. Rerun `node doctor.mjs --json` to confirm setup. For an existing file with settings, use `--force` only when the user asks to redo its setup. `node onboard-write.mjs --help` shows every field.
 
 The writer prints `{"written": [...], "kept": [...]}`. Do not read the templates first, and do not edit `portals.yml` or the answered profile fields afterward. To change an answer, rerun with `--force --only profile` or `--force --only portals` for the file that answer lives in. Leave `minimum` out when they gave none.
 
@@ -147,3 +149,12 @@ Then suggest automation:
 > "Want me to scan for new offers automatically? I can set up a recurring scan every few days so you don't miss anything. Just say 'scan every 3 days' and I'll configure it."
 
 If the user accepts, use the `/loop` or `/schedule` skill (if available) to set up a recurring scan entrypoint for their CLI (`/career-ops scan`, `/skill:career-ops scan` on Pi, or the equivalent Codex prompt). If those aren't available, point them to [docs/AUTOMATION.md](../docs/AUTOMATION.md) for copy-paste cron / launchd / Windows Task Scheduler recipes plus a zero-token triage-to-shortlist prompt, or remind them to run the scan mode periodically.
+
+## When the data root is refused
+
+If `node doctor.mjs --json` reports `dataRootError`, run none of the steps above: AGENTS.md → "First Run — Onboarding" has the stop rule. Doctor exits non-zero with `data_root` null, and `onboardingNeeded` stays true so that nothing proceeds on this root. The user corrects `dataRootError.source`, and that source decides how the correction reaches doctor:
+
+- **An environment variable** (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR`): a shell export does not reach an agent session that is already running. The user restarts the session from a shell that has the corrected value, and only then does a doctor rerun see it.
+- **The `.career-ops-data` marker file:** editing the file is enough. Doctor re-reads it on each run, so no restart is needed.
+
+Then run doctor again.
