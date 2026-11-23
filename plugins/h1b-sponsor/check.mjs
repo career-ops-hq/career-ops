@@ -143,6 +143,7 @@ function parseArgs(argv) {
     } else if (a.startsWith('-')) {
       const name = a.split('=')[0];
       if (!known.has(name)) args.error = `Error: unrecognized flag: ${name}`;
+      else if (a.includes('=')) args.error = `Error: ${name} does not take a value`;
     } else rest.push(a);
   }
   args.name = rest.join(' ').trim();

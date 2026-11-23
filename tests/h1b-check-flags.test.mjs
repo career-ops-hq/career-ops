@@ -34,6 +34,14 @@ test('an unknown flag exits 1 before a lookup', () => {
   assert.doesNotMatch(`${r.stdout}\n${r.stderr}`, /unknown:|install-h1b-index/);
 });
 
+test('a value on a flag that takes none exits 1 before a lookup', () => {
+  const r = run('Acme', '--json=x');
+  assert.equal(r.status, 1, `${r.stdout}\n${r.stderr}`);
+  assert.match(r.stderr, /--json does not take a value/);
+  assert.equal(r.stdout, '');
+  assert.doesNotMatch(`${r.stdout}\n${r.stderr}`, /unknown:|install-h1b-index/);
+});
+
 test('--cache-dir does not take a flag as its path', () => {
   const r = run('Acme', '--cache-dir', '--json');
   assert.equal(r.status, 1, `${r.stdout}\n${r.stderr}`);
