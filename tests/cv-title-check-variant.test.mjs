@@ -17,7 +17,7 @@ function run(args, variants = {}, cv = CV) {
   mkdirSync(join(dir, 'data', 'cv-variants'), { recursive: true });
   for (const [f, t] of Object.entries(variants)) writeFileSync(join(dir, 'data', 'cv-variants', f), t);
   return spawnSync(process.execPath, [join(ROOT, 'cv-title-check.mjs'), ...args], {
-    cwd: dir, encoding: 'utf-8', env: { ...process.env, CAREER_OPS_ROOT: dir },
+    cwd: dir, encoding: 'utf-8', env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_PROFILE: join(dir, 'config', 'profile.yml') },
   });
 }
 
@@ -74,7 +74,7 @@ function runMapped(args, { map = 'backend: ["Backend Engineer"]', variants = { '
   for (const [f, t] of Object.entries(variants)) writeFileSync(join(dir, 'data', 'cv-variants', f), t);
   writeFileSync(join(dir, 'config', 'profile.yml'), `cv:\n  variants:\n    ${map.replace(/\n/g, '\n    ')}\n`);
   return spawnSync(process.execPath, [join(ROOT, 'cv-title-check.mjs'), ...args], {
-    cwd: dir, encoding: 'utf-8', env: { ...process.env, CAREER_OPS_ROOT: dir },
+    cwd: dir, encoding: 'utf-8', env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_PROFILE: join(dir, 'config', 'profile.yml') },
   });
 }
 
@@ -111,4 +111,10 @@ test('--archetype stops on an archetype mapped by two variants', () => {
 test('--archetype without a value exits 1', () => {
   assert.equal(runMapped(['--archetype']).status, 1);
   assert.equal(runMapped(['--archetype', '--summary']).status, 1);
+});
+
+test('--archetype with no mapping prints parseable JSON without --summary', () => {
+  const r = runMapped(['--archetype', 'Data Analyst']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout), { variant: null });
 });

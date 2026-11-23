@@ -765,6 +765,7 @@ if (isMainModule(import.meta.url)) {
       if (variantName) say(`Variant: ${variantName} (from archetype "${archetype}")`);
       else {
         say('Variant: none (cv.md)');
+        if (!summaryMode) console.log(JSON.stringify({ variant: null }));
         process.exit(0);
       }
     } else if (variantName && archetype) say(`Variant: ${variantName}`);

@@ -333,3 +333,11 @@ test('a default-root call reads the profile CAREER_OPS_PROFILE names', () => {
     for (const [k, v] of [['CAREER_OPS_ROOT', prev.r], ['CAREER_OPS_PROFILE', prev.p]]) v === undefined ? delete process.env[k] : (process.env[k] = v);
   }
 });
+
+test('a moved bullet is found whatever its wrapping (#6792)', () => {
+  const cv = CV.replace('- Built an NLP pipeline with 94% accuracy', '- Built an NLP pipeline\n  with 94% accuracy');
+  const moved = OMIT_AND_REORDER.replace('- Led a team of 3 engineers', '- Led a team of 3 engineers\n- Built an NLP pipeline with\n  94% accuracy');
+  const root = workspace({ 'a.md': moved });
+  writeFileSync(join(root, 'cv.md'), cv);
+  assert.ok(checkVariant('a', { root }).problems.some((p) => p.type === 'attribution'));
+});

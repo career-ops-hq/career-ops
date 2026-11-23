@@ -1595,7 +1595,7 @@ function checkUserTemplates(root) {
 function checkCvVariants(root) {
   let findings;
   try {
-    findings = auditCvVariants({ root });
+    findings = auditCvVariants({ root, profilePath: profilePathFor(root) });
   } catch (err) {
     return { warn: true, label: `data/cv-variants: could not be audited (${err.message})` };
   }
