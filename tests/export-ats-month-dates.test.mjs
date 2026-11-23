@@ -54,3 +54,21 @@ test('ATS paste keeps month dates, splits the city, and includes certifications 
   assert.match(text, /--- CERTIFICATIONS ---\nCKA, CNCF \(2024\)/);
   assert.match(text, /--- PROJECTS ---\nR&D tool\n- Handles A & B\./);
 });
+
+test('a tab after ### keeps each project with its own bullets', () => {
+  const parsed = parseCvMarkdown(`## Projects
+
+###\tAlpha
+
+- One.
+
+###\tBeta
+
+- Two.
+`);
+  assert.equal(parsed.projects.length, 2);
+  assert.equal(parsed.projects[0].name, 'Alpha');
+  assert.deepEqual(parsed.projects[0].bullets, ['One.']);
+  assert.equal(parsed.projects[1].name, 'Beta');
+  assert.deepEqual(parsed.projects[1].bullets, ['Two.']);
+});
