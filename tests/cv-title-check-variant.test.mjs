@@ -43,3 +43,16 @@ test('--variant=<name> selects the variant too', () => {
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /"CTO"/);
 });
+
+for (const form of [['--variant'], ['--variant=']]) {
+  test(`${form[0]} with no name and a payload argument exits 1, not payload mode`, () => {
+    const dir = mkdtempSync(join(tmpdir(), 'co-title-var-'));
+    writeFileSync(join(dir, 'p.json'), '{"experience":[{"company":"Acme Corp","role":"Engineer","dates":"2020-2024"}]}');
+    writeFileSync(join(dir, 'cv.md'), CV);
+    const r = spawnSync(process.execPath, [join(ROOT, 'cv-title-check.mjs'), join(dir, 'p.json'), ...form], {
+      cwd: dir, encoding: 'utf-8', env: { ...process.env, CAREER_OPS_ROOT: dir },
+    });
+    assert.equal(r.status, 1, r.stdout);
+    assert.match(r.stderr, /--variant requires a name/);
+  });
+}

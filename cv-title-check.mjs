@@ -61,7 +61,7 @@ import { tmpdir } from 'os';
 import { spawnSync } from 'child_process';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { flagValue } from './lib/cli-flags.mjs';
+import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 // Cyclic with lib/cv-variants.mjs (which imports this module); safe, both use the other's exports only when called.
 import { resolveVariant } from './lib/cv-variants.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -729,6 +729,8 @@ const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
 const variantName = flagValue(args, '--variant');
 const variantIdx = args.indexOf('--variant');
+// Present without a usable name (`--variant`, `--variant=`, `--variant --summary`) is not an absent flag.
+const variantBad = hasFlag(args, '--variant') && (!variantName || variantName.startsWith('--'));
 const payloadPathArg = args.find((a, i) => !a.startsWith('--') && !(variantIdx >= 0 && i === variantIdx + 1));
 
 if (isMainModule(import.meta.url)) {
@@ -740,6 +742,10 @@ if (isMainModule(import.meta.url)) {
   } else if (selfTestMode) {
     runSelfTest();
   } else {
+    if (variantBad) {
+      console.error('Error: --variant requires a name (data/cv-variants/<name>.md)');
+      process.exit(1);
+    }
     if (!variantName && (!payloadPathArg || !existsSync(payloadPathArg))) {
       console.error('Usage: node cv-title-check.mjs <tailored-cv-payload.json> [--summary]');
       console.error('       node cv-title-check.mjs --variant <name> [--summary]');
