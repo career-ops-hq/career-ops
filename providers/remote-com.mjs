@@ -85,6 +85,7 @@ function parsePay(pay) {
   if (rows.length !== 1) return undefined;
   const row = rows[0];
   const bound = (/** @type {unknown} */ v) => {
+    if (typeof v !== 'number' && typeof v !== 'string') return undefined;
     const n = Number(v);
     return Number.isFinite(n) && n > 0 ? n : undefined;
   };

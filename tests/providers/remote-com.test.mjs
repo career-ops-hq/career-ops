@@ -177,6 +177,20 @@ try {
     fail(`parseRemoteJobs one-sided salary = ${JSON.stringify(paid[4].salary)}`);
   }
 
+  const odd = parseRemoteJobs({
+    jobs: [
+      row({ public_id: 'm1', pay: pay({ min: true, max: false, currency: 'EUR' }) }),
+      row({ public_id: 'm2', pay: pay({ min: [5], max: {}, currency: 'EUR' }) }),
+      row({ public_id: 'm3', pay: pay({ min: { valueOf() { throw new Error('boom'); } }, max: Symbol('x'), currency: 'EUR' }) }),
+      row({ public_id: 'm4', pay: pay({ min: '90000', max: '120000', currency: 'EUR' }) }),
+    ],
+  });
+  if (odd.length === 4 && [0, 1, 2].every((i) => !('salary' in odd[i])) && odd[3].salary?.min === 90000 && odd[3].salary.max === 120000) {
+    pass('parseRemoteJobs reads no salary from boolean, array or object bounds, never throws, and reads numeric strings');
+  } else {
+    fail(`parseRemoteJobs malformed pay = ${JSON.stringify(odd.map((j) => j.salary))}`);
+  }
+
   // Empty vs broken envelope.
   const empty = parseRemoteJobs({ jobs: [] });
   if (Array.isArray(empty) && empty.length === 0) pass('parseRemoteJobs({jobs: []}) → []');

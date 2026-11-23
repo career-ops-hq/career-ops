@@ -35,11 +35,13 @@ function toEpochMs(value) {
 }
 
 /**
- * A salary bound, or undefined. The feed gives 0 when a posting has no salary,
+ * A salary bound, or undefined. Only a number or a numeric string counts; a
+ * boolean, array or object gives no value. The feed gives 0 when a posting has no salary,
  * and 0 is no value.
  * @param {unknown} value
  */
 function salaryBound(value) {
+  if (typeof value !== 'number' && typeof value !== 'string') return undefined;
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
