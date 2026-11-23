@@ -123,4 +123,20 @@ test('doctor finds the Experience section of a German cv.md', () => {
   const r = spawnSync(NODE, [join(ROOT, 'doctor.mjs')], { cwd: dir, env, encoding: 'utf-8', timeout: 60000 });
   assert.equal(r.error, undefined, describeSpawn(r));
   assert.doesNotMatch(r.stdout + r.stderr, /no Experience section the CV checks recognize/, describeSpawn(r));
+  // The check ran and passed, not merely stayed silent: an early exit before
+  // the cv.md check would also leave the warning out.
+  assert.match(r.stdout, /cv\.md: Experience section recognized \(1 entry\)/, describeSpawn(r));
+});
+
+// generate-pdf.mjs's sectionKey() strips emphasis markers before its lookup,
+// so an italic title is the same section there and here.
+test('an emphasized title reads as the plain one, as in the PDF build', () => {
+  for (const heading of ['*Kenntnisse*', '_Kenntnisse_', '`Kenntnisse`']) {
+    assert.equal(sectionKey(heading), 'skills', heading);
+    assert.equal(aliasSectionKey(heading), 'skills', heading);
+    const { existing, supportedByResume } = classifySkillGaps(JD_SKILLS, skillsCv(`## ${heading}`));
+    assert.deepEqual(existing.sort(), ['Go', 'Kafka'], heading);
+    assert.deepEqual(supportedByResume, [], heading);
+  }
+  assert.ok(isExperienceHeading('*Berufserfahrung*'));
 });
