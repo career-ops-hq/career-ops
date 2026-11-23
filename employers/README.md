@@ -63,9 +63,41 @@ employers/
 └── inbox/                  contributions waiting to be folded in (only while there are some)
 ```
 
-The registry lives in this repository only: a fresh clone has it, but the
-career-ops updater does not copy it to existing installs. CI warns when
-`boards/` passes 25 MB, so a maintainer can look at how the data is stored.
+Every release carries the registry to existing installs: the updater copies
+`boards/`, `contributions/` (the manifests, with the attribution some sources
+require), `LICENSE` and `THIRD_PARTY_NOTICES.md`. `inbox/` stays in this
+repository. An install uses its copy only to compare (see
+[Boards your install knows](#boards-your-install-knows)); the scanner does not
+read boards from it. CI warns when `boards/` passes 25 MB, so a maintainer can
+look at how the data is stored; past that size the release could carry only the
+sorted `careers_url` keys, or a compressed copy.
+
+## Boards your install knows
+
+```
+node employers-gap.mjs --list
+```
+
+lists the job boards in your own files that the registry does not have yet:
+`portals.yml`, `data/pipeline.md` and `data/scan-history.tsv`, and with
+`--include-applied` also `data/applications.md` and `reports/`. It uses no AI.
+Each URL is read back to its board with the same reader as the import
+(`parseBoardUrl`), so a posting link counts as its board, and a board is new
+only when no row has it, retired rows included: a board taken out is never
+proposed again.
+
+Before it lists a board as new it asks the board, through the provider the
+scanner already uses for that system, whether it lists jobs now (one page per
+board), so a board a company left when it moved to another system, or one with
+no jobs, is not listed. `--offline` skips that and sets aside a board whose
+company the registry already has on another system. Referral, internal and
+LinkedIn-copy boards, the examples in `templates/portals.example.yml`, and
+Greenhouse boards whose own name marks a channel copy or a sourcing board are
+set aside with their reason.
+
+What it would share is the board address only (`careers_url`), never a
+posting, a title, your tracker or which file it came from. `--out <file>`
+writes that list, one URL per line; the script itself sends nothing.
 
 ## Contributing boards
 
