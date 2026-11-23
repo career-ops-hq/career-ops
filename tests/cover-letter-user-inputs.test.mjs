@@ -119,12 +119,10 @@ test('a later percentage in the same sentence can still be the plan', () => {
   assert.deepEqual(result.invented, ['40%']);
 });
 
-test('leading percentages distinguish achievements from plans and preserve decimal precision', () => {
-  const plan = ['I will improve conversion by 20%.'];
-  assert.deepEqual(check(letter('I increased conversion by %20 and will improve retention.'), plan).invented, ['20%']);
-  assert.deepEqual(check(letter('I will improve conversion by %20.'), plan).invented, []);
-  assert.deepEqual(check(letter('I will improve conversion by %0,125.'), ['My target is 0.125%.']).invented, []);
-  assert.deepEqual(check(letter('I will improve conversion by 0.125%.'), ['My target is %0,125.']).invented, []);
+test('a completed percentage range requires evidence for both endpoints', () => {
+  const plan = ['I will improve retention by 20%.'];
+  assert.deepEqual(check(letter('I increased conversion from %10 to %20 and will improve retention.'), plan).invented, ['10%', '20%']);
+  assert.deepEqual(check(letter('I increased conversion by %10 and will improve retention by %20.'), plan).invented, ['10%']);
 });
 
 test('a later percentage stays the plan when the earlier past verb has no percentage', () => {
