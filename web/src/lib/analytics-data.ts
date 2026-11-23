@@ -65,7 +65,7 @@ function normalizeWorkMode(raw: string, text: string): string {
   // keeps its remote.
   const value = text.toLowerCase()
     .replace(/\b(?:non|not|no)[^a-z.!;?\n]*remote\b/g, " on-site ")
-    .replace(/\bremote(?:\s+work)?[^a-z.!;?\n]*(?:is\s+)?(?:not|n't)\s+(?:available|possible|allowed|offered|an option)\b/g, " on-site ");
+    .replace(/\bremote(?:[^\S\n]+work)?[^a-z.!;?\n]*(?:is[^\S\n]+)?(?:not|n't)[^\S\n]+(?:available|possible|allowed|offered|an option)\b/g, " on-site ");
   if (value.includes("hybrid")) return "Hybrid";
   if (value.includes("remote") && (value.includes("flex") || value.includes("remote-first") || value.includes("remote first"))) return "RemoteFlex";
   if (value.includes("remote")) return "Remote";

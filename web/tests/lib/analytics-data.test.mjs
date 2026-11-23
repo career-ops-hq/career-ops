@@ -148,4 +148,5 @@ test("a negated remote in the notes is not charted as Remote", () => {
   assert.equal(mode("", "Nonprofit Program Manager - Remote"), "Remote", "the negation never crosses a letter");
   assert.equal(mode("On-site; no. Remote ok"), "Remote", "a period ends the negation");
   assert.equal(mode("remote work is not available"), "Full");
+  assert.equal(mode("Remote\nwork is not available"), "Remote", "a line break ends the negation");
 });
