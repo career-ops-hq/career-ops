@@ -61,7 +61,7 @@ Reads seek_site and seek_searches from portals.yml:
   seek_site: au                       # optional; nz (default) or au
   seek_searches:
     - keyword: "data analyst"
-      location: "Wellington"          # optional; omit for the whole country
+      location: "Adelaide"            # optional; omit for the whole country
       daterange: 7                    # optional; last N days
       max_pages: 5                    # optional; default 5 (cap 50)
 
@@ -178,11 +178,12 @@ export function resolveSeekSite(value) {
   const raw = String(value ?? '').trim().toLowerCase();
   if (!raw) return SEEK_SITES.nz;
   const key = raw.replace(/^https?:\/\//, '').replace(/\.seek\.com\/?$/, '').replace(/\/.*$/, '');
-  const site = SEEK_SITES[key];
-  if (!site) {
+  // Object.hasOwn, not a bare lookup: `constructor` and `__proto__` would
+  // otherwise resolve to Object.prototype members instead of throwing.
+  if (!Object.hasOwn(SEEK_SITES, key)) {
     throw new Error(`Unknown seek_site ${JSON.stringify(value)}; use "nz" or "au"`);
   }
-  return site;
+  return SEEK_SITES[key];
 }
 
 /**
@@ -476,7 +477,13 @@ async function main(args) {
     await writeRunLog({ found, counts: gate.counts, newAdded: added.length, queries: searches.length, errors });
   }
 
-  printScanSummaryHeader(`SEEK ${site.label} Scan`, localToday());
+  // Literal per site, not a template: the banner title is a contract tests/
+  // scan-summary-marker.test.mjs asserts on the source text.
+  if (site === SEEK_SITES.au) {
+    printScanSummaryHeader('SEEK AU Scan', localToday());
+  } else {
+    printScanSummaryHeader('SEEK NZ Scan', localToday());
+  }
   console.log(`Queries:            ${searches.length}`);
   console.log(`Postings fetched:   ${found}`);
   console.log(`New offers:         ${added.length}${dryRun ? ' (dry run, nothing written)' : ''}`);

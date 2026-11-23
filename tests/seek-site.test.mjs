@@ -31,6 +31,15 @@ try {
   threw = true;
 }
 check('resolveSeekSite rejects an unknown site', threw, 'unknown site was accepted');
+for (const key of ['constructor', '__proto__']) {
+  threw = false;
+  try {
+    resolveSeekSite(key);
+  } catch {
+    threw = true;
+  }
+  check(`resolveSeekSite rejects the prototype key ${key}`, threw, `${key} resolved to an inherited member`);
+}
 
 check(
   'AU location uses the in- segment',
