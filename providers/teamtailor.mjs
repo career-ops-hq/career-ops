@@ -1,6 +1,7 @@
 // @ts-check
 import { decodeEntities } from './_html-entities.mjs';
 import { fetchTextWithRetry, resolveDefaultTimeoutMs, sleep } from './_http.mjs';
+import { isWorkModelOnly } from './greenhouse.mjs';
 import { markTruncated } from '../lib/board-truncation.mjs';
 /** @typedef {import('./_types.js').Provider} Provider */
 
@@ -279,15 +280,30 @@ function cleanUrl(value) {
   }
 }
 
-// Build a human location from the first <tt:location> (city, country). Falls
-// back to "Remote" when the posting carries no place but is flagged remote.
-function resolveLocation(item) {
-  const city = tagText(item, 'tt:city');
-  const country = tagText(item, 'tt:country');
-  const place = [city, country].filter(Boolean).join(', ');
-  if (place) return place;
-  const remote = tagText(item, 'remoteStatus').toLowerCase();
-  return remote === 'fully' || remote === 'temporary' ? 'Remote' : '';
+// Every place a posting is open in, each once, in the feed's order: the
+// <tt:city> and <tt:country> of each <tt:location> in its <tt:locations> block
+// (one block per place on the feeds read on 2026-11-23). Each block is read on
+// its own, so a city or country always comes from its own place: the feed
+// writes an empty tag self-closing (`<tt:name/>`), and over the whole item a
+// `<tt:city/>` would read on to the next place's `</tt:city>`.
+function resolvePlaces(item) {
+  const places = [];
+  for (const [, block] of item.matchAll(/<tt:location\b[^>]*>([\s\S]*?)<\/tt:location>/gi)) {
+    const place = [tagText(block, 'tt:city'), tagText(block, 'tt:country')].filter(Boolean).join(', ');
+    if (place && !places.includes(place)) places.push(place);
+  }
+  return places;
+}
+
+// The posting's places joined with " · ", the separator the providers share for
+// a multi-place posting, then "Remote" when its remoteStatus is remote (`fully`
+// or `temporary`) and no place already says so, whether or not it names a
+// place: on the feeds read on 2026-11-23, fully remote postings named an
+// office city.
+function resolveLocation(item, places) {
+  const status = tagText(item, 'remoteStatus').toLowerCase();
+  const remote = (status === 'fully' || status === 'temporary') && !places.some((p) => /\bremote\b/i.test(p));
+  return [...places, remote ? 'Remote' : ''].filter(Boolean).join(' · ');
 }
 
 /**
@@ -295,12 +311,13 @@ function resolveLocation(item) {
  *
  * Shape: `<rss><channel><item>...</item>...</channel></rss>`. Each item
  * exposes `<title>`, `<link>`, `<pubDate>`, an optional `<remoteStatus>`, and
- * a `tt:` locations block (`<tt:city>`, `<tt:country>`). The company is not in
+ * a `tt:` locations block with one `<tt:location>` (`<tt:city>`,
+ * `<tt:country>`) per place the posting is open in. The company is not in
  * the item, so the tracked_companies `name` is used.
  *
  * @param {string} xml - raw RSS feed body
  * @param {string} [defaultCompany] - company label for every posting
- * @returns {Array<{title: string, url: string, company: string, location: string, postedAt?: number}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, locations?: string[], postedAt?: number}>}
  */
 export function parseTeamtailorFeed(xml, defaultCompany = 'Teamtailor') {
   if (typeof xml !== 'string') return [];
@@ -316,11 +333,16 @@ export function parseTeamtailorFeed(xml, defaultCompany = 'Teamtailor') {
     if (!title) continue;
 
     const postedAt = toEpochMs(tagText(item, 'pubDate'));
+    const places = resolvePlaces(item);
+    // Job.locations holds places only, so a work-model name ("Remote") stays
+    // in the location string but not in the list, as ashby and lever do.
+    const locations = places.filter((p) => !isWorkModelOnly(p));
     const job = {
       title,
       company,
-      location: resolveLocation(item),
+      location: resolveLocation(item, places),
       url,
+      ...(locations.length > 0 ? { locations } : {}),
     };
     if (postedAt !== undefined) job.postedAt = postedAt;
     jobs.push(job);
