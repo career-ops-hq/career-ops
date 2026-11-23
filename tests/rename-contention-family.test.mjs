@@ -25,11 +25,14 @@ console.log('\n📝 rename contention: no shipped core module calls bare renameS
 
 const ok = (cond, msg) => (cond ? pass(msg) : fail(msg));
 
-const DEFINITION = 'tracker-utils.mjs';
+// lib/rename-retry.mjs defines renameSyncWithRetry and imports only node:fs,
+// so plugins/_lock.mjs can use it while doctor.mjs runs without node_modules.
+// tracker-utils.mjs re-exports it and defines writeFileAtomic on top of it.
+const DEFINITIONS = ['lib/rename-retry.mjs', 'tracker-utils.mjs'];
 
 // Files allowed a direct renameSync call, and why. Keep this list short: each
 // entry is a place the Windows retry does not run.
-// (tracker-utils.mjs needs no entry: it only names renameSync as
+// (lib/rename-retry.mjs needs no entry: it only names renameSync as
 // renameSyncWithRetry's default `rename`, and never calls it bare.)
 const EXEMPT = {
   // Byte-for-byte mirrored into web/src/lib/core/inbox-skip.mjs
@@ -44,10 +47,6 @@ const EXEMPT = {
   // Renames inside a freshly created temp/scaffold directory, and the first
   // call already has a tolerant catch with an in-place fallback.
   'plugin-install.mjs': 'renames inside a directory it just created',
-  // doctor.mjs loads it through plugins/_engine.mjs and must run before
-  // `npm install` (tests/doctor-without-node-modules.test.mjs), while
-  // tracker-utils.mjs pulls in js-yaml.
-  'plugins/_lock.mjs': 'loaded by doctor.mjs without node_modules',
 };
 
 // Every core module git ships. The suites are out (fixtures rename by hand on
@@ -108,7 +107,7 @@ const directCallers = shipped.filter((rel) =>
   DIRECT_CALL.test(withoutComments(readFileSync(join(ROOT, rel), 'utf-8'))));
 
 for (const rel of directCallers.filter((f) => !(f in EXEMPT))) {
-  fail(`${rel} calls renameSync directly — use renameSyncWithRetry or writeFileAtomic from ${DEFINITION} (#3046)`);
+  fail(`${rel} calls renameSync directly — use renameSyncWithRetry or writeFileAtomic from ${DEFINITIONS.join(' or ')} (#3046)`);
 }
 if (directCallers.every((f) => f in EXEMPT)) {
   pass(`no shipped core module outside the ${Object.keys(EXEMPT).length} exempt files calls renameSync directly`);
@@ -121,11 +120,12 @@ for (const [rel, why] of Object.entries(EXEMPT)) {
 }
 
 // Every caller of the seam takes renameSyncWithRetry from the one canonical
-// definition, not a local copy: that drift is what #2984 cost weeks chasing.
+// definition (directly, or through tracker-utils.mjs's re-export), not a local
+// copy: that drift is what #2984 cost weeks chasing.
 // A local writeFileAtomic wrapper around the imported helper is fine
 // (followup-seed.mjs has one). update-system.mjs must stay self-loading
 // (#1706), so it lazy-imports with `await import(...)`; both forms count.
-const seamCallers = shipped.filter((f) => f !== DEFINITION
+const seamCallers = shipped.filter((f) => !DEFINITIONS.includes(f)
   && SEAM_CALL.test(withoutComments(readFileSync(join(ROOT, f), 'utf-8'))));
 ok(seamCallers.length >= 10, `found ${seamCallers.length} modules that rename through the helper (the scan can see them)`);
 const strays = [];
@@ -135,12 +135,14 @@ for (const rel of seamCallers) {
     strays.push(`${rel} (defines its own renameSyncWithRetry)`);
     continue;
   }
-  let spec = posix.relative(dirname(rel) || '.', DEFINITION);
-  if (!spec.startsWith('.')) spec = `./${spec}`;
-  const quoted = `['"]${spec.replace(/[./]/g, (c) => `\\${c}`)}['"]`;
+  const specs = DEFINITIONS.map((def) => {
+    const spec = posix.relative(dirname(rel) || '.', def);
+    return spec.startsWith('.') ? spec : `./${spec}`;
+  });
+  const quoted = `['"](?:${specs.map((spec) => spec.replace(/[./]/g, (c) => `\\${c}`)).join('|')})['"]`;
   const names = '\\{[^}]*\\b(?:renameSyncWithRetry|writeFileAtomic)\\b[^}]*\\}';
   const imports = new RegExp(`import\\s*${names}\\s*from\\s*${quoted}`).test(src)
     || new RegExp(`(?:const|let|var)\\s*${names}\\s*=\\s*await\\s+import\\(\\s*${quoted}\\s*\\)`).test(src);
-  if (!imports) strays.push(`${rel} (no import from ${spec})`);
+  if (!imports) strays.push(`${rel} (no import from ${specs.join(' or ')})`);
 }
-ok(strays.length === 0, `every helper caller imports it from ${DEFINITION}${strays.length ? `: ${strays.join(', ')}` : ''}`);
+ok(strays.length === 0, `every helper caller imports it from ${DEFINITIONS.join(' or ')}${strays.length ? `: ${strays.join(', ')}` : ''}`);

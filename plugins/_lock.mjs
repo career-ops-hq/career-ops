@@ -1,9 +1,10 @@
 // @ts-check
 // plugins/_lock.mjs — integrity pinning for plugins (the rug-pull / OWASP-MCP04
-// defense). Pure, side-effect-free import (node:crypto + node:fs only, NO
-// child_process so it stays loadable under plugins/). plugins.lock is a USER-
-// layer file (gitignored) recording, per enabled plugin, the sha256 of EVERY
-// file in its directory + the consented capability surface.
+// defense). Pure, side-effect-free import (node:crypto, node:fs and the
+// dependency-free lib/rename-retry.mjs; NO child_process so it stays loadable
+// under plugins/). plugins.lock is a USER-layer file (gitignored) recording,
+// per enabled plugin, the sha256 of EVERY file in its directory + the
+// consented capability surface.
 //
 // Honest scope: the lock is tamper-EVIDENCE, not containment. A local attacker
 // with write access to plugins.local/ also has write access to plugins.lock and
@@ -12,8 +13,9 @@
 // WITHOUT a version bump (the postmark-mcp class). Stated plainly in README.
 
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync, readdirSync, lstatSync, renameSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, readdirSync, lstatSync, rmSync } from 'node:fs';
 import path from 'node:path';
+import { renameSyncWithRetry } from '../lib/rename-retry.mjs';
 
 const LOCK_VERSION = 1;
 
@@ -97,7 +99,7 @@ function saveLock(root, lock) {
   const tmp = path.join(root, `.plugins.lock.${process.pid}.${randomUUID()}.tmp`);
   try {
     writeFileSync(tmp, JSON.stringify(lock, null, 2) + '\n', 'utf8');
-    renameSync(tmp, file);
+    renameSyncWithRetry(tmp, file);
   } catch (err) {
     try { rmSync(tmp, { force: true }); } catch { /* the temp file may not exist */ }
     throw err;

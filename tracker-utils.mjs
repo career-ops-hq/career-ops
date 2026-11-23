@@ -8,7 +8,7 @@
  * copies — and every writer excludes every other writer through the same lock.
  */
 
-import { readFileSync, writeFileSync, renameSync, rmSync, statSync, lstatSync, existsSync, realpathSync, readlinkSync, accessSync, constants as fsConstants, chmodSync, appendFileSync, openSync, fstatSync, readSync, closeSync, copyFileSync, truncateSync } from 'fs';
+import { readFileSync, writeFileSync, rmSync, statSync, lstatSync, existsSync, realpathSync, readlinkSync, accessSync, constants as fsConstants, chmodSync, appendFileSync, openSync, fstatSync, readSync, closeSync, copyFileSync, truncateSync } from 'fs';
 import { join, dirname, basename, resolve, relative, isAbsolute, sep } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { tmpdir } from 'os';
@@ -16,6 +16,10 @@ import { loadYaml } from './lib/yaml-document.mjs';
 // The lock protocol is lib/dir-lock.mjs, shared with every other core lock.
 // This module only picks the tracker's lock directory, timing and error.
 import { acquireDirLock } from './lib/dir-lock.mjs';
+// The Windows rename retry (#3006) lives in a dependency-free module so
+// plugins/_lock.mjs can use it without loading js-yaml through this file.
+import { renameSyncWithRetry } from './lib/rename-retry.mjs';
+export { RENAME_RETRY_DELAYS_MS, isRenameContention, renameSyncWithRetry } from './lib/rename-retry.mjs';
 import { normalizeTextKey, firstLinkTarget, unwrapReportUrlToken } from './tracker-parse.mjs';
 
 /**
@@ -721,74 +725,6 @@ export async function openTrackerTransaction(appsFile, options = {}) {
       return closeError;
     },
   };
-}
-
-/**
- * Codes Windows raises when a rename-over-existing-file loses a race for the
- * destination handle. Same portability gap this module already documents for
- * mkdir/rm (#2777): POSIX `rename(2)` atomically replaces the destination and
- * cannot fail this way, so these never fire on Linux/macOS.
- */
-const RENAME_CONTENTION_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
-
-/** Backoff schedule for a contended rename. Worst case ~193ms, then rethrow. */
-export const RENAME_RETRY_DELAYS_MS = [1, 2, 5, 10, 25, 50, 100];
-
-/**
- * Is this error Windows saying "the destination is busy right now"?
- *
- * Exported for the same reason `lib/dir-lock.mjs` exports `isMkdirContention`
- * and `isRmContention`: one definition, testable, and no second copy to drift.
- *
- * @param {unknown} err - Error thrown by a rename attempt.
- * @returns {boolean} True when the rename should be retried.
- */
-export function isRenameContention(err) {
-  return RENAME_CONTENTION_CODES.has(err?.code);
-}
-
-/**
- * Block the current thread for `ms` without an event-loop turn.
- *
- * `writeFileAtomic` is synchronous by contract (every tracker writer calls it
- * inside a held lock), so the backoff cannot be a promise.
- *
- * @param {number} ms - Milliseconds to sleep.
- * @returns {void}
- */
-function sleepSync(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-/**
- * `renameSync` that survives Windows contention for the destination handle.
- *
- * Windows refuses a rename whose destination is open by anyone else at that
- * instant, and answers EPERM/EACCES/EBUSY. The holder is usually not another
- * writer of ours (they are serialized by the tracker lock) but a transient
- * reader: an antivirus scanner, the Search indexer, or a concurrent
- * `readFileSync` from a reporting script. The handle is released in
- * milliseconds, so a short backoff converts a lost write into a completed one.
- *
- * This mirrors `isMkdirContention` / `isRmContention` in lib/dir-lock.mjs.
- * Same reasoning as #2777: treating portable-looking contention as fatal is how
- * a write gets LOST, and the tracker is the canonical store.
- *
- * @param {string} tmpPath - Source path (the fully written temporary file).
- * @param {string} path - Destination path to replace.
- * @param {(from: string, to: string) => void} [rename] - Injectable rename, for tests.
- * @returns {void}
- */
-export function renameSyncWithRetry(tmpPath, path, rename = renameSync) {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      rename(tmpPath, path);
-      return;
-    } catch (err) {
-      if (!isRenameContention(err) || attempt >= RENAME_RETRY_DELAYS_MS.length) throw err;
-      sleepSync(RENAME_RETRY_DELAYS_MS[attempt]);
-    }
-  }
 }
 
 /**
