@@ -63,7 +63,7 @@ import { normalizeCompany } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 // Cyclic with lib/cv-variants.mjs (which imports this module); safe, both use the other's exports only when called.
-import { resolveVariant } from './lib/cv-variants.mjs';
+import { resolveVariant, attributionProblems } from './lib/cv-variants.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import {
   boldLineText, findExperienceSections, headingText, toPlainText, EXPERIENCE_HEADING_NAMES,
@@ -769,9 +769,12 @@ if (isMainModule(import.meta.url)) {
 
     const cvEntries = parseCvExperience(readFileSync(CV_PATH, 'utf-8'));
     let tailoredEntries;
+    let attribution = [];
     try {
       if (variantName) {
-        tailoredEntries = parseCvExperience(readFileSync(resolveVariant(variantName), 'utf-8'));
+        const variantText = readFileSync(resolveVariant(variantName), 'utf-8');
+        tailoredEntries = parseCvExperience(variantText);
+        attribution = attributionProblems(variantText, readFileSync(CV_PATH, 'utf-8'));
       } else {
         tailoredEntries = parseTailoredExperience(payload);
       }
@@ -809,13 +812,14 @@ if (isMainModule(import.meta.url)) {
           console.log(`    tailored CV titles:  ${a.tailoredTitles.map(t => `"${t}"`).join(', ')}`);
         }
       }
+      for (const a of attribution) console.log(`\n⚠️  ${a.detail}`);
       if (result.unmatchedTailored.length > 0) {
         console.log(`\n  (${result.unmatchedTailored.length} tailored entr${result.unmatchedTailored.length === 1 ? 'y has' : 'ies have'} no matching {company, dates} in cv.md — not checked)`);
       }
     } else {
       // Additive key: null when the run was conclusive, {reason, message}
       // when nothing was compared.
-      console.log(JSON.stringify({ ...result, unverified }, null, 2));
+      console.log(JSON.stringify({ ...result, unverified, ...(variantName ? { attribution } : {}) }, null, 2));
     }
 
     // Warn-only: a title mismatch is never a failing exit code.

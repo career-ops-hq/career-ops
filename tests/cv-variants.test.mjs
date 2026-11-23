@@ -249,3 +249,19 @@ test('numeric prose where the dates should be is rejected, real date shapes are 
     assert.doesNotThrow(() => resolveVariant('ok', { root: ok }), dates);
   }
 });
+
+test('a bullet moved under another employer is an attribution problem (#6792)', () => {
+  const moved = OMIT_AND_REORDER.replace('- Led a team of 3 engineers', '- Led a team of 3 engineers\n- Built an NLP pipeline with 94% accuracy');
+  const root = workspace({ 'a.md': moved });
+  const problems = checkVariant('a', { root }).problems;
+  const attr = problems.find((p) => p.type === 'attribution');
+  assert.ok(attr, JSON.stringify(problems));
+  assert.match(attr.detail, /Acme Corp/);
+  assert.match(attr.detail, /Beta Ltd/);
+});
+
+test('a condensed variant with its own bullets has no attribution problem (#6792)', () => {
+  const condensed = OMIT_AND_REORDER.replace('- Led a team of 3 engineers', '- Cut deploy time from 2 weeks to 4 hours with GitHub Actions');
+  const root = workspace({ 'a.md': condensed });
+  assert.deepEqual(checkVariant('a', { root }).problems.filter((p) => p.type === 'attribution'), []);
+});

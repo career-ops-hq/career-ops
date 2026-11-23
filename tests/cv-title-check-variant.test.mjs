@@ -11,9 +11,9 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CV = '## Work Experience\n\n### Acme Corp -- Sydney\n\n**Engineer**\n2020-2024\n\n- Led a team of 3 engineers\n';
 
-function run(args, variants = {}) {
+function run(args, variants = {}, cv = CV) {
   const dir = mkdtempSync(join(tmpdir(), 'co-title-var-'));
-  writeFileSync(join(dir, 'cv.md'), CV);
+  writeFileSync(join(dir, 'cv.md'), cv);
   mkdirSync(join(dir, 'data', 'cv-variants'), { recursive: true });
   for (const [f, t] of Object.entries(variants)) writeFileSync(join(dir, 'data', 'cv-variants', f), t);
   return spawnSync(process.execPath, [join(ROOT, 'cv-title-check.mjs'), ...args], {
@@ -56,3 +56,11 @@ for (const form of [['--variant'], ['--variant='], ['--variant', '--summary']]) 
     assert.match(r.stderr, /--variant requires a name/);
   });
 }
+
+test('a bullet moved under another employer is reported in a variant run (#6792)', () => {
+  const cv = `${CV}\n### Beta Ltd -- Remote\n\n**Engineer**\n2018-2020\n\n- Built an NLP pipeline with 94% accuracy\n`;
+  const moved = `${CV}- Built an NLP pipeline with 94% accuracy\n`;
+  const r = run(['--variant', 'a', '--summary'], { 'a.md': moved }, cv);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /under Beta Ltd in cv\.md/);
+});
