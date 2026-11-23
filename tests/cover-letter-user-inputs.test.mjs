@@ -125,6 +125,12 @@ test('a completed percentage range requires evidence for both endpoints', () => 
   assert.deepEqual(check(letter('I increased conversion by %10 and will improve retention by %20.'), plan).invented, ['10%']);
 });
 
+test('a relative clause needs factual evidence for its historical percentage', () => {
+  const plan = ['I will improve conversion by 20%.'];
+  assert.deepEqual(check(letter('I will have increased conversion by %20 to match the %20 I achieved last year.'), plan).invented, ['20%']);
+  assert.deepEqual(check(letter('I will have increased conversion by %20 to match the 10% that we previously achieved.'), plan).invented, ['10%']);
+});
+
 test('future-perfect percentages use plan evidence without excusing independent past claims', () => {
   const plan = ['I will improve conversion by 20%.'];
   assert.deepEqual(check(letter('I will have increased conversion by %20.'), plan).invented, []);
