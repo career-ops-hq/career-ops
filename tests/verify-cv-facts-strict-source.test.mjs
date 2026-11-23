@@ -36,6 +36,16 @@ test('allow_facts clears a named fact by default and not with strictSource', () 
   assert.ok(strict.unsupportedFacts.length + strict.invented.length > 0, JSON.stringify(strict));
 });
 
+test('allow_swaps clears a verb swap by default and not with strictSource', () => {
+  const src = join(dir, 'swap.md');
+  writeFileSync(src, '# CV\n\n## Experience\n\n### Acme\n\n- Used Kafka for event streaming.\n');
+  const text = '<html><body><li>Led a Kafka migration for event streaming.</li></body></html>';
+  const config = cfg({ allow_swaps: ['used -> led'] });
+  const go = strictSource => verifyFacts(text, { sourcePaths: [src], configPath: config, strictSource });
+  assert.equal(go(false).unsupportedFacts.length, 0, JSON.stringify(go(false)));
+  assert.ok(go(true).unsupportedFacts.length > 0, JSON.stringify(go(true)));
+});
+
 test('forbidden and warn phrases still run with strictSource', () => {
   const config = cfg({ allow_facts: ['x'], forbidden_phrases: ['rockstar'], warn_phrases: ['synergy'] });
   assert.ok(run('Led a team of 4 engineers, a rockstar.', config, true).forbidden.length > 0);
