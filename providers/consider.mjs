@@ -47,6 +47,8 @@ import { workplaceField } from './_workplace-type.mjs';
 // and not cut at `max_pages`. An entry without it reads the whole board, as
 // before.
 //
+// `salary` is read from the job's `salary` object when its period is a year.
+//
 // All requests are retried on a transient failure, through the shared helpers
 // in _http.mjs. A verify-portals probe (ctx.maxPages set) gets no retries, so it
 // receives a failure at once.
@@ -255,6 +257,31 @@ function workplaceOf(job) {
   return {};
 }
 
+/**
+ * The salary from the board's `salary` object, or null. Only a yearly figure
+ * counts, as in getro.mjs: an hourly or monthly one is not annual, and this
+ * provider does not convert it. A one-sided range fills the other bound.
+ * @param {any} job
+ */
+function salaryOf(job) {
+  const s = job.salary;
+  if (!s || typeof s !== 'object') return null;
+  if (s.period?.value !== 'year') return null;
+  const currency = typeof s.currency?.value === 'string' ? s.currency.value.trim().toUpperCase() : '';
+  if (!/^[A-Z]{3}$/.test(currency)) return null;
+  const bound = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined);
+  const lo = bound(s.minValue);
+  const hi = bound(s.maxValue);
+  if (lo === undefined && hi === undefined) return null;
+  return {
+    min: Math.min(lo ?? hi, hi ?? lo),
+    max: Math.max(lo ?? hi, hi ?? lo),
+    currency,
+    period: 'year',
+    posted: { ...(lo !== undefined ? { min: lo } : {}), ...(hi !== undefined ? { max: hi } : {}) },
+  };
+}
+
 /** A job row from the search response, or null when it has no usable URL. */
 function toRow(job, origin, entry) {
   const rawUrl = job.url || job.applyUrl || '';
@@ -268,6 +295,7 @@ function toRow(job, origin, entry) {
   } catch {
     return null;
   }
+  const salary = salaryOf(job);
   return {
     title: job.title || '',
     url,
@@ -275,6 +303,7 @@ function toRow(job, origin, entry) {
     location: locationString(job),
     postedAt: toEpochMs(job.timeStamp),
     ...workplaceOf(job),
+    ...(salary ? { salary } : {}),
   };
 }
 

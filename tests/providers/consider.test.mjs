@@ -90,6 +90,28 @@ try {
     pass('consider.fetch() sets no workplaceType for both flags, neither flag or no flags');
   else fail(`consider.fetch() ambiguous flags = ${JSON.stringify(considerModes.slice(2).map((j) => j.workplaceType))}`);
 
+  // salary comes from the board's `salary` object, for a yearly figure only: an
+  // hourly or monthly one is not annual, and no currency or no number means none.
+  const pay = (minValue, maxValue, period = 'year', currency = 'EUR') => ({ minValue, maxValue, period: { value: period }, currency: { value: currency } });
+  const considerPays = await consider.fetch(okEntry, {
+    _acquireHandshake: noHandshake,
+    fetchJson: async () => ({ jobs: [
+      pay(90000, 120000), pay(100000, null), pay(null, 100000, 'year', 'usd'), pay(50, 80, 'hour'), pay(5000, 6000, 'month'),
+      pay(0, 0), pay('90000', '120000'), pay(90000, 120000, 'year', ''), pay(90000, 120000, 'year', 'euro'), null, undefined,
+    ].map((salary, i) => ({ title: `S${i}`, url: `https://jobs.acmevc.example/s${i}`, companyName: 'Acme', salary })) }),
+  });
+  const salaries = considerPays.map((j) => j.salary);
+  if (JSON.stringify(salaries[0]) === JSON.stringify({ min: 90000, max: 120000, currency: 'EUR', period: 'year', posted: { min: 90000, max: 120000 } }))
+    pass('consider.fetch() maps a yearly salary with its currency and as-posted bounds');
+  else fail(`consider.fetch() salary = ${JSON.stringify(salaries[0])}`);
+  if (JSON.stringify(salaries[1]) === JSON.stringify({ min: 100000, max: 100000, currency: 'EUR', period: 'year', posted: { min: 100000 } })
+      && JSON.stringify(salaries[2]) === JSON.stringify({ min: 100000, max: 100000, currency: 'USD', period: 'year', posted: { max: 100000 } }))
+    pass('consider.fetch() fills a one-sided salary range and keeps the posted bound as given');
+  else fail(`consider.fetch() one-sided salary = ${JSON.stringify(salaries.slice(1, 3))}`);
+  if (salaries.slice(3).every((s) => s === undefined) && considerPays.slice(3).every((j) => !('salary' in j)))
+    pass('consider.fetch() sets no salary for an hourly or monthly figure, a zero or text bound, a missing currency or no salary');
+  else fail(`consider.fetch() no-salary cases = ${JSON.stringify(salaries.slice(3))}`);
+
   // fetch() refuses an unsafe host BEFORE touching the network.
   let considerThrew = false;
   try {
