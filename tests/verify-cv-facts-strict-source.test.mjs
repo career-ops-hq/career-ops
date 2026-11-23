@@ -73,3 +73,22 @@ test('CLI: forbidden phrase blocks under --strict-source', () => {
 });
 
 process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
+
+test('CLI: strict-source failure advice never points at ignored config allowances', () => {
+  const target = doc('Led a team of 4 engineers and cut latency by 30%.');
+  const config = cfg({ allow_metrics: ['30%'] });
+  const strict = cli(target, config, '--strict-source').out;
+  assert.doesNotMatch(strict, /allow_(metrics|facts|swaps)|config\/cv-facts\.json/);
+  assert.match(strict, /Remove the unsupported claims or correct/);
+  assert.match(cli(target, cfg({})).out, /A verified exception belongs in config\/cv-facts\.json/);
+});
+
+test('CLI: strict-source scope and drift advice names no allowance', () => {
+  const src = join(dir, 'scope.md');
+  writeFileSync(src, '# CV\n\n## Experience\n\n### Acme\n\n- Supported the Kafka migration for event streaming.\n- Used Kafka for event streaming.\n');
+  const target = doc('<li>Led the Kafka migration for event streaming.</li><li>Led a Kafka rollout for event streaming.</li>');
+  const config = cfg({});
+  const out = (...extra) => { const r = spawnSync(process.execPath, [join(ROOT, 'verify-cv-facts.mjs'), target, '--source', src, '--config', config, ...extra], { encoding: 'utf-8' }); return `${r.stdout}${r.stderr}`; };
+  assert.match(out(), /allow_facts|allow_swaps/);
+  assert.doesNotMatch(out('--strict-source'), /allow_(metrics|facts|swaps)/);
+});

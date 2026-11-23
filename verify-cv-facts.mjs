@@ -2564,11 +2564,16 @@ export function bulletDriftClaims(targetText, sourceText, { allowSwaps = [], all
 }
 
 /** Remediation text for a drift finding, shared by assertFacts and the CLI. */
-export function driftClaimAdvice({ added = [], sourceLine = '' }) {
+export function driftClaimAdvice({ added = [], sourceLine = '' }, { strictSource = false } = {}) {
   // The source bullet's own verb, not its first content word: a labelled
   // source ("Billing: Used Kafka ...") would otherwise suggest a swap on a noun.
   const anchorWord = predicateWords(sourceLine)[0]?.word ?? 'source word';
   const swap = `"${anchorWord} -> ${added[0] ?? 'cv word'}"`;
+  // --strict-source ignores allow_swaps, so only a source edit can clear the claim.
+  if (strictSource) {
+    return `the CV opens a clause with ${added.map(word => `"${word}"`).join(', ')}, which its source bullet does not use. ` +
+      'Keep the source\'s verb, or, if the new word is true for this work, add it to the selected source';
+  }
   return `the CV opens a clause with ${added.map(word => `"${word}"`).join(', ')}, which its source bullet does not use. ` +
     'Keep the source\'s verb, or, if the new word is true for this work, add it to cv.md ' +
     `or declare the swap in allow_swaps in config/cv-facts.json (e.g. ${swap})`;
@@ -3493,7 +3498,10 @@ function plannedClaims(targetText, planTexts) {
 }
 
 /** Say which sources the gate read, so nobody looks for evidence it never checked. */
-export function factSourceAdvice({ letterAnswers = false } = {}) {
+export function factSourceAdvice({ letterAnswers = false, strictSource = false } = {}) {
+  if (strictSource) {
+    return 'Remove the unsupported claims or correct the selected source (cv.md). --strict-source accepts no config exceptions.';
+  }
   if (!letterAnswers) {
     return 'cv.md and article-digest.md do not contain these claims. Add career evidence to one of them. A verified exception belongs in config/cv-facts.json.';
   }
@@ -3511,7 +3519,8 @@ export function factSourceAdvice({ letterAnswers = false } = {}) {
  *
  * The value is the exact string `allow_facts` matches, so the user can copy it.
  */
-export function scopeClaimAdvice({ value }) {
+export function scopeClaimAdvice({ value }, { strictSource = false } = {}) {
+  if (strictSource) return 'the source gives this work a weaker verb than the CV. Use the source\'s verb, or correct the selected source if the CV is right';
   return `the source gives this work a weaker verb than the CV. If the CV is right, add "${value}" to allow_facts in config/cv-facts.json`;
 }
 
@@ -3523,12 +3532,12 @@ export function assertFacts(targetText, options = {}) {
     if (result.invented.length) details.push(`metric-like claims absent from sources: ${result.invented.join(', ')}`);
     if (result.unsupportedFacts.length) details.push(`non-metric facts absent from sources: ${result.unsupportedFacts.map((claim) => {
       const { kind, value, sourceLine } = claim;
-      if (kind === 'scope') return `${kind}=${value} (source says: ${sourceLine}; ${scopeClaimAdvice(claim)})`;
-      if (kind === 'drift') return `${kind}=${value} (source says: ${sourceLine}; ${driftClaimAdvice(claim)})`;
+      if (kind === 'scope') return `${kind}=${value} (source says: ${sourceLine}; ${scopeClaimAdvice(claim, options)})`
+      if (kind === 'drift') return `${kind}=${value} (source says: ${sourceLine}; ${driftClaimAdvice(claim, options)})`
       return sourceLine ? `${kind}=${value} (source says: ${sourceLine})` : `${kind}=${value}`;
     }).join(', ')}`);
     if (result.forbidden.length) details.push(`forbidden phrases found: ${result.forbidden.join(', ')}`);
-    throw new Error(`Fact check failed${options.label ? ` for ${options.label}` : ''}: ${details.join('; ')}. ${factSourceAdvice({ letterAnswers: Array.isArray(options.planTexts) })}`);
+    throw new Error(`Fact check failed${options.label ? ` for ${options.label}` : ''}: ${details.join('; ')}. ${factSourceAdvice({ letterAnswers: Array.isArray(options.planTexts), strictSource: options.strictSource })}`);
   }
   return result;
 }
@@ -4217,14 +4226,14 @@ function runSelfTest() {
 }
 
 /** Print advisory facts (unsourced adoption claims, possible verb drift) for a human to confirm. */
-export function printAdvisoryFacts(facts = [], print = console.warn) {
+export function printAdvisoryFacts(facts = [], print = console.warn, adviceOptions = {}) {
   for (const claim of facts) {
     const { kind, value, line, sourceLine } = claim;
     if (kind === 'drift') {
       print(`  - possible verb drift: ${value}`);
       if (line && line !== value) print(`      CV:     ${line}`);
       if (sourceLine) print(`      source: ${sourceLine}`);
-      const advice = driftClaimAdvice(claim);
+      const advice = driftClaimAdvice(claim, adviceOptions);
       print(`      ${advice[0].toUpperCase()}${advice.slice(1)}`);
       continue;
     }
@@ -4245,9 +4254,9 @@ export function printAdvisoryFacts(facts = [], print = console.warn) {
  * @param {{warnings?: string[], advisoryFacts?: object[], coverage?: {message: string, spans: string[]}|null}} result
  * @param {(line: string) => void} [print]
  */
-export function printFactWarnings(result, print = console.warn) {
+export function printFactWarnings(result, print = console.warn, adviceOptions = {}) {
   for (const phrase of result.warnings ?? []) print(`  - advisory phrase: ${phrase}`);
-  printAdvisoryFacts(result.advisoryFacts, print);
+  printAdvisoryFacts(result.advisoryFacts, print, adviceOptions);
   if (result.coverage) {
     print(`  - not checked: ${result.coverage.message}`);
     for (const span of result.coverage.spans.slice(0, 8)) print(`      ${span}`);
@@ -4324,7 +4333,7 @@ export function runCli(args = process.argv.slice(2)) {
     }
     if (result.verdict === 'warn') {
       console.error(`CV fact check warning: ${basename(targetPath)}`);
-      printFactWarnings(result, console.error);
+      printFactWarnings(result, console.error, parsed);
       return 0;
     }
     console.error(`CV fact check failed: ${basename(targetPath)}`);
@@ -4340,7 +4349,7 @@ export function runCli(args = process.argv.slice(2)) {
         if (line && line !== value) console.error(`      CV:     ${line}`);
         if (sourceLine) console.error(`      source: ${sourceLine}`);
         if (kind === 'scope' || kind === 'drift') {
-          const advice = kind === 'scope' ? scopeClaimAdvice(claim) : driftClaimAdvice(claim);
+          const advice = kind === 'scope' ? scopeClaimAdvice(claim, parsed) : driftClaimAdvice(claim, parsed);
           console.error(`      ${advice[0].toUpperCase()}${advice.slice(1)}`);
         }
       }
@@ -4349,7 +4358,7 @@ export function runCli(args = process.argv.slice(2)) {
       console.error('\nForbidden phrases found:');
       for (const phrase of result.forbidden) console.error(`  - ${phrase}`);
     }
-    console.error(`\n${factSourceAdvice()}`);
+    console.error(`\n${factSourceAdvice(parsed)}`);
     return 1;
   } catch (err) {
     if (parsed.json) {
