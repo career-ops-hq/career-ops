@@ -5551,6 +5551,7 @@ async function main() {
   // company: see lib/board-truncation.mjs. Logged `partial`, never `reachable`.
   /** @type {Map<string, import('./lib/board-truncation.mjs').BoardTruncation>} */
   const partialTargets = new Map();
+  const queryScopedTargets = new Map();
 
   // Arm the failure-path row (#2643) now that the sweep is about to start and
   // every counter it reads is in scope. new_added is hardcoded 0 on a failed
@@ -5696,6 +5697,9 @@ async function main() {
       st.source += sourceDroppedTotal;
       for (const [reason, n] of Object.entries(sourceDropped)) st.sourceDetail[reason] = (st.sourceDetail[reason] || 0) + n;
       const truncation = boardTruncation(jobs);
+      if (jobs.queryScope) {
+        queryScopedTargets.set(company, { company: company.name, provider: provider.id, ...jobs.queryScope });
+      }
       // Boards (job_boards: aggregators) too: unlike an empty result, which is
       // routine for a keyword search, a capped or failed walk is a real gap.
       if (truncation) partialTargets.set(company.name, truncation);
@@ -6488,6 +6492,13 @@ async function main() {
       for (const line of partialRepeatHints(reasons)) console.log(`   ${line}`);
     }
   }
+  const queryScoped = targets.flatMap(target => queryScopedTargets.has(target) ? [queryScopedTargets.get(target)] : []);
+  if (queryScoped.length > 0) {
+    console.log(`\n⚠️  ${queryScoped.length} target(s) read through keyword queries only:`);
+    for (const { company, config, queries } of queryScoped) {
+      console.log(`   • ${company} (${config}): ${queries.map(query => JSON.stringify(query)).join(', ')}`);
+    }
+  }
   if (unverifiedZeroTargets.length > 0) {
     console.log(`⚠️  ${unverifiedZeroTargets.length} target(s) returned zero jobs without a successful HTTP response: ${unverifiedZeroTargets.join(', ')}`);
   }
@@ -6571,6 +6582,7 @@ async function main() {
       // Boards read only partly (lib/board-truncation.mjs), so automation can
       // tell a short read from a complete one without parsing stdout.
       partial: [...partialTargets].map(([company, { source: _source, ...t }]) => ({ company, ...t })),
+      ...(queryScoped.length ? { query_scoped: queryScoped } : {}),
       dry_run: dryRun,
     }, errors.length > 0 ? 2 : 0);
   }
