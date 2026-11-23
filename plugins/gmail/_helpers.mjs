@@ -44,8 +44,8 @@ const TRACKER_HOST_PARTS = [
  * and `?gh_src=newsletter` are all real postings.
  */
 const TRACKER_WORDS = new Set([
-  'click', 'clicks', 'newsletter', 'newsletters', 'opt-out', 'optout', 'subscribe',
-  'track', 'tracker', 'tracking', 'unsubscribe',
+  'click', 'clicks', 'newsletter', 'newsletters', 'openpixel', 'opt-out', 'optout',
+  'subscribe', 'track', 'tracker', 'tracking', 'unsubscribe',
 ]);
 
 /** Host-plus-path fragments that are account or legal pages, not postings. */
@@ -75,7 +75,7 @@ export function isCleanUrl(url) {
     // or `trackman` is one segment and does not match.
     const segments = path.split('/').map(seg => {
       try { return decodeURIComponent(seg); } catch { return seg; }
-    }).map(seg => seg.replace(/\.[a-z0-9]+$/, ''));
+    }).map(seg => seg.toLowerCase().replace(/\.[a-z0-9]+$/, ''));
     if (segments.some(seg => TRACKER_WORDS.has(seg))) return false;
     if (NON_POSTING_PATHS.some(prefix => `${host}${path}`.includes(prefix))) return false;
     // Page assets, not postings. Job-alert emails embed one company logo per job,
