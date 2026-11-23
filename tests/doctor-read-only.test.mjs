@@ -27,6 +27,7 @@ function doctor(dir, args = ['--json']) {
       CAREER_OPS_ROOT: dir,
       CAREER_OPS_DATA_DIR: '',
       CAREER_OPS_PIPELINE: '',
+      CAREER_OPS_PORTALS: join(dir, 'portals.yml'),
       CAREER_OPS_CLI: 'claude',
     },
   });
