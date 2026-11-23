@@ -70,6 +70,23 @@ function tagText(block, tag) {
   return m ? extractText(m[1]) : '';
 }
 
+/**
+ * The ISO 3166-1 alpha-2 code behind the flag emoji in `<country>`
+ * ("🇺🇸 United States of America" → "US"). A flag is two regional-indicator
+ * letters, so no name lookup is needed. A posting open to several countries
+ * ("🇨🇦 Canada, 🇵🇱 Poland, and 🇬🇧 United Kingdom ...") has several flags, and
+ * one code would misstate it, so it gets none, as does a value with no flag.
+ * @param {string} value
+ * @returns {string | undefined}
+ */
+function countryCodeFromFlags(value) {
+  const codes = new Set(
+    [...value.matchAll(/([\u{1F1E6}-\u{1F1FF}])([\u{1F1E6}-\u{1F1FF}])/gu)]
+      .map((m) => m.slice(1).map((c) => String.fromCharCode(c.codePointAt(0) - 0x1F1E6 + 65)).join('')),
+  );
+  return codes.size === 1 ? [...codes][0] : undefined;
+}
+
 function cleanUrl(value) {
   if (!value) return '';
   const trimmed = value.trim();
@@ -100,14 +117,15 @@ function splitTitle(rawTitle, defaultCompany) {
  * Shape: `<rss><channel><item>...</item>...</channel></rss>`, each item
  * carrying `<title>`, `<link>`, `<pubDate>`, and often `<region>`,
  * `<category>` and `<type>` (the employment type, normalized into
- * `employmentType`), and `<description>` holds the posting's HTML. The title is
- * usually "Company: Role"; when that split is present, company and title are
+ * `employmentType`), `<country>` (its flag gives `country`), and
+ * `<description>` holds the posting's HTML. The title is usually
+ * "Company: Role"; when that split is present, company and title are
  * normalized separately. The RSS `<link>` is the dedup key; items without a
  * usable absolute URL are dropped.
  *
  * @param {string} xml - raw RSS feed body
  * @param {string} [defaultCompany] - fallback company for unsplittable titles
- * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number, employmentType?: string}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number, employmentType?: string, country?: string}>}
  */
 export function parseWwrFeed(xml, defaultCompany = 'We Work Remotely') {
   if (typeof xml !== 'string') return [];
@@ -141,6 +159,9 @@ export function parseWwrFeed(xml, defaultCompany = 'We Work Remotely') {
     // <type> is the posting's employment type ("Full-Time", "Contract").
     const employmentType = normalizeEmploymentType(tagText(item, 'type'));
     if (employmentType) job.employmentType = employmentType;
+    // <country> is the posting's country, with its flag first. Empty on most items.
+    const country = countryCodeFromFlags(tagText(item, 'country'));
+    if (country) job.country = country;
     jobs.push(job);
   }
 

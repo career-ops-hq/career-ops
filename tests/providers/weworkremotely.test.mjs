@@ -122,6 +122,23 @@ try {
     fail(`parseWwrFeed description presence = ${JSON.stringify(described.map((j) => j.description))}`);
   }
 
+  // country: the flag in <country> gives the ISO code. Several flags, no flag
+  // or an empty tag give none.
+  const countries = parseWwrFeed(`<rss><channel>${[
+    '🇺🇸 United States of America', '<![CDATA[🇬🇧 United Kingdom of Great Britain and Northern Ireland]]>',
+    '🇨🇦 Canada, 🇵🇱 Poland, and 🇬🇧 United Kingdom of Great Britain and Northern Ireland', 'Germany', '', undefined,
+  ].map((country, i) => item(`c${i}`, country === undefined ? '' : `<country>${country}</country>`)).join('')}</channel></rss>`);
+  if (countries[0]?.country === 'US' && countries[1]?.country === 'GB') {
+    pass('parseWwrFeed reads the country code from the flag in <country>');
+  } else {
+    fail(`parseWwrFeed country codes = ${JSON.stringify(countries.slice(0, 2).map((j) => j.country))}`);
+  }
+  if (countries.length === 6 && countries.slice(2).every((j) => !('country' in j))) {
+    pass('parseWwrFeed sets no country for several flags, no flag, an empty or an absent <country>');
+  } else {
+    fail(`parseWwrFeed country presence = ${JSON.stringify(countries.map((j) => j.country))}`);
+  }
+
   if (parseWwrFeed('', 'X').length === 0 && parseWwrFeed(null, 'X').length === 0) {
     pass('parseWwrFeed empty / non-string feed -> empty result (no crash)');
   } else {
