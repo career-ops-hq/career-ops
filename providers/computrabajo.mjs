@@ -25,6 +25,7 @@
 // Crawl limits are deliberately tight, as the contributor asked: at most 3
 // pages and 15 postings per entry, with a random 2-5 s pause between pages.
 
+import { boundedPositiveInt } from './_config-utils.mjs';
 import { decodeEntities } from './_html-entities.mjs';
 import { fetchTextWithRetry, sleep } from './_http.mjs';
 import { markTruncated } from '../lib/board-truncation.mjs';
@@ -50,12 +51,6 @@ const POSTING_HREF_RE = /href="(?:https:\/\/[a-z]{2}\.computrabajo\.com)?\/ofert
 /** @param {string} s */
 function clean(s) {
   return decodeEntities(String(s).replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
-}
-
-/** Keep user overrides bounded so a typo cannot turn one board into a ban-prone crawl. */
-function boundedPositiveInt(value, fallback, cap) {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, cap) : fallback;
 }
 
 /**
