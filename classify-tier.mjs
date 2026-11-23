@@ -71,6 +71,11 @@ export function classifyTier(title) {
     { pattern: /\bjunior\b/i, tier: 'entry', weight: 2 },
     { pattern: /\b[a-z]{2,}[\s-](i)\b/i, tier: 'entry', weight: 2 },
     { pattern: /\b(l1|l2)\b/i, tier: 'entry', weight: 2 },
+    // New-grad hiring labels name the level outright ("New College Grad - Process
+    // Engineer", "Test Engineer - New College Graduate"). Without them these
+    // titles fell through to the 'mid' default and skip_tiers: [mid] dropped them.
+    { pattern: /\bnew\s+(?:college\s+)?grad(?:uate)?s?\b/i, tier: 'entry', weight: 2 },
+    { pattern: /\b(?:recent|university)\s+grad(?:uate)?s?\b/i, tier: 'entry', weight: 2 },
 
     // Intern Tier (weight 1)
     { pattern: /\binternship\b/i, tier: 'intern', weight: 1 },

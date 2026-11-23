@@ -191,6 +191,24 @@ try {
   check('Lead Gen AI Engineer', 'senior');
   check('Lead Gen-AI Engineer', 'senior');
 
+  // ── New-grad hiring labels are entry level, wherever they sit ──
+  // Before, these fell through to the 'mid' default, so skip_tiers: [mid]
+  // silently dropped the very postings a new graduate scans for.
+  check('New College Grad - Industrial Engineer', 'entry');
+  check('New Grad Software Engineer', 'entry');
+  check('Software Engineer, New Grad 2027', 'entry');
+  check('Process Engineer (New Graduate)', 'entry');
+  check('University Graduate - Process Engineer', 'entry');
+  check('Recent Graduates - Manufacturing Engineer', 'entry');
+  // A program title that also names new grads: the level word leads, so entry.
+  check('Test Engineer - New College Graduate (Rotational Development Program)', 'entry');
+  // A level that leads the title still decides it.
+  check('Senior Engineer, New Grad Hiring', 'senior');
+  check('Summer Intern, New Grad Recruiting Team', 'intern');
+  // Not a level: a graduate program run by someone senior, and a plain "Graduate".
+  check('Recent Graduate Program Lead', 'senior');
+  check('Graduate Engineer', 'mid');
+
 } catch (error) {
   fail(`classify-tier.mjs tests could not run: ${error.message}`);
 }
