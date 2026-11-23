@@ -52,5 +52,10 @@ test('an unparseable portals.yml fails a fresh setup with no tracker too', () =>
 
 test('a portals.yml that parses is still checked, not reported as unreadable', () => {
   const r = verify({ tracker: TRACKER, portals: 'tracked_companies: []\n' });
+  // The run must finish and the check must report its result: a timeout or a
+  // crash before check 15 prints would also leave "could not run" out of stdout.
+  assert.equal(r.error, undefined, describeSpawn(r));
   assert.doesNotMatch(r.stdout, /could not run/, describeSpawn(r));
+  assert.match(r.stdout, /^✅ All 0 enabled portals\.yml entries resolve to a provider$/m, describeSpawn(r));
+  assert.equal(r.status, 0, describeSpawn(r));
 });
