@@ -357,3 +357,19 @@ test('a numbered achievement moved under another employer is an attribution prob
   writeFileSync(join(root, 'cv.md'), cv);
   assert.ok(checkVariant('a', { root }).problems.some((p) => p.type === 'attribution'));
 });
+
+test('prose with a year where the dates should be is rejected (#6792)', () => {
+  for (const prose of ['Built a pipeline in 2021', 'Led the 2020 migration']) {
+    const root = workspace({ 'bad.md': BULLET_AS_DATES.replace('- Led a team of 3 engineers', prose) });
+    assert.throws(() => resolveVariant('bad', { root }), /could not be parsed/, prose);
+  }
+});
+
+test('a dates line cv.md itself uses is accepted, in any language (#6792)', () => {
+  const cv = CV.replace('2018-2020', 'Enero 2018 - Actualidad');
+  const variant = OMIT_AND_REORDER.replace('2018-2020', 'Enero 2018 - Actualidad');
+  const root = workspace({ 'es.md': variant });
+  writeFileSync(join(root, 'cv.md'), cv);
+  assert.doesNotThrow(() => resolveVariant('es', { root }));
+  assert.deepEqual(checkVariant('es', { root }).problems.filter((p) => p.type === 'parse'), []);
+});
