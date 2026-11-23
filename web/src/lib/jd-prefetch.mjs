@@ -48,14 +48,13 @@ export async function prefetchJd(input, run, signal) {
   const url = postingUrlFrom(input);
   if (!url || signal?.aborted) return miss;
   try {
-    let result = await run("fetch-jd", [url], { signal });
-    // A plain miss means no ATS API and no structured data. The worker's WebFetch is
-    // the next reader, but a hook (context-mode) can intercept it and leave the worker
-    // with no way to read the page (#7507), so read the visible text here first.
-    // Not after a timeout or spawn failure: the retry would fail the same way.
-    if (result.code === 1 && !result.timedOut && !result.spawnFailed && !signal?.aborted) {
-      result = await run("fetch-jd", [url, "--visible"], { signal });
-    }
+    // --visible only adds a last tier after the ATS API and the page's structured data miss,
+    // so one run covers every reader. The worker's WebFetch is the next reader after a miss,
+    // but a hook (context-mode) can intercept it and leave the worker with no way to read the
+    // page (#7507), so read the visible text here. One run, not a plain run plus a retry: the
+    // run has a single 30s budget, and a second full fetch of a slow or rate-limiting page
+    // would time out and send the worker to the blocked WebFetch.
+    const result = await run("fetch-jd", [url, "--visible"], { signal });
     if (result.timedOut || result.spawnFailed) return miss;
     const out = String(result.stdout ?? "").trim();
     if (result.code === 3) {
