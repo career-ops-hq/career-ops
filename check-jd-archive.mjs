@@ -628,7 +628,9 @@ export const hasMissingArchive = (findings) => findings.some((f) => f.type === '
 // a real counterparty and a real history, so having no record of what the role
 // asked for is a hole in the candidate's own archive — distinct from `SKIP` /
 // `Evaluated`, which were never applied to and are out of scope here.
-const SUBMITTED_LABELS = new Set(['Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected']);
+// Assessment (#4317) sits between Responded and Interview: the application is
+// out, and the employer has answered with a test.
+const SUBMITTED_LABELS = new Set(['Applied', 'Responded', 'Assessment', 'Interview', 'Offer', 'Hired', 'Rejected']);
 
 /**
  * Applications that were SENT but have no archive of any kind.
