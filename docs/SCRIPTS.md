@@ -382,7 +382,7 @@ npm run sync-check
 
 ## cv:verify-facts
 
-Checks a generated CV (HTML, Markdown, or `.tex`) against the user's own source files. It reports quantified claims that do not appear in those sources. It does not edit the CV. Default sources are `cv.md` and `article-digest.md` in the data root; `--source` replaces that list (repeatable) and `--config` points at a different `config/cv-facts.json`.
+Checks a generated CV (HTML, Markdown, or `.tex`) against the user's own source files. It reports quantified claims that do not appear in those sources. It does not edit the CV. Default sources are `cv.md` and `article-digest.md` in the data root; `--source` replaces that list (repeatable) `--config` points at a different `config/cv-facts.json`, and `--strict-source` ignores that config's `allow_metrics`, `allow_facts` and `allow_swaps` so only the sources support a claim (the forbidden and advisory phrase checks still run; variant runs use it).
 
 ```bash
 npm run cv:verify-facts -- output/cv.html

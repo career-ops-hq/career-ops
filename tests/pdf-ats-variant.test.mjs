@@ -120,8 +120,15 @@ test('Step 21a folds before it renders, renders the ats template, then gates', (
 
 test('in a variant run the ATS gate uses cv.md as its only fact source, as Step 19 does (#6792)', () => {
   const gate = STEP_21A.split('\n').find((l) => l.includes('Gate it:')) ?? '';
-  assert.match(gate, /variant run[^.]*`--source cv\.md`/,
+  assert.match(gate, /variant run[^.]*`--source cv\.md --strict-source`/,
     'without it, a claim only article-digest.md backs is cut from the styled HTML but passes the ATS gate');
+});
+
+test('every variant fact gate in modes/pdf.md carries --strict-source (#6792)', () => {
+  const lines = PDF_MODE.split('\n')
+    .filter((l) => /--source cv\.md/.test(l));
+  assert.equal(lines.length, 3);
+  for (const l of lines) assert.match(l, /--source cv\.md --strict-source/);
 });
 
 test('the optional ATS PDF is rendered without --report', () => {
