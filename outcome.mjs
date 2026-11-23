@@ -94,7 +94,7 @@ const USAGE = `Usage: node outcome.mjs <tracker#|company> <outcome_type> [option
   --note "..."       Custom note to append to tracker
   --role "..."       Disambiguate company match
   --cv "..."         Path to submitted CV (relative to the tracker workspace; defaults to cv.md)
-  --cover "..."      Path to submitted cover letter
+  --cover "..."      Path to submitted cover letter (relative to the tracker workspace)
   --url "..."        Job posting URL (overrides auto-detection from tracker notes)
   --clean-output     Remove the tailored PDF/HTML from output/ once archived to data/outcomes/
   --dry-run          Preview outcome logging without writing
@@ -270,20 +270,27 @@ let cvResolvedPath = null;
 let isPdf = false;
 let explicitCvBytes = null;
 
+// The bytes of a file the user named on the command line, read once. Throws
+// when it is not a regular, non-empty file.
+function readSelectedFile(path) {
+  if (!statSync(path).isFile()) throw new Error('not a file');
+  // A regular file may become a FIFO after stat; do not block before fstat.
+  const fd = openSync(path, process.platform === 'win32' ? 'r' : constants.O_RDONLY | constants.O_NONBLOCK);
+  try {
+    if (!fstatSync(fd).isFile()) throw new Error('not a file');
+    const bytes = readFileSync(fd);
+    if (bytes.length === 0) throw new Error('empty file');
+    return bytes;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 // Case A: A custom CV path is explicitly passed via CLI options.
 if (flags.cv !== null) {
   const selectedCv = resolve(repoRoot, flags.cv);
   try {
-    if (!statSync(selectedCv).isFile()) throw new Error('not a file');
-    // A regular file may become a FIFO after stat; do not block before fstat.
-    const fd = openSync(selectedCv, process.platform === 'win32' ? 'r' : constants.O_RDONLY | constants.O_NONBLOCK);
-    try {
-      if (!fstatSync(fd).isFile()) throw new Error('not a file');
-      explicitCvBytes = readFileSync(fd);
-      if (explicitCvBytes.length === 0) throw new Error('empty file');
-    } finally {
-      closeSync(fd);
-    }
+    explicitCvBytes = readSelectedFile(selectedCv);
   } catch (err) {
     failExit(`Selected CV is not a readable file: ${flags.cv} (${err.message})`, 'invalid-cv', 1);
   }
@@ -366,6 +373,20 @@ if (isPdf && resolvedCvAbs && pathIsInsideCanonical(resolvedCvAbs, outputDir)) {
     } catch (err) {
       // Fallback gracefully on parsing issues
     }
+  }
+}
+
+// An explicit --cover gets the same treatment as --cv, before the dry run and
+// before anything is written. It was copied only when existsSync() said yes,
+// from a path resolved against the process cwd: a cover letter that was not
+// found was dropped without a word while the run reported success, and a
+// directory reached copyFileSync() and crashed with a stack trace.
+let explicitCoverBytes = null;
+if (flags.cover !== null) {
+  try {
+    explicitCoverBytes = readSelectedFile(resolve(repoRoot, flags.cover));
+  } catch (err) {
+    failExit(`Selected cover letter is not a readable file: ${flags.cover} (${err.message})`, 'invalid-cover', 1);
   }
 }
 
@@ -482,10 +503,10 @@ if (flags.cleanOutput && htmlResolvedPath && existsSync(htmlResolvedPath)) {
 }
 
 // 2. Snapshot submitted cover letter if provided, preserving existing files instead of overwriting.
-if (flags.cover && existsSync(flags.cover)) {
+if (explicitCoverBytes) {
   const coverDestPath = join(outcomeDir, 'submitted_cover_letter.md');
   if (!existsSync(coverDestPath)) {
-    copyFileSync(flags.cover, coverDestPath);
+    writeFileSync(coverDestPath, explicitCoverBytes);
   }
 }
 
