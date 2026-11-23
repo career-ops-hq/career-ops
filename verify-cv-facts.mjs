@@ -3823,7 +3823,7 @@ const PAST_PERCENT_CLAIM_RE = /\b(?:grew|increased|improved|reduced|generated|ac
 const DURATION_INTRO_RE = /^\s*(?:over|in|within|for|during|across)\b[^,;:]*?\d[\d,.]*\s*\+?\s*(?:days|weeks|months|years)\s*$/i;
 // Recognize Turkish plans only where the number directly modifies the
 // planned change. A later intention cannot license an earlier percentage.
-const TR_PERCENT_PLAN_RE = /(?<![\p{L}\p{N}])(%\d+(?:[.,]\d+)?)\s+(?:oranında\s+)?\p{L}+(?:(?:mayı|meyi)\s+(?:planlıyorum|hedefliyorum|amaçlıyorum)|(?:acağım|eceğim))(?![\p{L}\p{M}])/giu;
+const TR_PERCENT_PLAN_RE = /(?<![\p{L}\p{N}])(%\d+(?:[.,]\d+)?)\s+(?:oran[ıI]nda\s+)?\p{L}+(?:(?:may[ıI]|mey[iİ])\s+(?:planl[ıI]yorum|hedefl[iİ]yorum|amaçl[ıI]yorum)|(?:acağ[ıI]m|eceğ[iİ]m))(?![\p{L}\p{M}])/giu;
 
 /**
  * Sentence bounds at `.`, `!`, `?`, or newline — used so a duration intro
@@ -3893,8 +3893,12 @@ function plannedClaims(targetText, planTexts) {
     const planAssertion = isPlanAssertion(span, sentence);
     const pastInSpan = pastClaimMetrics(span);
     const remaining = clean.slice(i, end);
-    for (const match of remaining.matchAll(TR_PERCENT_PLAN_RE)) forward.add(canonicalMetric(match[1]));
-    const nonTurkishPlans = remaining.replace(TR_PERCENT_PLAN_RE, match => match.replace(/^%\d+(?:[.,]\d+)?/, ''));
+    // In Turkish, uppercase I pairs with dotless ı and uppercase İ with i.
+    // Remove only the recognized plan metric before checking the rest of the span.
+    const nonTurkishPlans = remaining.replace(TR_PERCENT_PLAN_RE, (match, percent) => {
+      forward.add(canonicalMetric(percent));
+      return match.slice(percent.length);
+    });
     for (const claim of metricClaims(nonTurkishPlans)) {
       if (pastInSpan.has(claim)) past.add(claim);
       else if (planAssertion) forward.add(claim);
