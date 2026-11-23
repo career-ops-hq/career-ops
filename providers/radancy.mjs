@@ -381,7 +381,7 @@ export default {
               if (seen.has(row.id)) continue;
               seen.add(row.id);
               fresh++;
-              jobs.push({ title: row.title, url: row.url, company: entry.name, location: row.location });
+              jobs.push({ title: row.title, url: row.url, company: entry.name, location: row.location, requisitionId: row.id });
             }
             return fresh;
           };
@@ -517,7 +517,7 @@ export default {
         if (seen.has(row.id)) continue;
         seen.add(row.id);
         fresh++;
-        jobs.push({ title: row.title, url: row.url, company: entry.name, location: row.location });
+        jobs.push({ title: row.title, url: row.url, company: entry.name, location: row.location, requisitionId: row.id });
       }
       // No new ids → the server clamped ?p= to the last page (or looped). Stop.
       if (fresh === 0) break;
