@@ -236,3 +236,12 @@ test('one unreadable variant is a read problem and the audit still checks the re
   const findings = auditCvVariants({ root });
   assert.deepEqual(findings.map((f) => [f.name, f.problems[0].type]), [['a', 'read'], ['bad', 'parse']]);
 });
+
+test('numeric prose where the dates should be is rejected, real date shapes are kept (#6792)', () => {
+  const root = workspace({ 'bad.md': BULLET_AS_DATES.replace('- Led a team of 3 engineers', 'Built 3 pipelines') });
+  assert.throws(() => resolveVariant('bad', { root }), /could not be parsed/);
+  for (const dates of ['2020-2024', '2019 – 2024', 'Mar 2021 - Present', '03/21 - 05/23', '2021年3月 - 至今', '**2020 -- 2024**', 'Current']) {
+    const ok = workspace({ 'ok.md': BULLET_AS_DATES.replace('- Led a team of 3 engineers', `${dates}\n\n- Led a team of 3 engineers`) });
+    assert.doesNotThrow(() => resolveVariant('ok', { root: ok }), dates);
+  }
+});
