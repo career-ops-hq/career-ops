@@ -1,6 +1,3 @@
-// GitHub-flavored markdown and the dashboard treat "- [X]" as done. Scan
-// recognized only a space or a lowercase x, so the next scan added that
-// posting again. "- [!]" is a failed fetch and still does not count.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
