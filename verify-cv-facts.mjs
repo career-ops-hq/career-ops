@@ -3847,7 +3847,13 @@ function pastClaimMetrics(span) {
     for (const claim of metricClaims(text, { keepPlanHorizons: true })) claims.add(claim);
   };
   for (const match of span.matchAll(PAST_TIME_CLAIM_RE)) add(match[0]);
-  for (const part of span.split(FORWARD_MARKER_RE)) {
+  for (const [index, segment] of span.split(FORWARD_MARKER_RE).entries()) {
+    // After "will", "have increased" is future perfect. Skip that verb only:
+    // a later independent achievement in the same clause still needs evidence.
+    const firstVerb = PAST_ACHIEVEMENT_VERB_RE.exec(segment);
+    const futurePerfect = index > 0 && firstVerb
+      && /^\s*(?:already\s+)?have\s+(?:already\s+)?$/i.test(segment.slice(0, firstVerb.index));
+    const part = futurePerfect ? segment.slice(firstVerb.index + firstVerb[0].length) : segment;
     for (let i = 0; i < part.length;) {
       const { end } = clauseBounds(part, i, { extendCoordinated: false });
       const clause = part.slice(i, end);
