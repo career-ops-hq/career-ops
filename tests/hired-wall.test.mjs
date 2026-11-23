@@ -154,7 +154,9 @@ const FIXTURE_AVATAR = join(ROOT, 'tests', 'fixtures', 'avatar-8x8.png');
   const weeks = weeksFromScanHistory(history, '2026-08-20');
   if (weeks === 7) pass('weeks derive from the EARLIEST first_seen date (7 weeks)');
   else fail(`weeks math wrong: ${weeks}`);
-  const headerless = weeksFromScanHistory(history.split('\n').slice(1).join('\n'), '2026-08-20');
+  // The oldest row goes first here, so dropping the first data row changes
+  // the answer (the July 15 row alone gives 5 weeks, not 7).
+  const headerless = weeksFromScanHistory(history.split('\n').slice(1, 3).reverse().join('\n') + '\n', '2026-08-20');
   if (headerless === 7) pass('a headerless scan-history keeps its first row');
   else fail(`headerless scan-history gave ${headerless}`);
 
