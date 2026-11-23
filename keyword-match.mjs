@@ -32,7 +32,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { extractSkills } from './skill-extract.mjs';
 import { collapseMarkdownLinks } from './verify-cv-facts.mjs';
-import { headingText, normalizePandocLine, toPlainText } from './lib/cv-markdown.mjs';
+import { headingText, normalizePandocLine, toPlainText, isExperienceHeading, parseCompanyHeading, findExperienceSections } from './lib/cv-markdown.mjs';
 
 // A normal path stays readable. A space or other shell syntax is quoted so the
 // example stays one argument.
@@ -293,13 +293,120 @@ export function cvTermsNotInJd(keywords, cvText, { html = false } = {}) {
 }
 
 /**
+ * For each present keyword, report the section(s) it appears in, using the CV's
+ * own headings: summary, competencies or skills, and experience by entry and
+ * bullet position (#7066). Reuses the Experience reading from lib/cv-markdown.mjs
+ * (isExperienceHeading / parseCompanyHeading) so the checks share one parser.
+ *
+ * Informational only. When the CV structure cannot be determined, returns
+ * "placement wasn't determined" for that keyword rather than guessing.
+ *
+ * @param {string[]} keywords - Present keywords to locate.
+ * @param {string} cvText - Raw or normalized CV markdown.
+ * @returns {Record<string, string[]>} Map of keyword -> array of placement labels.
+ */
+export function locateKeywordPlacements(keywords, cvText) {
+  const result = {};
+  const cleaned = [];
+  const seen = new Set();
+  for (const raw of keywords || []) {
+    const k = String(raw).trim();
+    if (!k) continue;
+    const key = normalizeText(k);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cleaned.push(k);
+  }
+  if (!cleaned.length) return result;
+
+  const rawLines = String(cvText ?? '').replace(/<!--[\s\S]*?-->/g, ' ').replace(/\r\n/g, '\n').split('\n');
+  const lines = rawLines.map(normalizePandocLine);
+
+  let currentH2 = null;
+  let currentCompany = null;
+  let bulletIndex = 0;
+  let currentBullet = null;
+  let hasSupportedHeadings = false;
+  let inCodeFence = false;
+  const blocks = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const fenceMatch = /^(`{3,}|~{3,})/.exec(line.trim());
+    if (fenceMatch) {
+      inCodeFence = !inCodeFence;
+      continue;
+    }
+    if (inCodeFence) continue;
+
+    const h2 = headingText(line, 2);
+    if (h2 !== null) {
+      hasSupportedHeadings = true;
+      currentH2 = h2;
+      currentCompany = null;
+      bulletIndex = 0;
+      currentBullet = null;
+      continue;
+    }
+    if (!currentH2) continue;
+
+    if (isExperienceHeading(currentH2)) {
+      const h3 = headingText(line, 3);
+      if (h3 !== null) {
+        const parsed = parseCompanyHeading(line);
+        currentCompany = parsed?.company ?? h3.split(/\s+[-–—]+\s+/)[0]?.trim();
+        bulletIndex = 0;
+        currentBullet = null;
+        if (currentCompany) {
+          blocks.push({ label: currentCompany, text: currentCompany });
+        }
+        continue;
+      }
+      if (currentCompany) {
+        const bulletMatch = /^\s*[-*+]\s+(.*)$/.exec(line) || /^\s*\d+[.)]\s+(.*)$/.exec(line);
+        if (bulletMatch) {
+          bulletIndex++;
+          currentBullet = { label: `${currentCompany}, bullet ${bulletIndex}`, text: bulletMatch[1] };
+          blocks.push(currentBullet);
+        } else if (currentBullet && line.trim() && !/^#{1,6}\s/.test(line)) {
+          currentBullet.text += ' ' + line.trim();
+        } else if (bulletIndex === 0 && line.trim() && !/^#{1,6}\s/.test(line)) {
+          blocks.push({ label: currentCompany, text: line.trim() });
+        }
+      }
+    } else {
+      if (line.trim() && !/^#{1,6}\s/.test(line)) {
+        blocks.push({ label: currentH2, text: line.trim() });
+      }
+    }
+  }
+
+  for (const kw of cleaned) {
+    if (!hasSupportedHeadings) {
+      result[kw] = ["placement wasn't determined"];
+      continue;
+    }
+    const matched = [];
+    for (const b of blocks) {
+      if (keywordCount(kw, b.text) > 0 && !matched.includes(b.label)) {
+        matched.push(b.label);
+      }
+    }
+    result[kw] = matched.length > 0 ? matched : ["placement wasn't determined"];
+  }
+
+  return result;
+}
+
+/**
  * Core coverage analysis. Pure: no I/O. `thin` is a SUBSET of `present`
  * (keywords mentioned exactly once); coverage counts thin keywords as present.
  *
  * @param {string[]} keywords - JD keywords (order preserved, case-insensitively de-duped).
  * @param {string} cvText - Raw CV text to scan.
  * @returns {{total:number, presentCount:number, coveragePct:number,
- *            present:string[], thin:string[], missing:string[]}}
+ *            present:string[], thin:string[], missing:string[],
+ *            placement:Record<string, string[]>}}
  */
 export function analyzeCoverage(keywords, cvText) {
   const seen = new Set();
@@ -329,7 +436,8 @@ export function analyzeCoverage(keywords, cvText) {
   const total = cleaned.length;
   const presentCount = present.length;
   const coveragePct = total === 0 ? 0 : Math.round((presentCount / total) * 100);
-  return { total, presentCount, coveragePct, present, thin, missing };
+  const placement = locateKeywordPlacements(present, cvText);
+  return { total, presentCount, coveragePct, present, thin, missing, placement };
 }
 
 /**
@@ -615,7 +723,7 @@ export function htmlToText(html) {
  * @returns {string} Markdown block.
  */
 export function formatCoverageMarkdown(result, sourceLabel, keywordNote) {
-  const { coveragePct, presentCount, total, present, thin, missing } = result;
+  const { coveragePct, presentCount, total, present, thin, missing, placement } = result;
   const out = [
     '## Keyword Coverage',
     '',
@@ -625,6 +733,16 @@ export function formatCoverageMarkdown(result, sourceLabel, keywordNote) {
   if (sourceLabel) out.push(`_Scanned: ${sourceLabel}._`, '');
   if (keywordNote) out.push(`_${keywordNote}_`, '');
   out.push(`**Present (${present.length}):** ${present.join(', ') || '—'}`, '');
+  if (placement && present.length) {
+    for (const kw of present) {
+      const places = placement[kw];
+      const desc = Array.isArray(places) && places.length > 0
+        ? places.join('; ')
+        : (typeof places === 'string' && places ? places : "placement wasn't determined");
+      out.push(`- ${kw}: ${desc}`);
+    }
+    out.push('');
+  }
   if (thin.length) {
     out.push(`**Thin — mentioned once, consider reinforcing (${thin.length}):** ${thin.join(', ')}`, '');
   }
@@ -1024,6 +1142,35 @@ function runSelfTest() {
   if (!r.missing.includes('gRPC')) failures.push('gRPC should be missing');
   if (!r.thin.includes('observability')) failures.push('observability should be thin');
   if (r.coveragePct !== 80) failures.push(`coverage % = ${r.coveragePct} (expected 80)`);
+  if (r.placement['Python']?.[0] !== "placement wasn't determined") {
+    failures.push('unstructured cv placement fallback');
+  }
+
+  const structuredCv = [
+    '# Jane Doe',
+    '',
+    '## Professional Summary',
+    'Senior engineer building Python services and Kubernetes platforms.',
+    '',
+    '## Experience',
+    '',
+    '### Acme Cloud --- New York, NY',
+    '**Staff Engineer**',
+    '2021 -- Present',
+    '',
+    '- Scaled Kubernetes clusters and automated CI/CD deployments.',
+    '- Mentored junior engineers and designed PostgreSQL schemas.',
+    '',
+    '## Technical Skills',
+    '- Python, Go, Kubernetes, PostgreSQL',
+  ].join('\n');
+  const rStruct = analyzeCoverage(['Python', 'Kubernetes', 'CI/CD'], structuredCv);
+  const k8sPlaces = rStruct.placement['Kubernetes'] || [];
+  if (!k8sPlaces.includes('Professional Summary') ||
+      !k8sPlaces.includes('Acme Cloud, bullet 1') ||
+      !k8sPlaces.includes('Technical Skills')) {
+    failures.push(`structured cv placement (got: ${k8sPlaces.join('; ')})`);
+  }
   if (variantForms('aws').includes('aw')) failures.push('variantForms truncated acronym aws->aw');
   if (htmlToText('<style>.x{}</style><p>Python &amp; <b>gRPC</b></p>') !== 'Python & gRPC') {
     failures.push('htmlToText strip/decode');
