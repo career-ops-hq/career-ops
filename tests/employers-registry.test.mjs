@@ -360,7 +360,17 @@ test('sourceProblem: web-index:<name>@<date> needs a lowercase name and a real d
   ]) {
     assert.match(sourceProblem(bad) ?? '', /^source .* (is not one of|does not end in a real calendar date)/, bad);
   }
-  assert.match(sourceProblem('scraped'), /web-index:<name>@<YYYY-MM-DD>$/);
+  assert.match(sourceProblem('scraped'), /web-index:<name>@<YYYY-MM-DD>, user-submissions@<YYYY-MM-DD>$/);
+});
+
+test('sourceProblem: user-submissions@<date> needs a real date and nothing else', () => {
+  for (const ok of ['user-submissions@2026-11-23', 'user-submissions@2024-02-29']) assert.equal(sourceProblem(ok), null, ok);
+  for (const bad of [
+    'user-submissions', 'user-submissions@', 'user-submissions@2026-11', 'user-submissions@2026-02-30', 'user-submissions@2025-02-29',
+    'User-submissions@2026-11-23', 'user-submissions:acme@2026-11-23', 'user-submissions@2026-11-23 ', 'user_submissions@2026-11-23',
+  ]) {
+    assert.match(sourceProblem(bad) ?? '', /^source .* (is not one of|does not end in a real calendar date)/, bad);
+  }
 });
 
 test('schema.json: the manifest id pattern accepts and rejects what the validator does', () => {
