@@ -59,3 +59,24 @@ test('the path as the scan lists it still works', () => {
   assert.equal(r.status, 0, describeSpawn(r));
   assert.deepEqual(pending(), ['diplomas/msc.md']);
 });
+
+// documents/cv/master.md is both cv/master.md read from the data root and the
+// key of documents/documents/cv/master.md read from documents/. Taking the
+// first match recorded the nested file and left the one the user meant pending.
+test('a path that matches two scanned sources exits 1 and records nothing', () => {
+  const { root, run, pending } = workspace();
+  mkdirSync(join(root, 'documents', 'documents', 'cv'), { recursive: true });
+  writeFileSync(join(root, 'documents', 'documents', 'cv', 'master.md'), '# Older CV\n\nJane Doe, Engineer\n');
+  const r = run('--commit', 'documents/cv/master.md');
+  assert.equal(r.status, 1, describeSpawn(r));
+  assert.match(r.stderr, /More than one scanned source: documents\/cv\/master\.md matches .*Nothing was recorded\./, describeSpawn(r));
+  for (const key of ['cv/master.md', 'documents/cv/master.md']) {
+    assert.ok(r.stderr.includes(join(root, 'documents', ...key.split('/'))), describeSpawn(r));
+  }
+  assert.equal(existsSync(join(root, 'data', 'intake-state.json')), false);
+  assert.deepEqual(pending(), ['cv/master.md', 'diplomas/msc.md', 'documents/cv/master.md']);
+  // The absolute path names one file however it is read, and records only it.
+  const ok = run('--commit', join(root, 'documents', 'cv', 'master.md'));
+  assert.equal(ok.status, 0, describeSpawn(ok));
+  assert.deepEqual(pending(), ['diplomas/msc.md', 'documents/cv/master.md']);
+});
