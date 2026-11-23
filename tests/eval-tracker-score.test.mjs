@@ -58,3 +58,13 @@ test('a blank score line does not read the next line', () => {
   const text = 'SCORE:\n2 years of Go required.\n**Score:**\n4.2 extra\nscore:\n';
   assert.equal(readGlobalScore(text), null);
 });
+
+test('text after a /5 cell still counts, and a bare number does not', () => {
+  const noted = reply('4.2/5 (strong)', 'Apply');
+  assert.equal(readGlobalScore(noted), 4.2);
+  assert.match(normalizeEvaluationText(noted, JD), /final_decision: "Apply"/);
+
+  const bare = reply('42', 'Apply');
+  assert.equal(readGlobalScore(bare), null);
+  assert.match(normalizeEvaluationText(bare, JD), /final_decision: "Apply"/);
+});
