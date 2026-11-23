@@ -125,6 +125,14 @@ test('a completed percentage range requires evidence for both endpoints', () => 
   assert.deepEqual(check(letter('I increased conversion by %10 and will improve retention by %20.'), plan).invented, ['10%']);
 });
 
+test('future-perfect percentages use plan evidence without excusing independent past claims', () => {
+  const plan = ['I will improve conversion by 20%.'];
+  assert.deepEqual(check(letter('I will have increased conversion by %20.'), plan).invented, []);
+  assert.deepEqual(check(letter('I will have increased conversion by %20.'), []).invented, ['20%']);
+  assert.deepEqual(check(letter('I increased retention from %5 to %10 and will have increased conversion by %20.'), plan).invented, ['5%', '10%']);
+  assert.deepEqual(check(letter('I will have increased conversion by %20 as I improved retention by %10.'), plan).invented, ['10%']);
+});
+
 test('a later percentage stays the plan when the earlier past verb has no percentage', () => {
   const result = check(
     letter('I grew the team and will grow revenue 50%.'),
