@@ -595,6 +595,103 @@ try {
   }
   if (refused === badFilters.length + 3 && refusedCalls.length === 0) pass('fetch() throws on an unknown filter, an invalid value or a filters that is not a map, before any request');
   else fail(`bad filters refused ${refused} of ${badFilters.length + 3}, requests made: ${refusedCalls.length}`);
+
+  // ── Detail reads ──────────────────────────────────────────────────────────
+  // Off by default. When on: the employer's own posting becomes the job url, and
+  // description_text the description. Bounded by detailLimit, five at a time.
+  const detailJobs = Array.from({ length: 12 }, (_, i) => ({ id: `d-${i}`, title: `D${i}`, url: srUrl(i), company: 'Co' }));
+  const detailFor = (id) => {
+    const i = Number(id.slice(2));
+    if (i === 0) return { status: 'open', description_text: '  Build things.  ', apply: { kind: 'external', url: 'https://boards.greenhouse.io/acme/jobs/1' } };
+    if (i === 1) return { status: 'open', description_text: 'Onsite apply.', apply: { kind: 'onsite', url: srUrl(1) } };
+    if (i === 2) return { status: 'open', description_text: 'Hands off to speedrun.', apply: { kind: 'external', url: 'https://speedrun-talent-network.com/go/2' } };
+    if (i === 3) return { status: 'open', description_text: 'Insecure.', apply: { kind: 'external', url: 'http://jobs.acme.example/3' } };
+    if (i === 4) return { status: 'closed', description_text: null, apply: null };
+    if (i === 5) return { status: 'open', description_text: '   ', apply: { kind: 'external', url: 'not a url' } };
+    return { status: 'open', description_text: `Text ${i}`, apply: { kind: 'external', url: `https://jobs.acme.example/${i}` } };
+  };
+  const detailRun = async (entryExtra, { failId, probe } = {}) => {
+    const calls = [];
+    let inFlight = 0;
+    let peak = 0;
+    const warnings = [];
+    const realError = console.error;
+    console.error = (...args) => { warnings.push(args.join(' ')); };
+    let rows;
+    try {
+      rows = await provider.fetch({ name: 'sr', ...entryExtra }, {
+        ...(probe ? { maxPages: 1 } : {}),
+        sleep: async () => {},
+        fetchJson: async (url) => {
+          calls.push(url);
+          if (!new URL(url).pathname.startsWith('/api/v1/jobs/')) return { jobs: detailJobs, total_pages: 1 };
+          inFlight++;
+          peak = Math.max(peak, inFlight);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          inFlight--;
+          const id = decodeURIComponent(new URL(url).pathname.split('/').pop());
+          if (id === failId) { const e = new Error('HTTP 404'); e.status = 404; throw e; }
+          return { job: detailFor(id) };
+        },
+      });
+    } finally {
+      console.error = realError;
+    }
+    return { rows, detailCalls: calls.filter((u) => new URL(u).pathname.startsWith('/api/v1/jobs/')), peak, warnings };
+  };
+
+  const noDetails = await detailRun({});
+  if (noDetails.detailCalls.length === 0 && noDetails.rows.every((r) => !('description' in r) && r.url.startsWith('https://speedrun-talent-network.com/jobs/')))
+    pass('fetch() reads no job detail unless fetchDetails is true');
+  else fail(`default detail calls = ${noDetails.detailCalls.length}`);
+
+  const withDetails = await detailRun({ a16z_speedrun_talent: { fetchDetails: true, detailLimit: 8 } }, { failId: 'd-6' });
+  const byTitle = Object.fromEntries(withDetails.rows.map((r) => [r.title, r]));
+  if (byTitle.D0.url === 'https://boards.greenhouse.io/acme/jobs/1' && byTitle.D0.description === 'Build things.' && byTitle.D0.externalId === 'd-0')
+    pass('fetch() with fetchDetails sets url to the employer apply url and description to description_text, keeping externalId');
+  else fail(`detail row = ${JSON.stringify(byTitle.D0)}`);
+  if ([1, 2, 3, 4, 5].every((i) => byTitle[`D${i}`].url === srUrl(i)))
+    pass('fetch() keeps the feed url for an onsite apply, a speedrun-host apply, an http apply, a closed role and an invalid apply url');
+  else fail(`kept urls = ${JSON.stringify([1, 2, 3, 4, 5].map((i) => byTitle[`D${i}`].url))}`);
+  if (byTitle.D1.description === 'Onsite apply.' && !('description' in byTitle.D4) && !('description' in byTitle.D5))
+    pass('fetch() sets no description for a closed role or a blank description_text');
+  else fail(`descriptions = ${JSON.stringify([byTitle.D1.description, byTitle.D4.description, byTitle.D5.description])}`);
+  if (withDetails.detailCalls.length === 8 && !('description' in byTitle.D8) && byTitle.D8.url === srUrl(8)
+      && withDetails.detailCalls.every((u) => new URL(u).searchParams.get('source') === 'career-ops' && new URL(u).origin === 'https://speedrun-talent-network.com'))
+    pass('fetch() reads at most detailLimit details, with source=career-ops, on the feed host');
+  else fail(`detailLimit calls = ${withDetails.detailCalls.length}`);
+  if (withDetails.peak === 5 && withDetails.rows.length === 12) pass('fetch() reads details five at a time');
+  else fail(`detail concurrency peak = ${withDetails.peak}`);
+  if (byTitle.D6.url === srUrl(6) && !('description' in byTitle.D6) && byTitle.D7.url === 'https://jobs.acme.example/7'
+      && withDetails.warnings.length === 1 && withDetails.warnings[0].includes('1 of 8 job details not read'))
+    pass('fetch() keeps a job as listed and warns once when its detail fails, and still reads the others');
+  else fail(`failed detail = ${JSON.stringify({ d6: byTitle.D6, d7: byTitle.D7.url, warnings: withDetails.warnings })}`);
+
+  const defaultLimit = await detailRun({ a16z_speedrun_talent: { fetchDetails: true } });
+  const bigLimit = await detailRun({ a16z_speedrun_talent: { fetchDetails: true, detailLimit: 5000 } });
+  const badLimit = await detailRun({ a16z_speedrun_talent: { fetchDetails: true, detailLimit: 0 } });
+  if (defaultLimit.detailCalls.length === 12 && bigLimit.detailCalls.length === 12 && badLimit.detailCalls.length === 12)
+    pass('fetch() accepts a missing, oversized or invalid detailLimit and reads at most the jobs listed');
+  else fail(`detailLimit variants = ${JSON.stringify([defaultLimit, bigLimit, badLimit].map((r) => r.detailCalls.length))}`);
+
+  const manyJobs = Array.from({ length: 150 }, (_, i) => ({ id: `m-${i}`, title: `M${i}`, url: srUrl(1000 + i) }));
+  const limitCalls = [];
+  await provider.fetch({ name: 'sr', a16z_speedrun_talent: { fetchDetails: true, detailLimit: 5000 } }, {
+    fetchJson: async (url) => { limitCalls.push(url); return new URL(url).pathname === '/api/v1/jobs' ? { jobs: manyJobs, total_pages: 1 } : { job: { status: 'open' } }; },
+  });
+  if (limitCalls.length === 1 + 100) pass('fetch() caps detailLimit at 100');
+  else fail(`detailLimit cap = ${limitCalls.length - 1} detail calls`);
+
+  const oddIdCalls = [];
+  const oddIdRows = await provider.fetch({ name: 'sr', a16z_speedrun_talent: { fetchDetails: true } }, {
+    fetchJson: async (url) => { oddIdCalls.push(url); return new URL(url).pathname === '/api/v1/jobs' ? { jobs: [{ id: 'bad-\uD800', title: 'Odd', url: srUrl(77) }], total_pages: 1 } : { job: { status: 'open' } }; },
+  });
+  if (oddIdCalls.length === 1 && oddIdRows.length === 1 && oddIdRows[0].url === srUrl(77)) pass('fetch() skips the detail read for an id with a lone surrogate and keeps the job');
+  else fail(`lone-surrogate id = ${JSON.stringify({ calls: oddIdCalls.length, rows: oddIdRows.length })}`);
+
+  const probed = await detailRun({ a16z_speedrun_talent: { fetchDetails: true } }, { probe: true });
+  if (probed.detailCalls.length === 0) pass('fetch() reads no details under a ctx.maxPages probe');
+  else fail(`probe detail calls = ${probed.detailCalls.length}`);
 } catch (e) {
   fail(`a16z-speedrun-talent provider test crashed: ${e?.stack || e}`);
 }

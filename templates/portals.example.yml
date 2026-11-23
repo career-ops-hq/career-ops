@@ -2193,6 +2193,8 @@ search_queries:
 #       wp: remote
 #       sen: [senior, staff, founding, _]   # _ = roles with no stated level
 #       posted: 7d        # 24h | 7d | 30d
+#     fetchDetails: false # optional: read each job's detail for its description and the employer's own apply URL
+#     detailLimit: 25     # optional: max detail requests per scan (default 25, max 100)
 #   enabled: true
 #
 # - name: Arbeitnow                       # EU/DACH-heavy board, newest-first

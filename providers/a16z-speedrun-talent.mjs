@@ -2,6 +2,7 @@
 import { fetchJsonWithRetry } from './_http.mjs';
 import { coerceId } from './_ids.mjs';
 import { workplaceField } from './_workplace-type.mjs';
+import { safeEncodeURIComponent } from './_safe-url.mjs';
 import { markTruncated } from '../lib/board-truncation.mjs';
 
 /** @typedef {import('./_types.js').Provider} Provider */
@@ -26,6 +27,18 @@ import { markTruncated } from '../lib/board-truncation.mjs';
 //   a16z_speedrun_talent:
 //     filters: { scope: everywhere, fn: engineering, wp: remote, sen: [senior, staff, _], posted: 7d }
 //
+// The list has no apply link and no description. Optional detail reads add
+// both, from /api/v1/jobs/<id>: `apply.url` (for an `external` apply, the
+// employer's own posting) replaces the job's url, and `description_text`
+// becomes `description`. Off by default, like the other providers' extra
+// per-job requests (smartrecruiters, vdab):
+//
+//   a16z_speedrun_talent:
+//     fetchDetails: true   # one detail request per job, in batches of 5
+//     detailLimit: 25      # max detail requests per scan (default 25, max 100)
+//
+// Detail reads are skipped while verify-portals probes (ctx.maxPages is set).
+//
 // Every request carries `source=career-ops` — the feed's documented optional
 // attribution param, echoed in the response; it does not change results.
 //
@@ -44,6 +57,9 @@ const DEFAULT_MAX_PAGES = 6; // × PER_PAGE = the 300-job default scan
 // sits well above plausible board size (~353 pages / ~17.6k jobs as of
 // 2026-08), same policy as workday.mjs's cap.
 const MAX_PAGES_CAP = 1000;
+const DETAIL_BATCH = 5;
+const DEFAULT_DETAIL_LIMIT = 25;
+const MAX_DETAIL_LIMIT = 100;
 
 // The feed's documented filter parameters (/api/v1/openapi.json, searchJobs),
 // minus `q`, `page` and `source`, which this provider sets itself. An unknown
@@ -154,6 +170,39 @@ function resolveFilters(entry) {
   return pairs;
 }
 
+/**
+ * Whether to read each job's detail, and at most how many per scan.
+ * @param {any} entry
+ * @returns {{ fetchDetails: boolean, detailLimit: number }}
+ */
+function resolveDetails(entry) {
+  const cfg = resolveSettings(entry);
+  const limit = cfg.detailLimit;
+  return {
+    fetchDetails: cfg.fetchDetails === true,
+    detailLimit: Number.isInteger(limit) && limit > 0 ? Math.min(limit, MAX_DETAIL_LIMIT) : DEFAULT_DETAIL_LIMIT,
+  };
+}
+
+/**
+ * The employer's own posting from a job detail: its `apply.url` when the apply
+ * is `external`, https, and not on speedrun's own host. Null otherwise
+ * (`onsite` means the candidate applies on the job page itself).
+ * @param {any} detail
+ * @returns {string | null}
+ */
+export function applyUrlOf(detail) {
+  const apply = detail?.apply;
+  if (apply?.kind !== 'external' || typeof apply.url !== 'string') return null;
+  try {
+    const parsed = new URL(apply.url.trim());
+    const onFeedHost = parsed.hostname === TRUSTED_HOST || parsed.hostname.endsWith(`.${TRUSTED_HOST}`);
+    return parsed.protocol === 'https:' && !onFeedHost ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
+
 // NaN-safe Date.parse — `|| undefined` would also coerce a valid epoch 0.
 function toEpochMs(value) {
   if (typeof value !== 'string' || !value) return undefined;
@@ -221,6 +270,42 @@ export function normalizeSpeedrunJob(j, fallbackCompany) {
   const externalId = coerceId(j.id);
   if (externalId) job.externalId = externalId;
   return job;
+}
+
+/**
+ * Reads the detail of the first `limit` jobs, five at a time, and sets
+ * `description` (from `description_text`) and, for an external apply, `url` to
+ * the employer's own posting. A detail that fails keeps the job as the list
+ * gave it; the failures are counted in one warning.
+ * @param {Array<any>} jobs
+ * @param {number} limit
+ * @param {any} ctx
+ * @param {string} [name]
+ */
+async function enrichFromDetails(jobs, limit, ctx, name) {
+  // A job whose id cannot be encoded (a lone surrogate) keeps the list's fields.
+  const due = jobs.filter((job) => job.externalId && safeEncodeURIComponent(job.externalId) !== null).slice(0, limit);
+  let failed = 0;
+  for (let i = 0; i < due.length; i += DETAIL_BATCH) {
+    await Promise.all(due.slice(i, i + DETAIL_BATCH).map(async (job) => {
+      try {
+        const url = `${FEED_BASE}/${safeEncodeURIComponent(job.externalId)}?${new URLSearchParams({ source: 'career-ops' })}`;
+        const json = await fetchJsonWithRetry(ctx, assertFeedUrl(url), { redirect: 'error' });
+        const detail = json?.job;
+        if (!detail || typeof detail !== 'object' || detail.status === 'closed') return;
+        const text = typeof detail.description_text === 'string' ? detail.description_text.trim() : '';
+        if (text) job.description = text;
+        const apply = applyUrlOf(detail);
+        if (apply) job.url = apply;
+      } catch {
+        failed++;
+      }
+    }));
+  }
+  if (failed) {
+    const label = typeof name === 'string' && name ? name : 'a16z speedrun talent network';
+    console.error(`⚠️  a16z-speedrun-talent: ${label} — ${failed} of ${due.length} job details not read; those jobs keep the list's fields`);
+  }
 }
 
 /** @type {Provider} */
@@ -313,6 +398,11 @@ export default {
         markTruncated(out, 'page-cap', { fetched: out.length });
       }
     }
+
+    // Detail enrichment answers "what does this job say", not "is this feed
+    // alive": skipped while probing, like smartrecruiters and vdab.
+    const { fetchDetails, detailLimit } = resolveDetails(entry);
+    if (fetchDetails && !probing) await enrichFromDetails(out, detailLimit, ctx, fallbackCompany);
     return out;
   },
 };
