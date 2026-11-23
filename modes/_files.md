@@ -118,4 +118,4 @@ AGENTS.md → "Aggregator Listings" step 3 records an aggregator listing the emp
 
 ## Data root in scripts
 
-A new script resolves the data root and the tracker path through `path-resolver.mjs`, never through `__dirname`, because the data root can be overridden and can live outside the repository. Call `getCareerOpsRoot()` for the root, then pass it to `resolveTrackerPath(root)` to read or `resolveTrackerPathForWrite(root)` to write. Both take the root as an argument, with no default.
+A new script resolves the data root and the tracker path through `path-resolver.mjs`, never through `__dirname`, because the data root can be overridden and can live outside the repository. Call `getCareerOpsRoot()` for the root and pass it to `resolveTrackerPath(root)`, which finds the tracker to read and to write, including a legacy `{DATA_ROOT}/applications.md`. Call `resolveTrackerPathForWrite(root)` only when that file does not exist, to create the tracker; calling it first would start a second tracker beside the legacy one (`merge-tracker.mjs` and `set-status.mjs` both check the read path first). Both take the root as an argument, with no default.
