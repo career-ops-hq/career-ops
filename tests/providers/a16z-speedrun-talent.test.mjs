@@ -703,8 +703,8 @@ try {
     pass('normalizeSpeedrunJob maps an annual comp band (comp_period null or year) with its upper-cased currency');
   else fail(`annual salary = ${JSON.stringify([band?.salary, comp(90000, 120000, 'eur', 'year')?.salary])}`);
   if (JSON.stringify(comp(100000, null)?.salary) === JSON.stringify({ min: 100000, max: 100000, currency: 'USD', period: 'year', posted: { min: 100000 } })
-      && JSON.stringify(comp(null, 100000, null)?.salary) === JSON.stringify({ min: 100000, max: 100000, currency: '', period: 'year', posted: { max: 100000 } }))
-    pass('normalizeSpeedrunJob fills a one-sided band, keeps the posted bound as given, and leaves currency empty when the feed gives none');
+      && JSON.stringify(comp(null, 100000, null)?.salary) === JSON.stringify({ min: 100000, max: 100000, period: 'year', posted: { max: 100000 } }))
+    pass('normalizeSpeedrunJob fills a one-sided band, keeps the posted bound as given, and leaves currency out when the feed gives none');
   else fail(`one-sided salary = ${JSON.stringify([comp(100000, null)?.salary, comp(null, 100000, null)?.salary])}`);
   const noPay = [comp(50, 80, 'USD', 'hour'), comp(5000, 6000, 'USD', 'month'), comp(1, 2, 'USD', 'week'), comp(1, 2, 'USD', 'day'), comp(null, null), comp(0, 0), comp('150000', '200000'), comp(NaN, Infinity), comp(-5, -1)];
   if (noPay.every((j) => j && !('salary' in j))) pass('normalizeSpeedrunJob sets no salary for a non-annual band, no numbers, zero, text, non-finite or negative bounds');

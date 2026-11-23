@@ -208,8 +208,8 @@ export function applyUrlOf(detail) {
  * counts (`comp_period` is "year", or null, which the feed defines as annual):
  * an hourly or monthly one is not annual, and this provider does not convert it.
  * Bounds must be numbers above 0; a one-sided band fills the other bound, and
- * `posted` keeps the bounds as given. `currency` is the feed's, upper-cased,
- * and '' when the feed gives none.
+ * `posted` keeps the bounds as given. `currency` is the feed's 3-letter code,
+ * upper-cased, and absent when the feed gives none.
  * @param {any} j
  */
 function salaryOf(j) {
@@ -219,10 +219,12 @@ function salaryOf(j) {
   const lo = bound(j.comp_min);
   const hi = bound(j.comp_max);
   if (lo === undefined && hi === undefined) return null;
+  const code = typeof j.comp_currency === 'string' ? j.comp_currency.trim().toUpperCase() : '';
+  const currency = /^[A-Z]{3}$/.test(code) ? code : '';
   return {
     min: Math.min(lo ?? hi, hi ?? lo),
     max: Math.max(lo ?? hi, hi ?? lo),
-    currency: typeof j.comp_currency === 'string' ? j.comp_currency.trim().toUpperCase() : '',
+    ...(currency ? { currency } : {}),
     period: 'year',
     posted: { ...(lo !== undefined ? { min: lo } : {}), ...(hi !== undefined ? { max: hi } : {}) },
   };
