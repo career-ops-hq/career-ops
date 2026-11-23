@@ -73,5 +73,7 @@ test('interactive Jobicy extraction reads posting JSON-LD without launching a br
     timeout: 5000,
   });
   assert.equal(run.status, 0, run.stderr);
-  assert.match(JSON.parse(run.stdout).text, /Build and operate reliable production services/);
+  const result = JSON.parse(run.stdout);
+  assert.equal(result.title, posting.title);
+  assert.match(result.text, /Build and operate reliable production services/);
 });
