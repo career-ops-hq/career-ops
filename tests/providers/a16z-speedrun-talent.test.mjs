@@ -604,7 +604,7 @@ try {
   for (const filters of ['fn=engineering', ['fn'], 7]) {
     try { await provider.fetch({ name: 'sr', a16z_speedrun_talent: { filters } }, recordCtx(refusedCalls)); } catch (e) { if (/filters must be a map/.test(e.message)) refused++; }
   }
-  const badSettings = ['x', ['filters'], { fetchDetails: 'true' }, { fetchDetails: 1 }, { detailLimit: 0 }, { detailLimit: '50' }, { detailLimit: 2.5 }];
+  const badSettings = ['x', ['filters'], { fetchDetails: 'true' }, { fetchDetails: 1 }, { detailLimit: 0 }, { detailLimit: '50' }, { detailLimit: 2.5 }, { fetchDetail: true }, { detail_limit: 50 }];
   let refusedSettings = 0;
   for (const settings of badSettings) {
     try { await provider.fetch({ name: 'sr', a16z_speedrun_talent: settings }, recordCtx(refusedCalls)); } catch (e) { if (/a16z-speedrun-talent: sr — /.test(e.message)) refusedSettings++; }

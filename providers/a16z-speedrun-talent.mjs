@@ -84,6 +84,7 @@ const ENUM_FILTERS = /** @type {Record<string, string[]>} */ ({
 });
 // `metro` takes at most 5 keys, per the feed's documentation.
 const MAX_METROS = 5;
+const SETTINGS = new Set(['filters', 'fetchDetails', 'detailLimit']);
 
 /** @param {string} url */
 function assertFeedUrl(url) {
@@ -125,9 +126,12 @@ function resolveQuery(entry) {
 function resolveSettings(entry) {
   const cfg = entry?.a16z_speedrun_talent;
   if (cfg == null) return {};
+  const name = entry?.name || 'a16z speedrun talent network';
   if (typeof cfg !== 'object' || Array.isArray(cfg)) {
-    throw new Error(`a16z-speedrun-talent: ${entry?.name || 'a16z speedrun talent network'} — a16z_speedrun_talent must be a map of settings`);
+    throw new Error(`a16z-speedrun-talent: ${name} — a16z_speedrun_talent must be a map of settings`);
   }
+  const unknown = Object.keys(cfg).find((key) => !SETTINGS.has(key));
+  if (unknown) throw new Error(`a16z-speedrun-talent: ${name} — unknown setting "${unknown}" (use filters, fetchDetails or detailLimit)`);
   return cfg;
 }
 

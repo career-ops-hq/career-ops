@@ -2184,7 +2184,7 @@ search_queries:
 #
 # - name: a16z speedrun talent network    # a16z speedrun + wider a16z portfolio (~200 startups)
 #   provider: a16z-speedrun-talent
-#   max_pages: 3          # optional page cap (50 jobs/page, default 3)
+#   max_pages: 6          # optional page cap (50 jobs/page, default 6)
 #   q: machine learning   # optional server-side full-text search (synonyms expand)
 #   a16z_speedrun_talent:
 #     filters:            # optional feed filters (documented parameters only)
