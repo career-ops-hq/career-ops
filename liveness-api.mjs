@@ -328,7 +328,10 @@ const ATS_PROVIDERS = [
       let posting;
       try { posting = await res.json(); } catch { return null; }
       const postingId = posting?.id == null ? '' : String(posting.id);
-      const sameId = id.includes('-') ? postingId.toLowerCase() === id : postingId === id;
+      const postingUuid = posting?.uuid == null ? '' : String(posting.uuid);
+      const sameId = id.includes('-')
+        ? postingUuid.toLowerCase() === id || postingId.toLowerCase() === id
+        : postingId === id;
       if (!sameId || typeof posting.active !== 'boolean') return null;
       return posting.active
         ? { result: 'active', code: 'smartrecruiters_api_active', reason: 'SmartRecruiters marks the posting active' }

@@ -172,3 +172,29 @@ test('SmartRecruiters keeps UUID posting IDs whole instead of truncating at the 
   );
   assert.equal(missingId, null);
 });
+
+test('SmartRecruiters UUID requests match posting.uuid when response id is numeric', async () => {
+  const uuid = '12345678-1234-4abc-8def-1234567890ab';
+
+  const liveByUuid = await withFetch(
+    async () => new Response(JSON.stringify({ id: '884352026', uuid: uuid.toUpperCase(), active: true })),
+    () => checkLivenessViaApi(`https://jobs.smartrecruiters.com/ACME/${uuid}-security-analyst`),
+  );
+  assert.equal(liveByUuid?.result, 'active');
+
+  const closedByUuid = await withFetch(
+    async () => new Response(JSON.stringify({ id: '884352026', uuid, active: false })),
+    () => checkLivenessViaApi(`https://jobs.smartrecruiters.com/ACME/${uuid.toUpperCase()}`),
+  );
+  assert.equal(closedByUuid?.result, 'expired');
+
+  const mismatchedUuid = await withFetch(
+    async () => new Response(JSON.stringify({
+      id: '884352026',
+      uuid: '00000000-0000-4abc-8def-1234567890ab',
+      active: true,
+    })),
+    () => checkLivenessViaApi(`https://jobs.smartrecruiters.com/ACME/${uuid}`),
+  );
+  assert.equal(mismatchedUuid, null);
+});
