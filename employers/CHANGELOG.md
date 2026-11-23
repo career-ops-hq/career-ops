@@ -90,3 +90,20 @@ contribution does not edit this file: maintainers regenerate it on main with
 - 2026-11-21 `2026-11-21-santifer.8` (2 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
 - 2026-11-22 `2026-11-22-santifer` (681 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
 - 2026-11-22 `2026-11-22-santifer.2` (34 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
+- 2026-11-22 `2026-11-22-santifer.3` (14 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
+- 2026-11-22 `2026-11-22-santifer.4` (328 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
+- 2026-11-22 `2026-11-22-santifer.5` (9 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
+- 2026-11-22 `2026-11-22-santifer.6` (538 boards, source `web-index:commoncrawl@2026-11-21`): Hosts from the Common Crawl web graph, cc-main-2026-aug-sep-oct (Common Crawl terms of use)
+- 2026-11-22 `2026-11-22-santifer.7` (349 boards, source `web-index:commoncrawl@2026-11-21`): Hosts from the Common Crawl web graph, cc-main-2026-aug-sep-oct (Common Crawl terms of use)
+- 2026-11-22 `2026-11-22-santifer.8` (35 boards, source `web-index:commoncrawl@2026-11-22`): Sites from the Common Crawl URL index, CC-MAIN-2026-34, -39 and -43 (Common Crawl terms of use)
+- 2026-11-22 `2026-11-22-santifer.9` (18 boards, source `web-index:commoncrawl@2026-11-22`): Sites from the Common Crawl URL index, CC-MAIN-2026-34, -39 and -43 (Common Crawl terms of use)
+- 2026-11-22 `2026-11-22-santifer.10` (34 boards, source `web-index:commoncrawl@2026-11-22`): Sites from the Common Crawl URL index, CC-MAIN-2026-34, -39 and -43 (Common Crawl terms of use)
+- 2026-11-22 `2026-11-22-santifer.11` (398 boards, source `web-index:commoncrawl@2026-11-22`): Sites from the Common Crawl URL index, CC-MAIN-2026-34, -39 and -43 (Common Crawl terms of use)
+- 2026-11-23 `2026-11-23-santifer.2` (198 boards, source `web-index:commoncrawl@2026-11-22`): Sites from the Common Crawl URL index, CC-MAIN-2026-34, -39 and -43 (Common Crawl terms of use)
+- 2026-11-23 `2026-11-23-santifer.3` (134 boards, source `web-index:commoncrawl@2026-11-22`): Sites from the Common Crawl URL index, CC-MAIN-2026-34, -39 and -43 (Common Crawl terms of use)
+- 2026-11-23 `2026-11-23-santifer.4` (26 boards, source `web-index:commoncrawl@2026-11-22`): Sites from the Common Crawl URL index, CC-MAIN-2026-34, -39 and -43 (Common Crawl terms of use)
+- 2026-11-23 `2026-11-23-santifer.5` (3 boards, source `web-index:commoncrawl@2026-11-22`): Sites from the Common Crawl URL index, CC-MAIN-2026-34, -39 and -43 (Common Crawl terms of use)
+- 2026-11-23 `2026-11-23-santifer.9` (288 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
+- 2026-11-23 `2026-11-23-santifer.10` (136 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
+- 2026-11-23 `2026-11-23-santifer.11` (8 boards, source `web-index:commoncrawl@2026-11-21`): Hosts from the Common Crawl web graph, cc-main-2026-aug-sep-oct (Common Crawl terms of use)
+- 2026-11-23 `2026-11-23-santifer.12` (74 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers

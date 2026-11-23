@@ -393,6 +393,19 @@ cover_letter:
 # proposals:
 #   output_dir: "proposals"
 
+# ── In-app Apply: sites you sign in to yourself ─────────────────────────────
+#
+# Application forms behind your own login (often a social or Google sign-in)
+# cannot be filled by the in-app Apply browser, which never carries your
+# session. List those hosts and Apply skips the browser: it shows the posting
+# link, to open in your own browser where you are signed in, and the CV path
+# and answers. A host also covers its subdomains ("gupy.io" covers
+# "acme.gupy.io"). Only the first 200 hosts are read; later entries are
+# ignored. Absent means no change.
+#
+# apply:
+#   handoff_hosts: ["gupy.io", "linkedin.com", "apply.workable.com"]
+
 # ── Scan / JD extractor ─────────────────────────────────────────────────────
 #
 # How the scan and JD-extraction steps read SPA job pages.

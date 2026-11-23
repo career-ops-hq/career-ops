@@ -379,6 +379,8 @@ function resolveMaxPages(entry, ctx) {
 /** @type {Provider} */
 export default {
   id: 'eightfold',
+  // Tenant subdomains and branded hosts share a vendor rate limit.
+  fetchConcurrencyGroup: { limit: 1 },
 
   detect(entry) {
     try {
