@@ -35,5 +35,7 @@ test('prepare-application.mjs rejects --dryrun before it reads a PDF', () => {
   const r = run(['--url', 'https://boards.greenhouse.io/acme/jobs/1', '--pdf', 'output/missing.pdf', '--dryrun']);
   assert.equal(r.status, 1);
   assert.match(r.stderr, /unrecognized flag\(s\): --dryrun/);
+  assert.match(r.stderr, /Usage:/);
+  assert.match(r.stderr, /--pdf/);
   assert.doesNotMatch(r.stderr, /PDF not found/);
 });

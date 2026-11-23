@@ -57,6 +57,7 @@ const args = process.argv.slice(2);
 validateFlags(args, PREPARE_FLAGS, PREPARE_USAGE, {
   valueFlags: ['--url', '--pdf', '--cover'],
   requireOperand: true,
+  usageOnError: true,
 });
 const get = (flag) => flagValue(args, flag);
 
