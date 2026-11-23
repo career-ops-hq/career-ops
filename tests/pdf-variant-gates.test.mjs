@@ -45,3 +45,8 @@ test('Step 1 covers a standalone run with no report (#6792)', () => {
   const step1 = PDF_MODE.split('\n').find((l) => l.startsWith('1. ')) ?? '';
   assert.match(step1, /with no report, get the JD \(Step 2\) and detect the archetype as Step 7 does/);
 });
+
+test('the ATS gate recovery re-renders the styled PDF after rebuilding its HTML (#6792)', () => {
+  const gate = PDF_MODE.split('\n').find((l) => l.includes('Gate it:')) ?? '';
+  assert.match(gate, /rebuild both, and re-run both gates\. Once both pass, repeat Step 21/);
+});
