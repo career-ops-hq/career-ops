@@ -64,8 +64,8 @@ function normalizeWorkMode(raw: string, text: string): string {
   // web/ cannot import; it never crosses a letter, so "nonprofit … remote"
   // keeps its remote.
   const value = text.toLowerCase()
-    .replace(/\b(?:non|not|no)[^a-z]*remote\b/g, " on-site ")
-    .replace(/\bremote[^a-z]*(?:is\s+)?(?:not|n't)\s+(?:available|possible|allowed|offered|an option)\b/g, " on-site ");
+    .replace(/\b(?:non|not|no)[^a-z.!;?\n]*remote\b/g, " on-site ")
+    .replace(/\bremote(?:\s+work)?[^a-z.!;?\n]*(?:is\s+)?(?:not|n't)\s+(?:available|possible|allowed|offered|an option)\b/g, " on-site ");
   if (value.includes("hybrid")) return "Hybrid";
   if (value.includes("remote") && (value.includes("flex") || value.includes("remote-first") || value.includes("remote first"))) return "RemoteFlex";
   if (value.includes("remote")) return "Remote";
