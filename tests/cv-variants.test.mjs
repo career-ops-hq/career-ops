@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveVariant, checkVariant, auditCvVariants } from '../lib/cv-variants.mjs';
+import { resolveVariant, checkVariant, auditCvVariants, variantForArchetype } from '../lib/cv-variants.mjs';
 
 const CV = `# Jane Doe
 
@@ -264,4 +264,52 @@ test('a condensed variant with its own bullets has no attribution problem (#6792
   const condensed = OMIT_AND_REORDER.replace('- Led a team of 3 engineers', '- Cut deploy time from 2 weeks to 4 hours with GitHub Actions');
   const root = workspace({ 'a.md': condensed });
   assert.deepEqual(checkVariant('a', { root }).problems.filter((p) => p.type === 'attribution'), []);
+});
+
+// Archetype mapping (#6792): cv.variants in config/profile.yml.
+const withMap = (yaml, variants = { 'backend.md': OMIT_AND_REORDER }) => {
+  const root = workspace(variants);
+  writeFileSync(join(root, 'config', 'profile.yml'), yaml);
+  return root;
+};
+
+test('a mapped archetype selects its variant, case and spacing normalised', () => {
+  const root = withMap('cv:\n  variants:\n    backend: ["Backend Engineer", "Platform Engineer"]\n');
+  assert.equal(variantForArchetype('  backend   ENGINEER ', { root }), 'backend');
+});
+
+test('an unmapped archetype, no cv.variants and no profile all select nothing', () => {
+  assert.equal(variantForArchetype('Data Analyst', { root: withMap('cv:\n  variants:\n    backend: ["Backend Engineer"]\n') }), null);
+  assert.equal(variantForArchetype('Backend Engineer', { root: withMap('cv:\n  template: modern\n') }), null);
+  assert.equal(variantForArchetype('Backend Engineer', { root: workspace() }), null);
+  assert.equal(variantForArchetype('', { root: workspace() }), null);
+});
+
+test('an archetype mapped by two variants throws naming both', () => {
+  const root = withMap('cv:\n  variants:\n    a: ["Backend Engineer"]\n    b: ["backend engineer"]\n');
+  assert.throws(() => variantForArchetype('Backend Engineer', { root }), /a.*b|b.*a/);
+});
+
+test('a non-list entry is ignored by the resolver and does not hide a valid mapping', () => {
+  const root = withMap('cv:\n  variants:\n    a: "Backend Engineer"\n    b: ["Other"]\n');
+  assert.equal(variantForArchetype('Backend Engineer', { root }), null);
+  assert.equal(variantForArchetype('Other', { root }), 'b');
+});
+
+test('a mapped variant that is missing or unparseable stops through resolveVariant', () => {
+  const root = withMap('cv:\n  variants:\n    ghost: ["Ghost"]\n    bad: ["Bad"]\n', { 'bad.md': '# Jane\n' });
+  assert.throws(() => resolveVariant(variantForArchetype('Ghost', { root }), { root }), /ghost/);
+  assert.throws(() => resolveVariant(variantForArchetype('Bad', { root }), { root }), /parse/);
+});
+
+test('auditCvVariants flags a mapping to a missing file, an invalid entry and a duplicate', () => {
+  const root = withMap('cv:\n  variants:\n    ghost: ["Ghost"]\n    bad: "x"\n    a: ["Same"]\n    backend: ["same"]\n');
+  const found = auditCvVariants({ root });
+  const types = found.flatMap((f) => f.problems.map((p) => p.type));
+  for (const t of ['map-missing', 'map-invalid', 'map-duplicate']) assert.ok(types.includes(t), JSON.stringify(found));
+});
+
+test('a healthy mapping adds no audit finding', () => {
+  const root = withMap('cv:\n  variants:\n    backend: ["Backend Engineer"]\n');
+  assert.deepEqual(auditCvVariants({ root }), []);
 });

@@ -64,3 +64,51 @@ test('a bullet moved under another employer is reported in a variant run (#6792)
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /under Beta Ltd in cv\.md/);
 });
+
+// --archetype (#6792): the variant comes from cv.variants in config/profile.yml.
+function runMapped(args, { map = 'backend: ["Backend Engineer"]', variants = { 'backend.md': CV } } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'co-title-arch-'));
+  writeFileSync(join(dir, 'cv.md'), CV);
+  mkdirSync(join(dir, 'data', 'cv-variants'), { recursive: true });
+  mkdirSync(join(dir, 'config'), { recursive: true });
+  for (const [f, t] of Object.entries(variants)) writeFileSync(join(dir, 'data', 'cv-variants', f), t);
+  writeFileSync(join(dir, 'config', 'profile.yml'), `cv:\n  variants:\n    ${map.replace(/\n/g, '\n    ')}\n`);
+  return spawnSync(process.execPath, [join(ROOT, 'cv-title-check.mjs'), ...args], {
+    cwd: dir, encoding: 'utf-8', env: { ...process.env, CAREER_OPS_ROOT: dir },
+  });
+}
+
+test('--archetype with a mapped archetype names the variant and checks it', () => {
+  const r = runMapped(['--archetype', 'backend engineer', '--summary'], { variants: { 'backend.md': CV.replace('**Engineer**', '**CTO**') } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^Variant: backend \(from archetype "backend engineer"\)/m);
+  assert.match(r.stdout, /"CTO"/);
+});
+
+test('--archetype with an unmapped archetype falls back to cv.md and exits 0', () => {
+  const r = runMapped(['--archetype', 'Data Analyst', '--summary']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^Variant: none \(cv\.md\)/m);
+});
+
+test('--variant wins over the archetype mapping', () => {
+  const r = runMapped(['--archetype', 'Backend Engineer', '--variant', 'other', '--summary'], { variants: { 'backend.md': CV, 'other.md': CV } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^Variant: other/m);
+});
+
+test('--archetype stops on a mapped variant that is missing or unparseable', () => {
+  assert.equal(runMapped(['--archetype', 'Backend Engineer'], { variants: {} }).status, 1);
+  assert.equal(runMapped(['--archetype', 'Backend Engineer'], { variants: { 'backend.md': '# Jane\n' } }).status, 1);
+});
+
+test('--archetype stops on an archetype mapped by two variants', () => {
+  const r = runMapped(['--archetype', 'Backend Engineer'], { map: 'a: ["Backend Engineer"]\nb: ["Backend Engineer"]', variants: { 'a.md': CV, 'b.md': CV } });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /a.*b/);
+});
+
+test('--archetype without a value exits 1', () => {
+  assert.equal(runMapped(['--archetype']).status, 1);
+  assert.equal(runMapped(['--archetype', '--summary']).status, 1);
+});

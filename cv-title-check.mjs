@@ -63,7 +63,7 @@ import { normalizeCompany } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 // Cyclic with lib/cv-variants.mjs (which imports this module); safe, both use the other's exports only when called.
-import { resolveVariant, attributionProblems } from './lib/cv-variants.mjs';
+import { resolveVariant, variantForArchetype, attributionProblems } from './lib/cv-variants.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import {
   boldLineText, findExperienceSections, headingText, toPlainText, EXPERIENCE_HEADING_NAMES,
@@ -713,6 +713,7 @@ const args = process.argv.slice(2);
 const USAGE = `Usage:
   node cv-title-check.mjs <tailored-cv-payload.json> [--summary]
   node cv-title-check.mjs --variant <name> [--summary]
+  node cv-title-check.mjs --archetype "<name>" [--summary]
   node cv-title-check.mjs --self-test
 
 Pairs each tailored-CV {company, dates} entry against cv.md's canonical entry
@@ -720,6 +721,7 @@ and flags an exact-string job-title mismatch (case and whitespace normalized,
 never fuzzy). Warn-only: it edits neither file.
 
   --variant     check data/cv-variants/<name>.md instead of a payload (#6792)
+  --archetype   pick the variant cv.variants maps to this archetype; none means cv.md (#6792)
   --summary     human-readable table instead of JSON
   --self-test   run the built-in cases against no payload
   --help, -h    show this message
@@ -727,11 +729,16 @@ never fuzzy). Warn-only: it edits neither file.
 
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
-const variantName = flagValue(args, '--variant');
+const variantArg = flagValue(args, '--variant');
+const archetype = flagValue(args, '--archetype');
 const variantIdx = args.indexOf('--variant');
+const archetypeIdx = args.indexOf('--archetype');
 // Present without a usable name (`--variant`, `--variant=`, `--variant --summary`) is not an absent flag.
-const variantBad = hasFlag(args, '--variant') && (!variantName || variantName.startsWith('--'));
-const payloadPathArg = args.find((a, i) => !a.startsWith('--') && !(variantIdx >= 0 && i === variantIdx + 1));
+const variantBad = (hasFlag(args, '--variant') && (!variantArg || variantArg.startsWith('--')))
+  || (hasFlag(args, '--archetype') && (!archetype || archetype.startsWith('--')));
+// An explicit --variant wins; otherwise the archetype's mapped variant, resolved below.
+let variantName = variantArg;
+const payloadPathArg = args.find((a, i) => !a.startsWith('--') && !(variantIdx >= 0 && i === variantIdx + 1) && !(archetypeIdx >= 0 && i === archetypeIdx + 1));
 
 if (isMainModule(import.meta.url)) {
   // Checked before the operand, which --self-test also legitimately lacks:
@@ -743,9 +750,24 @@ if (isMainModule(import.meta.url)) {
     runSelfTest();
   } else {
     if (variantBad) {
-      console.error('Error: --variant requires a name (data/cv-variants/<name>.md)');
+      console.error('Error: --variant requires a name (data/cv-variants/<name>.md); --archetype requires an archetype name');
       process.exit(1);
     }
+    // stdout stays pure JSON without --summary.
+    const say = summaryMode ? console.log : console.error;
+    if (!variantName && archetype) {
+      try {
+        variantName = variantForArchetype(archetype);
+      } catch (err) {
+        console.error(`Error: ${err.message}`);
+        process.exit(1);
+      }
+      if (variantName) say(`Variant: ${variantName} (from archetype "${archetype}")`);
+      else {
+        say('Variant: none (cv.md)');
+        process.exit(0);
+      }
+    } else if (variantName && archetype) say(`Variant: ${variantName}`);
     if (!variantName && (!payloadPathArg || !existsSync(payloadPathArg))) {
       console.error('Usage: node cv-title-check.mjs <tailored-cv-payload.json> [--summary]');
       console.error('       node cv-title-check.mjs --variant <name> [--summary]');
