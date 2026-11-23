@@ -3704,14 +3704,16 @@ function parseCliArgs(args) {
   let targetArg = '';
   let configPath = DEFAULT_CONFIG;
   let json = false;
+  let help = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--source' || arg === '--config') {
-      if (!args[i + 1]) throw new Error(`${arg} requires a path`);
+      const next = args[i + 1];
+      if (!next || next.startsWith('-')) throw new Error(`${arg} requires a path`);
       if (arg === '--source') sourcePaths.push(args[++i]);
       else configPath = args[++i];
     } else if (arg === '--help' || arg === '-h') {
-      return { help: true };
+      help = true;
     } else if (arg === '--json') {
       json = true;
     } else if (arg.startsWith('--')) {
@@ -3722,7 +3724,7 @@ function parseCliArgs(args) {
       throw new Error(`unexpected extra positional argument: ${arg}`);
     }
   }
-  return { targetArg, sourcePaths, configPath, json, help: false };
+  return { targetArg, sourcePaths, configPath, json, help };
 }
 
 /** Return the command-line usage text. */
@@ -4460,6 +4462,10 @@ export function runCli(args = process.argv.slice(2)) {
   const missingSources = parsed.sourcePaths.filter((p) => !existsSync(resolveInputPath(p)));
   if (missingSources.length > 0) {
     console.error(`ERROR: --source file not found: ${missingSources.join(', ')}`);
+    return 1;
+  }
+  if (parsed.sourcePaths.length === 0 && !existsSync(DEFAULT_SOURCES[0])) {
+    console.error(`ERROR: cv.md not found: ${DEFAULT_SOURCES[0]}`);
     return 1;
   }
   try {
