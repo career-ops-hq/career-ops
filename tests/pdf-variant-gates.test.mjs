@@ -40,3 +40,8 @@ test('Step 1 picks the variant from the evaluated archetype and falls back to cv
   assert.match(step1, /Variant: none \(cv\.md\)/);
   assert.match(step1, /never fall back to `cv\.md`/);
 });
+
+test('Step 1 covers a standalone run with no report (#6792)', () => {
+  const step1 = PDF_MODE.split('\n').find((l) => l.startsWith('1. ')) ?? '';
+  assert.match(step1, /with no report, get the JD \(Step 2\) and detect the archetype as Step 7 does/);
+});

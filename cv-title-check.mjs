@@ -208,7 +208,7 @@ export function normalizeTitle(s) {
   return String(s ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
-function matchKey(company, dates) {
+export function matchKey(company, dates) {
   return `${normalizeCompany(company)}||${normalizeDates(dates)}`;
 }
 

@@ -313,3 +313,23 @@ test('a healthy mapping adds no audit finding', () => {
   const root = withMap('cv:\n  variants:\n    backend: ["Backend Engineer"]\n');
   assert.deepEqual(auditCvVariants({ root }), []);
 });
+
+test('an equivalent date spelling still pairs the entry for attribution (#6792)', () => {
+  const moved = OMIT_AND_REORDER.replace('2020-2024', '2020 – 2024').replace('- Led a team of 3 engineers', '- Led a team of 3 engineers\n- Built an NLP pipeline with 94% accuracy');
+  const root = workspace({ 'a.md': moved });
+  assert.ok(checkVariant('a', { root }).problems.some((p) => p.type === 'attribution'));
+});
+
+test('a default-root call reads the profile CAREER_OPS_PROFILE names', () => {
+  const root = workspace({ 'backend.md': OMIT_AND_REORDER });
+  const alt = join(root, 'alt-profile.yml');
+  writeFileSync(alt, 'cv:\n  variants:\n    backend: ["Backend Engineer"]\n');
+  const prev = { r: process.env.CAREER_OPS_ROOT, p: process.env.CAREER_OPS_PROFILE };
+  process.env.CAREER_OPS_ROOT = root;
+  process.env.CAREER_OPS_PROFILE = alt;
+  try {
+    assert.equal(variantForArchetype('Backend Engineer'), 'backend');
+  } finally {
+    for (const [k, v] of [['CAREER_OPS_ROOT', prev.r], ['CAREER_OPS_PROFILE', prev.p]]) v === undefined ? delete process.env[k] : (process.env[k] = v);
+  }
+});
