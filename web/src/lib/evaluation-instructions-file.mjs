@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 const YOUNG_MS = 30_000;
@@ -23,14 +24,15 @@ function removeInstructionDir(dir) {
   }
 }
 
-function ownerPid(dir) {
+function ownerRecord(dir) {
   try {
     const parsed = JSON.parse(fs.readFileSync(path.join(dir, "owner.json"), "utf8"));
-    if (parsed && Number.isSafeInteger(parsed.pid) && parsed.pid > 0) return parsed.pid;
+    const pid = parsed && Number.isSafeInteger(parsed.pid) && parsed.pid > 0 ? parsed.pid : null;
+    const host = typeof parsed?.host === "string" && parsed.host ? parsed.host : null;
+    return { pid, host };
   } catch {
-    return null;
+    return { pid: null, host: null };
   }
-  return null;
 }
 
 /**
@@ -50,8 +52,9 @@ export function sweepEvaluationInstructions(root, now = Date.now()) {
   for (const entry of names) {
     if (!entry.isDirectory() || !entry.name.startsWith(".evaluation-instructions-")) continue;
     const dir = path.join(root, entry.name);
-    const pid = ownerPid(dir);
+    const { pid, host } = ownerRecord(dir);
     if (pid !== null) {
+      if (host && host !== os.hostname()) continue;
       if (!processIsAlive(pid)) removeInstructionDir(dir);
       continue;
     }
@@ -80,7 +83,7 @@ export function writeEvaluationInstructions(root, instructions) {
 
   const staging = path.join(dir, `.instructions.${process.pid}.tmp`);
   try {
-    fs.writeFileSync(path.join(dir, "owner.json"), `${JSON.stringify({ pid: process.pid })}\n`, { encoding: "utf8", mode: 0o600 });
+    fs.writeFileSync(path.join(dir, "owner.json"), `${JSON.stringify({ pid: process.pid, host: os.hostname() })}\n`, { encoding: "utf8", mode: 0o600 });
     fs.writeFileSync(staging, instructions, { encoding: "utf8", mode: 0o600 });
     fs.renameSync(staging, file);
   } catch (error) {

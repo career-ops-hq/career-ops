@@ -68,9 +68,13 @@ test("instructions are published by rename and name the live process", (t) => {
   assert.equal(fs.readFileSync(stored.file, "utf8"), text);
   assert.equal(names.includes("instructions.md"), true);
   assert.equal(names.some((name) => name.endsWith(".tmp")), false);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, "owner.json"), "utf8")).pid, process.pid);
-  assert.equal(fs.statSync(stored.file).mode & 0o777, 0o600);
-  assert.equal(fs.statSync(path.join(dir, "owner.json")).mode & 0o777, 0o600);
+  const owner = JSON.parse(fs.readFileSync(path.join(dir, "owner.json"), "utf8"));
+  assert.equal(owner.pid, process.pid);
+  assert.equal(owner.host, os.hostname());
+  if (process.platform !== "win32") {
+    assert.equal(fs.statSync(stored.file).mode & 0o777, 0o600);
+    assert.equal(fs.statSync(path.join(dir, "owner.json")).mode & 0o777, 0o600);
+  }
   stored.cleanup();
   assert.deepEqual(fs.readdirSync(root), []);
 });
@@ -109,7 +113,14 @@ test("a dead run's instruction directory is removed and a live one stays", async
 
   sweepEvaluationInstructions(root);
 
+  const otherHost = fs.mkdtempSync(path.join(root, ".evaluation-instructions-"));
+  fs.writeFileSync(path.join(otherHost, "owner.json"), `${JSON.stringify({ pid: deadPid, host: "other-host.example" })}\n`);
+  fs.writeFileSync(path.join(otherHost, "instructions.md"), "elsewhere");
+
+  sweepEvaluationInstructions(root);
+
   assert.equal(fs.existsSync(deadDir), false);
+  assert.equal(fs.readFileSync(path.join(otherHost, "instructions.md"), "utf8"), "elsewhere");
   assert.equal(fs.readFileSync(path.join(liveDir, "instructions.md"), "utf8"), "live");
   assert.equal(fs.existsSync(young), true);
   assert.equal(fs.existsSync(old), false);
