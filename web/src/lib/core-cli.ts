@@ -29,15 +29,16 @@ function boundedLockWait(): Record<string, string> {
 
 export type CliResult = { code: number; stdout: string; stderr: string; spawnFailed: boolean; timedOut: boolean };
 
-export function runCoreCli(script: string, args: string[], opts?: { signal?: AbortSignal }): Promise<CliResult> {
+export function runCoreCli(script: string, args: string[], opts?: { signal?: AbortSignal; input?: string; maxBuffer?: number }): Promise<CliResult> {
   return new Promise((resolve) => {
-    execFile(
+    const child = execFile(
       process.execPath,
       [rootScript(script), ...args],
       {
         cwd: resolveCodeRoot(process.cwd(), process.env),
         timeout: CORE_CLI_TIMEOUT_MS,
         signal: opts?.signal,
+        ...(opts?.maxBuffer === undefined ? {} : { maxBuffer: opts.maxBuffer }),
         env: { ...coreProfileEnv(careerOpsRoot()), ...boundedLockWait() },
         // windowsHide: see api/doctor/route.ts — a stale inherited console
         // kills every child with 0xC0000142 on Windows; never inherit one.
@@ -61,6 +62,10 @@ export function runCoreCli(script: string, args: string[], opts?: { signal?: Abo
         });
       },
     );
+    if (opts?.input !== undefined) {
+      child.stdin?.on("error", () => { /* The exit callback reports an early child failure. */ });
+      child.stdin?.end(opts.input);
+    }
   });
 }
 

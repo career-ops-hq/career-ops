@@ -56,6 +56,10 @@
  * @property {Readonly<Object<string,unknown>>} settings  Frozen non-secret settings block for this plugin from config/plugins.yml (e.g. { label, days_back, actor }). Secrets never live here — they go in .env via requiredEnv.
  * @property {(...args: unknown[]) => void} log  Console logger that redacts declared env values from output (accidental-leak hygiene, not an exfiltration control).
  * @property {boolean} dryRun  True when invoked with --dry-run; side-effecting hooks must honor it.
+ * @property {(jobs: object[]) => object[]} [admitJobs]  Optional synchronous
+ *   engine admission filter supplied by runHook. Returns the jobs eligible for
+ *   canonical ingestion; it does not persist them or acknowledge their source.
+ *   Absent when the caller does not supply an admission gate.
  * @property {string} dataRoot  Absolute path of the user's data root (the
  *   directory that holds `data/`, `jds/`, `reports/`). A plugin that keeps a
  *   file of its own resolves it from here, never from a bare relative path:

@@ -983,6 +983,124 @@ try {
     }
   }
 
+  // Single-location flat `location` folds missing city, country, and `remote`
+  // consistently with the multi-place and no-location paths. Live Recruitee
+  // boards set flat `location` to a localized work-mode label ("Remote job",
+  // "Homeoffice", "Poste à distance", "Werken op afstand") on remote roles
+  // while keeping the city and country in top-level fields.
+  {
+    const singleRemote = parseRecruiteeResponse({
+      offers: [
+        {
+          title: 'Remote EN',
+          careers_url: 'https://x.recruitee.com/o/remote-en',
+          location: 'Remote job',
+          city: 'London',
+          country: 'United Kingdom',
+          remote: true,
+          locations: [{ name: 'London', city: 'London', country: 'United Kingdom' }],
+        },
+        {
+          title: 'Remote DE',
+          careers_url: 'https://x.recruitee.com/o/remote-de',
+          location: 'Homeoffice',
+          city: 'Hamburg',
+          country: 'Deutschland',
+          remote: true,
+          locations: [{ name: 'Hamburg', city: 'Hamburg', country: 'Deutschland' }],
+        },
+        {
+          title: 'Remote FR',
+          careers_url: 'https://x.recruitee.com/o/remote-fr',
+          location: 'Poste à distance',
+          city: 'Lyon',
+          country: 'France',
+          remote: true,
+        },
+        {
+          title: 'Remote City Loc',
+          careers_url: 'https://x.recruitee.com/o/remote-city',
+          location: 'Berlin, Germany',
+          city: 'Berlin',
+          country: 'Germany',
+          remote: true,
+        },
+        {
+          title: 'Remote In City',
+          careers_url: 'https://x.recruitee.com/o/remote-in-city',
+          location: 'Werken op afstand',
+          city: 'Bruges / Remote',
+          country: 'België',
+          remote: true,
+        },
+        {
+          title: 'Remote No Flat',
+          careers_url: 'https://x.recruitee.com/o/remote-no-flat',
+          city: 'Bruges / Remote',
+          country: 'België',
+          remote: true,
+        },
+        {
+          title: 'Near-miss City',
+          careers_url: 'https://x.recruitee.com/o/near-miss-flat',
+          location: 'Parisian HQ',
+          city: 'Paris',
+          country: 'France',
+        },
+        {
+          title: 'Accented City',
+          careers_url: 'https://x.recruitee.com/o/accented-flat',
+          location: 'Örebro Office',
+          city: 'Örebro',
+          country: 'Sweden',
+        },
+        {
+          title: 'City State',
+          careers_url: 'https://x.recruitee.com/o/city-state',
+          location: 'Remote job',
+          city: 'Singapore',
+          country: 'Singapore',
+          remote: true,
+        },
+        {
+          title: 'Non-string Fields',
+          careers_url: 'https://x.recruitee.com/o/non-string-fields',
+          location: 'Berlin',
+          city: 42,
+          country: null,
+          remote: false,
+        },
+      ],
+    }, 'X');
+    const byTitle = Object.fromEntries(singleRemote.map(o => [o.title, o.location]));
+    if (byTitle['Remote EN'] === 'Remote job, London, United Kingdom') {
+      pass('parseRecruiteeResponse folds city and country onto a single-location "Remote job" offer without duplicating Remote');
+    } else {
+      fail(`Remote EN location = ${JSON.stringify(byTitle['Remote EN'])}`);
+    }
+    if (byTitle['Remote DE'] === 'Homeoffice, Hamburg, Deutschland, Remote'
+        && byTitle['Remote FR'] === 'Poste à distance, Lyon, France, Remote'
+        && byTitle['Remote City Loc'] === 'Berlin, Germany, Remote') {
+      pass('parseRecruiteeResponse appends city, country and Remote when a single-location remote offer lacks the word "remote"');
+    } else {
+      fail(`localized/city remote locations = ${JSON.stringify([byTitle['Remote DE'], byTitle['Remote FR'], byTitle['Remote City Loc']])}`);
+    }
+    if (byTitle['Remote In City'] === 'Werken op afstand, Bruges / Remote, België'
+        && byTitle['Remote No Flat'] === 'Bruges / Remote, België') {
+      pass('parseRecruiteeResponse does not duplicate Remote when city already names it');
+    } else {
+      fail(`remote-in-city locations = ${JSON.stringify([byTitle['Remote In City'], byTitle['Remote No Flat']])}`);
+    }
+    if (byTitle['Near-miss City'] === 'Parisian HQ, Paris, France'
+        && byTitle['Accented City'] === 'Örebro Office, Sweden'
+        && byTitle['City State'] === 'Remote job, Singapore'
+        && byTitle['Non-string Fields'] === 'Berlin') {
+      pass('parseRecruiteeResponse applies whole-word city/country dedup and ignores non-string fields on the flat-location path');
+    } else {
+      fail(`flat-location dedup/edge cases = ${JSON.stringify([byTitle['Near-miss City'], byTitle['Accented City'], byTitle['City State'], byTitle['Non-string Fields']])}`);
+    }
+  }
+
 } catch (e) {
   fail(`recruitee provider tests crashed: ${e.message}`);
 }

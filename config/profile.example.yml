@@ -151,6 +151,7 @@ language:
 #   responded_initial_days: 1
 #   responded_subsequent_days: 3
 #   interview_thankyou_days: 1
+#   interview_followups: false  # Optional: omit interview rows; defaults to true
 
 # (Optional) Rename the session after the posting it handles, e.g.
 # "VP Infrastructure, Acme Health", in hosts that let the agent set its own
@@ -278,6 +279,13 @@ cv:
   # unless a flag passed for that render overrides the key.
   # max_pages: 1
   # strict_pages: true
+  #
+  # (Optional) For CVs you attach by hand (LinkedIn Easy Apply, email): every
+  # single-file CV render also writes a copy named for the recruiter,
+  # output/upload/{pdf name}/First-Last-Role-CV.pdf, from candidate.full_name
+  # and the tracker row's role. The canonical PDF and data/pdf-index.tsv are
+  # untouched. Same as passing --upload-copy to generate-pdf.mjs.
+  # upload_copy: true
 
   # Sections that the AI must never remove, shorten, or paraphrase during CV generation or tailoring.
   # (Enforced programmatically in HTML/PDF pipeline via build-cv-html and generate-pdf; LaTeX pipeline is not covered yet.)

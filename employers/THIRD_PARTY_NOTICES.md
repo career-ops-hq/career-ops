@@ -3,7 +3,7 @@
 Data in this directory that reaches the registry under a third party's own
 license is listed here, with the notice that license requires.
 
-Three open lists of job board addresses are used, each under its own license.
+Four open lists of job board addresses are used, each under its own license.
 From each of them only a board's address was taken. Every address was checked
 live before it was added, and the employer's name never comes from the list:
 the `origin` of each contribution says where it comes from. A contribution
@@ -48,3 +48,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## open-jobs
+
+- **Source:** https://github.com/elliottdehn/open-jobs, at commit `6f47bc050c9536c59ac771ca14aa507a25253348`
+- **License:** CC0 1.0 Universal, https://creativecommons.org/publicdomain/zero/1.0/ (no notice required; listed for completeness)

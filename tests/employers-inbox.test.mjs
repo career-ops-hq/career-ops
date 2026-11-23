@@ -146,7 +146,7 @@ test('inboxLineToRow writes a full registry row, keys in the registry order', ()
 
 test('inboxLineProblems: the short format and nothing else', () => {
   const agg = new Set(['jooble.org']);
-  assert.deepEqual(INBOX_LINE_KEYS, ['ats', 'region', 'board', 'workday_host', 'name', 'website']);
+  assert.deepEqual(INBOX_LINE_KEYS, ['ats', 'region', 'board', 'workday_host', 'name', 'website', 'own_domain_mark']);
   for (const line of NEW) assert.deepEqual(inboxLineProblems(line, agg), [], JSON.stringify(line));
   const cases = [
     [{ ats: 'ashby', board: 'acme', name: 'Acme', careers_url: 'x' }, /unknown key "careers_url"/],
@@ -213,7 +213,7 @@ test('bad lines are errors on their own line, and the rest of the file is still 
 }, (dir) => {
   const { errors } = validate(dir);
   assert.deepEqual(at(errors), [
-    `${DATE}-octocat.ndjson:2: unknown key "tags"; an inbox line has only ats, region, board, workday_host, name, website`,
+    `${DATE}-octocat.ndjson:2: unknown key "tags"; an inbox line has only ats, region, board, workday_host, name, website, own_domain_mark`,
     `${DATE}-octocat.ndjson:3: blank line`,
     `${DATE}-octocat.ndjson:4: not valid JSON: ${(() => { try { JSON.parse('not json'); } catch (e) { return e.message; } })()}`,
   ]);

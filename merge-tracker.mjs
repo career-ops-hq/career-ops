@@ -47,6 +47,29 @@ import { syncTrackerPdfFlags } from './sync-pdf-flags.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { occupiedTrackerNumbersFromLedgers } from './reserve-report-num.mjs';
 
+/**
+ * The line index a new tracker row is inserted at.
+ *
+ * Directly after the separator that belongs to the TRACKER header, not after the
+ * first separator in the file. `applications.md` is a user-authored document, so
+ * a preamble table above the applications table is legitimate, and inserting at
+ * the first separator put the new row above that table's header, where no reader
+ * parses it, while the run still printed "➕ Add #N" and archived the TSV.
+ *
+ * The index is the line AFTER the separator, because the caller inserts with
+ * `splice(index, 0, ...)`, which places the row before `index`: returning the
+ * separator's own index would splice the row between the header and the `|---|`
+ * line and malform the table.
+ *
+ * @param {string[]} lines - applications.md split into lines.
+ * @returns {number} Insert index, or -1 when there is no readable tracker table.
+ */
+export function mergeInsertIndex(lines) {
+  const headerIdx = lines.findIndex((line) => isHeaderRow(line));
+  if (headerIdx < 0) return -1;
+  return SEPARATOR_ROW_RE.test(lines[headerIdx + 1] || '') ? headerIdx + 2 : -1;
+}
+
 const MERGE_TRACKER_USAGE = `Usage: node merge-tracker.mjs [options]
 
 Options:
@@ -2554,18 +2577,10 @@ export async function mergeTracker(options = {}) {
       }
     }
 
-    // Insert new lines after the header (line index of first data row)
+    // Insert new lines after the tracker header's separator (see mergeInsertIndex:
+    // the row's own table decides, so a preamble table cannot swallow the batch).
     if (newLines.length > 0) {
-      // Find header separator (|---|...) and insert after it. Match the row's
-      // structure rather than a bare `---` substring, so a data row carrying three
-      // hyphens in its free text can never be mistaken for the separator.
-      let insertIdx = -1;
-      for (let i = 0; i < appLines.length; i++) {
-        if (SEPARATOR_ROW_RE.test(appLines[i])) {
-          insertIdx = i + 1;
-          break;
-        }
-      }
+      const insertIdx = mergeInsertIndex(appLines);
       if (insertIdx < 0) {
         // #2394: no separator row means no insert point. The old code left
         // insertIdx at -1, skipped the splice with no else, then carried on to

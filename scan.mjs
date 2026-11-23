@@ -1408,22 +1408,90 @@ export const DEFAULT_VISA_NEGATIVE = [
   // (Relocation wording is deliberately excluded: relocation != sponsorship.)
   'citizens and permanent residents only',
   'permanent residents only',
-];
+  ...visaRefusalPhrases(),
+].filter((k, i, all) => all.indexOf(k) === i);
+
+// Refusals that contain a positive keyword. Negatives are checked first and
+// matching is a plain substring test, so a refusal has to be listed here or
+// the positive inside it ("visa sponsorship", "eligible for sponsorship")
+// wins: strict mode keeps a posting that says it will NOT sponsor, and
+// default mode keeps it too. Measured on 7,168 public Greenhouse, Ashby and
+// Lever postings (2026-11-19): strict mode kept 939, and in 93 of them every
+// mention of sponsorship was a refusal, most often "visa sponsorship is not
+// offered for this role" and "we are unable to offer visa sponsorship".
+// Curly apostrophes are folded to straight ones before matching, so "n't"
+// covers "can’t" and "won’t" as well.
+function visaRefusalPhrases() {
+  const sponsorship = ['sponsorship', 'visa sponsorship', 'work visa sponsorship'];
+  const anySponsorship = [...sponsorship, 'company sponsorship', 'employer sponsorship'];
+  const cross = (prefixes, objects) => prefixes.flatMap(p => objects.map(o => `${p} ${o}`));
+  return [
+    // "we are unable to offer visa sponsorship", "this role does not support
+    // visa sponsorship", "we can't provide sponsorship"
+    ...cross(
+      ['not', "n't", 'unable to', 'not able to', 'not currently able to', 'not in a position to']
+        .flatMap(neg => ['offer', 'provide', 'support'].map(verb => `${neg} ${verb}`)),
+      sponsorship,
+    ),
+    // "work authorization that does not require sponsorship", "applicants
+    // must not require visa sponsorship now or in the future". Only in these
+    // framings: "we sponsor visas and welcome those who do not require
+    // sponsorship" offers sponsorship, so a bare "not require sponsorship"
+    // would drop it.
+    ...cross(
+      [
+        ...['authorization', 'authorisation']
+          .flatMap(a => [`${a} that does not require`, `${a} that doesn't require`]),
+        'must not require',
+        'must not now or in the future require',
+      ],
+      anySponsorship,
+    ),
+    // "you must be able to work without requiring visa sponsorship"
+    ...cross(['without requiring', 'without needing', 'without the need for'], anySponsorship),
+    'without visa sponsorship',
+    // "this position is not eligible for visa sponsorship"
+    'not eligible for sponsorship',
+    'not eligible for visa sponsorship',
+    'ineligible for sponsorship',
+    'ineligible for visa sponsorship',
+    // "visa sponsorship is not offered for this role"
+    'sponsorship is not offered',
+    'sponsorship not offered',
+    'sponsorship is not provided',
+    'sponsorship not provided',
+    'sponsorship will not be offered',
+    'sponsorship will not be provided',
+    'sponsorship cannot be offered',
+    'sponsorship cannot be provided',
+    // "we won't sponsor visas", "we are not currently able to sponsor visas"
+    "n't sponsor",
+    'will not sponsor',
+    'not currently sponsor',
+    'not currently able to sponsor',
+    'not in a position to sponsor',
+  ];
+}
+
+// Fold curly apostrophes so "can’t" and "can't" match the same keyword.
+function foldApostrophes(text) {
+  return text.replace(/[\u2018\u2019\u02bc]/g, "'");
+}
 
 export function buildVisaFilter(visaFilter) {
   if (!visaFilter || visaFilter.enabled === false) return () => true;
-  const positive = visaFilter.positive != null
+  const positive = (visaFilter.positive != null
     ? normalizeKeywordList(visaFilter.positive)
-    : DEFAULT_VISA_POSITIVE.slice();
-  const negative = visaFilter.negative != null
+    : DEFAULT_VISA_POSITIVE.slice()).map(foldApostrophes);
+  const negative = (visaFilter.negative != null
     ? normalizeKeywordList(visaFilter.negative)
-    : DEFAULT_VISA_NEGATIVE.slice();
+    : DEFAULT_VISA_NEGATIVE.slice()).map(foldApostrophes);
   const requireMention = visaFilter.require_mention === true;
 
   return (description) => {
     const hasText = typeof description === 'string' && description.trim() !== '';
     if (!hasText) return !requireMention;
-    const lower = description.toLowerCase();
+    const lower = foldApostrophes(description.toLowerCase());
     if (negative.length > 0 && negative.some(k => lower.includes(k))) return false;
     if (!requireMention) return true;
     if (positive.length === 0) return true;
@@ -2696,6 +2764,49 @@ function defaultCompanyNormalizer(name) {
   return String(name ?? '').trim().toLowerCase();
 }
 
+// Longer forms first so "incorporated" is taken whole. The separator is only
+// the suffix boundary: punctuation inside the remaining name stays, so
+// "C++ Consulting" does not collapse into "C Consulting".
+const TRAILING_LEGAL_SUFFIX_RE = new RegExp(
+  `(?:^|[\\s,.])(?:${[...LEGAL_SUFFIXES].sort((a, b) => b.length - a.length).join('|')})\\.?$`,
+  'u',
+);
+
+function companyStemForDedup(name) {
+  let key = String(name ?? '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+  const folded = key;
+  let guard = 0;
+  while (key && guard++ < LEGAL_SUFFIXES.length + 1) {
+    const match = TRAILING_LEGAL_SUFFIX_RE.exec(key);
+    // A name that is only a suffix keeps that suffix. Stripping it would make
+    // every such label the same empty key.
+    if (!match || match.index === 0) break;
+    key = key.slice(0, match.index).replace(/[\s,.]+$/u, '').trim();
+  }
+  return key || folded;
+}
+
+// "Acme, Inc." and "Acme Inc." are the same explicit alias as "Acme Inc".
+// The suffix word stays, so the label is not the stem "acme". Punctuation
+// inside the remaining name stays.
+function companyAliasSpelling(name) {
+  const key = String(name ?? '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+  const match = TRAILING_LEGAL_SUFFIX_RE.exec(key);
+  if (!match || match.index === 0) return key;
+  const suffixWord = match[0].replace(/^[\s,.]+/u, '').replace(/\.+$/u, '');
+  const head = key.slice(0, match.index).replace(/[\s,.]+$/u, '').trim();
+  if (!head || !suffixWord) return key;
+  return `${head} ${suffixWord}`;
+}
+
 /**
  * Build a company-name canonicalizer from `config.company_aliases`.
  *
@@ -2719,6 +2830,9 @@ function defaultCompanyNormalizer(name) {
  */
 export function buildCompanyCanonicalizer(aliases) {
   const map = new Map();
+  // An explicit alias claimed by two canonical names. Lookup returns that
+  // label unchanged, before the suffix stem can fold it into one of them.
+  const ambiguousExplicit = new Set();
   if (aliases && typeof aliases === 'object' && !Array.isArray(aliases)) {
     const entries = Object.entries(aliases);
     const canonicalKeys = new Set();
@@ -2731,23 +2845,45 @@ export function buildCompanyCanonicalizer(aliases) {
       canonicalKeys.add(canon);
     }
 
-    const aliasTargets = new Map();
+    const explicitTargets = new Map();
+    const stemTargets = new Map();
+    const claim = (bucket, form, canon) => {
+      // A canonical key keeps its own identity, even when it is also the
+      // suffix-stripped form of someone else's alias.
+      if (!form || canonicalKeys.has(form)) return;
+      if (!bucket.has(form)) bucket.set(form, new Set());
+      bucket.get(form).add(canon);
+    };
     for (const [canonical, list] of entries) {
       const canon = defaultCompanyNormalizer(canonical);
       if (!canon) continue;
       const arr = Array.isArray(list) ? list : [list];
       for (const a of arr) {
         const alias = defaultCompanyNormalizer(a);
-        if (!alias || canonicalKeys.has(alias)) continue;
-        if (!aliasTargets.has(alias)) aliasTargets.set(alias, new Set());
-        aliasTargets.get(alias).add(canon);
+        claim(explicitTargets, alias, canon);
+        const spelled = companyAliasSpelling(alias);
+        if (spelled !== alias) claim(explicitTargets, spelled, canon);
+        const stemmed = companyStemForDedup(alias);
+        if (stemmed && stemmed !== alias) claim(stemTargets, stemmed, canon);
       }
     }
 
-    // Ambiguous aliases fail open as their raw normalized label. This may allow
-    // a duplicate through, but it cannot silently suppress another company.
-    for (const [alias, targets] of aliasTargets) {
+    // An explicit alias wins over a stem inferred from a different alias.
+    // An ambiguous explicit alias stays out of the map. A punctuated form
+    // of that alias is the same collision, so it stays out too.
+    for (const [alias, targets] of explicitTargets) {
+      const spelled = companyAliasSpelling(alias);
+      if ((explicitTargets.get(spelled)?.size ?? 0) > 1) {
+        ambiguousExplicit.add(spelled);
+        if (spelled !== alias) ambiguousExplicit.add(alias);
+        continue;
+      }
       if (targets.size === 1) map.set(alias, targets.values().next().value);
+      else ambiguousExplicit.add(alias);
+    }
+    for (const [stem, targets] of stemTargets) {
+      if (explicitTargets.has(stem) || targets.size !== 1) continue;
+      map.set(stem, targets.values().next().value);
     }
   }
 
@@ -2759,7 +2895,18 @@ export function buildCompanyCanonicalizer(aliases) {
    */
   return function canonicalizeCompany(name) {
     const key = defaultCompanyNormalizer(name);
-    return map.get(key) ?? key;
+    const spelled = companyAliasSpelling(key);
+    // A canonical name keeps its identity. Any other spelling of an
+    // ambiguous alias stays unresolved, including "Acme Inc." when "acme inc"
+    // is already claimed twice.
+    const ownName = map.has(key) && map.get(key) === key;
+    if (!ownName && ambiguousExplicit.has(spelled)) return spelled;
+    if (ambiguousExplicit.has(key)) return key;
+    if (map.has(key)) return map.get(key);
+    if (spelled !== key && map.has(spelled)) return map.get(spelled);
+    const stemmed = companyStemForDedup(key);
+    if (stemmed !== key && map.has(stemmed)) return map.get(stemmed);
+    return key;
   };
 }
 
@@ -2779,6 +2926,7 @@ const ROLE_LOCATION_SUFFIXES = new Set([
   'canada',
   'chicago',
   'copenhagen',
+  'distributed',
   'dublin',
   'emea',
   'eu',
@@ -2789,6 +2937,7 @@ const ROLE_LOCATION_SUFFIXES = new Set([
   'germany',
   'hamburg',
   'helsinki',
+  'hybrid',
   'india',
   'ireland',
   'italy',
@@ -2828,10 +2977,14 @@ const ROLE_LOCATION_SUFFIXES = new Set([
   'united kingdom',
   'united states',
   'us',
+  'u s',
   'usa',
+  'u s a',
   'vancouver',
   'vienna',
   'warsaw',
+  'wfh',
+  'work from home',
   'zurich',
 ]);
 
@@ -2945,6 +3098,16 @@ export function normalizeRoleForDedup(role) {
       title = title.slice(0, piped.index).trimEnd();
       continue;
     }
+    // "Engineer - Remote", "Engineer, Remote", and
+    // "Engineer - Platform - Remote". The last separated dash or comma is
+    // the delimiter, so a team tag in front of Remote stays. A hyphen inside
+    // the suffix stays too ("On-site", "Work-from-home"). "Engineer - Platform"
+    // is not a workplace tag.
+    const trailed = title.match(/^(.*)\s*[-–—,]\s+([^,|–—]+)\s*$/);
+    if (trailed && isRoleLocationSuffix(trailed[2])) {
+      title = trailed[1].trimEnd();
+      continue;
+    }
     break;
   }
   // Unicode-aware (#2393 family): the [a-z0-9] strip this used to carry keyed
@@ -3045,7 +3208,7 @@ export function normalizeLocationForDedup(location) {
  * @returns {string} Stable dedupe key: `company::role`, or `company::role@@places`.
  */
 export function companyRoleDedupKey(company, role, canonicalize = defaultCompanyNormalizer, location = undefined) {
-  const base = `${canonicalize(company)}::${normalizeRoleForDedup(role)}`;
+  const base = `${companyStemForDedup(canonicalize(company))}::${normalizeRoleForDedup(role)}`;
   const places = normalizeLocationForDedup(location);
   // `@@` and not a third `::`: normalizeTextKey strips punctuation, so neither
   // the role nor the location component can ever contain the separator, and a
@@ -3055,10 +3218,23 @@ export function companyRoleDedupKey(company, role, canonicalize = defaultCompany
 
 /**
  * Marker for a seeded company+role row whose requisition is unknown (in the
- * language sets: whose language is unknown). A single such row keeps the key a
- * plain duplicate, exactly as if neither signal were read at all.
+ * language sets: whose language is unknown). It means this row named none, not
+ * that every id was seen. A later posting that names an id is a different
+ * opening. A later posting that also names none stays a duplicate.
  */
 export const ANY_REQUISITION = '*';
+
+/**
+ * Marker for a seeded pipeline row whose posting scan-history never recorded.
+ * The scanner writes pipeline.md first and scan-history second, and the
+ * requisition id lives only in scan-history. When only the pipeline write
+ * landed, the row's id is lost, not absent: it may have been a provider-only
+ * id such as `JR100`. Such a row keeps the duplicate, as an unknown row did
+ * before, so a new URL for the same requisition cannot come back through it.
+ * A row whose scan-history entry exists but names no id is still
+ * {@link ANY_REQUISITION}.
+ */
+export const UNRECORDED_REQUISITION = '?';
 
 /**
  * Canonical requisition IDs for company+role dedupe — every form the source
@@ -3124,7 +3300,10 @@ export const ANY_REQUISITION = '*';
  * @returns {string[]} Canonical requisition IDs, as-labelled form first.
  */
 export function requisitionIdsForDedup({ url, text, requisitionId } = {}) {
-  const suppliedId = typeof requisitionId === 'string' ? requisitionId.trim() : '';
+  const trimmedId = typeof requisitionId === 'string' ? requisitionId.trim() : '';
+  // `*` and `?` are the seed markers (ANY_REQUISITION, UNRECORDED_REQUISITION),
+  // not requisition IDs.
+  const suppliedId = trimmedId === ANY_REQUISITION || trimmedId === UNRECORDED_REQUISITION ? '' : trimmedId;
   const workdayKey = !suppliedId && typeof url === 'string' ? workdayDedupKey({ url }) : null;
   if (suppliedId) return [normalizeScanScalar(suppliedId).toUpperCase()];
   // Google Careers has no requisition field: the job id in the URL path is the
@@ -3177,19 +3356,28 @@ export function requisitionIdForDedup(source) {
  * Whether a candidate that matched a seen company+role key is nevertheless a
  * different requisition.
  *
- * True only when every seeded row for the key named its requisition and none of
- * the candidate's forms was seen. Any unknown on either side keeps the
- * historical answer — a duplicate — so the check can only let through postings
- * the company itself labelled as distinct. An ambiguous source contributes
- * every form it could mean (see {@link requisitionIdsForDedup}), and one hit
- * on any of them is a duplicate.
+ * True when the candidate names an id and no seeded row named that id. A seed
+ * that named none does not count as a match, so the labelled posting comes
+ * back, including when the seed is an Applied row. False when the candidate
+ * names no id, when a seeded row named one of its forms, when a seeded
+ * pipeline row lost its id ({@link UNRECORDED_REQUISITION}), or when there is
+ * no seed. An ambiguous source contributes every form it could mean (see
+ * {@link requisitionIdsForDedup}), and one hit on any of them is a duplicate.
  *
  * @param {Set<string>|undefined} seededRequisitions - Requisitions seen for matching keys.
  * @param {string[]|string|null} candidateRequisitions - From {@link requisitionIdsForDedup}.
  * @returns {boolean}
  */
 export function isDistinctRequisition(seededRequisitions, candidateRequisitions) {
-  return unseenOnEveryRow(seededRequisitions, candidateRequisitions);
+  const forms = toRequisitionForms(candidateRequisitions);
+  // A row that names no requisition is still the same opening. A row that
+  // names one is a different opening when the seed named none: the `*` marker
+  // means "unknown", not "every id".
+  if (!(seededRequisitions instanceof Set) || seededRequisitions.size === 0 || forms.length === 0) return false;
+  if (seededRequisitions.has(UNRECORDED_REQUISITION)) return false;
+  const named = [...seededRequisitions].filter((form) => form !== ANY_REQUISITION);
+  if (named.length === 0) return true;
+  return forms.every((form) => !seededRequisitions.has(form));
 }
 
 /**
@@ -3286,7 +3474,9 @@ function recordForms(formsByKey, key, forms) {
 function recordLanguages(languagesByKey, key, requisitions, languages) {
   let byRequisition = languagesByKey.get(key);
   if (!byRequisition) languagesByKey.set(key, (byRequisition = new Map()));
-  const list = toRequisitionForms(requisitions);
+  // A row that lost its requisition is filed with the unknown ones here; only
+  // the requisition check reads UNRECORDED_REQUISITION.
+  const list = toRequisitionForms(requisitions).filter((form) => form !== UNRECORDED_REQUISITION);
   for (const requisition of list.length > 0 ? list : [ANY_REQUISITION]) {
     recordForms(byRequisition, requisition, languages);
   }
@@ -3343,7 +3533,10 @@ function recordLanguages(languagesByKey, key, requisitions, languages) {
  * Requisition id and language are recorded per posting URL in scan-history
  * (`requisition_id`, `language`). A tracker or pipeline row carries neither, so
  * it inherits them from the scan-history row with the same URL; a row whose URL
- * scan-history never recorded them for stays unknown.
+ * scan-history never recorded them for stays unknown. A pipeline row whose URL
+ * scan-history has no row for at all, and whose URL names no id itself, is
+ * seeded as {@link UNRECORDED_REQUISITION}: its history write never landed, so
+ * the id it may have had is missing rather than absent.
  * @returns {Set<string>} Existing company+role dedupe keys.
  */
 export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize = defaultCompanyNormalizer, { includeLocation = false, locatedBases = null, requisitionsByBase = null, locatedRequisitionsByBase = null, languagesByBase = null, locatedLanguagesByBase = null } = {}) {
@@ -3421,6 +3614,21 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
       languageFormsForDedup(row.language));
   }
 
+  // An `added` row is the history write for the posting that entered the
+  // pipeline. A skipped or other observational row for the same URL is an
+  // earlier sighting, not proof that this write landed. Counting it left the
+  // pipeline row with no marker, so a later URL for the same id looked new.
+  let recordedUrls = null;
+  const recordedInHistory = (url) => {
+    if (!recordedUrls) {
+      recordedUrls = new Set();
+      for (const row of scanHistoryRows(scanHistoryText, historyRows)) {
+        if (row.url && (row.status || 'added') === 'added') recordedUrls.add(seenJobKey(row.url.trim()));
+      }
+    }
+    return recordedUrls.has(seenJobKey(url.trim()));
+  };
+
   // pipeline.md — company/title are the two cells after the URL cell, plus
   // optional trailing columns (location, compensation, posted:/trust:/note:
   // segments). The URL is not always first, and expired/pre-screen shapes
@@ -3431,8 +3639,11 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
     const pair = extractPipelineCompanyRole(line);
     if (!pair) continue;
     const attributes = attributesFor(pair.url);
-    add(pair.company, pair.role, pair.location,
-      requisitionIdsForDedup({ url: pair.url, requisitionId: attributes.requisitionId }),
+    let requisition = requisitionIdsForDedup({ url: pair.url, requisitionId: attributes.requisitionId });
+    if (requisition.length === 0 && typeof pair.url === 'string' && pair.url && !recordedInHistory(pair.url)) {
+      requisition = [UNRECORDED_REQUISITION];
+    }
+    add(pair.company, pair.role, pair.location, requisition,
       languageFormsForDedup(attributes.language));
   }
 
@@ -4800,6 +5011,7 @@ const USAGE = `Usage:
   node scan.mjs --verify --headed-fallback   # retry anti-bot-blocked URLs in a headed browser (needs a display)
   node scan.mjs --verify --throttle          # jittered ~5-10s gap between browser checks
   node scan.mjs --verify --throttle=8000     # custom base gap in ms (waits base..2*base)
+  node scan.mjs --verify --throttle 8000     # same gap, value as the next argument
   node scan.mjs --rediscover-404             # re-verify tracked URLs that 404/410 (rides on --verify)
   node scan.mjs --include-blacklisted        # let data/blacklist.md matches through (annotated)
   node scan.mjs --since 7                    # postings from the last 7 days
@@ -4811,6 +5023,32 @@ const USAGE = `Usage:
 
 Exit status: 0 when the scan ran, 1 on a configuration or fatal error, 2 when
 every target it tried failed (with --json: when any target failed).`;
+
+// --throttle stays out of VALUE_FLAGS. An equals form that is not a positive
+// integer has to remain an unrecognized flag, which is what the existing
+// throttle test locks. The space form is read here, after that check.
+export function readThrottleBaseMs(args) {
+  const eq = args.find((a) => typeof a === 'string' && a.startsWith('--throttle='));
+  if (eq && /^--throttle=0*[1-9]\d*$/.test(eq)) {
+    const raw = eq.slice('--throttle='.length);
+    const n = Number(raw);
+    if (Number.isSafeInteger(n) && n > 0) return { ms: n, consumedIndex: null };
+    // A digit string that does not fit a safe integer used to fall through and
+    // return ms: 0, which turns the pause off. The flag was present.
+    return { error: `Error: --throttle expects a positive number of milliseconds, got "${raw}"` };
+  }
+  const idx = args.indexOf('--throttle');
+  if (idx === -1) return { ms: 0, consumedIndex: null };
+  const next = args[idx + 1];
+  if (next === undefined || (typeof next === 'string' && next.startsWith('-'))) {
+    return { ms: 5000, consumedIndex: null };
+  }
+  if (typeof next === 'string' && /^0*[1-9]\d*$/.test(next)) {
+    const n = Number(next);
+    if (Number.isSafeInteger(n) && n > 0) return { ms: n, consumedIndex: idx + 1 };
+  }
+  return { error: `Error: --throttle expects a positive number of milliseconds, got "${next}"` };
+}
 
 async function main() {
   const args = process.argv.slice(2);
@@ -4827,11 +5065,26 @@ async function main() {
   // URL in a headed browser. Off by default — headed Chromium needs a display, so
   // scheduled/unattended scans should not rely on it.
   const headedFallback = args.includes('--headed-fallback');
-  // --throttle or --throttle=<ms>: jittered gap between --verify checks to stay
-  // under rate-based WAF limits (pracuj.pl flags the session after a few rapid
-  // hits). Default base 5000ms. Off by default — most ATS feeds don't need it.
-  const throttleArg = args.find((a) => a === '--throttle' || a.startsWith('--throttle='));
-  const throttleBaseMs = throttleArg ? (Number(throttleArg.split('=')[1]) || 5000) : 0;
+  // --throttle or --throttle=<ms> or --throttle <ms>: jittered gap between
+  // --verify checks. Bare flag is 5000ms. Off when the flag is absent.
+  const throttle = readThrottleBaseMs(args);
+  if (throttle.error) {
+    console.error(throttle.error);
+    process.exit(1);
+  }
+  const throttleBaseMs = throttle.ms;
+  const consumed = new Set();
+  if (throttle.consumedIndex != null) consumed.add(throttle.consumedIndex);
+  args.forEach((token, idx) => {
+    if (!VALUE_FLAGS.includes(token)) return;
+    const next = args[idx + 1];
+    if (typeof next === 'string' && !next.startsWith('-')) consumed.add(idx + 1);
+  });
+  const unexpected = args.find((token, idx) => !consumed.has(idx) && typeof token === 'string' && !token.startsWith('-'));
+  if (unexpected) {
+    console.error(`Error: unexpected argument "${unexpected}". Pass a company with --company, for example --company ${unexpected}.`);
+    process.exit(1);
+  }
   // --rediscover-404: when a tracked company's URL 404/410s, search for the
   // moved role and re-verify before marking it expired. Opt-in; rides on --verify.
   const rediscover = args.includes('--rediscover-404');
@@ -4901,6 +5154,15 @@ async function main() {
   const sinceDays = since.days;
 
   const effectiveAfter = resolveEffectiveAfter(postedAfter, sinceDays);
+  // Each bound is a valid date on its own, but a lower bound past the upper
+  // one leaves an empty window: every dated posting is filtered out and the
+  // run reports it as an ordinary "Filtered by posted date" count. Swapped
+  // dates or a mistyped year are the same typo the checks above exist for.
+  if (effectiveAfter && postedBefore && effectiveAfter > postedBefore) {
+    const lower = postedAfter === effectiveAfter ? `--posted-after ${postedAfter}` : `--since ${sinceDays} (from ${effectiveAfter})`;
+    console.error(`Error: ${lower} is later than --posted-before ${postedBefore}, so no dated posting can match`);
+    process.exit(1);
+  }
 
   // 1. Load providers
   const providers = await loadProviders(PROVIDERS_DIR);
@@ -4975,6 +5237,34 @@ async function main() {
   // description. See the title gate in the scan loop.
   const rescueTitleMisses = contentFilter.rescueTitleMisses === true;
   const titleGate = buildTitleGate(config.title_filter, contentFilter, titleFilter);
+
+  // #7244. A tracked_companies / job_boards entry may carry its own title_filter,
+  // which replaces the global filter for that entry only.
+  const entryTitleGates = new WeakMap();
+  const resolveEntryTitleGate = (entry) => {
+    const entryFilter = (entry?.title_filter && typeof entry.title_filter === 'object' && !Array.isArray(entry.title_filter))
+      ? entry.title_filter
+      : null;
+    if (!entryFilter) {
+      return { titleFilter, titleGate, rawFilter: config.title_filter };
+    }
+    const cached = entryTitleGates.get(entryFilter);
+    if (cached) return cached;
+
+    let raw = entryFilter;
+    // An entry without usable positive keywords keeps the global positives with or without negatives (#7244)
+    const hasEntryPositives = Array.isArray(raw.positive)
+      && raw.positive.some(k => typeof k === 'string' && k.trim().length > 0);
+    if (!hasEntryPositives && config.title_filter?.positive) {
+      raw = { ...raw, positive: config.title_filter.positive };
+    }
+
+    const tf = buildTitleFilter(raw);
+    const tg = buildTitleGate(raw, contentFilter, tf);
+    const compiled = { titleFilter: tf, titleGate: tg, rawFilter: raw };
+    entryTitleGates.set(entryFilter, compiled);
+    return compiled;
+  };
   const candidateCountry = loadCandidateCountry();
   const countryEligibilityFilter = buildCountryEligibilityFilter(config.country_eligibility_filter, candidateCountry);
   const visaFilter = buildVisaFilter(config.visa_filter);
@@ -5146,6 +5436,16 @@ async function main() {
       && (!Array.isArray(target.skip_tiers)
         || target.skip_tiers.some(t => typeof t !== 'string' || !TIERS.includes(t.toLowerCase())))) {
       exitOnConfigError(`${target.name}: skip_tiers must be a list of ${TIERS.join(', ')}, or [] to turn the tier filter off`);
+    }
+    if (target.title_filter !== undefined) {
+      if (!target.title_filter || typeof target.title_filter !== 'object' || Array.isArray(target.title_filter)) {
+        exitOnConfigError(`${target.name}: title_filter must be an object with positive and/or negative keyword lists`);
+      }
+      for (const key of Object.keys(target.title_filter)) {
+        if (!['positive', 'negative', 'seniority_boost'].includes(key)) {
+          exitOnConfigError(`${target.name}: title_filter.${key} is not a recognized key - expected one of positive, negative, seniority_boost`);
+        }
+      }
     }
   }
   const tierFilterActive = skipTiers.length > 0 || targets.some(t => entrySkipTiers(t).length > 0);
@@ -5345,7 +5645,7 @@ async function main() {
       // posting (Workday's multi-location detail GETs) and can skip postings
       // the title filter below will drop. Absent when this company's filter_on
       // leaves the title out, since then no title is dropped.
-      ...(normalizeFilterOn(company.filter_on).includes('title') ? { titleWanted: (title) => titleGate(title) === 'match' } : {}),
+      ...(normalizeFilterOn(company.filter_on).includes('title') ? { titleWanted: (title) => resolveEntryTitleGate(company).titleGate(title) === 'match' } : {}),
       idCache: idCaches.forProvider(provider.id),
     };
     applyEntryResponseCap(ctx, company);
@@ -5422,6 +5722,7 @@ async function main() {
 
       const declaredFields = normalizeFilterOn(company.filter_on);
       const companySkipTiers = entrySkipTiers(company);
+      const { titleGate: companyTitleGate, rawFilter: companyRawTitleFilter } = resolveEntryTitleGate(company);
       const orderedJobs = preferredLanguageRank ? orderByPreferredLanguage(jobs, preferredLanguageRank) : jobs;
       for (const job of orderedJobs) {
         const listingToken = refreshListingKey(job);
@@ -5480,7 +5781,7 @@ async function main() {
         let titleMissed = false;
         for (const field of declaredFields) {
           if (field === 'title') {
-            const verdict = titleGate(job.title);
+            const verdict = companyTitleGate(job.title);
             if (verdict === 'rescue') { titleMissed = true; continue; }
             if (verdict === 'reject') { failedField = field; break; }
           } else {
@@ -5553,7 +5854,7 @@ async function main() {
             continue;
           }
           totalRescuedByContent++;
-        } else if (!contentFilter(job.description, matchedTitleKeywords(job.title, config.title_filter))) {
+        } else if (!contentFilter(job.description, matchedTitleKeywords(job.title, companyRawTitleFilter))) {
           totalFilteredContent++;
           st.other++;
           continue;
