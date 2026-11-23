@@ -17,8 +17,8 @@ import { cardReason } from "../../src/lib/machine-summary.mjs";
 // This stub must stay behaviourally identical for the cases below: a leading
 // number wins, anything unparseable is NaN.
 const scoreOf = (s) => {
-  const m = String(s).match(/(\d+(?:\.\d+)?)/);
-  return m ? parseFloat(m[1]) : NaN;
+  const m = String(s).match(/(\d+(?:[.,]\d+)?)/);
+  return m ? parseFloat(m[1].replace(",", ".")) : NaN;
 };
 
 const row = (date, score, status = "Evaluated") => ({ date, score, status, company: `${date}|${score}` });
