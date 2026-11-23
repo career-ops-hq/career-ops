@@ -97,6 +97,8 @@ test('Turkish percentage plans allow a decimal comma and an explicit rate modifi
   assert.deepEqual(check(letter(plan)).invented, ['20.5%']);
   assert.equal(check(letter(plan), ['My target is 20.5%.']).verdict, 'pass');
   assert.equal(check(letter(plan.replace(',', '.')), [plan]).verdict, 'pass');
+  assert.equal(check(letter(plan.toLocaleUpperCase('tr')), [plan]).verdict, 'pass');
+  assert.deepEqual(check(letter('DÖNÜŞÜMÜ %20,5 ARTIRDIM.'), [plan]).invented, ['20.5%']);
   assert.deepEqual(check(letter('Dönüşümü %20,5 artırdım. ' + plan), [plan]).invented, ['20.5%']);
 });
 
