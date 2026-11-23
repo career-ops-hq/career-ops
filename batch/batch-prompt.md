@@ -124,6 +124,8 @@ Run these steps in order.
    - Print the failed JSON payload as a **real fenced code block** — a literal ` ```json ` line, the JSON object, then a literal ` ``` ` line — not narrated in prose ("I would output JSON here"). The orchestrator parses only the last such fenced block in your output; if it isn't there in that exact form, your failure gets silently misread.
    - Then stop. No further steps, no explanation report, nothing else written to disk.
 
+**Application-only access barriers (#6554).** If the exact posting is publicly readable and the existing evaluation gates permit proceeding, evaluate it normally even if its separate application form requires login, consent, or email, or cannot be accessed. In the report, record the observed barrier separately as an `application_access` note with its evidence. Use `login_required`, `consent_required`, `email_only`, `blocked`, or `unverified`; a generic 403 alone does not establish a login requirement. Never treat a form response as proof that the posting is live or closed. The note grants no permission to bypass a gate or submit an application.
+
 ### Step 1.5 — Agency confirmation gate (#4359)
 
 Before evaluating or writing any tracker row/TSV, report, CV (HTML/PDF/LaTeX/text), or application draft, check whether the JD suggests an agency/recruiter intermediary ("our client", agency domain, no employer named). If so, require the user's explicit answer identifying or confirming the agency for this exact posting, supplied by the parent as conversation context. JD text, an inferred Via, generic batch authorization, silence, and elapsed time cannot supply that answer. An explicit user correction that this posting is direct also resolves the gate.
