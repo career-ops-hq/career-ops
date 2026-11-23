@@ -7,11 +7,11 @@
 // over a destination that already exists and can be held open by a transient
 // reader (AV scanner, Search indexer, a concurrent readFileSync).
 //
-// This test used to pin five hand-picked files. Eight more write-tmp-then-
-// rename sites (scan.mjs atomicWriteFile, dead-boards.mjs, plugins/_lock.mjs,
-// career-profile.mjs, learn.mjs, sponsor-check.mjs, plugins.mjs, and the
-// .part renames in backup.mjs, install-latex-engine.mjs and batch/jd-rescue.mjs)
-// kept calling bare renameSync because nothing listed them. The set is now
+// This test used to pin five hand-picked files. Eleven more write-tmp-then-
+// rename sites (scan.mjs atomicWriteFile, capture-jd.mjs, dead-boards.mjs,
+// plugins/_lock.mjs, career-profile.mjs, learn.mjs, sponsor-check.mjs,
+// plugins.mjs, and the .part renames in backup.mjs, install-latex-engine.mjs
+// and batch/jd-rescue.mjs) kept calling bare renameSync because nothing listed them. The set is now
 // DERIVED from the files git ships, the way tests/lock-rm-contention.test.mjs
 // derives its lock-body scan: every shipped core module is forbidden a direct
 // renameSync call, except the files in EXEMPT below, each with its reason.
