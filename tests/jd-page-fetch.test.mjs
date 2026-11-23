@@ -630,3 +630,123 @@ test('a malformed copy that differs only in whitespace does not make the page am
   const out = jdFromPageHtml(`<html><script>{${valid},${malformed}}</script></html>`);
   assert.ok(out);
 });
+
+test('JobPosting qualifications/responsibilities fields are part of the JD, once', () => {
+  const words = Array.from({ length: 90 }, (_, i) => `word${i}`).join(' ');
+  const node = {
+    '@context': 'https://schema.org', '@type': 'JobPosting', title: 'Edge Strategy Manager',
+    description: `<p>${words}</p>`,
+    responsibilities: 'Manage a portfolio of partners.',
+    qualifications: '8+ years of experience in network delivery.',
+    experienceRequirements: { '@type': 'OccupationalExperienceRequirements', description: 'word1' },
+  };
+  const html = `<html><script type="application/ld+json">${JSON.stringify(node)}</script></html>`;
+  const found = jdFromPageHtml(html);
+  assert.ok(found, 'a JD is found');
+  assert.match(found.text, /## Responsibilities\nManage a portfolio of partners\./);
+  assert.match(found.text, /## Qualifications\n8\+ years of experience in network delivery\./);
+  // A field whose text the description already carries is not repeated.
+  assert.doesNotMatch(found.text, /## Experience requirements/);
+});
+
+// ── Jibe prefix redirect and markup-only pages (2026-11-20) ─────────────
+
+test('a Jibe /jobs/{id} redirect to /{prefix}/jobs/{id} on the same host is the same posting', async () => {
+  const net = stubNetwork((u) => new URL(u).pathname === '/jobs/31496'
+    ? new Response(null, { status: 302, headers: { location: 'https://careers.example.com/careers-home/jobs/31496' } })
+    : html(page(`<p>${BODY}</p>`)));
+  try {
+    assert.ok(await fetchJdFromPage('https://careers.example.com/jobs/31496'));
+  } finally { net.restore(); }
+});
+
+test('the Jibe prefix rule accepts only the same id on the same host', async () => {
+  const { sameDocument } = awaitedModule;
+  assert.equal(sameDocument('https://jobs.keysight.com/jobs/56576', 'https://jobs.keysight.com/external/jobs/56576'), true);
+  assert.equal(sameDocument('https://jobs.keysight.com/jobs/56576', 'https://jobs.keysight.com/external/jobs/56577'), false);
+  assert.equal(sameDocument('https://jobs.keysight.com/jobs/56576', 'https://evil.example.com/external/jobs/56576'), false);
+  assert.equal(sameDocument('https://jobs.keysight.com/jobs/56576', 'https://jobs.keysight.com/a/b/jobs/56576'), false);
+  assert.equal(sameDocument('https://jobs.keysight.com/jobs/56576', 'https://jobs.keysight.com/external/jobs/56576?x=1'), false);
+  assert.equal(sameDocument('https://jobs.keysight.com/job/56576', 'https://jobs.keysight.com/external/job/56576'), false);
+});
+
+const RMK_DESC = `<p>${sentence.repeat(10)}</p><ul><li>At least 3 years of experience in FP&amp;A.</li></ul>`;
+// SuccessFactors RMK microdata, shaped like jobs.lionsgate.com / careers.celestica.com.
+const rmkMicrodata = (id, desc = RMK_DESC) => `<html><body>
+<div class="jobDisplayShell" itemscope="itemscope" itemtype="http://schema.org/JobPosting">
+<span itemprop="jobLocation" itemscope itemtype="http://schema.org/Place"><meta itemprop="addressLocality" content="Santa Monica"></span>
+<h1 id="job-title" itemprop="title">Manager, Strategy &amp; Planning</h1>
+<a class="apply" href="/talentcommunity/apply/${id}/?locale=en_US">Apply now</a>
+<div class="job"><span itemprop="description" class="jobdescription"><span><span>${desc}</span></span><span>Equal opportunity employer.</span></span></div>
+<div class="footer"><span>Footer text that is not the JD</span></div>
+</div></body></html>`;
+
+test('a SuccessFactors RMK page: the microdata description, nested spans included, and nothing after it', () => {
+  const { inspectPage } = awaitedModule;
+  const r = inspectPage(rmkMicrodata('1457766833'), Date.now(), 'https://careers.example.com/job/Chief-of-Staff-NH/1457766833/');
+  assert.equal(r.found.method, 'microdata');
+  assert.match(r.found.text, /^# Manager, Strategy & Planning/);
+  assert.match(r.found.text, /At least 3 years of experience in FP&A\./);
+  assert.match(r.found.text, /Equal opportunity employer\./);
+  assert.doesNotMatch(r.found.text, /Footer text/);
+});
+
+test('markup is only taken when the page names the requested job id', () => {
+  const { inspectPage } = awaitedModule;
+  assert.equal(inspectPage(rmkMicrodata('1457766833'), Date.now(), 'https://careers.example.com/job/Other/9999999/').found, null);
+  // No requested URL (the batch rescue path): markup is never used.
+  assert.equal(inspectPage(rmkMicrodata('1457766833'), Date.now(), '').found, null);
+  assert.equal(jdFromPageHtml(rmkMicrodata('1457766833')), null);
+});
+
+test('a page with two microdata JobPostings or two descriptions is not read', () => {
+  const { inspectPage } = awaitedModule;
+  const two = rmkMicrodata('1457766833').replace('</body>', `<div itemscope itemtype="https://schema.org/JobPosting"></div></body>`);
+  assert.equal(inspectPage(two, Date.now(), 'https://x.example.com/job/a/1457766833/').found, null);
+  const twoDesc = rmkMicrodata('1457766833').replace('</body>', `<span itemprop="description">${RMK_DESC}</span></body>`);
+  assert.equal(inspectPage(twoDesc, Date.now(), 'https://x.example.com/job/a/1457766833/').found, null);
+});
+
+test('an RMK layout labelled "Job Description" with no microdata (seagatecareers.com)', () => {
+  const { inspectPage } = awaitedModule;
+  const token = (label, value) => `<div class="joblayouttoken displayDTM "><div class="inner"><div class="row"><div class="col-xs-12">
+        <span class="joblayouttoken-label" role="heading" aria-level="2">${label}: 
+        </span>
+    <span xml:lang="en-US" lang="en-US" class="rtltextaligneligible">${value}
+    </span></div></div></div></div>`;
+  const src = `<html><head><link rel="canonical" href="https://careers.example.com/job/Senior-Analyst/15583-en_US/"></head><body>
+${token('Requisition Id', '15583')}${token('Job Description', `<div><span><span>${RMK_DESC}</span></span></div>`)}${token('Location', 'Singapore')}</body></html>`;
+  const r = inspectPage(src, Date.now(), 'https://careers.example.com/job/Senior-Analyst/15583-en_US');
+  assert.equal(r.found.method, 'rmk-layout');
+  assert.match(r.found.text, /At least 3 years/);
+  assert.doesNotMatch(r.found.text, /Singapore|15583/);
+});
+
+test('a Radancy ats-description block (disneycareers.com), matched by the job id', () => {
+  const { inspectPage } = awaitedModule;
+  const src = `<html><body><section class="job-description" data-job-id="103440744848">
+<div class="ats-description"><h2 class="ats-description__main-heading">Job Summary:</h2>
+<div class="ats-description__content-wrap"><div class="ats-description__content">${RMK_DESC}</div></div></div>
+<div class="related">Similar jobs</div></section></body></html>`;
+  const r = inspectPage(src, Date.now(), 'https://www.careers.example.com/en/job/celebration/director-pricing/391/103440744848');
+  assert.equal(r.found.method, 'radancy');
+  assert.match(r.found.text, /^Job Summary:/);
+  assert.doesNotMatch(r.found.text, /Similar jobs/);
+});
+
+test('JSON-LD still wins over markup on a page that has both', () => {
+  const { inspectPage } = awaitedModule;
+  const src = page(`<p>${BODY}</p>`, { body: rmkMicrodata('1457766833') });
+  assert.equal(inspectPage(src, Date.now(), 'https://x.example.com/job/a/1457766833/').found.method, 'ld+json');
+});
+
+test('elementInnerHtml matches nesting by tag name and stays fast on hostile markup', async () => {
+  const { elementInnerHtml } = await import('../lib/jd-parse.mjs');
+  const src = '<div class="a"><div>x</div><divider>y</divider><span>z</span></div><div>after</div>';
+  assert.equal(elementInnerHtml(src, 0), '<div>x</div><divider>y</divider><span>z</span>');
+  assert.equal(elementInnerHtml('<span>never closed', 0), null);
+  const hostile = `<span class="a">${'<span>'.repeat(50_000)}${'</span>'.repeat(50_001)}`;
+  const t0 = Date.now();
+  assert.equal(typeof elementInnerHtml(hostile, 0), 'string');
+  assert.ok(Date.now() - t0 < 1000, 'linear on deep nesting');
+});

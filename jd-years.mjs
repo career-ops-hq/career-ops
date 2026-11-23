@@ -31,9 +31,10 @@
  *      - scope: overall / skill ("3 years of experience with SQL") /
  *        degree-substitute ("a degree or 4 years of equivalent experience",
  *        which binds only candidates without the degree) / sub ("7 years,
- *        including 2 managing people").
+ *        including 2 managing people", "3 years' supervisory experience").
  *      - degreeAlt: one of several degree-conditional bars in one sentence
- *        ("7 with a BS or 5 with an MS").
+ *        ("7 with a BS or 5 with an MS", "a degree and 7 years OR 9 years"),
+ *        or across "Option 1: ... Option 2: ..." lines.
  *   4. The gating figure is the LOWEST floor among required overall mentions,
  *      the most lenient honest reading. Several bars that differ ("5+ years
  *      of software", "2+ years leading a team") are all required, so the real
@@ -58,6 +59,8 @@ import {
 } from './browser-extract.mjs';
 import { resolveAtsApi, JD_TEXT_API_ATS, throttleProviderRequest } from './liveness-api.mjs';
 import { fetchJsonWithRetry, makeHttpCtx } from './providers/_http.mjs';
+import { fetchJdViaHostReader, canonicalPageUrl } from './lib/jd-host-readers.mjs';
+import { fetchJdFromPage } from './lib/jd-page-fetch.mjs';
 
 /**
  * @typedef {Object} YearsMention
@@ -73,8 +76,10 @@ import { fetchJsonWithRetry, makeHttpCtx } from './providers/_http.mjs';
 
 /**
  * @typedef {Object} YearsRequirement
- * @property {'stated'|'preferred-only'|'skill-only'|'none'} status
+ * @property {'stated'|'preferred-only'|'skill-only'|'substitute-only'|'none'} status
  *   stated: the JD names a required overall bar; the others carry no gate.
+ *   substitute-only: the only figure stands in for a degree ("a degree or 4
+ *   years of equivalent experience"). none: the JD names no figure at all.
  * @property {number|null} min      Gating floor (lowest required overall floor)
  * @property {number|null} max      Upper bound when that bar is a range
  * @property {boolean} confident    The lowest bar found is a hard bar: the text was the whole
@@ -118,7 +123,7 @@ const WINDOW_LEAD = /\b(?:within|after|every|per|ago|the (?:first|next|last|past
 const CEILING_LEAD = /\b(?:up to|less than|fewer than|no more than|not more than|under|at most|maximum of|max(?:imum)?\.?)\s*$/i;
 const CEILING_TRAIL = /^(?:'s|')?\s*(?:\+\s*)?(?:of\s+)?(?:[\w/&-]+\s+){0,4}?(?:experience\s+)?(?:or (?:less|fewer|under)|maximum|max\b|at most|at the most)/i;
 // Sentences about something other than the candidate's experience.
-const NOT_A_REQUIREMENT = /\b(?:year[- ]over[- ]year|years? old|years? of age|ago\b|founded|anniversary|in business|vest(?:s|ed|ing)?\b|contract (?:term|length|duration)|fixed[- ]term|warranty|retention bonus|sabbatical|parental leave|commitment of|\d+[- ]year (?:degree|program|programme|course|plan|contract|term|appointment)|(?:four|two|three)[- ]year (?:degree|college|university|program))/i;
+const NOT_A_REQUIREMENT = /\b(?:year[- ]over[- ]year|years? old|years? of age|ago\b|founded|anniversary|been in business\b|in business (?:for|since)\b|vest(?:s|ed|ing)?\b|contract (?:term|length|duration)|fixed[- ]term|warranty|retention bonus|sabbatical|parental leave|commitment of|\d+[- ]year (?:degree|program|programme|course|plan|contract|term|appointment)|(?:four|two|three)[- ]year (?:degree|college|university|program))/i;
 // Company voice ("our team has 50 years of combined experience") with no
 // candidate-facing word in the sentence. Case-sensitive "us", so "a US
 // multinational" is not read as the company speaking.
@@ -146,11 +151,26 @@ const DEGREE_OR_BEFORE = /\b(?:degree|bachelor'?s?|diploma|b\.?s\.?|b\.?a\.?|bsc
 const SUB_LEAD = /\b(?:including|incl\.?|of which|of those|of this|within that|with at least|out of which)\s*(?:at least\s+|a minimum of\s+)?$/i;
 // "with a Bachelor's" names the degree the bar goes with, not a skill.
 const DEGREE_TRAIL = /^(?:'s|')?\s*(?:\+\s*)?(?:of\s+(?:\w+\s+){0,2}?)?(?:experience\s+)?(?:with|and|plus|\+)\s+(?:an?\s+|the\s+)?(?:relevant\s+|related\s+)?(?:degree|bachelor|master|mba|ph\.?\s?d|doctorate|b\.?s\b|b\.?a\b|m\.?s\b|m\.?a\b|bsc|msc|advanced|graduate|undergraduate)/i;
+// "8+ years finance, consulting, or strategy experience", "5+ years integrated
+// marketing (e.g., digital, social), event management, or related work
+// experience": the field list sits between the figure and the word
+// "experience". Only a list that reaches "experience" inside the same sentence
+// counts, and it may not open on a word that makes the figure something else
+// ("5 years to", "3 years we", "2 years after").
+const LIST_STOP = 'to|we|our|you|your|the|this|that|it|they|ago|after|before|later|since|from|until|old|will|would|can|may|have|has|had|are|is|was|were|be|been|role|position|program|programme|plan|term|period|contract|assignment|rotation|during|while|where|which|who|when';
+const LIST_THEN_EXPERIENCE = new RegExp(`^(?:'s|')?\\s+(?:(?!(?:${LIST_STOP})\\b)[\\w/&()'.,+-]+\\s+){1,30}?(?:work\\s+|related\\s+)?(?:experience|exp)\\b`, 'i');
+// "3 years' supervisory experience", "2+ years of people management
+// experience", "5 years managing direct reports": a bar on managing people,
+// a part of the overall bar, never the overall bar itself. "Leading a team"
+// and "as a tech lead" stay overall bars: a JD often states its only bar so.
+const SUPERVISORY_TRAIL = /^(?:'s|')?\s*(?:\+\s*)?(?:of\s+)?(?:(?:direct|formal|prior|proven|demonstrated|relevant)\s+)?(?:(?:supervisory|supervisor|managerial|people[- ]management|people[- ]leadership|people[- ]manager)\s+(?:experience|exp)\b|(?:experience\s+)?(?:managing|supervising)\s+(?:people|direct reports|staff|employees|associates|others)\b)/i;
 const SKILL_TRAIL = /^(?:'s|')?\s*(?:\+\s*)?(?:of\s+)?(?:(?:hands[- ]on|direct|professional|practical|relevant|production|commercial)\s+)?(?:experience\s+)?(?:with|using|programming|coding|writing|scripting)\b/i;
 
 // "or an equivalent combination of education and experience": the bar can
 // be met another way, so it is shown but never drops on its own.
 const EQUIVALENT_COMBINATION = /\bequivalent combination\b|\bor (?:an? )?equivalent (?:amount|level|mix) of\b|\bcombination of (?:education|training) and (?:work )?experience\b/i;
+
+const OPTION_LEAD = /^(?:option|path|alternative)\s*(?:\d+|[a-c]|one|two|three)\s*[:.)-]/i;
 
 const NO_EXPERIENCE_RE = /\bno (?:prior |previous )?(?:work |professional |industry )?experience (?:is )?(?:required|necessary|needed)\b/i;
 
@@ -238,10 +258,22 @@ function toLines(input) {
   // same, and the flag only ever keeps a line without a colon from opening one.
   const lines = [];
   let marker = false;
-  for (const l of text.replace(/[’‘]/g, "'").replace(/[^\S\r\n]+/g, ' ').split(/\r?\n/)) {
+  // Every apostrophe shape reads as "'": "7 years’", "1 yearʼs", "5 years´".
+  for (const l of text.replace(/[’‘ʼ´`′]/g, "'").replace(/[^\S\r\n]+/g, ' ').split(/\r?\n/)) {
     const item = LIST_MARKER.test(l);
     const rest = l.replace(LIST_MARKER, '').trim();
     if (!rest) { marker ||= item; continue; }
+    // A sentence wrapped onto the next line ("... OR 7 years'\nexperience in
+    // marketing."): a line that ends mid-sentence, then one that opens in lower
+    // case and is not a new item, is one sentence.
+    const prev = lines[lines.length - 1];
+    // A line or item that opens on OR ("- OR Bachelor's Degree ... AND 4+
+    // years", Microsoft) is the other half of the bar above it.
+    const wrapped = !item && !marker && /^[a-z]/.test(rest) && !/[.!?:;)]$/.test(prev?.text ?? '.');
+    if (prev && (wrapped || /^OR\b/.test(rest))) {
+      prev.text = `${prev.text} ${rest}`;
+      continue;
+    }
     lines.push({ text: rest, item: item || marker });
     marker = false;
   }
@@ -287,7 +319,8 @@ function headingKind(line, item) {
 function latinHeadingKind(line, item) {
   // "Preferred Qualifications (any 2 of the following)": the parenthetical
   // is an aside, not a figure.
-  const bare = line.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
+  // "Minimum Qualifications..." (Walmart): a trailing ellipsis is no full stop.
+  const bare = line.replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s*(?:\.{3}|…)$/, '').trim();
   // A lead-in line that introduces a preferred list, however long ("It would
   // be great if you also have the following things").
   if (bare.length <= 120 && !/\d/.test(bare) && PREFERRED_HEADING.test(bare) && /(?::|\bfollowing\b[\w\s]*)$/i.test(bare)) return 'preferred';
@@ -357,9 +390,15 @@ function mentionsIn(sentence, sectionKind) {
     if (NON_EXPERIENCE_OF.test(trail)) return;
     const months = /^mo/i.test(unit);
     if (months && !/^(?:'s|')?\s*(?:of\s+)?(?:\w+\s+){0,3}?experience\b/i.test(trail)) return;
-    if (!EXPERIENCE_TRAIL.test(trail)) return;
+    // "a two- to three-year role": a figure hyphened onto its unit is an
+    // adjective, never the start of a field list.
+    const adjectival = /-\s*(?:years?|yrs?|months?)$/i.test(sentence.slice(at, end));
+    if (!EXPERIENCE_TRAIL.test(trail) && (adjectival || !LIST_THEN_EXPERIENCE.test(trail))) return;
     // Bare "N years." needs experience named nearby ("Experience: 5+ years").
-    if (/^(?:'s|')?\s*(?:[,;:.)]|$)/.test(trail) && !/\bexp(?:erience)?\b/i.test(sentence)) return;
+    // A list item that is nothing but the figure ("Requirements:\n- 5+ years")
+    // is the bar of the section it sits in.
+    const bareItem = sectionKind === 'required' && !/\w/.test(sentence.slice(0, at)) && !/\w/.test(trail);
+    if (/^(?:'s|')?\s*(?:[,;:.)]|$)/.test(trail) && !/\bexp(?:erience)?\b/i.test(sentence) && !bareItem) return;
     const scale = months ? 1 / 12 : 1;
     const lo = Math.round(floor * scale * 10) / 10;
     const hi = ceiling === null ? null : Math.round(ceiling * scale * 10) / 10;
@@ -374,6 +413,8 @@ function mentionsIn(sentence, sectionKind) {
       scope = 'degree-substitute';
     } else if (SKILL_TRAIL.test(trail) && !DEGREE_TRAIL.test(trail)) {
       scope = 'skill';
+    } else if (SUPERVISORY_TRAIL.test(trail)) {
+      scope = 'sub';
     } else if (SUB_LEAD.test(lead) && found.some(f => f.scope === 'overall')) {
       scope = 'sub';
     }
@@ -416,8 +457,31 @@ function mentionsIn(sentence, sectionKind) {
   if (overall.length >= 2) {
     const withDegree = overall.filter(f => (zh.includes(f) ? ZH_DEGREE_WORD.test(clauseAround(sentence, f.at, f.end).text) : DEGREE_WORD.test(sentence.slice(Math.max(0, f.at - 45), f.end + 45))));
     if (withDegree.length >= 2 && (zh.length ? withDegree.length === overall.length : /\bor\b|\//i.test(sentence))) for (const f of withDegree) f.degreeAlt = true;
+    else if (!zh.length && orJoinedDegreePaths(sentence, overall)) for (const f of overall) f.degreeAlt = true;
   }
   return found.map(({ at: _at, end: _end, ...rest }) => rest);
+}
+
+/**
+ * "Bachelor's degree in X and 7 years' experience in Y OR 9 years' experience
+ * in Y", "4 years of experience in X, or 2 years with an advanced degree": two
+ * bars joined by "or", one of them tied to a degree, so the other is the path
+ * for a candidate without it. Each bar is one way in, like "7 with a BS or 5
+ * with an MS".
+ * @param {string} sentence
+ * @param {Array<{at: number, end: number}>} bars overall mentions, in order
+ */
+function orJoinedDegreePaths(sentence, bars) {
+  const sorted = [...bars].sort((a, b) => a.at - b.at);
+  for (let i = 1; i < sorted.length; i++) {
+    if (!/\bor\b|\//i.test(sentence.slice(sorted[i - 1].end, sorted[i].at))) return false;
+  }
+  // The first bar owns a degree named anywhere before it ("Bachelor's degree
+  // in ... and 7 years"); a later one only one named beside it.
+  const first = sorted[0];
+  const before = sentence.slice(0, first.at);
+  const firstHasDegree = DEGREE_WORD.test(before) && /\b(?:and|with|plus)\b|\+/i.test(before.slice(before.search(DEGREE_WORD)));
+  return firstHasDegree || sorted.slice(1).some(f => DEGREE_WORD.test(sentence.slice(f.end, f.end + 45)));
 }
 
 /**
@@ -505,6 +569,11 @@ export function parseYearsRequirement(jd) {
   let noExperience = false;
   /** @type {YearsMention[]} */
   let previous = [];
+  // "Option 1: Bachelor's degree and 4 years' ... Option 2: 6 years' ...": each
+  // option is one way in, like a degree-conditional bar.
+  /** @type {YearsMention[]} */
+  const optionBars = [];
+  let optionDegree = false;
   for (const { text: line, item } of lines) {
     if (NO_EXPERIENCE_RE.test(line)) noExperience = true;
     const heading = headingKind(line, item);
@@ -521,8 +590,15 @@ export function parseYearsRequirement(jd) {
       }
       mentions.push(...found);
       if (found.length) previous = found;
+      if (OPTION_LEAD.test(sentence)) {
+        const bars = found.filter(m => m.scope === 'overall');
+        optionBars.push(...bars);
+        if (bars.length && DEGREE_WORD.test(sentence)) optionDegree = true;
+      }
     }
   }
+
+  if (optionBars.length >= 2 && optionDegree) for (const m of optionBars) m.degreeAlt = true;
 
   // Unclear bars count toward the lowest reading, so they can show and keep a
   // row, but a reading that rests on one is never confident: it cannot drop.
@@ -532,7 +608,9 @@ export function parseYearsRequirement(jd) {
   }
   if (gating.length === 0) {
     const preferred = mentions.filter(m => m.kind === 'preferred' && m.scope === 'overall');
-    const skill = mentions.filter(m => m.kind === 'required' && m.scope === 'skill');
+    // A supervisory bar ("3 years' supervisory experience") with no overall
+    // one beside it is a specific-experience figure, shown like a skill one.
+    const skill = mentions.filter(m => m.kind === 'required' && (m.scope === 'skill' || m.scope === 'sub'));
     if (preferred.length > 0) {
       const lowest = preferred.reduce((a, b) => (b.floor < a.floor ? b : a));
       return { status: 'preferred-only', min: null, max: null, confident: false, display: `pref ${rangeText(lowest)}`, mentions };
@@ -540,6 +618,14 @@ export function parseYearsRequirement(jd) {
     if (skill.length > 0) {
       const lowest = skill.reduce((a, b) => (b.floor < a.floor ? b : a));
       return { status: 'skill-only', min: null, max: null, confident: false, display: `skill ${rangeText(lowest)}`, mentions };
+    }
+    // "A degree or 4 years of equivalent experience" binds only a candidate
+    // without the degree, so it never gates; but the JD does name a figure, and
+    // `none stated` is kept for a JD that names none.
+    const substitute = mentions.filter(m => m.kind !== 'preferred' && m.scope === 'degree-substitute');
+    if (substitute.length > 0) {
+      const lowest = substitute.reduce((a, b) => (b.floor < a.floor ? b : a));
+      return { status: 'substitute-only', min: null, max: null, confident: false, display: `degree or ${rangeText(lowest)}`, mentions };
     }
     return { status: 'none', min: null, max: null, confident: false, display: 'none stated', mentions };
   }
@@ -576,10 +662,14 @@ export function classifyYears(req, { years, stretchYears }) {
  * The `yrs:` pipeline segment body.
  * @param {YearsRequirement|null} req - null when the JD could not be read
  * @param {'in'|'out'|'unknown'} verdict
+ * @param {'ats'|'listing'|null} [source] where the text came from (applyExperienceFilter's `source`)
  * @returns {string}
  */
-export function formatYearsSegment(req, verdict) {
+export function formatYearsSegment(req, verdict, source = 'ats') {
   if (!req) return 'yrs: unread';
+  // A listing excerpt routinely leaves the qualifications out, so its silence
+  // on years is not the JD's: say where the reading came from.
+  if (source === 'listing' && req.status === 'none') return 'yrs: none stated (listing only)';
   return verdict === 'out' ? `yrs: ${req.display} above band` : `yrs: ${req.display}`;
 }
 
@@ -636,19 +726,54 @@ const JD_TEXT_CAP = 60_000;
 const JD_TIMEOUT_MS = 15_000;
 const JD_RETRY_POLICY = { retries: 2 };
 
+// Spacing between two page reads on one host (the JSON-LD tier below).
+const PAGE_SPACING_MS = 400;
+
 /**
- * Full JD text for a posting, or null when its host has no known public JD
- * API. Throws on a failed request (the caller labels the row `unread`).
- *
+ * The JD from the posting page's own schema.org JobPosting, or null when the
+ * page holds no single posting. Throws when the page says it is closed.
  * @param {string} url
- * @param {{ boardCache?: Map<string, Promise<any>>, ctx?: any }} [opts]
- *   boardCache: Ashby's API is the whole board, so one fetch serves every
- *   posting on it for the rest of the run.
+ * @param {(url: string, cap: number, timeoutMs: number) => Promise<any>} fetchPage
  * @returns {Promise<string|null>}
  */
-export async function fetchJdText(url, { boardCache, ctx = makeHttpCtx() } = {}) {
+async function readJdPage(url, fetchPage) {
+  let host = '';
+  try { host = new URL(url).hostname.toLowerCase(); } catch { return null; }
+  await throttleProviderRequest(`jd-page:${host}`, PAGE_SPACING_MS);
+  const page = await fetchPage(canonicalPageUrl(url), JD_TEXT_CAP, JD_TIMEOUT_MS);
+  if (!page) return null;
+  if (page.closed) throw new Error(`posting page says closed: ${page.evidence || 'closed'}`);
+  return page.text || null;
+}
+
+/**
+ * Full JD text for a posting, or null when nothing could be read for its host.
+ * Throws on a failed request (the caller labels the row `unread`).
+ *
+ * Three tiers, first match wins:
+ *   1. an ATS API in JD_TEXT_API_ATS (Greenhouse, Lever, Ashby, Workday, ...);
+ *   2. a host reader (lib/jd-host-readers.mjs: Oracle Recruiting Cloud,
+ *      Eightfold PCSX, Google, Apple, Amazon, Walmart, Goldman, ServiceNow);
+ *   3. the posting page's own schema.org JobPosting (lib/jd-page-fetch.mjs),
+ *      which covers most other career sites (Meta, Radancy/TMP boards, iCIMS,
+ *      Jibe, ...). Null when the page holds no single posting. Tier 1 falls to
+ *      it too when its API answers 404 and that API's 404 is not authoritative.
+ *
+ * @param {string} url
+ * @param {{ boardCache?: Map<string, Promise<any>>, ctx?: any,
+ *   fetchPage?: (url: string, cap: number, timeoutMs: number) => Promise<any> }} [opts]
+ *   boardCache: Ashby's API is the whole board, so one fetch serves every
+ *   posting on it for the rest of the run. fetchPage: the tier-3 page reader
+ *   (injectable for tests).
+ * @returns {Promise<string|null>}
+ */
+export async function fetchJdText(url, { boardCache, ctx = makeHttpCtx(), fetchPage = fetchJdFromPage } = {}) {
   const resolved = resolveAtsApi(url);
-  if (!resolved || !JD_TEXT_API_ATS.has(resolved.ats)) return null;
+  if (!resolved || !JD_TEXT_API_ATS.has(resolved.ats)) {
+    const viaHost = await fetchJdViaHostReader(url, { textCap: JD_TEXT_CAP, timeoutMs: JD_TIMEOUT_MS, ctx });
+    if (viaHost) return viaHost.text;
+    return readJdPage(url, fetchPage);
+  }
   const normalize = JSON_JD[resolved.ats];
   if (!normalize) {
     const result = await fetchJdViaKnownApi(url, JD_TEXT_CAP, JD_TIMEOUT_MS);
@@ -664,13 +789,23 @@ export async function fetchJdText(url, { boardCache, ctx = makeHttpCtx() } = {})
     }, JD_RETRY_POLICY);
   };
   let json;
-  if (resolved.ats === 'ashby' && boardCache) {
-    // A failure is cached too: get() already retried, so asking again for
-    // every other posting on a down board would only repeat that backoff.
-    if (!boardCache.has(apiUrl)) boardCache.set(apiUrl, get());
-    json = await boardCache.get(apiUrl);
-  } else {
-    json = await get();
+  try {
+    if (resolved.ats === 'ashby' && boardCache) {
+      // A failure is cached too: get() already retried, so asking again for
+      // every other posting on a down board would only repeat that backoff.
+      if (!boardCache.has(apiUrl)) boardCache.set(apiUrl, get());
+      json = await boardCache.get(apiUrl);
+    } else {
+      json = await get();
+    }
+  } catch (err) {
+    // A 404 from an API whose 404 is not proof the posting is gone
+    // (`api404Authoritative: false` in liveness-api.mjs: an embed-only Ashby
+    // board such as Whatnot 404s its posting API while every posting page is
+    // live) leaves the JD on the posting page: read it there.
+    const status = /** @type {{status?: number}} */ (err)?.status;
+    if ((status === 404 || status === 410) && resolved.api404Authoritative === false) return readJdPage(url, fetchPage);
+    throw err;
   }
   const result = normalize(json, resolved, url, JD_TEXT_CAP);
   if (!result?.text) throw new Error(`${resolved.ats} answered without a JD for this posting`);
@@ -735,7 +870,7 @@ export async function applyExperienceFilter(offers, filter, deps = {}) {
         source = 'listing';
       }
       const verdict = classifyYears(req, filter);
-      const label = formatYearsSegment(req, verdict).replace(/^yrs: /, '');
+      const label = formatYearsSegment(req, verdict, source ?? 'ats').replace(/^yrs: /, '');
       annotated[i] = { ...offer, years: { req, verdict, source, error, label } };
       deps.onProgress?.(++done, offers.length);
     }
