@@ -573,6 +573,17 @@ try {
   })) pass('fetch() passes documented filters to the feed query: lists joined, flags as 1, blank and false skipped, page, source and q kept');
   else fail(`filters query = ${JSON.stringify(got)}`);
 
+  const locForms = [['San Francisco', 'New York'], 'San Francisco, New York', ["Saint-Denis", "O'Fallon", 'St. Louis', 'Zürich']];
+  const locGot = [];
+  for (const loc of locForms) {
+    const c = [];
+    await provider.fetch({ name: 'sr', a16z_speedrun_talent: { filters: { loc } } }, recordCtx(c));
+    locGot.push(c[0] ? new URL(c[0]).searchParams.get('loc') : null);
+  }
+  if (JSON.stringify(locGot) === JSON.stringify(['San Francisco,New York', 'San Francisco,New York', "Saint-Denis,O'Fallon,St. Louis,Zürich"]))
+    pass('fetch() takes multiword city names in loc, as a list or a string, keeping internal spaces');
+  else fail(`loc forms = ${JSON.stringify(locGot)}`);
+
   const plainCalls = [];
   await provider.fetch({ name: 'sr' }, recordCtx(plainCalls));
   if (plainCalls.length === 1 && [...new URL(plainCalls[0]).searchParams.keys()].join() === 'page,source') pass('fetch() sends only page and source when the entry has no filters');
@@ -582,7 +593,7 @@ try {
     { bogus: 'x' }, { page: 3 }, { source: 'x' }, { q: 'x' },
     { posted: '1y' }, { scope: 'galaxy' }, { sort: 'oldest' }, { stealth: 'maybe' },
     { comp: -1 }, { comp: '150000' }, { comp: 1.5 }, { remote: 'yes' }, { ai: 2 },
-    { fn: 'a&page=3' }, { fn: [' ', ''] }, { fn: ['ok', 'bad value'] }, { fn: {} },
+    { sen: ['senior', false] }, { sen: ['senior', 7] }, { loc: 'San Francisco, a\nb' }, { loc: ['x;y'] }, { fn: ['San Francisco'] }, { fn: 'a&page=3' }, { fn: [' ', ''] }, { fn: ['ok', 'bad value'] }, { fn: {} },
     { metro: 'sf,nyc,la,sv,dc,chi' }, { company: 5 }, { company: 'x'.repeat(121) },
   ];
   let refused = 0;
@@ -645,6 +656,15 @@ try {
     pass('fetch() reads no job detail unless fetchDetails is true');
   else fail(`default detail calls = ${noDetails.detailCalls.length}`);
 
+  // Detail batches are paced: one pause before each batch after the first.
+  const pauses = [];
+  await provider.fetch({ name: 'sr', a16z_speedrun_talent: { fetchDetails: true, detailLimit: 12 } }, {
+    sleep: async (ms) => { pauses.push(ms); },
+    fetchJson: async (url) => (new URL(url).pathname === '/api/v1/jobs' ? { jobs: detailJobs, total_pages: 1 } : { job: { status: 'open' } }),
+  });
+  if (pauses.length === 2 && pauses.every((ms) => ms > 0)) pass('fetch() pauses between detail batches, not before the first');
+  else fail(`detail pauses = ${JSON.stringify(pauses)}`);
+
   const withDetails = await detailRun({ a16z_speedrun_talent: { fetchDetails: true, detailLimit: 8 } }, { failId: 'd-6' });
   const byTitle = Object.fromEntries(withDetails.rows.map((r) => [r.title, r]));
   if (byTitle.D0.url === 'https://boards.greenhouse.io/acme/jobs/1' && byTitle.D0.description === 'Build things.' && byTitle.D0.externalId === 'd-0')
@@ -677,6 +697,7 @@ try {
   const manyJobs = Array.from({ length: 150 }, (_, i) => ({ id: `m-${i}`, title: `M${i}`, url: srUrl(1000 + i) }));
   const limitCalls = [];
   await provider.fetch({ name: 'sr', a16z_speedrun_talent: { fetchDetails: true, detailLimit: 5000 } }, {
+    sleep: async () => {},
     fetchJson: async (url) => { limitCalls.push(url); return new URL(url).pathname === '/api/v1/jobs' ? { jobs: manyJobs, total_pages: 1 } : { job: { status: 'open' } }; },
   });
   if (limitCalls.length === 1 + 100) pass('fetch() caps detailLimit at 100');

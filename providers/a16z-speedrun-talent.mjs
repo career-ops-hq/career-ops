@@ -1,5 +1,5 @@
 // @ts-check
-import { fetchJsonWithRetry } from './_http.mjs';
+import { fetchJsonWithRetry, sleep } from './_http.mjs';
 import { coerceId } from './_ids.mjs';
 import { workplaceField } from './_workplace-type.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
@@ -58,6 +58,8 @@ const DEFAULT_MAX_PAGES = 6; // × PER_PAGE = the 300-job default scan
 // 2026-08), same policy as workday.mjs's cap.
 const MAX_PAGES_CAP = 1000;
 const DETAIL_BATCH = 5;
+// Pause between detail batches, so a long read does not hit the feed in a burst.
+const INTER_BATCH_DELAY_MS = 250;
 const DEFAULT_DETAIL_LIMIT = 25;
 const MAX_DETAIL_LIMIT = 100;
 
@@ -144,10 +146,13 @@ function resolveFilters(entry) {
   for (const [key, raw] of Object.entries(filters)) {
     if (raw == null || raw === '') continue;
     if (LIST_FILTERS.has(key)) {
-      const values = (Array.isArray(raw) ? raw : String(raw).split(','))
-        .map((v) => (typeof v === 'string' ? v.trim() : ''))
-        .filter(Boolean);
-      if (!values.length || values.some((v) => !/^[A-Za-z0-9_.-]+$/.test(v))) throw bad(key, 'must be a string or a list of plain values');
+      const items = Array.isArray(raw) ? raw : String(raw).split(',');
+      if (items.some((v) => typeof v !== 'string')) throw bad(key, 'must be a string or a list of strings');
+      const values = items.map((v) => v.trim()).filter(Boolean);
+      // `loc` takes city names ("San Francisco", "O'Fallon"): letters, marks,
+      // digits, spaces, periods, apostrophes and hyphens; no commas or controls.
+      const plain = key === 'loc' ? /^[\p{L}\p{M}\p{N}][\p{L}\p{M}\p{N} .'-]*$/u : /^[A-Za-z0-9_.-]+$/;
+      if (!values.length || values.some((v) => !plain.test(v))) throw bad(key, 'must be a string or a list of plain values');
       if (key === 'metro' && values.length > MAX_METROS) throw bad(key, `takes at most ${MAX_METROS} values`);
       pairs.push([key, values.join(',')]);
     } else if (FLAG_FILTERS.has(key)) {
@@ -318,6 +323,7 @@ async function enrichFromDetails(jobs, limit, ctx, name) {
   const due = jobs.filter((job) => job.externalId && safeEncodeURIComponent(job.externalId) !== null).slice(0, limit);
   let failed = 0;
   for (let i = 0; i < due.length; i += DETAIL_BATCH) {
+    if (i > 0) await sleep(INTER_BATCH_DELAY_MS, ctx);
     await Promise.all(due.slice(i, i + DETAIL_BATCH).map(async (job) => {
       try {
         const url = `${FEED_BASE}/${safeEncodeURIComponent(job.externalId)}?${new URLSearchParams({ source: 'career-ops' })}`;
