@@ -1881,6 +1881,10 @@ search_queries:
 #   # host that proxies Avature (detect() won't auto-claim it), set
 #   # provider: avature + api: the SearchJobs URL explicitly instead.
 #   careers_url: https://exampleco.avature.net/careers/SearchJobs
+#   # A tenant with no SearchJobs lists postings per country; give that page
+#   # (provider: avature), the full URL in careers_url (or in api:, which wins over
+#   # careers_url), e.g. https://jobs.exampleco.com/en_US/careers/JobOpeningsSpain;
+#   # a bare origin in api: is requested as /careers/SearchJobs
 #   max_pages: 50          # optional page cap (only 6 jobs/page — Avature's hard
 #                          # limit — so ~300 postings by default, max 200 pages)
 #   # offset_param: offset  # optional — pins the pagination key for a tenant
