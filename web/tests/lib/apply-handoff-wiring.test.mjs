@@ -65,6 +65,7 @@ export async function finalizeDrivenSession() {
 }
 export async function extractCurrent() { return { form: {} }; }
 export function isApplicationFormFn() { return true; }
+export async function refusedDestination() { return null; }
 `;
 const cvStub = `
 export async function resolveSessionCv() {
