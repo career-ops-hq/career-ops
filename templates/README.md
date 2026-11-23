@@ -94,6 +94,43 @@ sections: all
 
 `sections: all` claims every section; `sections: experience, education` claims a subset. A declared section must exist (checked when the template resolves by name) and must parse with a non-empty `<!--ENTRY-->` zone (checked when the CV renders), or the build fails naming the file — it never falls back. Undeclared sections keep the silent fallback, so a pack written before this key exists behaves exactly as it did; a pack that declares nothing is simply a pack that has not made the claim. Prefer `sections: all` for a pack whose point is its DOM, as the ATS pack does: the alternative is being correct by a coincidence the pack never stated, which the next change to a built-in builder can end without any test noticing.
 
+### Distributable template packs (`pack.json`)
+
+A template pack you publish on its own is a directory with a `pack.json` at its root and the templates it declares. `validate-template-pack.mjs` is the structural gate for it. It reads the files as text and executes nothing.
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `packVersion` | yes | Manifest format version. The only supported value is the number `1`; anything else fails. |
+| `id` | yes | Lowercase letters, digits and hyphens, starting with a letter or digit (`^[a-z0-9][a-z0-9-]*$`). |
+| `name` | yes | Must equal `career-ops-template-` plus `id`. |
+| `displayName`, `description`, `author`, `license`, `version` | yes | Non-empty strings. |
+| `templates` | yes | Non-empty array of template entries (below). |
+
+Each entry in `templates`:
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `id` | yes | Same format as the pack `id`. Unique within the pack. |
+| `displayName` | yes | Non-empty string. |
+| `kind` | yes | `cv`, `cover` or `both`. |
+| `ats` | yes | Boolean. When `true`, the ATS rules in `ats-rules.yml` run on the template and any finding fails the pack. |
+| `atsRisk` | yes | `none` or `design-forward`. |
+| `atsRiskNote` | when `atsRisk` is `design-forward` | Non-empty string saying what the risk is. |
+| `files.cv`, `files.cover` | one per kind (`both` needs both) | Path inside the pack. The filename must be `cv-template.<id>.html` or `cover-letter-template.<id>.html`, and the file must exist. |
+| `previews.cv`, `previews.cover` | one per kind | Path inside the pack to an existing preview file. |
+
+Declared paths must name their file directly. An absolute path, a path that leaves the pack, a `..` segment and a symlink that resolves outside the pack all fail. Fields not listed here are not checked.
+
+Every declared template must carry the placeholders `validateTemplate` requires, and must pass `renderLint`: a script, remote asset or other construct the renderer drops fails the pack, with no advisory tier.
+
+Run it against the pack directory:
+
+```bash
+node validate-template-pack.mjs <pack-dir>
+```
+
+It exits 0 and prints `✓ template pack is valid` when the pack passes. It exits 1 with one `✗` line per problem on stderr, and 2 when no directory is given. `--help` prints the usage. Fix every line, then run it again; the same command is the check to put in the pack's own CI.
+
 ### resume-template.html
 
 Resume-branded variant of `cv-template.html` for US/industry job applications. Key differences from the CV template:
