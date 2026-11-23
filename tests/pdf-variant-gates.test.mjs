@@ -25,3 +25,10 @@ test('every variant fact gate in modes/pdf.md carries --strict-source (#6792)', 
   assert.equal(lines.length, 3);
   for (const l of lines) assert.match(l, /--source cv\.md --strict-source/);
 });
+
+test('variant gate commands resolve cv.md and the variant from the data root (#6792)', () => {
+  const gates = PDF_MODE.split('\n').flatMap(l => l.match(/--source \S+ --strict-source/g) ?? []);
+  assert.ok(gates.length >= 3);
+  for (const g of gates) assert.match(g, /--source \{DATA_ROOT\}\/cv\.md /);
+  assert.doesNotMatch(PDF_MODE, /(?<!\{DATA_ROOT\}\/)data\/cv-variants\/<name>\.md/);
+});
