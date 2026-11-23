@@ -502,7 +502,7 @@ const NOUN_SYNONYMS = new Map([
 const MAGNITUDE_ALT = String.raw`(?:\s?(?:thousand|million|billion)\b|\s?[kKmMbB](?![\p{L}]))`;
 const SIMPLE_CLAIM_PATTERNS = [
   /\b\d+(?:\.\d+)?[^\S\n]?(?:%|(?:percent|per\s?cent|pct)\b)/gi,
-  /(?<![\p{L}\p{N}])%\d+(?:\.\d+)?(?![\p{L}\p{N}])/gu,
+  /(?<![\p{L}\p{N}])%\d+(?:[.,]\d+)?(?![\p{L}\p{N}])/gu,
   new RegExp(String.raw`(?<![\w$€£])[$€£]\s?\d[\d,.]*(?:\s?(?:thousand|million|billion)\b|\s?[kKmMbB])?`, 'gu'),
   new RegExp(String.raw`(?:\b(?:USD|EUR|GBP)|\bUS\$)\s?\d[\d,.]*${MAGNITUDE_ALT}?`, 'gu'),
   new RegExp(String.raw`\b\d[\d,.]*${MAGNITUDE_ALT}?\s?-?\s?(?:(?:USD|EUR|GBP)\b|(?:[Dd]ollars?|[Ee]uros?)\b)`, 'gu'),
@@ -527,11 +527,11 @@ const CURRENCY_SYMBOLS = new Map([
  * @returns {string}
  */
 function canonicalMetric(raw) {
+  const prefix = /^%(\d+(?:[.,]\d+)?)$/.exec(raw);
+  if (prefix) return prefix[1].replace(',', '.') + '%';
   const claim = normalizeClaim(raw);
   const percent = /^(\d+(?:\.\d+)?) ?(?:%|percent|per ?cent|pct)$/.exec(claim);
   if (percent) return `${percent[1]}%`;
-  const prefixedPercent = /^%(\d+(?:\.\d+)?)$/.exec(claim);
-  if (prefixedPercent) return `${prefixedPercent[1]}%`;
   const multiplier = /^(\d+(?:\.\d+)?) ?(?:x|-? ?fold)$/.exec(claim);
   if (multiplier) return `${multiplier[1]}x`;
   const amount = String.raw`(\d[\d.]*)(?: ?(thousand|million|billion|[kmb]))?`;
@@ -3823,7 +3823,7 @@ const PAST_PERCENT_CLAIM_RE = /\b(?:grew|increased|improved|reduced|generated|ac
 const DURATION_INTRO_RE = /^\s*(?:over|in|within|for|during|across)\b[^,;:]*?\d[\d,.]*\s*\+?\s*(?:days|weeks|months|years)\s*$/i;
 // Recognize Turkish plans only where the number directly modifies the
 // planned change. A later intention cannot license an earlier percentage.
-const TR_PERCENT_PLAN_RE = /(?<![\p{L}\p{N}])(%\d+(?:\.\d+)?)\s+\p{L}+(?:(?:mayı|meyi)\s+(?:planlıyorum|hedefliyorum|amaçlıyorum)|(?:acağım|eceğim))(?![\p{L}\p{M}])/giu;
+const TR_PERCENT_PLAN_RE = /(?<![\p{L}\p{N}])(%\d+(?:[.,]\d+)?)\s+(?:oranında\s+)?\p{L}+(?:(?:mayı|meyi)\s+(?:planlıyorum|hedefliyorum|amaçlıyorum)|(?:acağım|eceğim))(?![\p{L}\p{M}])/giu;
 
 /**
  * Sentence bounds at `.`, `!`, `?`, or newline — used so a duration intro
@@ -3894,7 +3894,7 @@ function plannedClaims(targetText, planTexts) {
     const pastInSpan = pastClaimMetrics(span);
     const remaining = clean.slice(i, end);
     for (const match of remaining.matchAll(TR_PERCENT_PLAN_RE)) forward.add(canonicalMetric(match[1]));
-    const nonTurkishPlans = remaining.replace(TR_PERCENT_PLAN_RE, match => match.replace(/^%\d+(?:\.\d+)?/, ''));
+    const nonTurkishPlans = remaining.replace(TR_PERCENT_PLAN_RE, match => match.replace(/^%\d+(?:[.,]\d+)?/, ''));
     for (const claim of metricClaims(nonTurkishPlans)) {
       if (pastInSpan.has(claim)) past.add(claim);
       else if (planAssertion) forward.add(claim);
