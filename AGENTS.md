@@ -221,7 +221,7 @@ Output: `{"onboardingNeeded": <bool>, "data_root": "<path>", "project_root": "<p
 
 The output above is the healthy shape. **`dataRootError` — a hard stop, not an onboarding invitation.** When the resolved data root is refused because it sits inside a Claude Code plugin install (the next plugin update deletes that copy), doctor exits non-zero and reports a different shape: `data_root` is null, `onboardingNeeded` stays true so that nothing proceeds on this root, `warnings[0]` carries the refusal, and `dataRootError` names it (`{code, source, root}`). Do not onboard on this state — no `--init-templates`, no `cv.md`, no tracker: every write to that root is lost on the next plugin update. Show the user the refusal from `warnings[0]`, and wait for them to point `dataRootError.source` at a folder outside `~/.claude/plugins` (or remove it to use the default data root). When the source is an environment variable (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR`), a shell export does not reach an agent session that is already running: the session restarts from a shell that has the corrected value, and only then does a doctor rerun see it. When the source is the `.career-ops-data` marker file, editing the file is enough — doctor re-reads it on each run, so no restart is needed. Then run doctor again.
 
-**`unpersonalized` — act on this even when `onboardingNeeded` is false.** Entries are `{path, reason, impact}` for a personalization file that exists but still carries template content, and for a `config/profile.yml` or `portals.yml` that holds only comments. After onboarding copies `modes/_profile.md` and `modes/_brief.md`, an existence check cannot catch their unedited content. Left unedited, `_profile.md` feeds the **template author's** archetypes and North Star into every A-F evaluation, so offers get scored against a stranger's targeting; `_brief.md` hands the triage first pass literal `{placeholders}`. It is a warning, not a gate (career-ops works out of the box), but before running `scan`, `pipeline`, or `batch` with a non-empty `unpersonalized`, tell the user which files it lists, with each entry's `impact`, and offer to personalize them from their CV first. For `modes/_profile.md`, say that every score changes.
+**`unpersonalized` — act on this even when `onboardingNeeded` is false.** Entries are `{path, reason, impact}` for a personalization file that exists but still carries template content, and for a `config/profile.yml` or `portals.yml` that holds only comments. After onboarding copies `modes/_profile.md` and `modes/_brief.md`, an existence check cannot catch their unedited content. Left unedited, `_profile.md` feeds the **template author's** archetypes and North Star into every A-F evaluation, so offers get scored against a stranger's targeting; `_brief.md` hands the triage first pass literal `{placeholders}`. An empty or comments-only YAML prerequisite sets `onboardingNeeded` to true. Unpersonalized Markdown templates remain warnings. Before running `scan`, `pipeline`, or `batch` with a non-empty `unpersonalized`, tell the user which files it lists, with each entry's `impact`, and offer to personalize them from their CV first. For `modes/_profile.md`, say that every score changes.
 
 `modes/_custom.md` is deliberately never reported — unedited house rules are a valid end state.
 
@@ -263,7 +263,7 @@ Create `cv.md` from whatever they provide — clean markdown with standard secti
 #### Step 2: Profile (required)
 If `node doctor.mjs --json` `warnings` says the data-root `.env` sets `CAREER_OPS_PROFILE`, do not copy the example profile. Ask the user to export that variable in the shell (or shell profile) that starts the agent, then restart the session from it, or to remove the line from `.env`. A shell export does not reach an agent session that is already running, so run doctor again only after that.
 
-If `config/profile.yml` is missing, ask:
+If `config/profile.yml` is missing or doctor lists it in `unpersonalized` with no settings, ask:
 > "I need a few details to personalize the system:
 > - Your full name and email
 > - Your location and timezone
@@ -280,7 +280,7 @@ If `config/profile.yml` is missing, ask:
 Keep the answers for the writer in Step 3. Archetypes and targeting narrative go to `modes/_profile.md` or `config/profile.yml` — never `modes/_shared.md`.
 
 #### Step 3: Portals (recommended)
-If `portals.yml` is missing:
+If `portals.yml` is missing or doctor lists it in `unpersonalized` with no settings:
 > "I'll set up the job scanner with 180+ pre-configured companies. Want me to customize the search keywords for your target roles?"
 
 Then write both files in one run. Do not copy or hand-edit the templates. `templates/portals.example.yml` is about 160 KB, and the writer changes only the answered fields:
@@ -311,7 +311,7 @@ JSON
 - When `candidate.years_of_experience` is under 2 (or, when they gave none, `cv.md` shows under 2 years of work), or the archetypes they target are entry level (`level` Entry, Junior or Graduate), also ask whether every CV should fit on one page. A yes becomes `"cv": { "max_pages": 1 }`. Add `"strict_pages": true` only if they want a CV that runs over to fail rather than warn. Never set it without asking: with no answer, a CV may run to two pages.
 - `max_posting_age_days` defaults to 45. Tell them it also hides long-open roles on a company's own board. Set 0 only when they ask for older postings.
 - Contact fields they did not give are blanked, so the example person never reaches a CV.
-- Existing files are kept. Pass `--force` only when the user asks to redo setup. `node onboard-write.mjs --help` shows every field.
+- Existing files are kept by default. For each YAML prerequisite that doctor still reports as empty or comments-only, rerun `node onboard-write.mjs --answers - --force --only profile` or `node onboard-write.mjs --answers - --force --only portals` with the same answers JSON on stdin. Recheck that specific file immediately before replacing it and keep it if settings have since been added. Use the same data-root and file overrides as doctor, so the writer repairs the configured file. Rerun `node doctor.mjs --json` to confirm setup. For an existing file with settings, use `--force` only when the user asks to redo its setup. `node onboard-write.mjs --help` shows every field.
 
 The writer prints `{"written": [...], "kept": [...]}`. Do not read the templates first, and do not edit `portals.yml` or the answered profile fields afterward. To change an answer, rerun with `--force --only profile` or `--force --only portals` for the file that answer lives in. Leave `minimum` out when they gave none.
 
