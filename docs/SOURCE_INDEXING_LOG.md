@@ -322,3 +322,29 @@ Startup jobs. The provider reads Wellfound in two ways: the jobs page of one com
 **Rule 6 (read what is public).** No page needs a login, and no request got a CAPTCHA. career-ops' default User-Agent gets the same pages as a browser. `robots.txt` (checked 2026-11-12) has only a `User-agent: *` group and no `Crawl-delay`, and disallows none of the paths the provider reads (`/company/<slug>/jobs`, `/role/…`, `/location/…`). The provider waits 250 ms between requests and bounds them with at most 20 search URLs per entry, each read up to `max_pages`, and with `wellfound.max_companies`.
 
 **Not in this PR.** AGENTS.md ("Aggregator Listings — Confirm at the Employer") names Wellfound, and a job with no `atsSource` may exist only on Wellfound. The maintainers chose a separate PR for that rule and for passing `atsSource` on with each job (#4903).
+
+---
+
+## itjobs.pt
+
+| | |
+|---|---|
+| **Proposed by** | @SalvadorCorreia in issue [#7686](https://github.com/career-ops-hq/career-ops/issues/7686) (not the operator) |
+| **Provider** | `providers/itjobs.mjs` |
+| **PR** | this PR · issue [#7686](https://github.com/career-ops-hq/career-ops/issues/7686) |
+| **Status** | Proposed |
+
+Portugal's IT job board. The provider reads the board's public RSS feed, `https://feeds.itjobs.pt/feed/emprego`, linked from the site's home page, with `limit=5000`. Measured on 2026-11-23: 714 items in one response, the same "714 ofertas" the site shows, newest first. The feed also accepts the site's search filters (`q`, `location`, `company`); the provider does not use them, because the whole board fits in one request. ITJobs also has a keyed JSON API, which the provider does not use.
+
+**Rule 1 (real listings, identifiable employer, free for candidates).** Every one of the 714 items names its employer on the `Empresa` line of its description; the provider drops a row without one. Many employers are IT consultancies and staffing firms (Neotalent Conclusion, Dellent and Olisipo were the most frequent). Offers are free to read without an account. To see an offer's application address (email or site), a candidate signs in with a free ITJobs account, as on Computrabajo. The terms ask candidates not to send mass or automated applications; the provider only reads.
+
+**Rule 2 (canonical URL).** The feed links each item to its ITJobs offer page (`https://www.itjobs.pt/oferta/<id>/<slug>`) and carries no employer link; the employer's application address is on the offer page, for signed-in candidates. The provider keeps the offer page without its query string.
+
+**Rule 3 (complete inventory, no paid placement).** ITJobs sells featured ads ("Anúncios em destaque", on its plans page). The feed does not mark them, but it lists every offer newest first, and its count matches the site's, so a featured ad cannot change what the provider reads or its order.
+
+**Rule 4 (operator declared).** Red Maze, per the copyright line in the site footer. The proposer is not the operator but a candidate using the board.
+
+**Rule 5 (aggregation stays in core).** The provider reads only itjobs.pt.
+
+**Rule 6 (read what is public).** The feed and the offer pages need no login, and no request got a CAPTCHA. `www.itjobs.pt/robots.txt` (read 2026-11-23) sets `Crawl-delay: 1` and disallows search and filter query strings on the site, which the provider does not request; `feeds.itjobs.pt` serves no `robots.txt` (404). The provider makes one request per scan.
+

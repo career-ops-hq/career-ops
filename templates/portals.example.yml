@@ -2365,6 +2365,10 @@ search_queries:
 #   provider: landingjobs
 #   enabled: true
 #
+# - name: ITJobs                          # Portuguese IT jobs (public RSS feed)
+#   provider: itjobs                      # whole board in one request
+#   enabled: true
+#
 # - name: RemoteOK
 #   provider: remoteok
 #   enabled: true
