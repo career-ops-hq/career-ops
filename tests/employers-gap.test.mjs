@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { collectInstanceUrls, findGap, notPublicReason, shareList, boardsIn, loadRegistryIdentities } from '../employers-gap.mjs';
 
 const known = new Set(['https://job-boards.greenhouse.io/vercel']);
@@ -74,7 +75,7 @@ test('an install: portals, pipeline and scan history by default; applications an
 });
 
 test('the real registry loads and a board from it is known', () => {
-  const ids = loadRegistryIdentities(new URL('../employers/boards', import.meta.url).pathname);
+  const ids = loadRegistryIdentities(fileURLToPath(new URL('../employers/boards', import.meta.url)));
   assert.ok(ids.size > 1000);
   assert.ok(ids.has('https://job-boards.greenhouse.io/vercel'));
 });
