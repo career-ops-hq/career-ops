@@ -19,7 +19,7 @@ cat posting.md | node posting-guard.mjs --text --out clean.md # clean text to a 
 
 | Flag | Meaning |
 |---|---|
-| `--in FILE` | Read the posting from a file (default: stdin). A relative path resolves against the data root, as the modes write `jds/{slug}.md` |
+| `--in FILE` | Read the posting from a file (default: stdin). A relative path resolves against the data root, as the modes write `jds/{slug}.md`; one starting with `./` or `../` names the working directory instead |
 | `--html` / `--text` | Force the input mode; omitted = auto-detect from the first 2000 chars |
 | `--json` | Emit findings only (no cleaned text), for machine consumption |
 | `--out FILE` | Write the cleaned text to a file. Same path resolution as `--in`, and it is refused when it names the `--in` file |

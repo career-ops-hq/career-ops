@@ -121,19 +121,25 @@ function styleHidden(style) {
 const ATTR_RE = /([a-zA-Z_:][-\w:.]*)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/g;
 
 function attrsHidden(attrs) {
+  let hiddenAttr = false;
   let style = null;
   let ariaHidden = false;
   for (const m of attrs.matchAll(ATTR_RE)) {
     const name = m[1].toLowerCase();
     const value = m[3] ?? m[4] ?? m[5] ?? '';
-    if (name === 'style') style = value;
+    if (name === 'hidden') hiddenAttr = true;
+    else if (name === 'style') style = value;
     else if (name === 'aria-hidden' && value.trim().toLowerCase() === 'true') ariaHidden = true;
   }
-  // A bare `hidden` attribute has no value, so the name=value pairs are removed
-  // first: matching the word anywhere in the tag fires on `title="no longer
-  // hidden"` and drops a visible block.
-  const bare = attrs.replace(ATTR_RE, ' ').toLowerCase();
-  if (/(^|[\s"'/])hidden(?=[\s/>]|$)/.test(bare + ' ')) return 'hidden attribute';
+  // A bare `hidden` has no value, so the loop above never sees it: the
+  // name=value pairs are removed first, then a standalone `hidden` is looked
+  // for. Valued forms (`hidden`, `hidden=""`, `hidden="hidden"`) were caught
+  // above, before the removal could swallow them.
+  if (!hiddenAttr) {
+    const bare = attrs.replace(ATTR_RE, ' ').toLowerCase();
+    hiddenAttr = /(^|[\s"'/])hidden(?=[\s/>]|$)/.test(bare + ' ');
+  }
+  if (hiddenAttr) return 'hidden attribute';
   if (ariaHidden) return 'aria-hidden=true';
   if (style) return styleHidden(style);
   return null;
@@ -273,6 +279,11 @@ function splitHtmlTags(markup) {
   let textStart = 0;
   for (let i = 0; i < markup.length; i++) {
     if (markup[i] !== '<') continue;
+    // A literal `<` in text ("5 < 10") is not a tag opener: only a name,
+    // `/`, `!` or `?` after it starts one. Otherwise the scan below would run
+    // to the next `>`, or to the end of the document, and that text would
+    // never be scanned at all.
+    if (!/[a-zA-Z!?/]/.test(markup[i + 1] ?? '')) continue;
     let quote = null;
     let end = -1;
     for (let j = i + 1; j < markup.length; j++) {
@@ -281,7 +292,7 @@ function splitHtmlTags(markup) {
       if (c === '"' || c === "'") { quote = c; continue; }
       if (c === '>') { end = j; break; }
     }
-    if (end === -1) break; // unterminated: leave the remainder as text
+    if (end === -1) continue; // unterminated tag: leave the `<` as text
     if (i > textStart) tokens.push(markup.slice(textStart, i));
     tokens.push(markup.slice(i, end + 1));
     textStart = end + 1;
