@@ -224,3 +224,15 @@ test('a job whose line after the title is prose, not dates, is rejected (#6792)'
   const root = workspace({ 'bad.md': BULLET_AS_DATES.replace('- Led a team of 3 engineers', 'Built a pipeline') });
   assert.throws(() => resolveVariant('bad', { root }), /could not be parsed/);
 });
+
+test('a `1)` ordered list item where the dates should be is rejected (#6792)', () => {
+  const root = workspace({ 'bad.md': BULLET_AS_DATES.replace('- Led a team of 3 engineers', '1) Led a team of 3 engineers') });
+  assert.throws(() => resolveVariant('bad', { root }), /could not be parsed/);
+});
+
+test('one unreadable variant is a read problem and the audit still checks the rest (#6792)', () => {
+  const root = workspace({ 'bad.md': '# Jane\n' });
+  mkdirSync(join(root, 'data', 'cv-variants', 'a.md'));
+  const findings = auditCvVariants({ root });
+  assert.deepEqual(findings.map((f) => [f.name, f.problems[0].type]), [['a', 'read'], ['bad', 'parse']]);
+});
