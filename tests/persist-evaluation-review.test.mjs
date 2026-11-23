@@ -89,3 +89,24 @@ test('evaluation refuses a report whose answers writer already holds the lock', 
     assert.equal(fs.existsSync(report + '.lock'), true, 'the rejected save must preserve its peer lock');
   } finally { lock.release(); }
 }));
+
+test('a staging removal failure does not undo a completed save or skip further cleanup', (t) => fixture((root, report) => {
+  const warnings = t.mock.method(console, 'error', () => {});
+  const removals = [];
+  const tsv = join(root, 'batch', 'tracker-additions', '035-globex.tsv');
+  const result = writeEvaluationArtifacts(root, payload, {
+    ...fs,
+    rmSync(staging, options) {
+      removals.push(staging);
+      if (removals.length === 1) throw new Error('injected staging removal failure');
+      fs.rmSync(staging, options);
+    },
+  });
+  assert.deepEqual(result, { ok: true });
+  assert.equal(fs.readFileSync(report, 'utf8'), payload.markdown);
+  assert.match(fs.readFileSync(tsv, 'utf8'), /Globex/);
+  assert.equal(removals.length, 2);
+  assert.equal(fs.existsSync(removals[1]), false);
+  assert.match(warnings.mock.calls[0].arguments[0], /injected staging removal failure/);
+  assert.equal(fs.existsSync(report + '.lock'), false);
+}));

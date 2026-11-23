@@ -106,7 +106,7 @@ export function writeEvaluationArtifacts(root, payload, fsImpl = fs) {
     return fail(cleanupError ? `${message} ${cleanupError}` : message);
   } finally {
     try {
-      for (const { staging } of attempted) fsImpl.rmSync(staging, { recursive: true, force: true });
+      for (const { staging } of attempted) removeStaging(fsImpl, staging);
     } finally {
       if (lock) releaseOrWarn(lock);
     }
@@ -135,7 +135,15 @@ function writeNew(fsImpl, filePath, content, attempted) {
     retained = true;
     fsImpl.linkSync(stagedPath, filePath);
   } finally {
-    if (!retained) fsImpl.rmSync(staging, { recursive: true, force: true });
+    if (!retained) removeStaging(fsImpl, staging);
+  }
+}
+
+function removeStaging(fsImpl, staging) {
+  try {
+    fsImpl.rmSync(staging, { recursive: true, force: true });
+  } catch (err) {
+    console.error(`Warning: evaluation staging cleanup failed at ${staging}: ${err.message}`);
   }
 }
 
