@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Sparkles, X, Settings } from "lucide-react";
-import { SETUP_BANNER_KEY, bannerStaysDismissed, setupBannerDismissKey } from "@/lib/home/setup-banner.mjs";
+import { SETUP_BANNER_KEY, bannerStaysDismissed, setupBannerDismissKey, setupPaths } from "@/lib/home/setup-banner.mjs";
 import { readSavedCliId, resolveCliId } from "@/lib/saved-cli";
 
 type Doctor = { available: boolean; onboardingNeeded: boolean; missing: string[]; unpersonalized?: { path: string; reason: string }[]; warnings: string[] };
@@ -14,13 +14,6 @@ const LABELS: Record<string, string> = {
   "modes/_profile.md": "your personalization",
   "portals.yml": "the companies to scan",
 };
-
-function setupPaths(doctor: Doctor) {
-  const emptyYaml = (doctor.unpersonalized ?? [])
-    .filter(entry => entry.reason === "has no settings (empty or only comments)")
-    .map(entry => entry.path);
-  return [...new Set([...doctor.missing, ...emptyYaml])];
-}
 
 // Detect (via the core's doctor.mjs) whether setup is incomplete, and offer to
 // finish it CONVERSATIONALLY — the assistant asks in plain language and writes
