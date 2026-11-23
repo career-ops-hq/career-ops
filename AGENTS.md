@@ -283,7 +283,9 @@ Keep the answers for the writer in Step 3. Archetypes and targeting narrative go
 If `portals.yml` is missing or doctor lists it in `unpersonalized` with no settings:
 > "I'll set up the job scanner with 180+ pre-configured companies. Want me to customize the search keywords for your target roles?"
 
-Then write both files in one run. Do not copy or hand-edit the templates. `templates/portals.example.yml` is about 160 KB, and the writer changes only the answered fields:
+When the profile already has settings and only portals need setup, read the configured profile. Take the candidate's full name, email and location from `candidate`, salary target and currency from `compensation`, country and timezone from `location`, and the target roles from `target_roles.primary`. Ask only for required values that are missing. Combine those values with the portal answers in the JSON below. Use `--only portals` for a missing portal file or `--force --only portals` after confirming the existing file still has no settings.
+
+When both files need setup, write both in one run. Do not copy or hand-edit the templates. `templates/portals.example.yml` is about 160 KB, and the writer changes only the answered fields:
 
 ```bash
 node onboard-write.mjs --answers - <<'JSON'
