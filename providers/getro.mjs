@@ -52,6 +52,7 @@
 import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, fetchTextWithRetry, sleep } from './_http.mjs';
 import { cachedLookup } from './_cached-lookup.mjs';
 import { markTruncated } from '../lib/board-truncation.mjs';
+import { workplaceField } from './_workplace-type.mjs';
 
 // Getro returns `created_at` as Unix seconds, but older boards have been seen
 // emitting ISO strings, so both shapes are handled. Non-positive values return
@@ -333,6 +334,10 @@ export default {
           company: j.organization?.name || j.organization_name || entry.name,
           location: locationString(j),
           postedAt: createdMs,
+          // Only "remote" sets the type. `work_mode` is "remote" or "on_site", and
+          // "on_site" is also what a posting gets when nobody chose one: some
+          // "100% Remote" titles carry it. So "on_site" gives no type.
+          ...workplaceField(j.work_mode === 'remote' ? 'remote' : undefined),
         };
         const salary = getroSalary(j);
         if (salary) row.salary = salary;

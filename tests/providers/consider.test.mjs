@@ -75,6 +75,21 @@ try {
   if (considerZeroStamp[0]?.postedAt == null) pass('consider.fetch() treats a 0 timeStamp as missing, not epoch 0');
   else fail(`consider.fetch() postedAt for timeStamp=0 = ${JSON.stringify(considerZeroStamp[0]?.postedAt)}`);
 
+  // workplaceType comes from the board's remote and hybrid flags. Both flags,
+  // or neither, set no type: the role can be done either way, or onsite.
+  const considerModes = await consider.fetch(okEntry, {
+    _acquireHandshake: noHandshake,
+    fetchJson: async () => ({ jobs: [
+      { remote: true, hybrid: false }, { remote: false, hybrid: true }, { remote: true, hybrid: true }, { remote: false, hybrid: false }, {},
+    ].map((flags, i) => ({ title: `T${i}`, url: `https://jobs.acmevc.example/wm${i}`, companyName: 'Acme', ...flags })) }),
+  });
+  if (considerModes[0]?.workplaceType === 'remote' && considerModes[1]?.workplaceType === 'hybrid')
+    pass('consider.fetch() sets workplaceType from the remote and hybrid flags');
+  else fail(`consider.fetch() workplaceType = ${JSON.stringify(considerModes.map((j) => j.workplaceType))}`);
+  if (considerModes.slice(2).every((j) => !('workplaceType' in j)))
+    pass('consider.fetch() sets no workplaceType for both flags, neither flag or no flags');
+  else fail(`consider.fetch() ambiguous flags = ${JSON.stringify(considerModes.slice(2).map((j) => j.workplaceType))}`);
+
   // fetch() refuses an unsafe host BEFORE touching the network.
   let considerThrew = false;
   try {
