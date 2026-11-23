@@ -285,16 +285,21 @@ function loadJournals(workspaceRoot) {
 }
 
 /**
- * Per-row stage-reached evidence from the transition ledger data/status-log.tsv
+ * Per-row stage-reached evidence from the transition ledger, the status-log.tsv
+ * beside the tracker that set-status writes through statusLogPath()
  * ({num}\t{date}\t{from}\t{to}\t{source}\t{note}). A row reached interview if any
  * transition entered OR left Interview/Offer/Hired; reached offer if it entered
  * OR left Offer/Hired. Offer implies interview. Missing file → empty Map (the
  * calibration falls back to journals + current status, exactly as before).
  * @returns {Map<number, {reachedInterview:boolean, reachedOffer:boolean}>}
  */
-export function loadLedgerReached(workspaceRoot) {
+export function loadLedgerReached(appsFile) {
   const reached = new Map();
-  const logPath = join(workspaceRoot, 'data', 'status-log.tsv');
+  // Beside the tracker, where every writer puts it and loadClosedNoResponse()
+  // below reads it. <workspace>/data/ is that place only for the default
+  // tracker, so a CAREER_OPS_TRACKER elsewhere or a root-level applications.md
+  // lost every interview the ledger recorded.
+  const logPath = statusLogPath(appsFile);
   if (!existsSync(logPath)) return reached;
   const INTERVIEW_PLUS = new Set(['interview', 'offer', 'hired']);
   const OFFER_PLUS = new Set(['offer', 'hired']);
@@ -517,7 +522,7 @@ if (isMainModule(import.meta.url)) {
   const workspaceRoot = resolveWorkspaceRoot(appsFile);
   const rows = loadTrackerRows(appsFile);
   const journals = loadJournals(workspaceRoot);
-  const reached = loadLedgerReached(workspaceRoot);
+  const reached = loadLedgerReached(appsFile);
   const closedNoResponse = loadClosedNoResponse(appsFile, rows, loadCanonicalStates(STATES_FILE));
   const result = computeCalibration(rows, journals, { minBandN, reached, closedNoResponse });
   if (argv.includes('--json')) console.log(JSON.stringify(result, null, 2));
