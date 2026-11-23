@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { chmodSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 import { atomicWriteFile, isIgnorableDirectoryFsyncError } from '../scan.mjs';
@@ -21,8 +21,9 @@ function workspace(portals) {
   return root;
 }
 
-function runJson(root) {
-  return spawnSync(process.execPath, [SCAN, '--dry-run', '--json'], {
+function runJson(root, preload) {
+  const args = preload ? ['--import', pathToFileURL(preload).href] : [];
+  return spawnSync(process.execPath, [...args, SCAN, '--dry-run', '--json'], {
     cwd: root,
     env: {
       ...process.env,
@@ -36,6 +37,41 @@ function runJson(root) {
     maxBuffer: 8 * 1024 * 1024,
   });
 }
+
+test('a completed keyword search is reported as scoped even without truncation', (t) => {
+  const root = workspace(`tracked_companies:
+  - name: Amazon keyword search
+    careers_url: https://www.amazon.jobs/en/search
+    provider: amazon
+    amazon: {base_query: engineering}
+  - name: Amazon regional board
+    careers_url: https://www.amazon.jobs/en/search
+    provider: amazon
+    amazon: {loc_query: Germany}
+  - name: Google keyword search
+    provider: google
+    google: {queries: ["data engineer"]}
+`);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const preload = join(root, 'fetch.mjs');
+  writeFileSync(preload, `globalThis.fetch = async (input) => {
+    const url = new URL(input);
+    if (url.hostname === 'www.amazon.jobs') return Response.json({ jobs: [], hits: 0 });
+    if (url.hostname === 'www.google.com') return new Response('<html><body>No results</body></html>', {
+      headers: { 'content-type': 'text/html' },
+    });
+    throw new Error('Unexpected request: ' + url.href);
+  };`);
+  const result = runJson(root, preload);
+  assert.equal(result.status, 0, describeSpawn(result));
+  const receipt = JSON.parse(result.stdout);
+  assert.deepEqual(receipt.partial, []);
+  assert.deepEqual(receipt.query_scoped, [
+    { company: 'Amazon keyword search', provider: 'amazon', config: 'amazon.base_query', queries: ['engineering'] },
+    { company: 'Google keyword search', provider: 'google', config: 'google.queries', queries: ['data engineer'] },
+  ]);
+  assert.match(result.stderr, /2 target\(s\) read through keyword queries only/);
+});
 
 test('atomicWriteFile replaces content without leaving a temporary file', () => {
   const root = mkdtempSync(join(tmpdir(), 'career-ops-atomic-'));
