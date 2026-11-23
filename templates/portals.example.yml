@@ -340,13 +340,30 @@
 
 # -- Employment-type filter (optional) --
 # Keep only the employment types you want: full_time, part_time, contract,
-# temporary, internship. Applied right after the salary filter. Reads the
-# structured type a provider takes from the source's own field, never the title
-# or description. Providers that set it today: himalayas ("Full Time",
-# "Contractor", ...), weworkremotely (<type>), remotive (job_type; "freelance"
-# counts as contract), ashby (employmentType) and lever (categories.commitment,
-# free text per employer; "Permanent" says nothing about the hours and is left
-# unknown). Every other provider leaves it unknown.
+# temporary, internship. Applied right after the salary filter. It reads the
+# type a provider takes from the source's own field, never the title or
+# description. scan:full does not apply this filter yet.
+# Providers that set it, and the field each reads:
+#   ashby            employmentType
+#   himalayas        employmentType ("Full Time", "Contractor", ...)
+#   kula             employmentType
+#   lever            categories.commitment (free text per employer;
+#                    "Permanent" does not give the hours, so it stays unknown)
+#   personio         employment_type_slug and schedule_slug (careers page),
+#                    <employmentType> and <schedule> (XML feed); trainee
+#                    (an apprenticeship) stays unknown
+#   recruitee        employment_type_code (fixed term counts as temporary)
+#   remotive         job_type ("freelance" counts as contract)
+#   smartrecruiters  typeOfEmployment.label; an experienceLevel of
+#                    internship decides
+#   wellfound        jobType
+#   weworkremotely   <type>
+#   workable         employment_type (widget), the Type column (markdown
+#                    fallback), <jobtype> (scan:full's feed); an
+#                    experience level of Internship decides on the widget and
+#                    the feed, and the markdown fallback cannot see it
+#   wttj             contract_type ("freelance" counts as contract)
+# Every other provider leaves it unknown.
 #
 # Semantics:
 #   - a type in `allow` → kept; any other known type → removed
