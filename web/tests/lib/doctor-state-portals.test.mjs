@@ -80,6 +80,9 @@ test("doctorState agrees with core on empty YAML and keeps the missing list sepa
       ["candidate: {}\n", "tracked_companies: []\n", false],
       ["  # Profile settings\r\n\r\n", "tracked_companies: []\n", true],
       ["candidate: {}\n", "# Portal settings\n", true],
+      ["{}\n", "tracked_companies: []\n", true],
+      ["candidate: {}\n", "--- {} # no settings\n", true],
+      ["candidate: {}\n", "null\n", true],
       ["candidate: {}\n", "\n  \n", true],
       ["candidate: {}\n", "tracked_companies: [\n", false],
     ]) {
