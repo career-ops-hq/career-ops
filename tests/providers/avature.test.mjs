@@ -443,6 +443,9 @@ try {
     const inComment = await run({ sleep: async () => {}, fetchText: async () => '<html><body><!-- <div class="list-controls"></div> --><p>Error</p></body></html>' });
     if (named(inScript) && named(inComment)) pass('avature.fetch() does not count a list-controls class inside a script or a comment as the toolbar');
     else fail(`toolbar in script/comment: ${JSON.stringify([inScript.jobs ?? inScript.err?.message, inComment.jobs ?? inComment.err?.message])}`);
+    const spacedCloser = await run({ sleep: async () => {}, fetchText: async () => '<html><body><script>const markup = \'<div class="list-controls"></div>\';</script ><p>Error</p></body></html>' });
+    if (named(spacedCloser)) pass('avature.fetch() still treats the script as code when its closing tag has a space before the >');
+    else fail(`toolbar in a script closed with </script >: ${JSON.stringify(spacedCloser.jobs ?? spacedCloser.err?.message)}`);
 
     // The page budget ending the walk on a full page is a partial board: marker and warning.
     const endless = { sleep: async () => {}, fetchText: async (url) => page(Number(new URL(url).searchParams.get('jobOffset')) / 6) };
@@ -451,12 +454,16 @@ try {
     console.error = (m) => capWarnings.push(String(m));
     let capped;
     let ceiling;
+    let fractional;
     try {
       capped = await avature.fetch({ name: 'X', api: base, max_pages: 2 }, endless);
       ceiling = await avature.fetch({ name: 'X', api: base, max_pages: 500 }, endless);
+      fractional = await avature.fetch({ name: 'X', api: base, max_pages: 1.5 }, endless);
     } finally {
       console.error = capErr;
     }
+    if (fractional.length === 6 && fractional.truncated?.reason === 'page-cap') pass('avature.fetch() rounds a fractional max_pages down to whole pages and still marks the cap');
+    else fail(`max_pages 1.5: ${fractional.length} jobs, ${JSON.stringify(fractional.truncated)}`);
     if (capped.length === 12 && capped.truncated?.reason === 'page-cap' && /raise max_pages/.test(capWarnings[0] ?? '')) pass('avature.fetch() marks page-cap and advises raising max_pages when the budget stops a full page');
     else fail(`page cap: ${capped.length} jobs, ${JSON.stringify(capped.truncated)}, ${JSON.stringify(capWarnings[0])}`);
     if (ceiling.length === 1200 && ceiling.truncated?.reason === 'page-cap' && /hard ceiling/.test(capWarnings[1] ?? '') && !/raise max_pages/.test(capWarnings[1] ?? '')) pass('avature.fetch() says the hard ceiling was reached instead of advising to raise max_pages');

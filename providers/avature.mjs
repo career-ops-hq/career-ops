@@ -112,7 +112,10 @@ const LISTING_PAGE = /\sclass\s*=\s*(?:"[^"]*?|'[^']*?)(?<![\w-])list-controls(?
 
 /** @param {unknown} html */
 function isListingPage(html) {
-  return LISTING_PAGE.test(replaceScriptStyleBlocks(stripHtmlComments(String(html ?? '')), ' '));
+  // replaceScriptStyleBlocks knows only the bare `</script>` closer, and HTML
+  // also allows whitespace before the `>`, so such closers are written bare first.
+  const markup = stripHtmlComments(String(html ?? '')).replace(/<\/(script|style)\s+>/gi, '</$1>');
+  return LISTING_PAGE.test(replaceScriptStyleBlocks(markup, ' '));
 }
 
 /** @param {string} s */
@@ -301,9 +304,11 @@ export default {
   async fetch(entry, ctx) {
     const cfg = resolveConfig(entry);
     if (!cfg) throw new Error(`avature: cannot resolve origin for ${entry.name}`);
+    // A whole number of pages, at least one: the page-cap check below compares
+    // page indexes with it, so a fractional budget would never match.
     const maxPages = Math.min(
       HARD_MAX_PAGES,
-      Number.isFinite(entry.max_pages) && entry.max_pages > 0 ? Number(entry.max_pages) : DEFAULT_MAX_PAGES,
+      Number.isFinite(entry.max_pages) && entry.max_pages > 0 ? Math.max(1, Math.floor(entry.max_pages)) : DEFAULT_MAX_PAGES,
     );
 
     // Pagination key. An explicit `offset_param` pins it (and disables the
