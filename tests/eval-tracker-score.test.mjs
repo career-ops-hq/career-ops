@@ -1,6 +1,3 @@
-// A tracker cell can be "2.4/5" or "2.4 (weak fit)". readGlobalScore used to
-// accept only a bare number, so alignDecisionToScore left the written Apply
-// decision in place.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeEvaluationText, readGlobalScore } from '../lib/eval-evidence.mjs';
