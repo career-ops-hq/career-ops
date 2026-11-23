@@ -3817,7 +3817,7 @@ function sourceFileLines(path, text) {
  * past metric into the plan set.
  */
 const PAST_TIME_CLAIM_RE = /\b(?:have|has|had|spent|worked)\s+(?:[\p{L}\p{M}-]+\s+){0,4}\d[\d,.]*\s*\+?\s*(?:months|years|weeks|days)\b/giu;
-const PAST_PERCENT_CLAIM_RE = /\b(?:grew|increased|improved|reduced|generated|achieved|delivered|managed|led)\b[^.!?;\n]{0,80}?(?:%\d+(?:[.,]\d+)?|\d[\d,.]*\s*(?:%|(?:percent|per\s?cent|pct)\b))/giu;
+const PAST_ACHIEVEMENT_VERB_RE = /\b(?:grew|increased|improved|reduced|generated|achieved|delivered|managed|led)\b/i;
 const DURATION_INTRO_RE = /^\s*(?:over|in|within|for|during|across)\b[^,;:]*?\d[\d,.]*\s*\+?\s*(?:days|weeks|months|years)\s*$/i;
 // Recognize Turkish plans only where the number directly modifies the
 // planned change. A later intention cannot license an earlier percentage.
@@ -3847,10 +3847,18 @@ function pastClaimMetrics(span) {
     for (const claim of metricClaims(text, { keepPlanHorizons: true })) claims.add(claim);
   };
   for (const match of span.matchAll(PAST_TIME_CLAIM_RE)) add(match[0]);
-  for (const match of span.matchAll(PAST_PERCENT_CLAIM_RE)) {
-    const markerAfterVerb = match[0].search(FORWARD_MARKER_RE) > 0;
-    if (markerAfterVerb) continue;
-    add(match[0]);
+  for (const part of span.split(FORWARD_MARKER_RE)) {
+    for (let i = 0; i < part.length;) {
+      const { end } = clauseBounds(part, i, { extendCoordinated: false });
+      const clause = part.slice(i, end);
+      const verb = clause.search(PAST_ACHIEVEMENT_VERB_RE);
+      if (verb >= 0) {
+        for (const claim of metricClaims(clause.slice(verb))) {
+          if (claim.endsWith('%')) claims.add(claim);
+        }
+      }
+      i = end + 1;
+    }
   }
   return claims;
 }
