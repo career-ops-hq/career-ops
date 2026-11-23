@@ -360,7 +360,9 @@
  * @property {{limit: number}} [fetchConcurrencyGroup]                      Optional.
  *   A parallel board scan limit shared by every entry for this provider,
  *   including entries that use different hostnames.
- * @property {(entry: PortalEntry, ctx: Context) => Promise<Job[]>} fetch      Required.
+ * @property {(entry: PortalEntry, ctx: Context) => Promise<Job[] & {queryScope?: {config: string, queries: string[]}}>} fetch
+ *   Required. Attach queryScope when the returned jobs cover keyword queries
+ *   only, even when every query was read to completion.
  * @property {((job: Job) => (string | null))} [dedupKey]                     Optional. A
  *   provider-scoped identifier for a job, precise where URL normalization
  *   isn't — e.g. a Workday requisition ID, so the same posting served under
