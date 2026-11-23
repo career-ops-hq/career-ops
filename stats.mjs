@@ -25,7 +25,7 @@ import { fileURLToPath } from 'url';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { normalizeStatus, analyzeFromContent, loadFollowupsEnabled } from './followup-cadence.mjs';
+import { normalizeStatus, analyzeFromContent, loadFollowupsEnabled, parseFollowups } from './followup-cadence.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { parseStatusLogStages, recoverFunnelStages } from './funnel-stages.mjs';
@@ -463,8 +463,12 @@ export function computePortalRecommendations(portalsContent, scanContent, health
 }
 
 /**
- * Follow-up compliance from follow-ups.md (same table shape followup-cadence
- * parses: | num | appNum | date | company | role | channel | contact | notes |).
+ * Follow-up compliance from follow-ups.md, read with followup-cadence.mjs's
+ * parseFollowups(): table rows (| num | appNum | date | company | role | channel
+ * | contact | notes |) and the legacy `- YYYY-MM-DD · #N Company — note`
+ * bullets. Reading only the table made one --summary contradict itself: a row
+ * was cold (analyzeFromContent() counts its bullet follow-ups) while the
+ * Follow-ups line said none were sent.
  * appliedWithoutFollowup counts tracker rows currently in Applied with zero
  * logged follow-ups — the rows the followup mode would flag as aging silently.
  *
@@ -473,17 +477,9 @@ export function computePortalRecommendations(portalsContent, scanContent, health
  */
 export function computeFollowupStats(followupsContent, trackerByNum) {
   const byApp = new Map();
-  let totalFollowups = 0;
-  for (const line of String(followupsContent ?? '').replace(/\r/g, '').split('\n')) {
-    if (!line.startsWith('|')) continue;
-    const parts = line.split('|').map((s) => s.trim());
-    if (parts.length < 8) continue;
-    const num = parseInt(parts[1], 10);
-    const appNum = parseInt(parts[2], 10);
-    if (Number.isNaN(num) || Number.isNaN(appNum)) continue; // header/separator
-    totalFollowups++;
-    byApp.set(appNum, (byApp.get(appNum) || 0) + 1);
-  }
+  const entries = parseFollowups(String(followupsContent ?? '').replace(/\r/g, ''));
+  const totalFollowups = entries.length;
+  for (const { appNum } of entries) byApp.set(appNum, (byApp.get(appNum) || 0) + 1);
   let appliedWithoutFollowup = 0;
   for (const [num, status] of trackerByNum) {
     if (status === 'Applied' && !byApp.has(num)) appliedWithoutFollowup++;

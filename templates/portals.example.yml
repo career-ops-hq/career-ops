@@ -1502,6 +1502,12 @@ search_queries:
 # claim. Set `provider: rexx` + `careers_url` pointed at the portal's job list
 # page (e.g. https://jobs.exampleco.com/stellenangebote.html).
 #
+# Bizneo HR is explicit-only too: its career sites run on the employer's own
+# domain (empleo.<company>.com, jobs.<company>.com), so there is no vendor host
+# to claim. Set `provider: bizneo` + `careers_url` pointed at the site (only the
+# host is used, and it must be a public named https host: no credentials, port,
+# IP address or local name; the provider reads its `/jobs` list).
+#
 # Eploy is also explicit-only: standard tenants use unrelated branded domains,
 # so a URL cannot be distinguished safely from a non-Eploy careers site. Set
 # `provider: eploy`; the provider reads the public `/live-jobs.xml` on that
@@ -1546,6 +1552,12 @@ search_queries:
 #
 # - name: Example BambooHR Co
 #   careers_url: https://exampleco.bamboohr.com/careers   # any *.bamboohr.com host
+#   enabled: true
+#
+# - name: Example Bizneo Co
+#   careers_url: https://empleo.exampleco.com/jobs        # Bizneo HR career site on the employer's own domain
+#   provider: bizneo       # required — branded domains cannot auto-detect
+#   max_pages: 30          # optional page cap (default 30, max 100)
 #   enabled: true
 #
 # - name: Example Homerun Co
@@ -2283,7 +2295,7 @@ search_queries:
 # - name: Jobstreet — Indonesia          # SEEK aggregator
 #   provider: jobstreet
 #   searchKeywords: "Software Engineer"
-#   siteKey: ID-Main      # SEEK site key (ID-Main, SG-Main, MY-Main, AU-Main, NZ-Main)
+#   siteKey: ID-Main      # SEEK site key (ID-Main, SG-Main, MY-Main, PH-Main, AU-Main, NZ-Main)
 #   searchLocation: ""    # optional location filter
 #   enabled: true
 #
@@ -2548,7 +2560,8 @@ search_queries:
 # entry only (with dedup_include_language off).
 #
 # Teamtailor auto-detects from a <slug>.teamtailor.com careers host and reads
-# the public no-auth /jobs.rss feed — e.g.:
+# the public no-auth /jobs.rss feed (100 postings per request, so it is paged
+# with ?offset= up to max_pages, default 20, hard ceiling 100) — e.g.:
 #
 #   - name: Example Co
 #     careers_url: https://example.teamtailor.com
@@ -3488,6 +3501,14 @@ tracked_companies:
   - name: Naturgy
     careers_url: https://career5.successfactors.eu/career?company=C0000880172P
     notes: "Madrid/Barcelona and Latin America. Energy utility. SAP-hosted classic SuccessFactors board (27 postings on 2026-11-18, Spanish and Brazilian); no place in the list, so filter by title."
+    enabled: true
+
+  # -- Spain (Bizneo HR career pages) --
+
+  - name: Bit2Me
+    careers_url: https://empleo.bit2me.com/jobs
+    provider: bizneo
+    notes: "Madrid / Remote. Crypto exchange. Bizneo HR career site on its own domain (3 postings on 2026-11-18)."
     enabled: true
 
   # -- Spain (Viterbit career sites) --

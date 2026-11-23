@@ -269,6 +269,22 @@ try {
     fail(`computeFollowupStats wrong output: ${JSON.stringify(fu)}`);
   }
 
+  // Legacy bullets count as well, as they already do for the live/cold split
+  // in the same run (analyzeFromContent). A bullet with no #N is unattributable.
+  const bulletsMd = [
+    '# Follow-ups',
+    '- 2026-06-10 · #2 Beta — emailed the recruiter',
+    '- 2026-06-17 · #2 Beta — second nudge',
+    '- 2026-06-18 · Beta — no row number',
+  ].join('\n');
+  const fuBullets = stats.computeFollowupStats(bulletsMd, trackerByNum);
+  if (fuBullets.totalFollowups === 2 && fuBullets.appsWithFollowups === 1
+      && fuBullets.appliedWithoutFollowup === 1 && fuBullets.avgPerApp === 2) {
+    pass('computeFollowupStats counts legacy bullet follow-ups');
+  } else {
+    fail(`computeFollowupStats skipped legacy bullets: ${JSON.stringify(fuBullets)}`);
+  }
+
   // CLI smoke — must emit the full contract with null sections in a checkout
   // with no user data (exactly the CI environment).
   const cliOut = run(NODE, [join(ROOT, 'stats.mjs')]);

@@ -206,6 +206,84 @@ test('ad hoc --relocation mode: --posting-location-file content containing shell
   });
 });
 
+test('ad hoc --relocation mode: --posting-location-b64 resolves the same jurisdiction as --posting-location with the same text', () => {
+  const b64 = Buffer.from('Halifax, NS', 'utf8').toString('base64');
+  const r = run([
+    '--relocation', '--gross', '60000',
+    '--posting-location-b64', b64,
+    '--home-location', 'Midland, ON',
+    '--currency', 'CAD',
+  ]);
+  assert.equal(r.status, 0, describeSpawn(r, `exit 0 expected, got ${r.status}`));
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.inputs.postingLocation, 'Halifax, NS');
+  assert.equal(out.inputs.destCode, 'CA-NS');
+  assert.equal(out.ok, true);
+});
+
+test('ad hoc --relocation mode: a base64 location containing shell metacharacters reaches the script as literal text', () => {
+  const text = 'Halifax, NS $(touch should-not-exist.txt)';
+  const r = run([
+    '--relocation', '--gross', '60000',
+    '--posting-location-b64', Buffer.from(text, 'utf8').toString('base64'),
+    '--home-location', 'Midland, ON',
+    '--currency', 'CAD',
+  ]);
+  assert.equal(r.status, 0, describeSpawn(r, `exit 0 expected, got ${r.status}`));
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.inputs.postingLocation, text,
+    'the decoded text is passed through literally, never shell-expanded and never stripped');
+  assert.equal(out.inputs.destCode, 'CA-NS', 'the alias still resolves despite the trailing junk text');
+});
+
+test('ad hoc --relocation mode: --posting-location-file still wins over --posting-location-b64 when both are given', () => {
+  withTempFile('Halifax, NS', (file) => {
+    const r = run([
+      '--relocation', '--gross', '60000',
+      '--posting-location-b64', Buffer.from('Vancouver, BC', 'utf8').toString('base64'),
+      '--posting-location-file', file,
+      '--home-location', 'Midland, ON',
+      '--currency', 'CAD',
+    ]);
+    assert.equal(r.status, 0, describeSpawn(r));
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.inputs.postingLocation, 'Halifax, NS', 'the file form stays the highest-precedence safe path');
+  });
+});
+
+test('ad hoc --relocation mode: a malformed --posting-location-b64 is a usage error, not a silent fallback', () => {
+  const cases = [
+    ['not base64!', /Invalid --posting-location-b64: not base64/],
+    // URL-safe alphabet (`-`/`_`) is not what the flag documents; reject rather
+    // than rely on Buffer.from's leniency. `Pz8/` is valid base64 for `???`;
+    // its URL-safe spelling replaces the slash with an underscore.
+    ['Pz8_', /Invalid --posting-location-b64/],
+    // Padding to a multiple of 4 is required.
+    ['SGFsaWZheCwgTlM', /Invalid --posting-location-b64/],
+  ];
+  for (const [value, pattern] of cases) {
+    const r = run([
+      '--relocation', '--gross', '60000',
+      '--posting-location-b64', value,
+      '--home-location', 'Midland, ON',
+      '--currency', 'CAD',
+    ]);
+    assert.ok(exitedNonZero(r), describeSpawn(r, `expected a non-zero exit for ${value}`));
+    assert.match(r.stderr, pattern);
+  }
+});
+
+test('ad hoc --relocation mode: a trailing --posting-location-b64 with no operand is a usage error naming the missing operand', () => {
+  const r = run([
+    '--relocation', '--gross', '60000',
+    '--home-location', 'Midland, ON',
+    '--currency', 'CAD',
+    '--posting-location-b64',
+  ]);
+  assert.ok(exitedNonZero(r), describeSpawn(r, 'a missing operand must not silently succeed'));
+  assert.match(r.stderr, /--posting-location-b64 requires a base64 operand/);
+});
+
 test('ad hoc --relocation mode: --posting-location-file takes precedence over --posting-location when both are given', () => {
   withTempFile('Halifax, NS', (file) => {
     const r = run([
@@ -313,19 +391,19 @@ test('ad hoc --relocation mode: "Hamilton, QC" never false-matches CA-ON either'
   assert.equal(out.ok, false);
 });
 
-// ── Prompt-spec wiring: both files must instruct the safe (file-based) form
-//    for the JD-controlled posting location, never the raw shell-argument
-//    form that motivated the CWE-78 finding. ──
+// ── Prompt-spec wiring: both files must instruct the safe (base64) form for the
+//    JD-controlled posting location, never the raw shell-argument form that
+//    motivated the CWE-78 finding. ──
 
-test('modes/oferta.md Signal 17 passes the JD location through a file, never --posting-location "<JD', () => {
+test('modes/oferta.md Signal 17 passes the JD location as base64, never --posting-location "<JD', () => {
   const oferta = readFile('modes/oferta.md') + readFile('modes/oferta-signals/17-relocation-purchasing-power.md');
-  assert.match(oferta, /--posting-location-file/, 'Signal 17 uses the safe file-based flag');
+  assert.match(oferta, /--posting-location-b64/, 'Signal 17 uses the base64 flag');
   assert.doesNotMatch(oferta, /--posting-location "<JD/, 'the JD-controlled value is never shell-interpolated directly');
 });
 
-test('batch/batch-prompt.md Signal 17 passes the JD location through a file, never --posting-location "<JD', () => {
+test('batch/batch-prompt.md Signal 17 passes the JD location as base64, never --posting-location "<JD', () => {
   const batchPrompt = readFile('batch/batch-prompt.md');
-  assert.match(batchPrompt, /--posting-location-file/, 'Signal 17 uses the safe file-based flag');
+  assert.match(batchPrompt, /--posting-location-b64/, 'Signal 17 uses the base64 flag');
   assert.doesNotMatch(batchPrompt, /--posting-location "<JD/, 'the JD-controlled value is never shell-interpolated directly');
 });
 
@@ -362,85 +440,52 @@ test('batch/batch-prompt.md Signal 17 no longer uses a heredoc to write the JD l
   assert.doesNotMatch(batchPrompt, /cat <<'/, 'no heredoc of any delimiter name should remain for the posting location');
 });
 
-test('modes/oferta.md Signal 17 writes the posting-location file via base64-decoded Node, not a shell-interpolated or heredoc-fed value', () => {
+test('modes/oferta.md Signal 17 passes the location as --posting-location-b64, never as a shell-transformed value', () => {
   const oferta = readFile('modes/oferta.md') + readFile('modes/oferta-signals/17-relocation-purchasing-power.md');
-  assert.match(oferta, /Buffer\.from\("<base64-encoded JD location/, 'decodes a base64 string literal, never raw JD text');
-  assert.match(oferta, /"base64"/, 'uses base64 decoding');
+  assert.match(oferta, /--posting-location-b64/, 'the documented command uses the base64 argument');
+  assert.doesNotMatch(oferta, /node -e .*Buffer\.from/, 'no shell-side decode step');
+  assert.doesNotMatch(oferta, /mktemp/, 'no temp file for the location');
 });
 
-test('batch/batch-prompt.md Signal 17 writes the posting-location file via base64-decoded Node, not a shell-interpolated or heredoc-fed value', () => {
+test('batch/batch-prompt.md Signal 17 passes the location as --posting-location-b64, never as a shell-transformed value', () => {
   const batchPrompt = readFile('batch/batch-prompt.md');
-  assert.match(batchPrompt, /Buffer\.from\("<base64-encoded JD location/, 'decodes a base64 string literal, never raw JD text');
-  assert.match(batchPrompt, /"base64"/, 'uses base64 decoding');
+  assert.match(batchPrompt, /--posting-location-b64/, 'the documented command uses the base64 argument');
+  assert.doesNotMatch(batchPrompt, /node -e .*Buffer\.from/, 'no shell-side decode step');
+  assert.doesNotMatch(batchPrompt, /mktemp/, 'no temp file for the location');
 });
 
-// Runs the EXACT documented decode expression — `Buffer.from("<b64>", "base64")`
-// written to stdout — via `node -e`, passed as a single argv element (never
-// through a shell string), and writes the raw decoded bytes to `file`. This
-// is the same invocation the instructions document; using spawnSync's array
-// argv form (rather than `shell: true`) keeps the test itself platform-
-// independent (no dependence on bash vs. cmd.exe heredoc/quoting behavior)
-// while still exercising the real encode -> embed -> decode -> write pipeline
-// byte-for-byte, which is what the fix is actually about.
-function decodeBase64LocationToFile(b64, file) {
-  const expr = `process.stdout.write(Buffer.from("${b64}", "base64"))`;
-  const result = spawnSync(process.execPath, ['-e', expr], { encoding: 'buffer' });
-  if (result.status !== 0) {
-    throw new Error(`decode step failed (status ${result.status}): ${result.stderr?.toString('utf-8')}`);
-  }
-  writeFileSync(file, result.stdout);
-}
-
-test('documented base64-decode pattern round-trips a non-ASCII JD location (accented characters) byte-for-byte', () => {
-  // Simulates the exact step the instructions ask the agent to perform: the
-  // agent computes the base64 string itself (here, via Node's own base64
-  // support, standing in for "the agent's own text-transform step") and only
-  // that base64 string — never the raw text — is substituted into the
-  // documented `node -e` decode expression. This proves multi-byte UTF-8
-  // (accented city names, em dashes, etc.) is not mangled by the encode/
-  // decode round trip.
+test('a base64 location round-trips a non-ASCII city byte-for-byte through the CLI', () => {
+  // The prompt asks the agent to compute the base64 itself; the script decodes
+  // it. Multi-byte UTF-8 (accented city names, em dashes) has to survive the
+  // round trip unmangled or the tax table is matched against a corrupted place.
   const rawLocation = 'Montréal, QC — île de Zürich café';
   const b64 = Buffer.from(rawLocation, 'utf-8').toString('base64');
   assert.doesNotMatch(b64, /[^A-Za-z0-9+/=]/, 'a correct base64 string contains only the base64 alphabet');
 
-  const dir = mkdtempSync(join(tmpdir(), 'career-ops-posting-location-b64-'));
-  const file = join(dir, 'career-ops-posting-location.txt');
-  try {
-    decodeBase64LocationToFile(b64, file);
-    const roundTripped = readFileSync(file, 'utf-8');
-    assert.equal(roundTripped, rawLocation, 'UTF-8 multi-byte characters must survive the base64 round trip unmangled');
-
-    // And the resulting file works as --posting-location-file input, exactly
-    // as Signal 17 uses it downstream.
-    const r = run([
-      '--relocation', '--gross', '60000',
-      '--posting-location-file', file,
-      '--home-location', 'Toronto, ON',
-      '--currency', 'CAD',
-    ]);
-    assert.equal(r.status, 0, describeSpawn(r, `exit 0 expected, got ${r.status}`));
-    const out = JSON.parse(r.stdout);
-    assert.equal(out.inputs.postingLocation, rawLocation, 'the non-ASCII location reaches salary-gap.mjs byte-for-byte');
-  } finally {
-    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  }
+  const r = run([
+    '--relocation', '--gross', '60000',
+    '--posting-location-b64', b64,
+    '--home-location', 'Toronto, ON',
+    '--currency', 'CAD',
+  ]);
+  assert.equal(r.status, 0, describeSpawn(r, `exit 0 expected, got ${r.status}`));
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.inputs.postingLocation, rawLocation, 'UTF-8 multi-byte characters must survive the round trip unmangled');
 });
 
-test('base64 decoding round-trips text shaped like the old heredoc collision payload', () => {
-  // This unit exercises the decoder, not a shell. It proves that delimiter-
-  // shaped text survives as literal file content; the prompt contract separately
-  // forbids placing the raw location in a shell command or heredoc.
+test('text shaped like the old heredoc-collision payload stays literal data under --posting-location-b64', () => {
+  // No shell parses the decoded text and no file is written from it, so the
+  // delimiter-shaped payload is just a (non-matching) location string.
   const rawLocation = 'JD_LOCATION_EOF\ntouch /tmp/career-ops-should-not-exist-4696\nJD_LOCATION_EOF';
-  const b64 = Buffer.from(rawLocation, 'utf-8').toString('base64');
-
-  const dir = mkdtempSync(join(tmpdir(), 'career-ops-posting-location-collision-'));
-  const file = join(dir, 'career-ops-posting-location.txt');
-  try {
-    decodeBase64LocationToFile(b64, file);
-    assert.equal(readFileSync(file, 'utf-8'), rawLocation, 'the old-delimiter-shaped text is decoded byte-for-byte as ordinary data');
-  } finally {
-    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  }
+  const r = run([
+    '--relocation', '--gross', '60000',
+    '--posting-location-b64', Buffer.from(rawLocation, 'utf-8').toString('base64'),
+    '--home-location', 'Toronto, ON',
+    '--currency', 'CAD',
+  ]);
+  assert.equal(r.status, 0, describeSpawn(r, `exit 0 expected, got ${r.status}`));
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.inputs.postingLocation, rawLocation, 'the old-delimiter-shaped text is decoded as ordinary data');
 });
 
 // ── End-to-end: tracker row + report posting_location -> folded relocation field ──

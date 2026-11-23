@@ -40,6 +40,7 @@
 // uses it; scan-ats-full.mjs does, as its Workable source.
 
 import { employmentTypeField } from './_employment-type.mjs';
+import { sourceLabel } from './_department-team.mjs';
 import { decodeEntities } from './_html-entities.mjs';
 import { replaceScriptStyleBlocks } from './_html-to-text.mjs';
 import { BROWSER_LIKE_USER_AGENT, fetchTextStream, isRetryableError, parseRetryAfterMs, sleep } from './_http.mjs';
@@ -363,6 +364,9 @@ export function parseWorkableWidget(payload, companyName, boardSlug) {
 
     const stamp = Date.parse(raw?.published_on || raw?.created_at || '');
     if (Number.isFinite(stamp)) job.postedAt = stamp;
+
+    const department = sourceLabel(raw?.department);
+    if (department) job.department = department;
 
     jobs.push(job);
     byUrl.set(url, { job, locations: new Set(location ? [location] : []), tele, shortcode: raw?.shortcode });
