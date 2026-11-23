@@ -61,11 +61,11 @@ try {
 // copy made without `npm install`) died with a raw ERR_MODULE_NOT_FOUND stack
 // from the very check that exists to report missing dependencies. Loading them
 // dynamically lets that failure be caught and reported with the fix.
-let hasYamlContent, loadYaml, dotenv, AGENT_CLIS, validateProfile, EXAMPLE_PATH;
+let loadYaml, dotenv, AGENT_CLIS, validateProfile, EXAMPLE_PATH;
 let resolveExtractorMode, auditUserTemplates, browserLaunchOptions, resolveBrowserExecutable, snapshotBrowserProcessEnv, checkRemotePageBrowser;
 try {
   [
-    { hasYamlContent, loadYaml },
+    { loadYaml },
     { default: dotenv },
     { AGENT_CLIS },
     { validateProfile, EXAMPLE_PATH },
@@ -1296,7 +1296,8 @@ function emptyYamlPrereqs(root) {
   return USER_LAYER_PREREQS.filter((prereq) => {
     if (!prereq.emptyImpact || !prereqPresent(root, prereq)) return false;
     try {
-      return !hasYamlContent(readFileSync(prereqFile(root, prereq), 'utf-8'));
+      const value = loadYaml(readFileSync(prereqFile(root, prereq), 'utf-8'));
+      return value == null || (Object.prototype.toString.call(value) === '[object Object]' && Object.keys(value).length === 0);
     } catch {
       return false;
     }
