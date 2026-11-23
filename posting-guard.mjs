@@ -277,8 +277,13 @@ function excerptAt(text, idx) {
 function splitHtmlTags(markup) {
   const tokens = [];
   let textStart = 0;
+  // A `<` with no `>` left after it can never close a tag: bailing out here keeps
+  // a malformed suffix (`<a` repeated) linear instead of rescanning to the end
+  // from every opener.
+  const lastGt = markup.lastIndexOf('>');
   for (let i = 0; i < markup.length; i++) {
     if (markup[i] !== '<') continue;
+    if (i > lastGt) break;
     // A literal `<` in text ("5 < 10") is not a tag opener: only a name,
     // `/`, `!` or `?` after it starts one. Otherwise the scan below would run
     // to the next `>`, or to the end of the document, and that text would

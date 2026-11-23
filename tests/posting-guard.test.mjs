@@ -292,3 +292,11 @@ test('a literal < in text does not swallow the rest of the document', () => {
   assert.ok(clean.includes('5 < 10 developers'), `clean was ${JSON.stringify(clean)}`);
   assert.equal(findings.instruction_shaped.length, 1);
 });
+
+test('an unterminated tag suffix stays linear and keeps its text', () => {
+  const started = Date.now();
+  const { clean } = guard('Role' + '<a'.repeat(40000), 'html');
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed < 2000, `tokenizing 40k unterminated openers took ${elapsed}ms`);
+  assert.ok(clean.startsWith('Role<a<a'), `clean was ${JSON.stringify(clean.slice(0, 20))}`);
+});
