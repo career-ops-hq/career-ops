@@ -329,35 +329,37 @@ test("persistEvaluation: writes report + TSV, reserves, merges, releases", async
   }
 });
 
-test("overlapping evaluations each return the report they reserved and wrote", { timeout: 30_000 }, async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "co-evalpersist-overlap-"));
-  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 5 }));
-  const coreRoot = fileURLToPath(new URL("../../../", import.meta.url));
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("CAREER_OPS_")));
-  env.CAREER_OPS_ROOT = root;
-  const rows = [
-    { role: "Senior Engineer", url: "https://acme.example/jobs/7" },
-    { role: "Staff Analyst", url: "https://acme.example/jobs/8" },
-  ];
-  const reports = await Promise.all(rows.map(({ role, url }) => {
-    const markdown = REPORT.replaceAll("Senior Engineer", role).replace(
-      /^(# Evaluation: .+)$/m, `$1\n\n**URL:** ${url}`,
-    );
-    return persistEvaluation({
-      spawnFn: (command, args, opts) => spawn(command, args, { ...opts, env }),
-      execPath: process.execPath, root, coreRoot, markdown, url, today: "2026-08-04",
-    });
-  }));
-  for (const [index, result] of reports.entries()) {
-    assert.equal(result.ok, true, result.error);
-    assert.ok(result.reportFile.startsWith(`${result.num}-`));
-    const saved = readFileSync(join(root, "reports", result.reportFile), "utf8");
-    assert.ok(saved.includes(rows[index].role));
-    assert.ok(saved.includes(`**URL:** ${rows[index].url}`));
-    assert.ok(!saved.includes(rows[1 - index].url));
-  }
-  assert.notEqual(reports[0].num, reports[1].num);
-});
+for (const secondRole of ["Staff Analyst", "Senior Engineer"]) {
+  test("overlapping evaluations retain their own report when the second role is " + secondRole, { timeout: 30_000 }, async (t) => {
+    const root = mkdtempSync(join(tmpdir(), "co-evalpersist-overlap-"));
+    t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 5 }));
+    const coreRoot = fileURLToPath(new URL("../../../", import.meta.url));
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("CAREER_OPS_")));
+    env.CAREER_OPS_ROOT = root;
+    const rows = [
+      { role: "Senior Engineer", url: "https://acme.example/jobs/7" },
+      { role: secondRole, url: "https://acme.example/jobs/8" },
+    ];
+    const reports = await Promise.all(rows.map(({ role, url }) => {
+      const markdown = REPORT.replaceAll("Senior Engineer", role).replace(
+        /^(# Evaluation: .+)$/m, `$1\n\n**URL:** ${url}`,
+      );
+      return persistEvaluation({
+        spawnFn: (command, args, opts) => spawn(command, args, { ...opts, env }),
+        execPath: process.execPath, root, coreRoot, markdown, url, today: "2026-08-04",
+      });
+    }));
+    for (const [index, result] of reports.entries()) {
+      assert.equal(result.ok, true, result.error);
+      assert.ok(result.reportFile.startsWith(`${result.num}-`));
+      const saved = readFileSync(join(root, "reports", result.reportFile), "utf8");
+      assert.ok(saved.includes(rows[index].role));
+      assert.ok(saved.includes(`**URL:** ${rows[index].url}`));
+      assert.ok(!saved.includes(rows[1 - index].url));
+    }
+    assert.notEqual(reports[0].num, reports[1].num);
+  });
+}
 
 test("persistEvaluation: with a separate checkout, every step runs from it with the data root as cwd", async () => {
   const root = mkdtempSync(join(tmpdir(), "co-evalpersist-data-"));
