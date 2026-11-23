@@ -4252,7 +4252,9 @@ job_boards:
   # `careers_url`; the board id (not the host: Founderful's is "wingman") is
   # read from that page. Optional knobs: `consider_size` (default 500, maximum 1000,
   # the jobs one request returns), `max_pages` (default 10, hard cap 100, the
-  # requests per board), `consider_board` (the board id, only when the
+  # requests per board), `consider_posted_since` (an ISO 8601 duration such as
+  # "P7D": the board's own "Posted" filter, so only jobs posted in that window
+  # are read; off by default), `consider_board` (the board id, only when the
   # scan reports that it cannot be read from the page).
 
   - name: Founderful (portfolio)

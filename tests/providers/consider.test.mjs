@@ -547,6 +547,7 @@ try {
     const realConsoleError = console.error;
     console.error = (...args) => { warnings.push(args.join(' ')); };
     const metas = [];
+    const queries = [];
     const delays = [];
     let jobs = null;
     let thrown = null;
@@ -556,9 +557,10 @@ try {
         ...(maxPages ? { maxPages } : {}),
         sleep: async (ms) => { delays.push(ms); },
         fetchJson: async (_url, opts) => {
-          const { meta } = JSON.parse(opts.body);
+          const { meta, query } = JSON.parse(opts.body);
           const page = meta.sequence ? Number(meta.sequence.slice(1)) : 0;
           metas.push(meta);
+          queries.push(query);
           const row = (i) => ({ title: `T${page}-${i}`, url: `https://jobs.acmevc.example/j${page}-${i}`, companyName: 'Acme' });
           const response = { jobs: [row(0), row(1)], total, meta: page + 1 < pages ? { sequence: `s${page + 1}` } : {} };
           return shape ? shape(page, response, row) : response;
@@ -569,7 +571,7 @@ try {
     } finally {
       console.error = realConsoleError;
     }
-    return { jobs, thrown, metas, delays, warnings };
+    return { jobs, thrown, metas, queries, delays, warnings };
   };
 
   const fullWalk = await walkRun({});
@@ -617,6 +619,33 @@ try {
   } else {
     fail(`consider.fetch() hard cap: ${JSON.stringify({ requests: hardCap.metas.length, warnings: hardCap.warnings })}`);
   }
+
+  // consider_posted_since is the board's own "Posted" window, sent as query.postedSince on every page.
+  const windowed = await walkRun({ consider_posted_since: ' P7D ' });
+  if (windowed.queries.length === 3 && windowed.queries.every((q) => q.postedSince === 'P7D' && q.promoteFeatured === true)
+      && windowed.jobs?.length === 6 && windowed.jobs?.truncated === undefined) {
+    pass('consider.fetch() sends consider_posted_since as query.postedSince on every page and reads the window to its end');
+  } else {
+    fail(`consider.fetch() window: ${JSON.stringify({ queries: windowed.queries, rows: windowed.jobs?.length })}`);
+  }
+  if (fullWalk.queries.every((q) => JSON.stringify(q) === '{"promoteFeatured":true}')) pass('consider.fetch() sends no postedSince without consider_posted_since');
+  else fail(`consider.fetch() default query: ${JSON.stringify(fullWalk.queries)}`);
+
+  const windowCapped = await walkRun({ consider_posted_since: 'P30D', max_pages: 2 }, { pages: 5, total: 10 });
+  if (windowCapped.metas.length === 2 && windowCapped.jobs?.truncated?.reason === 'page-cap') pass('consider.fetch() marks a windowed read page-cap when max_pages ends it with a cursor left');
+  else fail(`consider.fetch() windowed page cap: ${JSON.stringify({ requests: windowCapped.metas.length, truncated: windowCapped.jobs?.truncated })}`);
+
+  const durations = ['P7D', 'P2W', 'P1M', 'PT12H', 'P1DT12H', 'P1Y2M3DT4H5M6S'];
+  const badDurations = ['7d', 'P', 'PT', 'P7', 'P1DT', '7', 'week', 'P-1D', 7, true];
+  const accepted = await Promise.all(durations.map((d) => walkRun({ consider_posted_since: d }, { pages: 1, total: 2 })));
+  if (accepted.every((r, i) => !r.thrown && r.queries[0]?.postedSince === durations[i])) pass('consider.fetch() accepts ISO 8601 durations for consider_posted_since');
+  else fail(`consider.fetch() durations: ${JSON.stringify(accepted.map((r) => r.thrown?.message ?? r.queries[0]))}`);
+  const rejected = await Promise.all(badDurations.map((d) => walkRun({ consider_posted_since: d })));
+  if (rejected.every((r) => r.thrown?.message.includes('consider_posted_since must be an ISO 8601 duration') && r.metas.length === 0)) pass('consider.fetch() refuses a consider_posted_since that is not an ISO 8601 duration, before any request');
+  else fail(`consider.fetch() bad durations: ${JSON.stringify(rejected.map((r) => [r.thrown?.message, r.metas.length]))}`);
+  const blank = await walkRun({ consider_posted_since: '' }, { pages: 1, total: 2 });
+  if (!blank.thrown && blank.queries[0]?.postedSince === undefined) pass('consider.fetch() treats an empty consider_posted_since as not set');
+  else fail(`consider.fetch() empty window: ${JSON.stringify(blank.thrown?.message ?? blank.queries)}`);
 
   const failing = (rejection) => (page, response) => { if (page === 1) throw rejection; return response; };
   const laterFailure = await walkRun({}, { shape: failing(httpError(429)) });
