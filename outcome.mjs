@@ -43,7 +43,7 @@ import { localToday } from './lib/local-today.mjs';
 import { resolveOutcomeDir } from './lib/outcome-dir.mjs';
 import { acquireDirLock, releaseOrWarn } from './lib/dir-lock.mjs';
 import { parsePdfIndex } from './find.mjs';
-import { captureSlug, findCaptureForReport } from './jd-capture.mjs';
+import { captureSlug, findCaptureForReport, findCaptureForUrl } from './jd-capture.mjs';
 
 // Two roots. CODE_ROOT locates the sibling scripts this file shells out to and
 // is the cwd it runs them from; DATA_ROOT is where the user's tracker and
@@ -523,10 +523,12 @@ const targetUrl = flags.url || cellUrl || (matchedRow.notes && matchedRow.notes.
 // `{N}-…`, jd-capture.mjs looks them up that way, and the PDF lookup above
 // already keys by it. matchedRow.num is the TRACKER #, and the two differ once
 // any row has no report, so an existing capture was never found and a new one
-// was filed under another application's number. A row without exactly one
-// self-consistent report link keeps the tracker # it was keyed by before.
-const linkedReports = linkedReportNumbers(matchedRow.report, matchedRow.notes);
-const captureKey = linkedReports.length === 1 ? linkedReports[0] : matchedRow.num;
+// was filed under another application's number. Without one unambiguous
+// report link, use the posting URL as the only implicit capture identity.
+// Older trackers prefixed the local report path with `local:`.
+const reportCell = matchedRow.report?.replace(/^local:(?=reports\/)/, '');
+const linkedReports = linkedReportNumbers(reportCell, matchedRow.notes);
+const captureReportNum = linkedReports.length === 1 ? linkedReports[0] : null;
 // A capture carries the company slug archive-posting.mjs wrote, captureSlug(),
 // so the lookup uses that slug and not this file's slugify(). The two agree on
 // a Latin name, but slugify() turns one written only in another script
@@ -536,6 +538,10 @@ const captureKey = linkedReports.length === 1 ? linkedReports[0] : matchedRow.nu
 // so it still looks for 'unknown': the name archive-posting gives a posting
 // whose company it could not detect.
 const captureCompanySlug = captureSlug(matchedRow.company) || 'unknown';
+const captureDir = resolve(repoRoot, 'jds');
+const findPostingCapture = () => captureReportNum === null
+  ? findCaptureForUrl(captureDir, targetUrl)
+  : findCaptureForReport(captureDir, captureReportNum, { companySlug: captureCompanySlug });
 
 // Case 1: Check if there's already an archived posting link in the notes column
 const notesLink = matchedRow.notes && matchedRow.notes.match(/local:(jds\/[^\s|)]+)/)?.[1];
@@ -547,31 +553,27 @@ if (notesLink) {
   }
 }
 
-// Case 2: Look for a capture already keyed to this report number. Covers captures
-// made on any earlier day, and postings whose URL has since gone dead — the case
-// the archive exists for, and the one a same-day filename rebuild cannot serve.
+// Case 2: Resolve an existing capture even when the posting is now offline.
 if (!resolvedPostingPath) {
-  const found = findCaptureForReport(resolve(repoRoot, 'jds'), captureKey, {
-    companySlug: captureCompanySlug,
-  });
+  const found = findPostingCapture();
   if (found) {
     resolvedPostingPath = found.path;
     postingArchived = true;
   }
 }
 
-// Case 3: Archive the posting now, keyed to the report so it resolves next time.
+// Case 3: Archive the posting with the report key when one is available.
 if (!resolvedPostingPath && targetUrl) {
   try {
-    execFileSync(NODE, [ARCHIVE_POSTING_SCRIPT, targetUrl, `--company=${matchedRow.company}`, `--role=${matchedRow.role}`, `--report=${captureKey}`], {
+    const archiveArgs = [ARCHIVE_POSTING_SCRIPT, targetUrl, `--company=${matchedRow.company}`, `--role=${matchedRow.role}`];
+    if (captureReportNum !== null) archiveArgs.push(`--report=${captureReportNum}`);
+    execFileSync(NODE, archiveArgs, {
       cwd: CODE_ROOT,
       env: process.env,
       stdio: 'ignore',
       timeout: 45000,
     });
-    const found = findCaptureForReport(resolve(repoRoot, 'jds'), captureKey, {
-      companySlug: captureCompanySlug,
-    });
+    const found = findPostingCapture();
     if (found) {
       resolvedPostingPath = found.path;
       postingArchived = true;
