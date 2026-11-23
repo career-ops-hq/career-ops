@@ -203,6 +203,31 @@ export function applyUrlOf(detail) {
   }
 }
 
+/**
+ * The pay band of a feed job as a Job salary, or null. Only an annual band
+ * counts (`comp_period` is "year", or null, which the feed defines as annual):
+ * an hourly or monthly one is not annual, and this provider does not convert it.
+ * Bounds must be numbers above 0; a one-sided band fills the other bound, and
+ * `posted` keeps the bounds as given. `currency` is the feed's, upper-cased,
+ * and '' when the feed gives none.
+ * @param {any} j
+ */
+function salaryOf(j) {
+  const period = j.comp_period;
+  if (period != null && period !== 'year') return null;
+  const bound = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined);
+  const lo = bound(j.comp_min);
+  const hi = bound(j.comp_max);
+  if (lo === undefined && hi === undefined) return null;
+  return {
+    min: Math.min(lo ?? hi, hi ?? lo),
+    max: Math.max(lo ?? hi, hi ?? lo),
+    currency: typeof j.comp_currency === 'string' ? j.comp_currency.trim().toUpperCase() : '',
+    period: 'year',
+    posted: { ...(lo !== undefined ? { min: lo } : {}), ...(hi !== undefined ? { max: hi } : {}) },
+  };
+}
+
 // NaN-safe Date.parse — `|| undefined` would also coerce a valid epoch 0.
 function toEpochMs(value) {
   if (typeof value !== 'string' || !value) return undefined;
@@ -227,10 +252,12 @@ function toEpochMs(value) {
  *   - postedAt: `published_at` ISO date → epoch ms (omitted when absent or
  *               unparseable).
  *   - externalId: `id`, the feed's own posting id (omitted when absent).
+ *   - salary:   `comp_min` / `comp_max` / `comp_currency` for an annual band
+ *               (see salaryOf; omitted when the feed gives no annual numbers).
  *
  * @param {any} j
  * @param {string} [fallbackCompany]
- * @returns {{ title: string, url: string, company: string, location: string, workplaceType?: 'remote' | 'hybrid' | 'onsite', postedAt?: number, externalId?: string } | null}
+ * @returns {{ title: string, url: string, company: string, location: string, workplaceType?: 'remote' | 'hybrid' | 'onsite', postedAt?: number, externalId?: string, salary?: object } | null}
  */
 export function normalizeSpeedrunJob(j, fallbackCompany) {
   if (!j || typeof j !== 'object') return null;
@@ -260,7 +287,7 @@ export function normalizeSpeedrunJob(j, fallbackCompany) {
   const base = typeof j.location === 'string' ? j.location.trim() : '';
   const location = [base, j.remote === true ? 'Remote' : ''].filter(Boolean).join(', ');
 
-  /** @type {{ title: string, url: string, company: string, location: string, workplaceType?: 'remote' | 'hybrid' | 'onsite', postedAt?: number, externalId?: string }} */
+  /** @type {{ title: string, url: string, company: string, location: string, workplaceType?: 'remote' | 'hybrid' | 'onsite', postedAt?: number, externalId?: string, salary?: object }} */
   const job = { title, url, company, location };
   // `workplace_type` is "Remote", "Hybrid", "OnSite" or "Onsite", and null when
   // the poster gave none.
@@ -269,6 +296,8 @@ export function normalizeSpeedrunJob(j, fallbackCompany) {
   if (postedAt !== undefined) job.postedAt = postedAt;
   const externalId = coerceId(j.id);
   if (externalId) job.externalId = externalId;
+  const salary = salaryOf(j);
+  if (salary) job.salary = salary;
   return job;
 }
 

@@ -692,6 +692,26 @@ try {
   const probed = await detailRun({ a16z_speedrun_talent: { fetchDetails: true } }, { probe: true });
   if (probed.detailCalls.length === 0) pass('fetch() reads no details under a ctx.maxPages probe');
   else fail(`probe detail calls = ${probed.detailCalls.length}`);
+
+  // ── Salary ────────────────────────────────────────────────────────────────
+  // An annual band (comp_period "year", or null, which the feed defines as annual)
+  // sets salary; other periods, no numbers or invalid bounds set none.
+  const comp = (comp_min, comp_max, comp_currency = 'USD', comp_period = null) => normalizeSpeedrunJob({ title: 'T', url: srUrl(9), comp_min, comp_max, comp_currency, comp_period });
+  const band = comp(150000, 200000);
+  if (JSON.stringify(band?.salary) === JSON.stringify({ min: 150000, max: 200000, currency: 'USD', period: 'year', posted: { min: 150000, max: 200000 } })
+      && JSON.stringify(comp(90000, 120000, 'eur', 'year')?.salary) === JSON.stringify({ min: 90000, max: 120000, currency: 'EUR', period: 'year', posted: { min: 90000, max: 120000 } }))
+    pass('normalizeSpeedrunJob maps an annual comp band (comp_period null or year) with its upper-cased currency');
+  else fail(`annual salary = ${JSON.stringify([band?.salary, comp(90000, 120000, 'eur', 'year')?.salary])}`);
+  if (JSON.stringify(comp(100000, null)?.salary) === JSON.stringify({ min: 100000, max: 100000, currency: 'USD', period: 'year', posted: { min: 100000 } })
+      && JSON.stringify(comp(null, 100000, null)?.salary) === JSON.stringify({ min: 100000, max: 100000, currency: '', period: 'year', posted: { max: 100000 } }))
+    pass('normalizeSpeedrunJob fills a one-sided band, keeps the posted bound as given, and leaves currency empty when the feed gives none');
+  else fail(`one-sided salary = ${JSON.stringify([comp(100000, null)?.salary, comp(null, 100000, null)?.salary])}`);
+  const noPay = [comp(50, 80, 'USD', 'hour'), comp(5000, 6000, 'USD', 'month'), comp(1, 2, 'USD', 'week'), comp(1, 2, 'USD', 'day'), comp(null, null), comp(0, 0), comp('150000', '200000'), comp(NaN, Infinity), comp(-5, -1)];
+  if (noPay.every((j) => j && !('salary' in j))) pass('normalizeSpeedrunJob sets no salary for a non-annual band, no numbers, zero, text, non-finite or negative bounds');
+  else fail(`no-salary cases = ${JSON.stringify(noPay.map((j) => j?.salary))}`);
+  const viaFetch = await provider.fetch({ name: 'sr' }, recordCtx([], { jobs: [oneJob({ comp_min: 120000, comp_max: 160000, comp_currency: 'USD', comp_period: null })], total_pages: 1 }));
+  if (viaFetch[0]?.salary?.min === 120000 && viaFetch[0].salary.max === 160000) pass('fetch() carries the feed comp band through as salary');
+  else fail(`fetch() salary = ${JSON.stringify(viaFetch[0]?.salary)}`);
 } catch (e) {
   fail(`a16z-speedrun-talent provider test crashed: ${e?.stack || e}`);
 }
