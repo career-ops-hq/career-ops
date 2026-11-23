@@ -757,7 +757,28 @@ async function main() {
       );
       process.exit(1);
     }
-    const count = await commitState(result, all ? COMMIT_ALL : only);
+    // commitState() matches the scan's documents/-relative keys exactly, so a
+    // path spelled any other way (`./cv/master.md`, `documents/cv/master.md` as
+    // modes/intake.md annotates proposals, a typo) recorded nothing at exit 0,
+    // and the confirmed source was proposed again on the next run. Accept a
+    // path relative to documents/ or to the data root, and refuse the rest
+    // before anything is written.
+    let keys = only;
+    if (!all) {
+      const scanned = new Set(result.sources.map((source) => source.path));
+      keys = only.map((p) => [resolve(DOCS_DIR, p), resolve(DATA_ROOT, p)]
+        .map((abs) => toRelPath(abs))
+        .find((rel) => scanned.has(rel)));
+      const unknown = only.filter((_, i) => keys[i] === undefined);
+      if (unknown.length > 0) {
+        console.error(
+          `Not a scanned source: ${unknown.join(', ')}. Pass a path as \`node intake.mjs --summary\` lists it. `
+          + 'Nothing was recorded.',
+        );
+        process.exit(1);
+      }
+    }
+    const count = await commitState(result, all ? COMMIT_ALL : keys);
     console.log(`Recorded ${count} source(s) as ingested → ${STATE_FILE}`);
     return;
   }
