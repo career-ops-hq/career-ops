@@ -76,7 +76,7 @@ import { join, dirname, basename, relative, delimiter } from 'path';
 import { tmpdir, availableParallelism } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { pass, fail, warn, stripJsComments, run, runRejects, runAcrossUtcDay, runAcrossLocalDay, lastRunFailure, formatRunFailure, fileExists, finish, results, absorbResults, importSuiteContained, linkNodeModules, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv, pinSandboxDataRoot, exitOnInterrupt, ownRootEnv } from './tests/helpers.mjs';
+import { pass, fail, warn, stripJsComments, run, runRejects, runAcrossUtcDay, runAcrossLocalDay, lastRunFailure, formatRunFailure, fileExists, finish, results, absorbResults, importSuiteContained, linkNodeModules, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, NODE_TEST_BUDGET_FACTOR, getBash, toBashPath, hermeticGitEnv, pinSandboxDataRoot, exitOnInterrupt, ownRootEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { REQUIRED_TOOL_ENV, declaresTool } from './tests/required-tools.mjs';
 import { collectMjsFiles } from './lib/mjs-files.mjs';
@@ -339,12 +339,12 @@ async function runDiscovered(filter = null, tools = null) {
       // a bare 30s script budget cannot cover on slow-spawn platforms
       // (Windows). Derived from the helpers constant so sandbox runs that
       // shrink the default shrink this budget with it.
-      const out = run(NODE, ['--test', f], { timeout: DEFAULT_SCRIPT_TIMEOUT_MS * PARALLEL_NODE_TEST_BUDGET_FACTOR });
+      const out = run(NODE, ['--test', f], { timeout: DEFAULT_SCRIPT_TIMEOUT_MS * NODE_TEST_BUDGET_FACTOR });
       const failure = lastRunFailure();
       // run()'s timeout for node:test suites is the FACTOR-scaled budget above.
       // Said the way the parallel loop says it, since a killed suite has no
       // exit status to print — and the line reports the budget actually given.
-      const budgetMs = DEFAULT_SCRIPT_TIMEOUT_MS * PARALLEL_NODE_TEST_BUDGET_FACTOR;
+      const budgetMs = DEFAULT_SCRIPT_TIMEOUT_MS * NODE_TEST_BUDGET_FACTOR;
       const how = failure?.code === 'ETIMEDOUT'
         ? `killed after ${budgetMs / 1000}s`
         : `exit ${failure?.status ?? '?'}`;
@@ -376,13 +376,14 @@ async function runDiscovered(filter = null, tools = null) {
 // and one that keeps the event loop open is cut off after a grace period
 // instead of riding along until finish(). Both are reported, not hidden.
 
-// A node:test suite gets the same 30s budget run() gives it, times this, when
-// it shares the machine with N-1 others. Measured on 8 cores: a file takes
-// about 1.7x as long at 8 jobs as it does alone, and the slowest is 16s alone.
-const PARALLEL_NODE_TEST_BUDGET_FACTOR = 4;
+// A node:test suite gets DEFAULT_SCRIPT_TIMEOUT_MS × NODE_TEST_BUDGET_FACTOR
+// (tests/helpers.mjs), the same budget the in-process loop gives it.
 // The serial loop has no limit for an imported suite at all; a child that never
 // exits must not hang the whole run, so this one is only a backstop.
 const PARALLEL_SUITE_TIMEOUT_MS = 5 * 60_000;
+// Named under the total suite time, so a slow run says where it spent that
+// time before a suite reaches its budget and gets killed (#7713).
+const SLOWEST_SUITES_SHOWN = 10;
 
 /**
  * Spawn node on one suite and collect what it printed.
@@ -454,7 +455,7 @@ async function runSuiteInChild(f, scratch, index) {
     return { ms: 0, lingered: false, report: () => fail(SUITE_REFUSALS[kind](rel)) };
   }
   if (kind === 'node-test') {
-    const r = await spawnSuite(['--test', f], DEFAULT_SCRIPT_TIMEOUT_MS * PARALLEL_NODE_TEST_BUDGET_FACTOR);
+    const r = await spawnSuite(['--test', f], DEFAULT_SCRIPT_TIMEOUT_MS * NODE_TEST_BUDGET_FACTOR);
     const how = r.timedOut ? `killed after ${Math.round(r.ms / 1000)}s` : `exit ${r.status ?? '?'}`;
     return { ms: r.ms, lingered: false, report: () => reportNodeTestSuite(rel, r.status === 0, r.stdout, r, how) };
   }
@@ -632,6 +633,11 @@ async function runDiscoveredParallel(files, jobs, { withInlineSections = false }
   const wall = (Date.now() - startedAt) / 1000;
   const summed = finished.reduce((n, r) => n + (r?.ms ?? 0), 0) / 1000;
   console.log(`\n  ⏱  ${files.length} discovered suites in ${wall.toFixed(0)}s, ${pool} at a time (${summed.toFixed(0)}s of suite time; --jobs N or CAREER_OPS_TEST_JOBS to change, 1 runs them in-process)`);
+  const slowest = files
+    .map((f, i) => ({ rel: f.slice(ROOT.length + 1), ms: finished[i]?.ms ?? 0 }))
+    .sort((a, b) => b.ms - a.ms)
+    .slice(0, SLOWEST_SUITES_SHOWN);
+  console.log(`  ⏱  slowest: ${slowest.map((s) => `${s.rel} ${(s.ms / 1000).toFixed(0)}s`).join(', ')}`);
   if (withInlineSections) {
     console.log(`  ⏱  the inline sections ran at the same time, for the first ${(inlineMs / 1000).toFixed(0)}s, in one of the ${jobs} slots`);
   }
