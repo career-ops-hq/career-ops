@@ -373,3 +373,9 @@ test('a dates line cv.md itself uses is accepted, in any language (#6792)', () =
   assert.doesNotThrow(() => resolveVariant('es', { root }));
   assert.deepEqual(checkVariant('es', { root }).problems.filter((p) => p.type === 'parse'), []);
 });
+
+test('a moved bullet that differs only by a final full stop is still an attribution problem (#6792)', () => {
+  const moved = OMIT_AND_REORDER.replace('- Led a team of 3 engineers', '- Led a team of 3 engineers\n- Built an NLP pipeline with 94% accuracy.');
+  const root = workspace({ 'a.md': moved });
+  assert.ok(checkVariant('a', { root }).problems.some((p) => p.type === 'attribution'));
+});
