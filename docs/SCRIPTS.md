@@ -1607,6 +1607,14 @@ npm run or:pipeline             # process pending URLs
 npm run or:apply                # application assistance
 ```
 
+Each request asks for at most 8192 output tokens and waits 120 s. A reasoning
+model pinned with `CAREER_OPS_MODEL` (glm-5.3, a thinking Qwen) can spend the
+whole cap thinking through a full evaluation: the reply then fails as cut off at
+`max_tokens`. Raise the cap with `CAREER_OPS_MAX_TOKENS` (32768, the
+`openai-eval.mjs` default, fits a full A-G report plus the reasoning) and the
+wait with `CAREER_OPS_TIMEOUT_MS` (in milliseconds; `OPENROUTER_TIMEOUT_MS` also
+works). The free-model rotation keeps 8192 unless you set the variable.
+
 ---
 
 ## reconcile
