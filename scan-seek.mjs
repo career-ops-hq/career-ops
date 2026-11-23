@@ -15,8 +15,9 @@
  * for the pipeline, not requested during the scan.
  *
  * Both sites are served from the same SEO path form and inline the same Redux
- * dump, so the only per-site differences are the host, the location slug map
- * and the location record shape `seekLocation()` already reads.
+ * dump, so the only per-site differences are the fetch host, the posting host
+ * (AU posts under `www.seek.com.au`, which 403s a plain fetch), the location
+ * slug map and the location record shape `seekLocation()` already reads.
  *
  * PAGINATION & FRESHNESS (#6694). Paginates `?page=N` (from page 2 onward) up
  * to `max_pages` per search (default 5, cap 50, or `--pages N` on the CLI),
@@ -143,30 +144,70 @@ const NZ_LOCATION_SLUGS = {
   masterton: 'in-Masterton-Wellington',
 };
 
+// State-wide forms are `in-<State-Name>` or the bare `in-<ABBR>`; `in-All-<State>`
+// returns zero results on SEEK, so it is never used for a state. City forms
+// take the short `<City>-<STATE>` slug, not `in-All-<City>-<STATE>`.
 const AU_LOCATION_SLUGS = {
   adelaide: 'in-Adelaide-SA',
   'adelaide-sa': 'in-Adelaide-SA',
-  'south-australia': 'in-South-Australia-SA',
+  'south-australia': 'in-South-Australia',
+  sa: 'in-SA',
   sydney: 'in-Sydney-NSW',
+  'sydney-nsw': 'in-Sydney-NSW',
+  'new-south-wales': 'in-New-South-Wales',
+  nsw: 'in-NSW',
   melbourne: 'in-Melbourne-VIC',
+  'melbourne-vic': 'in-Melbourne-VIC',
+  victoria: 'in-Victoria',
+  vic: 'in-VIC',
   brisbane: 'in-Brisbane-QLD',
+  'brisbane-qld': 'in-Brisbane-QLD',
+  queensland: 'in-Queensland',
+  qld: 'in-QLD',
   perth: 'in-Perth-WA',
+  'perth-wa': 'in-Perth-WA',
+  'western-australia': 'in-Western-Australia',
+  wa: 'in-WA',
   canberra: 'in-Canberra-ACT',
+  'canberra-act': 'in-Canberra-ACT',
+  'australian-capital-territory': 'in-Australian-Capital-Territory',
+  act: 'in-ACT',
   hobart: 'in-Hobart-TAS',
+  'hobart-tas': 'in-Hobart-TAS',
+  tasmania: 'in-Tasmania',
+  tas: 'in-TAS',
   darwin: 'in-Darwin-NT',
+  'darwin-nt': 'in-Darwin-NT',
+  'northern-territory': 'in-Northern-Territory',
+  nt: 'in-NT',
+  newcastle: 'in-Newcastle-NSW',
+  'newcastle-nsw': 'in-Newcastle-NSW',
+  'gold-coast': 'in-Gold-Coast-QLD',
+  'gold-coast-qld': 'in-Gold-Coast-QLD',
+  wollongong: 'in-Wollongong-NSW',
+  'wollongong-nsw': 'in-Wollongong-NSW',
+  geelong: 'in-Geelong-VIC',
+  'geelong-vic': 'in-Geelong-VIC',
   remote: 'in-Remote',
 };
 
-/** Per-site host, location map and country aliases that mean "no location". */
+/**
+ * Per-site hosts, location map and country aliases that mean "no location".
+ * `base` is the fetch host; `postingBase` is the host written into the offer's
+ * URL. They differ on AU: `www.seek.com.au` answers 403 to a plain fetch but is
+ * the host jobstreet writes, so scan-history/tracker URLs only dedup with it.
+ */
 export const SEEK_SITES = {
   nz: {
     base: 'https://nz.seek.com',
+    postingBase: 'https://nz.seek.com',
     locations: NZ_LOCATION_SLUGS,
     countrySlugs: ['new-zealand', 'nz'],
     label: 'NZ',
   },
   au: {
     base: 'https://au.seek.com',
+    postingBase: 'https://www.seek.com.au',
     locations: AU_LOCATION_SLUGS,
     countrySlugs: ['australia', 'au', 'all-australia'],
     label: 'AU',
@@ -177,13 +218,17 @@ export const SEEK_SITES = {
 export function resolveSeekSite(value) {
   const raw = String(value ?? '').trim().toLowerCase();
   if (!raw) return SEEK_SITES.nz;
-  const key = raw.replace(/^https?:\/\//, '').replace(/\.seek\.com\/?$/, '').replace(/\/.*$/, '');
+  // Validate the shape before stripping anything: a suffix-stripping lookup
+  // would coerce `seek.com`, `au.seek.com.au` or `evil.com/au` into a valid key.
+  const host = raw.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/\.$/, '');
+  const key = host.endsWith('.seek.com') ? host.slice(0, -'.seek.com'.length) : '';
   // Object.hasOwn, not a bare lookup: `constructor` and `__proto__` would
   // otherwise resolve to Object.prototype members instead of throwing.
-  if (!Object.hasOwn(SEEK_SITES, key)) {
+  const resolved = Object.hasOwn(SEEK_SITES, raw) ? raw : key;
+  if (!Object.hasOwn(SEEK_SITES, resolved)) {
     throw new Error(`Unknown seek_site ${JSON.stringify(value)}; use "nz" or "au"`);
   }
-  return SEEK_SITES[key];
+  return SEEK_SITES[resolved];
 }
 
 /**
@@ -326,7 +371,7 @@ export function parseSeekPage(html, site = SEEK_SITES.nz) {
     const date = typeof j.listingDate === 'string' ? j.listingDate.slice(0, 10) : '';
     offers.push({
       id,
-      url: `${site.base}/job/${id}`, // recorded, never fetched during scan
+      url: `${site.postingBase}/job/${id}`, // recorded, never fetched during scan
       title: decodeHtml(j.title),
       company: decodeHtml(j.advertiser?.description ?? j.companyName ?? ''),
       location: seekLocation(j),
