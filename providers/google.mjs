@@ -207,6 +207,7 @@ export default {
     if (fetchFailed) {
       jobs = markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
     }
+    if (!queriesToRun.every(q => String(q).trim())) return jobs;
     return Object.assign(jobs, {
       queryScope: { config: 'google.queries', queries: queriesToRun.map(String) },
     });
