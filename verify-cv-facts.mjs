@@ -500,9 +500,13 @@ const NOUN_SYNONYMS = new Map([
 // Currency codes are matched case-sensitively: lowercase "eur" or "gbp" in prose
 // is not a currency. A bare "pound(s)" is left out because it is also a weight.
 const MAGNITUDE_ALT = String.raw`(?:\s?(?:thousand|million|billion)\b|\s?[kKmMbB](?![\p{L}]))`;
-const SIMPLE_CLAIM_PATTERNS = [
+const PERCENT_CLAIM_PATTERNS = [
   /\b\d+(?:[.,]\d+)?[^\S\n]?(?:%|(?:percent|per\s?cent|pct)\b)/gi,
   /(?<![\p{L}\p{N}])%\d+(?:[.,]\d+)?(?![\p{L}\p{N}])/gu,
+];
+
+const SIMPLE_CLAIM_PATTERNS = [
+  ...PERCENT_CLAIM_PATTERNS,
   new RegExp(String.raw`(?<![\w$€£])[$€£]\s?\d[\d,.]*(?:\s?(?:thousand|million|billion)\b|\s?[kKmMbB])?`, 'gu'),
   new RegExp(String.raw`(?:\b(?:USD|EUR|GBP)|\bUS\$)\s?\d[\d,.]*${MAGNITUDE_ALT}?`, 'gu'),
   new RegExp(String.raw`\b\d[\d,.]*${MAGNITUDE_ALT}?\s?-?\s?(?:(?:USD|EUR|GBP)\b|(?:[Dd]ollars?|[Ee]uros?)\b)`, 'gu'),
@@ -3818,6 +3822,8 @@ function sourceFileLines(path, text) {
  */
 const PAST_TIME_CLAIM_RE = /\b(?:have|has|had|spent|worked)\s+(?:[\p{L}\p{M}-]+\s+){0,4}\d[\d,.]*\s*\+?\s*(?:months|years|weeks|days)\b/giu;
 const PAST_ACHIEVEMENT_VERB_RE = /\b(?:grew|increased|improved|reduced|generated|achieved|delivered|managed|led)\b/i;
+// The relative clause can omit "that", as in "the 20% I achieved".
+const RELATIVE_SUBJECT_RE = /^\s+(?:(?:that|which)\s+)?(?:I|we|you|they|he|she|it|(?:my|our|the)\s+team)\s+(?:(?:had|have|previously|already)\s+)*$/i;
 const DURATION_INTRO_RE = /^\s*(?:over|in|within|for|during|across)\b[^,;:]*?\d[\d,.]*\s*\+?\s*(?:days|weeks|months|years)\s*$/i;
 // Recognize Turkish plans only where the number directly modifies the
 // planned change. A later intention cannot license an earlier percentage.
@@ -3859,6 +3865,14 @@ function pastClaimMetrics(span) {
       const clause = part.slice(i, end);
       const verb = clause.search(PAST_ACHIEVEMENT_VERB_RE);
       if (verb >= 0) {
+        const beforeVerb = clause.slice(0, verb);
+        for (const pattern of PERCENT_CLAIM_PATTERNS) {
+          for (const match of beforeVerb.matchAll(pattern)) {
+            if (RELATIVE_SUBJECT_RE.test(beforeVerb.slice(match.index + match[0].length))) {
+              claims.add(canonicalMetric(match[0]));
+            }
+          }
+        }
         for (const claim of metricClaims(clause.slice(verb))) {
           if (claim.endsWith('%')) claims.add(claim);
         }
