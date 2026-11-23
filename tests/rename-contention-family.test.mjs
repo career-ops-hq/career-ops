@@ -70,6 +70,7 @@ function withoutComments(src) {
     } else if (c === '/' && src[i + 1] === '*') {
       const end = src.indexOf('*/', i + 2);
       i = end === -1 ? src.length : end + 1;
+      out += ' ';
     } else if (c === "'" || c === '"' || c === '`') {
       const start = i;
       for (i++; i < src.length && src[i] !== c; i++) if (src[i] === '\\') i++;
@@ -96,6 +97,10 @@ ok(!DIRECT_CALL.test('renameSyncWithRetry(tmp, file)'), 'the scan does not flag 
 ok(
   DIRECT_CALL.test(withoutComments("const url = 'https://example.com'; renameSync(tmp, file);")),
   'a // inside a string does not hide the call after it',
+);
+ok(
+  DIRECT_CALL.test(withoutComments('void/* publish */renameSync(tmp, file);')),
+  'a removed block comment does not glue the tokens around it',
 );
 ok(!DIRECT_CALL.test(withoutComments('// renameSync(tmp, file)\n/* renameSync(a, b) */')), 'comments are not calls');
 
