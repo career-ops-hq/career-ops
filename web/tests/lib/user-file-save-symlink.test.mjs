@@ -18,6 +18,7 @@ register(`data:text/javascript,${encodeURIComponent(`
 const { POST: saveCv } = await import("../../src/app/api/cv/route.ts");
 const { POST: saveProfile } = await import("../../src/app/api/profile/route.ts");
 const { POST: saveCadence } = await import("../../src/app/api/followups/cadence/route.ts");
+const { resolveUserFileWriteTarget } = await import("../../src/lib/core/safe-write.ts");
 
 function fixture(t) {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), "web-user-file-link-"));
@@ -55,6 +56,20 @@ function request(route, body) {
     body: JSON.stringify(body),
   });
 }
+
+test("a linked documents directory resolves to the physical save location", (t) => {
+  const { root } = fixture(t);
+  const targetDir = path.join(root, "documents");
+  const aliasDir = path.join(root, "shared-documents");
+  fs.mkdirSync(targetDir);
+  fs.symlinkSync(targetDir, aliasDir, "junction");
+  const filename = "cv.md";
+  const target = path.join(fs.realpathSync.native(targetDir), filename);
+
+  assert.equal(resolveUserFileWriteTarget(path.join(aliasDir, filename)), target);
+  fs.writeFileSync(target, "# Fictional candidate\n");
+  assert.equal(resolveUserFileWriteTarget(path.join(aliasDir, filename)), target);
+});
 
 test("saving a CV updates the shared file without replacing its link", async (t) => {
   const { folder, root } = fixture(t);

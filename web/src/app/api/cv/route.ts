@@ -19,9 +19,9 @@ export async function GET() {
   }
 }
 
-function readCv(): { exists: boolean; content: string } {
+function readCv(file: string): { exists: boolean; content: string } {
   try {
-    return { exists: true, content: fs.readFileSync(cvPath(), "utf8") };
+    return { exists: true, content: fs.readFileSync(file, "utf8") };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return { exists: false, content: "" };
     throw err;
@@ -32,15 +32,16 @@ export async function POST(req: Request) {
   const body = await readJsonObject<{ content?: string; backup?: boolean; expected?: { content?: string; exists?: boolean } }>(req);
   if (!body) return NextResponse.json({ error: "bad json" }, { status: 400 });
   let disk: { exists: boolean; content: string };
+  let target: string;
   try {
-    disk = readCv();
+    target = resolveUserFileWriteTarget(cvPath());
+    disk = readCv(target);
   } catch {
     return NextResponse.json({ error: "write failed" }, { status: 500 });
   }
   const decision = decideCvWrite(disk, body);
   if (!decision.ok) return NextResponse.json({ error: decision.error }, { status: decision.status });
   try {
-    const target = resolveUserFileWriteTarget(cvPath());
     let bak = null;
     if (decision.backup) bak = atomicWriteWithBackup(target, body.content as string);
     else atomicWrite(target, body.content as string);
