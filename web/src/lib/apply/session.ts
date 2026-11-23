@@ -16,6 +16,7 @@ import { fencingReport } from "../cli-fencing.mjs";
 import { CAPS } from "../worker-capabilities.mjs";
 import { assertSafeApplyUrl, installApplyEgressGuard, isUnsafeApplyUrlError, isBlockedNavigation, UnsafeApplyUrlError } from "./url-guard.mjs";
 import { unsupportedAtsMessage, unsupportedInAppAts } from "./unsupported-ats.mjs";
+import { readHandoffHosts } from "./handoff-hosts.mjs";
 
 type ApplyLaunch = { headless?: boolean; channel?: string; args?: string[] };
 
@@ -179,7 +180,9 @@ async function enrichFromAts(url: string, fields: ApplyField[]): Promise<void> {
   }
 }
 
-type Session = { id: string; url: string; title: string; fields: ApplyField[]; context: BrowserContext; page: Page; frame: Frame; createdAt: number; formShot?: string; written?: Map<string, string> };
+// handoffHosts: the apply.handoff_hosts list read when the session opened, kept
+// so the streamed drive refuses those hosts with the same list (refusedDestination).
+type Session = { id: string; url: string; title: string; fields: ApplyField[]; context: BrowserContext; page: Page; frame: Frame; createdAt: number; formShot?: string; written?: Map<string, string>; handoffHosts?: string[] };
 
 declare global {
   // eslint-disable-next-line no-var
@@ -244,8 +247,13 @@ type UnsupportedApplySession = { unsupported: { vendor: string; label: string; p
 
 export async function openSession(url: string, cliId?: string, forceAgent?: boolean, noApplyBtn?: boolean): Promise<OpenedApplySession | UnsupportedApplySession> {
   // Workday, iCIMS, and UKG have no in-app fill. Refuse before Chrome starts.
-  const blockedAts = await unsupportedInAppAts(url);
-  if (blockedAts) return { unsupported: blockedAts, message: unsupportedAtsMessage(blockedAts.label) };
+  // apply.handoff_hosts is read once, before any window opens: a broken profile
+  // throws here with nothing to clean up, and every later check in this session
+  // (landed URL, Apply trigger, empty-page diagnosis) reuses the same list
+  // instead of re-reading a file that could fail after the context exists.
+  const handoffHosts = readHandoffHosts();
+  const blockedAts = await unsupportedInAppAts(url, { handoffHosts });
+  if (blockedAts) return { unsupported: blockedAts, message: unsupportedAtsMessage(blockedAts) };
   // Refuse before launching any navigation, so an obviously-internal target
   // never reaches Playwright at all.
   await assertSafeApplyUrl(url);
@@ -260,6 +268,19 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
     await context.close().catch(() => {});
     if (SESSIONS.size === 0) scheduleIdleClose();
     throw new Error(msg);
+  };
+  // The first of these URLs that is a refused host (Workday, iCIMS, UKG or
+  // apply.handoff_hosts) closes this window and becomes the refusal panel.
+  // Used once the page or a frame of it may have moved since navigation.
+  const refuseAt = async (...hrefs: string[]): Promise<UnsupportedApplySession | null> => {
+    for (const href of hrefs) {
+      const hit = await unsupportedInAppAts(href, { handoffHosts });
+      if (!hit) continue;
+      await context.close().catch(() => {});
+      if (SESSIONS.size === 0) scheduleIdleClose();
+      return { unsupported: hit, message: unsupportedAtsMessage(hit, true) };
+    }
+    return null;
   };
   // Capture the real form as we read it → a "behind the scenes" progress strip
   // that proves we genuinely opened + parsed THEIR form (not magic). The last
@@ -284,11 +305,11 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   }
   // A career page can redirect onto a blocked portal. Close before scroll,
   // screenshots, or the Apply click that opens a second window.
-  const landedAts = await unsupportedInAppAts(page.url());
+  const landedAts = await unsupportedInAppAts(page.url(), { handoffHosts });
   if (landedAts) {
     await context.close().catch(() => {});
     if (SESSIONS.size === 0) scheduleIdleClose();
-    return { unsupported: landedAts, message: unsupportedAtsMessage(landedAts.label, true) };
+    return { unsupported: landedAts, message: unsupportedAtsMessage(landedAts, true) };
   }
   await snap(); // first paint
   const sBlock = statusBlock(resp?.status(), resp ? resp.headers() : {});
@@ -303,11 +324,11 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   await Promise.race(page.frames().map((f) => f.waitForSelector(formSel, { timeout: 12_000 }).catch(() => null))).catch(() => {});
   await page.waitForTimeout(1200);
   await dropNewTabs(page); // make any "Apply" link/popup navigate in OUR tab
-  const settledAts = await unsupportedInAppAts(page.url());
+  const settledAts = await unsupportedInAppAts(page.url(), { handoffHosts });
   if (settledAts) {
     await context.close().catch(() => {});
     if (SESSIONS.size === 0) scheduleIdleClose();
-    return { unsupported: settledAts, message: unsupportedAtsMessage(settledAts.label, true) };
+    return { unsupported: settledAts, message: unsupportedAtsMessage(settledAts, true) };
   }
   await snap(); // settled
 
@@ -315,6 +336,10 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   //    trigger lazy/virtualized fields, then (b) clicking an "Apply" button (SPA;
   //    never a submit) — re-settling and re-extracting after each.
   let { frame, form } = await pickFormFrame(page);
+  // A form embedded from a refused host gets the refusal panel, even when it
+  // is a sign-in form (checked first, so it is not reported as a login wall).
+  const embeddedAts = await refuseAt(frame.url());
+  if (embeddedAts) return embeddedAts;
   // A password box is a login wall. Stop before scroll, Apply clicks, or the
   // agent, so nothing is typed into the password field.
   if (formHasPassword(form)) return abort(LOGIN_WALL_MESSAGE);
@@ -324,34 +349,48 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
     await nudgeScroll(page);
     await page.waitForTimeout(400);
     ({ frame, form } = await pickFormFrame(page));
+    // The scroll can move the page. A refused host gets its own panel, not
+    // the login-wall message its password field would otherwise trigger.
+    const moved = await refuseAt(page.url(), frame.url());
+    if (moved) return moved;
     if (formHasPassword(form)) return abort(LOGIN_WALL_MESSAGE);
   }
   if (!noApplyBtn && !looksLikeApplicationForm(form)) {
-    const trigger = await tryApplyTrigger(page);
+    const trigger = await tryApplyTrigger(page, handoffHosts);
     // The Apply control points at Workday, iCIMS, or UKG. Close this window
     // instead of following it or handing the page to the drive agent.
     if (trigger && typeof trigger === "object" && "blocked" in trigger) {
-      const hit = await unsupportedInAppAts(trigger.blocked);
+      const hit = await unsupportedInAppAts(trigger.blocked, { handoffHosts });
       await context.close().catch(() => {});
       if (SESSIONS.size === 0) scheduleIdleClose();
-      if (hit) return { unsupported: hit, message: unsupportedAtsMessage(hit.label, true) };
+      if (hit) return { unsupported: hit, message: unsupportedAtsMessage(hit, true) };
     } else if (trigger && typeof trigger === "object" && "followed" in trigger) {
       await Promise.race(page.frames().map((f) => f.waitForSelector(formSel, { timeout: 6_000 }).catch(() => null))).catch(() => {});
       await page.waitForTimeout(800);
       await dropNewTabs(page);
       await waitForBlankPopup(page, trigger.followed);
-      const lateUrl = await blockedAfterAction(page, trigger.followed, false);
-      const lateAts = lateUrl ? await unsupportedInAppAts(lateUrl) : null;
+      const lateUrl = await blockedAfterAction(page, trigger.followed, false, handoffHosts);
+      const lateAts = lateUrl ? await unsupportedInAppAts(lateUrl, { handoffHosts }) : null;
       if (lateAts) {
         await context.close().catch(() => {});
         if (SESSIONS.size === 0) scheduleIdleClose();
-        return { unsupported: lateAts, message: unsupportedAtsMessage(lateAts.label, true) };
+        return { unsupported: lateAts, message: unsupportedAtsMessage(lateAts, true) };
       }
       ({ frame, form } = await pickFormFrame(page));
+      const followedAts = await refuseAt(page.url(), frame.url());
+      if (followedAts) return followedAts;
       if (formHasPassword(form)) return abort(LOGIN_WALL_MESSAGE);
       await snap();
     }
   }
+  // Recovering the form above (scroll, a second pickFormFrame) gives the page
+  // time to move on its own. Check where it is now, with the same list, before
+  // a usable form there is enriched, interpreted or registered: a refused host
+  // must not slip through just because it showed a form. The form's own frame
+  // is checked too: an unlisted page can embed a listed host's form, while an
+  // embedded form on an unlisted host stays supported.
+  const finalAts = await refuseAt(page.url(), frame.url());
+  if (finalAts) return finalAts;
   await enrichFromAts(url, form.fields); // clean labels + real options for known ATS (Greenhouse)
   await snap();
 
@@ -367,6 +406,9 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   // result) — for users who'd rather pay tokens than risk a heuristic miss.
   if (forceAgent && cliId) {
     const aiFrame = await richestControlFrame(page);
+    // The agent reads this frame's controls, which may not be the form's frame.
+    const aiAts = await refuseAt(aiFrame.url());
+    if (aiAts) return aiAts;
     const ai: AgentInterpretation = await interpretFormWithAgent(aiFrame, cliId, form.title || (await page.title().catch(() => ""))).catch(() => ({ fields: [] as ApplyField[], spawned: false }));
     agentSpawned = ai.spawned;
     agentRefused = ai.refused;
@@ -385,14 +427,14 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   //    A challenge/login/listing/expired/Workday page has no form to interpret,
   //    so we abort directly with the right message (no wasted AI run).
   if (!aiInterpreted && !looksLikeApplicationForm(form)) {
-    const why = await classifyEmpty(page, url);
+    const why = await classifyEmpty(page, url, handoffHosts);
     // Driveable (controls present, not a hard block) + we have an agent → KEEP the
     // session open and hand off to the STREAMED drive route, so the user watches
     // the agent reach the form live (/api/apply/drive). Otherwise abort.
     if (cliId && why.code === "no-form") {
       const id = `apply-${crypto.randomUUID()}`;
       const title = form.title || (await page.title().catch(() => "")) || "Application";
-      SESSIONS.set(id, { id, url, title, fields: [], context, page, frame, createdAt: Date.now(), formShot: shots[shots.length - 1] });
+      SESSIONS.set(id, { id, url, title, fields: [], context, page, frame, createdAt: Date.now(), formShot: shots[shots.length - 1], handoffHosts });
       return { id, title, fields: [], shots, issues: [], needsDrive: true };
     }
     return abort(why.message);
@@ -421,7 +463,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   if (unlabeled > 0) issues.push({ level: "warn", code: "unlabeled-fields", message: `${unlabeled} field${unlabeled > 1 ? "s" : ""} couldn't be labelled cleanly — double-check ${unlabeled > 1 ? "them" : "it"} before submitting.` });
 
   const id = `apply-${crypto.randomUUID()}`;
-  SESSIONS.set(id, { id, url, title: form.title, fields: form.fields, context, page, frame, createdAt: Date.now(), formShot: shots[shots.length - 1] });
+  SESSIONS.set(id, { id, url, title: form.title, fields: form.fields, context, page, frame, createdAt: Date.now(), formShot: shots[shots.length - 1], handoffHosts });
   return { id, title: form.title, fields: form.fields, shots, issues };
 }
 
@@ -464,10 +506,39 @@ export function isApplicationFormFn(form: ExtractedForm): boolean {
 /** After the streamed drive loop reaches a form, extract+enrich it (Tier-3
  *  interpret as a last resort), UPDATE the open session, and return the fields +
  *  issues. Returns null if no real application form materialised. */
-export async function finalizeDrivenSession(id: string, cliId?: string): Promise<{ title: string; fields: ApplyField[]; issues: ApplyIssue[] } | null> {
+/** Whether an open session's page has moved onto a refused host (Workday,
+ *  iCIMS, UKG or the apply.handoff_hosts read when it opened): the page itself,
+ *  or the frame its form would be read from. A hit closes the session's window,
+ *  as the checks in openSession do. The streamed drive calls this before its
+ *  first step and between steps, so a listed site is never driven. */
+export async function refusedDestination(id: string): Promise<UnsupportedApplySession["unsupported"] | null> {
+  const s = SESSIONS.get(id);
+  if (!s) return null;
+  const { frame } = await pickFormFrame(s.page);
+  return refuseSessionAt(id, s, [s.page.url(), frame.url()]);
+}
+
+// The first of these URLs that is a refused host closes the session's window
+// and is returned; otherwise null.
+async function refuseSessionAt(id: string, s: Session, hrefs: string[]): Promise<UnsupportedApplySession["unsupported"] | null> {
+  for (const href of hrefs) {
+    const hit = await unsupportedInAppAts(href, { handoffHosts: s.handoffHosts });
+    if (!hit) continue;
+    await closeSession(id);
+    return hit;
+  }
+  return null;
+}
+
+export async function finalizeDrivenSession(id: string, cliId?: string): Promise<{ title: string; fields: ApplyField[]; issues: ApplyIssue[] } | { unsupported: UnsupportedApplySession["unsupported"] } | null> {
   const s = SESSIONS.get(id);
   if (!s) return null;
   let { frame, form } = await pickFormFrame(s.page);
+  // A drive that ended on a refused host must not leave a form to fill there.
+  // The frame checked is the one this form was read from, so nothing loaded
+  // after the check can supply the form.
+  const refused = await refuseSessionAt(id, s, [s.page.url(), frame.url()]);
+  if (refused) return { unsupported: refused };
   await enrichFromAts(s.url, form.fields);
   if (formHasPassword(form)) return null;
   let aiInterpreted = false;
@@ -475,6 +546,8 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
   let agentRefused: string | undefined;
   if (!looksLikeApplicationForm(form) && cliId) {
     const aiFrame = await richestControlFrame(s.page);
+    const aiHit = await refuseSessionAt(id, s, [aiFrame.url()]);
+    if (aiHit) return { unsupported: aiHit };
     const ai: AgentInterpretation = await interpretFormWithAgent(aiFrame, cliId, form.title || s.title).catch(() => ({ fields: [] as ApplyField[], spawned: false }));
     agentSpawned = ai.spawned;
     agentRefused = ai.refused;

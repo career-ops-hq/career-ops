@@ -341,7 +341,7 @@ Full evaluation を `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` に保存す�
 (list of 15-20 keywords from the JD for ATS optimization)
 
 ## Keyword Coverage
-(`keyword-match.mjs` (1b) が生成 — coverage %、present、thin、missing)
+(`keyword-match.mjs` (1b) が生成 — coverage %、present、missing)
 
 ## Job Description (archived verbatim)
 (posting の全文を verbatim で貼る — 下の要件を参照)

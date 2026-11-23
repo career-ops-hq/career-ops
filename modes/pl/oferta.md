@@ -244,7 +244,7 @@ Nazwy pól w nagłówku (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF
 (lista 15-20 słów kluczowych z oferty do optymalizacji ATS)
 
 ## Keyword Coverage
-(generowane przez `keyword-match.mjs` (1b) -- pokrycie w %, present, thin, missing)
+(generowane przez `keyword-match.mjs` (1b) -- pokrycie w %, present, missing)
 
 ## Job Description (archived verbatim)
 (pełny tekst oferty, wklejony dosłownie -- zobacz wymaganie poniżej)

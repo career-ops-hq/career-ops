@@ -41,6 +41,12 @@
  *                                                (same, but the posting location is read
  *                                                 from a file instead of a shell argument —
  *                                                 see CWE-78 note below)
+ *      node salary-gap.mjs --relocation --gross <amount> --posting-location-b64 <base64>
+ *                          [--home-location "<city, province>"] [--currency <code>]
+ *                                                (same, but the posting location arrives as
+ *                                                 base64 the caller computed as text; the
+ *                                                 only characters that reach argv are
+ *                                                 A-Z a-z 0-9 + / = — see CWE-78 note below)
  *      node salary-gap.mjs --self-test
  *
  * `--posting-location` vs `--posting-location-file` (#4696 CodeRabbit CWE-78
@@ -132,6 +138,12 @@ const relocPostingLocation = flagValue(args, '--posting-location') ?? null;
 // shell metacharacters in the JD text are never given to a shell to expand in
 // the first place. See the file header comment for the full rationale.
 const relocPostingLocationFile = flagValue(args, '--posting-location-file') ?? null;
+// Base64 form (#4696 follow-up): the caller encodes the location as a pure text
+// transformation and passes only the resulting base64, so nothing but
+// `A-Z a-z 0-9 + / =` ever reaches argv. That removes the temp file and the
+// `node -e` decode step the prompt used to require, while keeping the location
+// out of the shell entirely.
+const relocPostingLocationB64 = flagValue(args, '--posting-location-b64') ?? null;
 // `flagValue` alone cannot distinguish "flag absent" from "flag present but
 // given a missing/invalid operand" — both collapse to `undefined`/`null`
 // above. `hasFlag` sees the token itself, so the two cases can be told apart
@@ -139,7 +151,37 @@ const relocPostingLocationFile = flagValue(args, '--posting-location-file') ?? n
 // falling back to --posting-location or misreading the next flag as a path
 // (#4696 CodeRabbit follow-up finding).
 const relocPostingLocationFileFlagPresent = hasFlag(args, '--posting-location-file');
+const relocPostingLocationB64FlagPresent = hasFlag(args, '--posting-location-b64');
 const relocHomeLocationFlag = flagValue(args, '--home-location') ?? null;
+
+/**
+ * Decode a base64 posting location (#4696).
+ *
+ * The caller computes this value as a pure text transformation on the JD text it
+ * already has, so the only characters that ever reach argv are `A-Z a-z 0-9 + / =`
+ * — none of them shell-special. `Buffer.from(..., 'base64')` is lenient (it skips
+ * junk and stops at the first bad byte), so validate the alphabet and the padding
+ * first, and treat a decode that produced U+FFFD as a failure: silently accepting
+ * it would hand the tax table a corrupted location.
+ *
+ * @param {string} value
+ * @returns {{ ok: true, text: string } | { ok: false, error: string }}
+ */
+export function decodePostingLocationB64(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return { ok: false, error: 'empty value' };
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(raw) || raw.length % 4 !== 0) {
+    return {
+      ok: false,
+      error: 'not base64 (expected A-Z a-z 0-9 + / = only, padded to a multiple of 4)',
+    };
+  }
+  const text = Buffer.from(raw, 'base64').toString('utf8');
+  if (!text || text.includes('\uFFFD')) {
+    return { ok: false, error: 'decoded bytes are not valid UTF-8' };
+  }
+  return { ok: true, text: text.trim() };
+}
 
 const TRUST = {
   actual: { contract: 3, 'offer-letter': 2, 'recruiter-verbal': 1, user: 0 },
@@ -1689,6 +1731,26 @@ function main() {
     // over the inline flag rather than silently falling back to the one a
     // caller may have meant to replace.
     let postingLocation = relocPostingLocation;
+    // Base64 form (#4696 follow-up) — the safe path the prompts now use. The
+    // file form still wins when both are present, because it is the older
+    // documented escape hatch and silently preferring a different operand
+    // would be a surprise.
+    if (relocPostingLocationB64FlagPresent && !relocPostingLocationFileFlagPresent) {
+      if (!relocPostingLocationB64 || relocPostingLocationB64.startsWith('-')) {
+        console.error(
+          `Usage: --posting-location-b64 requires a base64 operand (got ${
+            relocPostingLocationB64 ? `'${relocPostingLocationB64}', which looks like another flag` : 'none'
+          })`
+        );
+        process.exit(1);
+      }
+      const decoded = decodePostingLocationB64(relocPostingLocationB64);
+      if (!decoded.ok) {
+        console.error(`Invalid --posting-location-b64: ${decoded.error}`);
+        process.exit(1);
+      }
+      postingLocation = decoded.text;
+    }
     if (relocPostingLocationFileFlagPresent) {
       // The flag is present — require a real operand before ever touching
       // the filesystem. Missing (`--posting-location-file` as the last
@@ -1714,7 +1776,7 @@ function main() {
       }
     }
     if (gross === null || !postingLocation) {
-      console.error('Usage: node salary-gap.mjs --relocation --gross <amount> (--posting-location "<city, province>" | --posting-location-file <path>) [--home-location "<city, province>"] [--currency <code>]');
+      console.error('Usage: node salary-gap.mjs --relocation --gross <amount> (--posting-location "<city, province>" | --posting-location-file <path> | --posting-location-b64 <base64>) [--home-location "<city, province>"] [--currency <code>]');
       process.exit(1);
     }
     const jurisdictions = loadRelocationTable();

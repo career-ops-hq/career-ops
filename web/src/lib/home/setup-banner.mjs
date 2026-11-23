@@ -22,3 +22,11 @@ export function bannerStaysDismissed(stored, missing) {
   if (typeof stored !== "string" || stored.length === 0) return false;
   return stored === setupBannerDismissKey(missing);
 }
+
+/** @param {{ missing: string[], unpersonalized?: { path: string, reason: string }[] }} doctor */
+export function setupPaths(doctor) {
+  const emptyYaml = (doctor.unpersonalized ?? [])
+    .filter(entry => entry.reason === "has no settings (empty or only comments)")
+    .map(entry => entry.path);
+  return [...new Set([...doctor.missing, ...emptyYaml])];
+}

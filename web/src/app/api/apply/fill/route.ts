@@ -1,4 +1,5 @@
-import { fillSession, handoffSession, getSession } from "@/lib/apply/session";
+import { fillSession, handoffSession, getSession, refusedDestination } from "@/lib/apply/session";
+import { unsupportedSessionJson } from "@/lib/apply/unsupported-ats.mjs";
 import { resolveSessionCv, uploadNameForCv } from "@/lib/apply/cv";
 import { handoffDecision } from "@/lib/apply/handoff-gate.mjs";
 import { prepareFillAnswers, readApplyProfile } from "@/lib/apply/blank-unknown.mjs";
@@ -40,6 +41,13 @@ export async function POST(req: Request) {
       profile: readApplyProfile(careerOpsRoot()),
       edited,
     });
+    // A page that moved onto a refused host (Workday, iCIMS, UKG or
+    // apply.handoff_hosts) since the session opened is not filled: its window is
+    // closed and the answer is the same refusal the session open and the drive
+    // give. Checked here, after the CV lookup and right before the first write,
+    // so nothing awaited in between can move the page past it.
+    const refused = await refusedDestination(sessionId);
+    if (refused) return Response.json(unsupportedSessionJson(refused, application, true));
     const result = await fillSession(sessionId, safeAnswers, fields, cvPath, cvUploadName);
     const unmetLabels = (result.issues ?? []).flatMap((issue) =>
       issue.code === "required-empty" && Array.isArray(issue.labels) ? issue.labels : [],

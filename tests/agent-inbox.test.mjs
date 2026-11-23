@@ -14,8 +14,8 @@
  *       truncating it in place, leaves no temp file behind, keeps the file's
  *       permissions, and writes through a symlinked inbox.
  *   5. An empty `add` fails loudly (exit 1) rather than queuing a blank line.
- *   6. On the default path, a first `add` self-heals .gitignore (idempotent) so
- *      the personal queue isn't accidentally tracked.
+ *   6. Where the default queue lives, and the .gitignore self-heal, are in
+ *      tests/agent-inbox-data-root.test.mjs.
  *   7. Concurrent `add` calls all survive — the queue is appended to, never
  *      rewritten, so simultaneous writers cannot clobber each other.
  *   7c. When a writer in 7 dies, the line 7 prints names the cause. It did not:
@@ -248,20 +248,6 @@ console.log('5. empty add fails (exit 1), does not queue a blank line');
   let exit = 0;
   try { run(inbox, ['add', '   ']); } catch (e) { exit = e.status; }
   check('non-zero exit on empty request', exit === 1, `exit=${exit}`);
-}
-
-// ---------------------------------------------------------------------------
-console.log('6. first add on the default path self-heals .gitignore (idempotent)');
-{
-  const repo = tmp('inbox-repo-');
-  writeFileSync(join(repo, '.gitignore'), 'node_modules\noutput/*\n');
-  const addOnce = () => execFileSync(NODE, [CLI, 'add', 'queue a scan'], {
-    cwd: repo, env: { ...process.env, CAREER_OPS_INBOX: '' }, stdio: ['pipe', 'pipe', 'pipe'],
-  });
-  addOnce(); addOnce();
-  const gi = readFileSync(join(repo, '.gitignore'), 'utf8');
-  const ruleCount = gi.split('\n').filter((l) => l.trim() === 'data/agent-inbox.md').length;
-  check('.gitignore gains exactly one data/agent-inbox.md rule', ruleCount === 1, `count=${ruleCount}`);
 }
 
 // ---------------------------------------------------------------------------
