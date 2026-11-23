@@ -173,7 +173,7 @@ const CLOSURE = {
   ],
   'generate-pdf.mjs': [
     'generate-pdf.mjs', 'path-resolver.mjs', 'tracker-utils.mjs', 'pipeline-lock.mjs', 'lib/dir-lock.mjs', 'lib/lock-path.mjs',
-    'tracker-parse.mjs', 'theme-style.mjs', 'lib/page-format.mjs', 'lib/is-main-module.mjs', 'lib/yaml-document.mjs',
+    'tracker-parse.mjs', 'theme-style.mjs', 'lib/page-format.mjs', 'lib/cv-section-aliases.mjs', 'lib/is-main-module.mjs', 'lib/yaml-document.mjs',
     'lib/browser-launch.mjs',
     'cv-sections-core.mjs', 'cv-experience-order.mjs', 'lib/local-today.mjs',
     'tracker-aliases.json',

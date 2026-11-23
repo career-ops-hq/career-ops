@@ -3456,8 +3456,12 @@ if (machineSummaryFenceCount >= 2) {
 
 console.log('\n7e. CV section order check is language-aware');
 
+// The table moved to lib/cv-section-aliases.mjs so the cv.md checks read the
+// same names; generate-pdf.mjs imports it from there.
+const sectionAliasesSource = readFile('lib/cv-section-aliases.mjs');
+
 for (const header of ['podsumowanie zawodowe', 'doświadczenie zawodowe', 'wykształcenie', 'certyfikaty', 'umiejętności']) {
-  if (generatePdfScript.includes(`['${header}',`)) {
+  if (sectionAliasesSource.includes(`['${header}',`)) {
     pass(`SECTION_ALIASES maps Polish header: ${header}`);
   } else {
     fail(`SECTION_ALIASES missing Polish header: ${header}`);
@@ -3469,7 +3473,7 @@ for (const header of ['podsumowanie zawodowe', 'doświadczenie zawodowe', 'wyksz
 // cv.sections — the documented way to correct an order — silently did nothing.
 // Both scripts are required: a CV written in either renders through this table.
 for (const header of ['專業摘要', '工作經歷', '學歷', '證照', '技能', '专业摘要', '工作经历', '学历', '证书', '项目']) {
-  if (generatePdfScript.includes(`['${header}',`)) {
+  if (sectionAliasesSource.includes(`['${header}',`)) {
     pass(`SECTION_ALIASES maps Chinese header: ${header}`);
   } else {
     fail(`SECTION_ALIASES missing Chinese header: ${header}`);

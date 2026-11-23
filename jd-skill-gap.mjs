@@ -32,6 +32,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { join } from 'path';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { normalizePandocLine, parseCompanyHeading, toPlainText } from './lib/cv-markdown.mjs';
+import { aliasSectionKey } from './lib/cv-section-aliases.mjs';
 import { collapseMarkdownLinks } from './verify-cv-facts.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
@@ -614,6 +615,11 @@ const ZH_SKILLS_WORD_RE = /技能|专长|專長|技术能力|技術能力|技术
 // — Milano"), only under a skills section or on a heading that is not an
 // entry, so an employer named after one keeps its bullets in resume prose.
 const PL_PT_IT_SKILLS_WORD_RE = /(?<![\p{L}\p{N}])(?:umiej[ęe]tno[śs]ci|kompetencje|compet[êe]ncias|conhecimentos\s+t[ée]cnicos|competenze|conoscenze\s+tecniche|capacit[àa]\s+tecniche)(?![\p{L}\p{N}])/iu;
+// Every other language reads the section-title table itself: a heading the
+// PDF build maps to `skills` (Kenntnisse, Compétences techniques,
+// Vaardigheden, スキル, 기술 스택, Навыки…) is a skills heading here too, on the
+// same terms as the words above. The title must match an entry whole, so this
+// adds no match inside a longer heading.
 const TOP_HEADING_RE = /^#{1,2}(?!#)\s*\S/;
 
 /**
@@ -628,7 +634,7 @@ function isSkillsHeading(line, underSkillsSection = false) {
   // reads as the precomposed word the patterns spell.
   const text = toPlainText(normalizePandocLine(m[2]).replace(/\s*\{[^}]*\}\s*$/, '')).normalize('NFC');
   if (SKILLS_WORD_RE.test(text) || (m[1].length <= 2 && TOOLS_WORD_RE.test(text))) return true;
-  return (ZH_SKILLS_WORD_RE.test(text) || PL_PT_IT_SKILLS_WORD_RE.test(text))
+  return (ZH_SKILLS_WORD_RE.test(text) || PL_PT_IT_SKILLS_WORD_RE.test(text) || aliasSectionKey(text) === 'skills')
     && (underSkillsSection || !parseCompanyHeading(normalizePandocLine(line)));
 }
 
