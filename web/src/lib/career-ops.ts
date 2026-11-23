@@ -454,11 +454,13 @@ export function doctorState(snapshot?: Pick<PipelineSummary, "applications" | "i
       try {
         // Mirror core's hasYamlContent. Malformed or unreadable files are
         // diagnosed elsewhere and must not be offered for replacement.
-        const hasContent = fs.readFileSync(file, "utf8").split("\n").some((line) => {
+        const source = fs.readFileSync(file, "utf8");
+        const hasContent = source.split("\n").some((line) => {
           const trimmed = line.trim();
           return trimmed !== "" && !trimmed.startsWith("#");
         });
-        emptyYaml ||= !hasContent;
+        const value = hasContent ? yaml.load(source) : null;
+        emptyYaml ||= value == null || (Object.prototype.toString.call(value) === "[object Object]" && Object.keys(value as object).length === 0);
       } catch {
         // Match doctor.mjs when a file exists but cannot be read.
       }
