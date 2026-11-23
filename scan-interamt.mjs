@@ -20,17 +20,19 @@
 
 import { chromium } from './lib/hardened-chromium.mjs';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { loadYaml } from './lib/yaml-document.mjs';
 import {
   appendToPipeline,
   appendToScanHistory,
   appendUnrecordedToScanHistory,
+  atomicWriteFile,
   BROWSER_PROCESS_ENV,
   DATA_ROOT as SCAN_DATA_ROOT,
   PORTALS_PATH,
   SCAN_HISTORY_PATH,
 } from './scan.mjs';
+import { withPipelineLock } from './pipeline-lock.mjs';
 import { createAdmissionGate } from './lib/admission-gate.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -127,8 +129,32 @@ function parseDE(str) {
   return new Date(`${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}T00:00:00Z`);
 }
 
-// Returns the most recent first_seen date for 'interamt' portal entries, or null
-function loadLastScanDate() {
+// Marker for the last run that searched every configured keyword (not just
+// the ones it got through before dying). scan-history rows are flushed after
+// EACH keyword (#2789-style crash safety), so a run killed after keyword 1
+// already has today's date on disk for that keyword alone; reading the max
+// first_seen from those rows would hand the next run a floor that silently
+// skips postings under keywords 2..N as "already scanned through today" when
+// they were never searched. The floor only advances once the whole sweep
+// finishes.
+export const SWEEP_STATE_PATH = join(DATA_ROOT, 'data', 'interamt-sweep-state.json');
+
+export function recordSweepComplete(date) {
+  mkdirSync(dirname(SWEEP_STATE_PATH), { recursive: true });
+  atomicWriteFile(SWEEP_STATE_PATH, JSON.stringify({ lastCompleteSweep: date }) + '\n');
+}
+
+// Returns the date floor for the "already scanned" check, or null.
+export function loadLastScanDate() {
+  if (existsSync(SWEEP_STATE_PATH)) {
+    try {
+      const { lastCompleteSweep } = JSON.parse(readFileSync(SWEEP_STATE_PATH, 'utf-8'));
+      const d = new Date(`${lastCompleteSweep}T00:00:00Z`);
+      if (!isNaN(d)) return d;
+    } catch { /* corrupt/missing marker — fall back below */ }
+  }
+  // Pre-marker fallback (upgrades from before this fix, or a corrupt marker
+  // file): best-effort floor from the max first_seen interamt row on disk.
   if (!existsSync(SCAN_HISTORY)) return null;
   let latest = null;
   scanHistoryDataLines(readFileSync(SCAN_HISTORY, 'utf-8')).forEach(line => {
@@ -379,6 +405,14 @@ async function main() {
 
   // Writes now happen per-keyword inside the loop above, not here — each
   // completed keyword already flushed everything accumulated so far.
+
+  // Reaching here means every keyword in `keywords` was attempted (a
+  // per-keyword error is caught above and the loop moves on), so the
+  // date-floor marker can advance now. A run killed mid-sweep never reaches
+  // this line, so the floor stays where the last full sweep left it.
+  if (!DRY_RUN) {
+    await withPipelineLock(SWEEP_STATE_PATH, () => recordSweepComplete(date));
+  }
 
   // Summary
   printScanSummaryHeader('Interamt Scan', date);
