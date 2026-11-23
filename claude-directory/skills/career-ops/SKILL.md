@@ -3,7 +3,7 @@ name: career-ops
 description: "Open-source AI job search agent -- evaluate offers, generate CVs, scan portals, track applications. Use when the user pastes a job URL or JD, asks to scan portals, generate a CV/PDF, track applications, prepare for interviews, draft outreach/emails, or run any career-ops mode."
 arguments: mode
 user-invocable: true
-argument-hint: "[scan | discover | deep | pdf | ats | text | latex | latex-tex | cover | email | proposal | add | expand | eu-swe | oferta | ofertas | apply | triage | batch | tracker | agent-inbox | pipeline | contacto | gambit | training | project | interview-prep | interview | master-profile | intake | retro | interview/plan | interview/practice | interview/debrief | interview-redflag | patterns | calibrate | offer-prep | titles | upskill | followup | reply-watch | outcome | update]"
+argument-hint: "[scan | discover | deep | pdf | ats | text | latex | latex-tex | cover | email | proposal | add | expand | eu-swe | oferta | ofertas | apply | capture | triage | batch | tracker | agent-inbox | pipeline | contacto | gambit | training | project | interview-prep | interview | master-profile | intake | retro | interview/plan | interview/practice | interview/debrief | interview-redflag | patterns | calibrate | offer-prep | titles | upskill | followup | reply-watch | outcome | update]"
 license: MIT
 ---
 
@@ -87,6 +87,7 @@ Determine the mode from `$mode`:
 | `agent-inbox` | `agent-inbox` |
 | `inbox` | `agent-inbox` |
 | `pipeline` | `pipeline` |
+| `capture` | `capture` |
 | `apply` | `apply` |
 | `scan` | `scan` |
 | `discover` | `discover` |
@@ -202,6 +203,7 @@ Available commands:
   /career-ops apply     → Live application assistant (Playwright from this checkout, does not submit)
   /career-ops scan      → Scan portals and discover new offers
   /career-ops discover  → Resolve a company list to scannable ATS boards + append to portals.yml (zero-token)
+  /career-ops capture   → Record a posting in the inbox, no evaluation (URL + optional JD text)
   /career-ops triage    → Fast first-pass go/no-go score from modes/_brief.md (writes no files)
   /career-ops batch     → Batch processing with parallel workers
   /career-ops patterns  → Analyze rejection patterns and improve targeting
@@ -246,7 +248,11 @@ Applies to: `tracker`, `agent-inbox`, `deep`, `interview-prep`, `interview`, `ma
 
 Read `modes/{mode}.md` only. Do not preload `_shared.md`, `_profile.md` or `_custom.md`: the mode file names the one context file it reads and the ones it must not. Values it takes from `config/profile.yml` (`language.output`, `pipeline.triage_threshold`) are resolved here and injected; the mode never reads that file itself.
 
-Applies to: `triage`
+Applies to: `triage`, `capture`
+
+`capture` is deliberately in this group: it records a posting and stops, so
+loading the evaluation context (`oferta.md` alone is ~80 KB) would cost more than
+the whole capture and buy nothing.
 
 ### Modes delegated to subagent
 
