@@ -15,15 +15,15 @@ const STEP_21A = PDF_MODE.match(/^21a\. [\s\S]*?(?=^22\. )/m)?.[0] ?? '';
 
 test('in a variant run the ATS gate uses cv.md as its only fact source, as Step 19 does (#6792)', () => {
   const gate = STEP_21A.split('\n').find((l) => l.includes('Gate it:')) ?? '';
-  assert.match(gate, /variant run[^.]*`--source cv\.md --strict-source`/,
+  assert.match(gate, /variant run[^.]*`--source \{DATA_ROOT\}\/cv\.md --strict-source`/,
     'without it, a claim only article-digest.md backs is cut from the styled HTML but passes the ATS gate');
 });
 
 test('every variant fact gate in modes/pdf.md carries --strict-source (#6792)', () => {
   const lines = PDF_MODE.split('\n')
-    .filter((l) => /--source cv\.md/.test(l));
+    .filter((l) => /--source \{DATA_ROOT\}\/cv\.md/.test(l));
   assert.equal(lines.length, 3);
-  for (const l of lines) assert.match(l, /--source cv\.md --strict-source/);
+  for (const l of lines) assert.match(l, /--source \{DATA_ROOT\}\/cv\.md --strict-source/);
 });
 
 test('variant gate commands resolve cv.md and the variant from the data root (#6792)', () => {
