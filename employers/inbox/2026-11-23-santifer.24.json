@@ -1,0 +1,18 @@
+{
+  "id": "2026-11-23-santifer.24",
+  "contributor": "santifer",
+  "signed_by": "career-ops maintainers",
+  "rows": 3,
+  "source": "web-index:wayback@2026-11-14",
+  "origin": "Employer boards found in the Wayback Machine's public index of 2026 captures, each checked live through the board's public list of offers; the employer's name is the site name or title of the board's front page; checked on 2026-11-17 by an automated job of the maintainers, written with AI assistance: each board answered and listed at least one posting.",
+  "no_conflicting_contract": true,
+  "personal_data": false,
+  "exclusive": false,
+  "license": "CC-BY-4.0",
+  "also_permits": [
+    "ODbL-1.0",
+    "CC0-1.0"
+  ],
+  "attribution": "Found by the project's discoverer in a public web index",
+  "date": "2026-11-23"
+}
