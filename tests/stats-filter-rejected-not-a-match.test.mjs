@@ -12,6 +12,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { computePortalRecommendations, computePortalStats, scanCompanyNames } from '../stats.mjs';
+import { OBSERVATIONAL_SCAN_HISTORY_STATUSES } from '../lib/scan-history-columns.mjs';
 
 const row = (company, status, date = '2026-07-01') =>
   `https://job-boards.greenhouse.io/${company.toLowerCase()}/jobs/1\t${date}\tgreenhouse\tEngineer\t${company}\t${status}`;
@@ -40,4 +41,18 @@ test('--prune lists a reachable company whose postings the filters all rejected'
   const r = computePortalRecommendations(PORTALS, SCAN, health, now);
   assert.deepEqual(r.neverProduced.map((x) => x.company), ['Globex', 'Initech', 'Hooli']);
   assert.deepEqual(r.healthyButQuiet.map((x) => x.company), ['Acme', 'Duplo']);
+});
+
+// stats.mjs reads the set from lib/scan-history-columns.mjs instead of keeping
+// a copy, so every status recorded only to keep a drop visible is covered,
+// skipped_no_apply_control included, and a status added there later is too.
+test('no status in OBSERVATIONAL_SCAN_HISTORY_STATUSES names a producing company', () => {
+  for (const status of OBSERVATIONAL_SCAN_HISTORY_STATUSES) {
+    const scan = ['url\tfirst_seen\tportal\ttitle\tcompany\tstatus', row('Globex', status)].join('\n');
+    assert.deepEqual(scanCompanyNames(scan), [], status);
+    const health = '2026-07-01\tGlobex\treachable\n2026-09-22\tGlobex\treachable';
+    const portals = 'tracked_companies:\n  - name: Globex\n    careers_url: https://job-boards.greenhouse.io/globex\n';
+    const r = computePortalRecommendations(portals, scan, health, Date.parse('2026-09-22T12:00:00Z'));
+    assert.deepEqual(r.neverProduced.map((x) => x.company), ['Globex'], status);
+  }
 });

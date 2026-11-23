@@ -30,7 +30,7 @@ import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { parseStatusLogStages, recoverFunnelStages } from './funnel-stages.mjs';
 export { parseStatusLogStages } from './funnel-stages.mjs';
-import { parseScanHistoryLine } from './lib/scan-history-columns.mjs';
+import { parseScanHistoryLine, OBSERVATIONAL_SCAN_HISTORY_STATUSES } from './lib/scan-history-columns.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -275,16 +275,15 @@ export function computeScanStats(content, { weeks = 8 } = {}) {
   return { totalRecorded, added, byStatus, byPortal, distinctCompanies: companies.size, firstSeen, lastSeen, addedPerWeek };
 }
 
-// Rows the user's own filters removed: title_filter, location_filter,
-// max_posting_age_days, the experience filter, and scan-dayforce.mjs's content,
-// visa and country-eligibility cuts. The scanners record them so a mis-aimed
-// filter is visible (modes/scan.md), but a posting a filter removed is not a
-// match. Counted as one, any board that returned a posting at all "produced a
-// match", and --prune could never point at a title_filter that matches nothing.
-const FILTER_REJECTED_STATUSES = new Set([
-  'skipped_title', 'skipped_location', 'skipped_age', 'skipped_experience',
-  'skipped_content', 'skipped_visa', 'skipped_country_eligibility',
-]);
+// Rows a scanner recorded only so a drop stays visible (modes/scan.md): the
+// user's title, location, age and experience filters, scan-dayforce.mjs's
+// content, visa and country-eligibility cuts, and a posting --verify found no
+// Apply control on. None of them reached the pipeline, so none is a match.
+// Counted as one, any board that returned a posting at all "produced a match",
+// and --prune could never point at a title_filter that matches nothing. The
+// set is the one scan.mjs keeps unpinned, read from where it is defined, so a
+// status added there is not missed here.
+const FILTER_REJECTED_STATUSES = OBSERVATIONAL_SCAN_HISTORY_STATUSES;
 
 /** Lowercased set of company names with a scan-history.tsv row the filters kept. */
 export function scanCompanyNames(content) {
