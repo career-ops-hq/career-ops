@@ -83,6 +83,15 @@ test('a plan answer does not support a past percentage the letter repeats', () =
   assert.deepEqual(result.invented, ['40%']);
 });
 
+test('a Turkish plan supports its own percentage and leaves completed work to career evidence', () => {
+  const plan = 'İlk 90 günde dönüşüm oranını %20 artırmayı planlıyorum.';
+  assert.deepEqual(check(letter(plan)).invented, ['20%']);
+  assert.equal(check(letter(plan), [plan]).verdict, 'pass');
+  assert.equal(check(letter('Dönüşüm oranını %20 artıracağım.'), [plan]).verdict, 'pass');
+  assert.deepEqual(check(letter('Dönüşüm oranını %20 artırdım ve bunu sürdürmeyi planlıyorum.'), [plan]).invented, ['20%']);
+  assert.deepEqual(check(letter('Geçmişte dönüşümü %20 artırdım ve burada dönüşümü %20 artırmayı planlıyorum.'), [plan]).invented, ['20%']);
+});
+
 test('a later percentage in the same sentence can still be the plan', () => {
   const result = check(
     letter('I grew revenue 40% and will grow it 50%.'),
