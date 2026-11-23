@@ -349,3 +349,11 @@ test('an unindented continuation line is part of its bullet (#6792)', () => {
   writeFileSync(join(root, 'cv.md'), cv);
   assert.ok(checkVariant('a', { root }).problems.some((p) => p.type === 'attribution'));
 });
+
+test('a numbered achievement moved under another employer is an attribution problem (#6792)', () => {
+  const cv = CV.replace('- Built an NLP pipeline with 94% accuracy', '1. Built an NLP pipeline with 94% accuracy');
+  const moved = OMIT_AND_REORDER.replace('- Led a team of 3 engineers', '- Led a team of 3 engineers\n2) Built an NLP pipeline with 94% accuracy');
+  const root = workspace({ 'a.md': moved });
+  writeFileSync(join(root, 'cv.md'), cv);
+  assert.ok(checkVariant('a', { root }).problems.some((p) => p.type === 'attribution'));
+});
