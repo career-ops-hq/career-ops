@@ -275,12 +275,23 @@ export function computeScanStats(content, { weeks = 8 } = {}) {
   return { totalRecorded, added, byStatus, byPortal, distinctCompanies: companies.size, firstSeen, lastSeen, addedPerWeek };
 }
 
-/** Lowercased set of company names that ever appeared in scan-history.tsv. */
+// Rows the user's own filters removed: title_filter, location_filter,
+// max_posting_age_days, the experience filter, and scan-dayforce.mjs's content,
+// visa and country-eligibility cuts. The scanners record them so a mis-aimed
+// filter is visible (modes/scan.md), but a posting a filter removed is not a
+// match. Counted as one, any board that returned a posting at all "produced a
+// match", and --prune could never point at a title_filter that matches nothing.
+const FILTER_REJECTED_STATUSES = new Set([
+  'skipped_title', 'skipped_location', 'skipped_age', 'skipped_experience',
+  'skipped_content', 'skipped_visa', 'skipped_country_eligibility',
+]);
+
+/** Lowercased set of company names with a scan-history.tsv row the filters kept. */
 export function scanCompanyNames(content) {
   const names = new Set();
   for (const line of String(content ?? '').replace(/\r/g, '').split('\n')) {
     const row = parseScanHistoryLine(line);
-    if (!/^https?:\/\//.test(row.url)) continue;
+    if (!/^https?:\/\//.test(row.url) || FILTER_REJECTED_STATUSES.has(row.status.trim())) continue;
     const company = row.company.trim();
     if (company) names.add(company.toLowerCase());
   }
@@ -410,10 +421,10 @@ export function computePortalRecommendations(portalsContent, scanContent, health
   const produced = new Set(scanCompanyNames(scanContent));
   const lastMatch = new Map();
   for (const line of String(scanContent ?? '').split('\n')) {
-    const c = line.trimEnd().split('\t');
-    if (!/^https?:\/\//.test(c[0]) || !validDate(c[1]) || !c[4]) continue;
-    const key = c[4].trim().toLowerCase();
-    if (!lastMatch.has(key) || c[1] > lastMatch.get(key)) lastMatch.set(key, c[1]);
+    const { url, first_seen: seen, company, status } = parseScanHistoryLine(line.trimEnd());
+    if (!/^https?:\/\//.test(url) || !validDate(seen) || !company || FILTER_REJECTED_STATUSES.has(status.trim())) continue;
+    const key = company.trim().toLowerCase();
+    if (!lastMatch.has(key) || seen > lastMatch.get(key)) lastMatch.set(key, seen);
   }
   const health = new Map();
   const healthRows = [];
