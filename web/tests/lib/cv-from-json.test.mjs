@@ -298,3 +298,176 @@ test("a payload the title check cannot read stops the render", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+const DRIFT_CV_MD = `## Experience
+
+### Globex -- Remote
+
+**Analyst**
+2020 - 2024
+
+- Worked with a third-party NLP engine to classify support tickets
+- Shipped the weekly report
+`;
+
+async function buildWithBullets(bullets, { cvMd = DRIFT_CV_MD, experience = null, files = {} } = {}) {
+  const dir = mkdtempSync(path.join(tmpdir(), "cv-drift-"));
+  const saved = {
+    root: process.env.CAREER_OPS_ROOT,
+    data: process.env.CAREER_OPS_DATA_DIR,
+    profile: process.env.CAREER_OPS_PROFILE,
+  };
+  delete process.env.CAREER_OPS_DATA_DIR;
+  delete process.env.CAREER_OPS_PROFILE;
+  process.env.CAREER_OPS_ROOT = dir;
+  try {
+    mkdirSync(path.join(dir, "config"), { recursive: true });
+    writeFileSync(path.join(dir, "config", "profile.yml"), "name: Jane Doe\n");
+    writeFileSync(path.join(dir, "cv.md"), cvMd);
+    for (const [name, text] of Object.entries(files)) writeFileSync(path.join(dir, name), text);
+    const body = payload();
+    body.experience = experience ?? [{
+      company: "Globex",
+      role: "Analyst",
+      location: "Remote",
+      dates: "2020 - 2024",
+      bullets,
+    }];
+    const envelope = { ok: true, kind: "json", format: "letter", payload: body, warnings: [] };
+    const result = await materializeTailoredCv({
+      envelope,
+      coreRoot: CORE,
+      dataRoot: dir,
+      htmlPath: path.join(dir, ".career-ops-web", "pdf-tmp", "cv-web-019.html"),
+      finalPdf: path.join(dir, "output", "cv.pdf"),
+    });
+    return { result, envelope };
+  } finally {
+    if (saved.root === undefined) delete process.env.CAREER_OPS_ROOT;
+    else process.env.CAREER_OPS_ROOT = saved.root;
+    if (saved.data === undefined) delete process.env.CAREER_OPS_DATA_DIR;
+    else process.env.CAREER_OPS_DATA_DIR = saved.data;
+    if (saved.profile === undefined) delete process.env.CAREER_OPS_PROFILE;
+    else process.env.CAREER_OPS_PROFILE = saved.profile;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const DRIFTED = "Ran a third-party NLP engine to classify support tickets";
+const SOURCE_WORDING = "Worked with a third-party NLP engine to classify support tickets";
+
+test("a bullet whose verb drifted from cv.md gets the cv.md wording and a warning naming both", async () => {
+  const { result, envelope } = await buildWithBullets([DRIFTED, "Shipped the weekly report"]);
+  assert.equal(result.ok, true, result.error);
+  assert.ok(result.html.includes(SOURCE_WORDING), "cv.md wording is rendered");
+  assert.ok(!result.html.includes(DRIFTED), "drifted wording is gone");
+  const warning = result.warnings.find((w) => /Restored the cv\.md wording/.test(w));
+  assert.ok(warning, "a restore warning is returned");
+  assert.ok(warning.includes(DRIFTED) && warning.includes(SOURCE_WORDING));
+  assert.equal(envelope.payload.experience[0].bullets[0], DRIFTED, "the envelope payload is not mutated");
+});
+
+test("a payload with no drift is returned unchanged with no restore warning", async () => {
+  const { result } = await buildWithBullets([SOURCE_WORDING, "Shipped the weekly report"]);
+  assert.equal(result.ok, true, result.error);
+  assert.ok(result.html.includes(SOURCE_WORDING));
+  assert.ok(!result.warnings.some((w) => /Restored the cv\.md wording/.test(w)));
+});
+
+test("a bullet that does not link to any cv.md line is left alone", async () => {
+  const { result } = await buildWithBullets(["Orchestrated unrelated quarterly gardening"]);
+  assert.equal(result.ok, true, result.error);
+  assert.ok(result.html.includes("Orchestrated unrelated quarterly gardening"));
+  assert.ok(!result.warnings.some((w) => /Restored the cv\.md wording/.test(w)));
+});
+
+test("a drift anchored to one sentence of a two-sentence cv.md bullet restores the whole bullet", async () => {
+  const cvMd = DRIFT_CV_MD.replace(
+    "- Worked with a third-party NLP engine to classify support tickets\n",
+    "- Worked with a third-party NLP engine to classify support tickets. Cut triage time by 40%.\n",
+  );
+  const { result } = await buildWithBullets([DRIFTED, "Shipped the weekly report"], { cvMd });
+  assert.equal(result.ok, true, result.error);
+  assert.ok(!result.html.includes(DRIFTED), "drifted wording is gone");
+  assert.ok(result.html.includes(SOURCE_WORDING), "the anchored sentence is restored");
+  assert.ok(result.html.includes("Cut triage time by 40%"), "the bullet's other cv.md sentence is kept");
+});
+
+test("every bullet matching a drift is restored, in every role", async () => {
+  const cvMd = `${DRIFT_CV_MD}
+### Initech -- Remote
+
+**Associate**
+2016 - 2019
+
+- Worked with a third-party NLP engine to classify support tickets
+`;
+  const experience = [
+    { company: "Globex", role: "Analyst", location: "Remote", dates: "2020 - 2024", bullets: [DRIFTED, "Shipped the weekly report", DRIFTED] },
+    { company: "Initech", role: "Associate", location: "Remote", dates: "2016 - 2019", bullets: [DRIFTED] },
+  ];
+  const { result } = await buildWithBullets(null, { cvMd, experience });
+  assert.equal(result.ok, true, result.error);
+  assert.ok(!result.html.includes(DRIFTED), "no drifted copy is left");
+  assert.equal(result.warnings.filter((w) => /Restored the cv\.md wording/.test(w)).length, 3);
+});
+
+test("two roles sharing a drifted sentence each get their own cv.md figure back", async () => {
+  const cvMd = `## Experience
+
+### Globex -- Remote
+
+**Analyst**
+2020 - 2024
+
+- Worked with a third-party NLP engine to classify support tickets. Cut triage time by 40%.
+
+### Initech -- Remote
+
+**Associate**
+2016 - 2019
+
+- Worked with a third-party NLP engine to classify support tickets. Cut triage time by 15%.
+`;
+  const experience = [
+    { company: "Globex", role: "Analyst", location: "Remote", dates: "2020 - 2024", bullets: [`${DRIFTED}. Cut triage time by 40%.`] },
+    { company: "Initech", role: "Associate", location: "Remote", dates: "2016 - 2019", bullets: [`${DRIFTED}. Cut triage time by 15%.`] },
+  ];
+  const { result } = await buildWithBullets(null, { cvMd, experience });
+  assert.equal(result.ok, true, result.error);
+  assert.ok(!result.html.includes(DRIFTED), "no drifted copy is left");
+  const globex = result.html.indexOf("Cut triage time by 40%");
+  const initech = result.html.indexOf("Cut triage time by 15%");
+  assert.ok(globex !== -1, "Globex keeps its own 40%");
+  assert.ok(initech !== -1, "Initech keeps its own 15%, not Globex's");
+  assert.ok(globex < initech, "each figure stays in its own role");
+});
+
+test("a drift whose wording exists only in article-digest.md is left for the gate", async () => {
+  const cvMd = DRIFT_CV_MD.replace("- Worked with a third-party NLP engine to classify support tickets\n", "");
+  const files = { "article-digest.md": `- ${SOURCE_WORDING}. Cut triage time by 40%.\n` };
+  const { result } = await buildWithBullets([DRIFTED, "Shipped the weekly report"], { cvMd, files });
+  assert.equal(result.ok, true, result.error);
+  assert.ok(!result.warnings.some((w) => /Restored the cv\.md wording/.test(w)), "no bullet is replaced from article-digest.md");
+  assert.ok(!result.html.includes("Cut triage time by 40%"), "digest text is not written into the CV");
+});
+
+test("a cv.md bullet soft-wrapped over two lines is restored whole", async () => {
+  const cvMd = DRIFT_CV_MD.replace(
+    "- Worked with a third-party NLP engine to classify support tickets\n",
+    "- Worked with a third-party NLP engine to classify support tickets.\n  Cut triage time by 40%.\n",
+  );
+  const { result } = await buildWithBullets([DRIFTED, "Shipped the weekly report"], { cvMd });
+  assert.equal(result.ok, true, result.error);
+  assert.ok(!result.html.includes(DRIFTED), "drifted wording is gone");
+  assert.ok(result.html.includes(SOURCE_WORDING), "the first line is restored");
+  assert.ok(result.html.includes("Cut triage time by 40%"), "the wrapped second line is kept");
+});
+
+test("a trademark sign in a tailored bullet does not stop it matching its drift line", async () => {
+  const drifted = "Ran a third-party NLP™ engine to classify support tickets";
+  const { result } = await buildWithBullets([drifted, "Shipped the weekly report"]);
+  assert.equal(result.ok, true, result.error);
+  assert.ok(result.html.includes(SOURCE_WORDING), "cv.md wording is rendered");
+  assert.ok(!result.html.includes("Ran a third-party"), "drifted wording is gone");
+});

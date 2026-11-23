@@ -4,6 +4,9 @@
 
 import { inviteEvidence } from './lib/invite-evidence.mjs';
 import { isPlaceholderCompany } from './lib/placeholder-cell.mjs';
+import { parseAppliedDate } from './followup-cadence.mjs';
+import { companiesMatchIgnoringCorporateForm, LEGAL_SUFFIXES } from './tracker-utils.mjs';
+import { normalizeTextKey } from './tracker-parse.mjs';
 
 export function extractDomain(emailStr) {
   if (!emailStr) return null;
@@ -107,7 +110,51 @@ export function checkCompanyMatch(text, company) {
   const cChi = normalizeChinese(company);
   if (cChi && cChi.length >= 2 && text.includes(cChi)) return true;
 
-  return false;
+  // Corporate form: the tracker says "Acme Inc." and the mail says "Acme".
+  // Every check above looks for the whole tracker cell in the text, so it
+  // matches the reverse direction only.
+  return corporateFormStems(company).some(stem => textHasTokenRun(text, stem));
+}
+
+// Legal suffixes only. The shared rule's default set also treats generic
+// descriptors ("Solutions", "Holdings") as optional, which is fine for comparing
+// two company cells but not for searching free text: "Data Solutions Inc." would
+// shrink to "data" and match any mail that mentions data.
+const LEGAL_FORM_WORDS = new Set(LEGAL_SUFFIXES);
+
+// The leading token runs of `company` that companiesMatchIgnoringCorporateForm()
+// accepts as the same employer: "Acme Holdings Inc." → ["acme holdings"]. The
+// shared rule supplies the suffix vocabulary, the dotted-initialism handling
+// ("Acme L.L.C.") and the MIN_STEM_CHARS floor, so "HP Inc." yields nothing and
+// never searches for a bare "hp". Names written without spaces are one token
+// and have no shorter run, so Chinese and Japanese cells are unaffected.
+function corporateFormStems(company) {
+  const tokens = normalizeTextKey(company, ' ').split(' ').filter(Boolean);
+  const stems = [];
+  for (let k = tokens.length - 1; k >= 1; k--) {
+    const stem = tokens.slice(0, k).join(' ');
+    if (companiesMatchIgnoringCorporateForm(stem, company, LEGAL_FORM_WORDS)) stems.push(stem);
+  }
+  return stems;
+}
+
+// A URL with a scheme, removed whole up to the next space or bracket whatever
+// its host ("https://192.0.2.1/acme", "https://jobs.example:8443/acme"); an
+// email address ("no-reply@acme-partners.com"); or a bare hostname with its
+// port and path ("careers.acme.io", "jobs.example:8443/acme").
+const ADDRESS_OR_HOST_RE = /[a-z][a-z\d+.-]*:\/\/[^\s<>()"']*|[^\s<>()"',;]+@[^\s<>()"',;]+|(?:[\p{L}\p{M}\p{N}-]+\.)+\p{L}{2,}(?::\d+)?(?:[/?#][^\s<>()"']*)?/giu;
+
+// Whole-token match in the same key space as the stem, so "acme" is found in
+// "Thanks for applying to Acme!" but not inside "Acmecorp". A stem is shorter
+// and more generic than the cell it came from, so it gets no substring path,
+// and addresses and hostnames are removed first: normalizing
+// "no-reply@acme-partners.com" yields the token "acme", and a domain that only
+// shares a tracked company's first word is not evidence for that company.
+// Domains are the sender-domain signal's job.
+function textHasTokenRun(text, stem) {
+  const words = text.replace(ADDRESS_OR_HOST_RE, ' ');
+  const tokens = normalizeTextKey(words, ' ').split(' ').filter(Boolean).join(' ');
+  return ` ${tokens} `.includes(` ${stem} `);
 }
 
 // Generic recruiting/HR vocabulary. These words are common enough in unrelated
@@ -446,10 +493,17 @@ function comparableDateRange(raw) {
 }
 
 function candidateReceivedAt(cand) {
-  return comparableDateRange(
-    cand?.received_at ?? cand?.receivedAt ?? cand?.email_date ?? cand?.date,
-  );
+  const value = cand?.received_at ?? cand?.receivedAt ?? cand?.email_date ?? cand?.date;
+  const range = comparableDateRange(value);
+  // A date-only receipt has no known time of day. Its latest possible instant
+  // is needed when excluding applications definitely newer than the message.
+  if (range && /^\d{4}-\d{2}-\d{2}$/.test(String(value).trim())) {
+    return { ...range, latest: range.earliest + 86400000 - 1 };
+  }
+  return range;
 }
+
+const CALENDAR_DATE_SHAPE = /^\d{4}-\d{2}-\d{2}(?:T.*)?$/i;
 
 function canonicalStatus(raw) {
   return String(raw ?? '').replace(/\*\*/g, '').trim().toLowerCase();
@@ -457,6 +511,28 @@ function canonicalStatus(raw) {
 
 function companyKey(raw) {
   return normalizeStr(normalizeChinese(String(raw ?? ''))).replace(/[^\p{L}\p{M}\p{N}]+/gu, '');
+}
+
+function sameCompany(a, b) {
+  const ka = companyKey(a);
+  return Boolean(ka) && (ka === companyKey(b) || companiesMatchIgnoringCorporateForm(a, b));
+}
+
+// Tied rows count as one employer only when every pair is the same company
+// cell, either by key or by companiesMatchIgnoringCorporateForm() ("Acme" and
+// "Acme Inc."). Pairwise rather than against the first row: "Acme Solutions"
+// and "Acme Technologies" each match "Acme" but not each other, and must stay
+// two employers. Returns 1 for one employer, 0 when none has a key, and 2 for
+// "more than one".
+function countDistinctCompanies(companies) {
+  const named = companies.filter(c => companyKey(c));
+  if (named.length === 0) return 0;
+  for (let i = 0; i < named.length; i++) {
+    for (let j = i + 1; j < named.length; j++) {
+      if (!sameCompany(named[i], named[j])) return 2;
+    }
+  }
+  return 1;
 }
 
 function companyWideEligible(app, emailRange) {
@@ -472,12 +548,38 @@ export function matchCandidates(candidates, apps, followups = []) {
   for (const cand of candidates) {
     const textContext = `${cand.from || ''} ${cand.subject || ''} ${cand.body_snippet || ''}`;
     const fromDomain = extractDomain(cand.from);
+    const receivedAt = cand.received_at ?? cand.receivedAt ?? cand.email_date ?? cand.date;
+    const emailRange = CALENDAR_DATE_SHAPE.test(String(receivedAt ?? '').trim()) ? candidateReceivedAt(cand) : null;
+    const latestReceipt = emailRange && emailRange.latest
+      + (/^\d{4}-\d{2}-\d{2}$/.test(String(receivedAt).trim()) ? 12 * 3600000 : 0);
     
     let bestMatches = [];
     let highestScore = -1;
     let anyRoleMatch = false;
+    const excludedRoles = [];
     
     for (const app of apps) {
+      // The tracker Date is an evaluation date. Only an explicit own submission
+      // note can establish when this application actually went out.
+      const appliedDate = emailRange && parseAppliedDate(app.notes, { requireValidCalendarDate: true, requireExactDate: true, requireUnambiguousDate: true });
+      const appRange = appliedDate && comparableDateRange(appliedDate);
+      // Calendar notes have no timezone: allow UTC+14 at submission and UTC-12
+      // on a date-only receipt rather than turn an adjacent local day into proof.
+      if (appRange && appRange.earliest - 14 * 3600000 > latestReceipt) {
+        // Its role remains evidence that this is not a role-less company reply.
+        // Partial role words need the same company/domain corroboration as
+        // ordinary candidates, so unrelated future rows cannot block a match.
+        const isRoleExactMatch = checkRoleMatchExact(textContext, app.role);
+        const isRolePartialMatch = !isRoleExactMatch && checkRoleMatch(textContext, app.role);
+        const isCompanyMatch = checkCompanyMatch(textContext, app.company);
+        const hasDomainMatch = fromDomain
+          && getAppDomains(app, followups).some(d => fromDomain === d || fromDomain.endsWith(`.${d}`));
+        if (isRoleExactMatch || isRolePartialMatch) anyRoleMatch = true;
+        if (isRoleExactMatch || (isRolePartialMatch && (isCompanyMatch || hasDomainMatch))) {
+          excludedRoles.push(app.role);
+        }
+        continue;
+      }
       let score = 0;
       let signals = [];
       let companyHint = '';
@@ -558,20 +660,25 @@ export function matchCandidates(candidates, apps, followups = []) {
       }
     }
     
-    if (bestMatches.length === 1) {
+    const soleRole = bestMatches.length === 1 ? bestMatches[0].role_hint : '';
+    // A shorter title embedded in the excluded named role is not independent
+    // evidence for the survivor. Equivalent titles still match both ways.
+    const nestedExcludedRole = excludedRoles.some(role => checkRoleMatchExact(textContext, role)
+      && checkRoleMatchExact(role, soleRole) && !checkRoleMatchExact(soleRole, role));
+    if (bestMatches.length === 1 && (!excludedRoles.length || (checkRoleMatchExact(textContext, soleRole) && !nestedExcludedRole))) {
       const match = bestMatches[0];
       delete match.score;
       results.push(match);
-    } else if (bestMatches.length > 1) {
+    } else if (bestMatches.length > 0) {
       const tiedApps = bestMatches
         .map(match => apps.find(app => app.num === match.application_num))
         .filter(Boolean);
-      const tiedCompanies = new Set(tiedApps.map(app => companyKey(app.company)).filter(Boolean));
+      const tiedCompanyCount = countDistinctCompanies(tiedApps.map(app => app.company));
       const emailRange = candidateReceivedAt(cand);
       const isRejection = classifyReply(cand).type === 'Rejected';
       const eligible = tiedApps.filter(app => companyWideEligible(app, emailRange));
 
-      if (isRejection && !anyRoleMatch && tiedCompanies.size === 1 && eligible.length > 0) {
+      if (isRejection && !anyRoleMatch && tiedCompanyCount === 1 && eligible.length > 0) {
         results.push({
           message_id: cand.message_id,
           company_hint: eligible[0].company,

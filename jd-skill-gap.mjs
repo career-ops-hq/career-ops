@@ -605,6 +605,15 @@ const ANY_HEADING_RE = /^#{1,6}\s/;
 const SKILLS_WORD_RE = /\b(?:skills|competenc(?:y|ies)|aptitudes|habilidades|competencias)\b/i;
 const TOOLS_WORD_RE = /\b(?:tools|technologies|tech\s+stack)\b/i;
 const ZH_SKILLS_WORD_RE = /技能|专长|專長|技术能力|技術能力|技术栈|技術棧/;
+// The Polish, Portuguese and Italian skills and competencies names, the ones
+// SECTION_ALIASES maps for modes/pl, modes/pt and modes/it: Umiejętności,
+// Kompetencje, Competências, Conhecimentos Técnicos, Competenze, Conoscenze
+// tecniche, Capacità tecniche. `\b` only knows ASCII letters, so it cannot end
+// a word such as "capacità"; Unicode lookarounds bound these instead. Like the
+// Chinese words, they do not count on an entry heading ("### Competenze S.r.l.
+// — Milano"), only under a skills section or on a heading that is not an
+// entry, so an employer named after one keeps its bullets in resume prose.
+const PL_PT_IT_SKILLS_WORD_RE = /(?<![\p{L}\p{N}])(?:umiej[ęe]tno[śs]ci|kompetencje|compet[êe]ncias|conhecimentos\s+t[ée]cnicos|competenze|conoscenze\s+tecniche|capacit[àa]\s+tecniche)(?![\p{L}\p{N}])/iu;
 const TOP_HEADING_RE = /^#{1,2}(?!#)\s*\S/;
 
 /**
@@ -615,9 +624,12 @@ function isSkillsHeading(line, underSkillsSection = false) {
   // `\s*` rather than `\s+` keeps the historical `#Skills` (no space) form.
   const m = String(line).match(/^(#{1,6})(?!#)\s*(.+?)\s*$/);
   if (!m) return false;
-  const text = toPlainText(normalizePandocLine(m[2]).replace(/\s*\{[^}]*\}\s*$/, ''));
+  // NFC, so a heading written with combining accents ("Compete\u0302ncias")
+  // reads as the precomposed word the patterns spell.
+  const text = toPlainText(normalizePandocLine(m[2]).replace(/\s*\{[^}]*\}\s*$/, '')).normalize('NFC');
   if (SKILLS_WORD_RE.test(text) || (m[1].length <= 2 && TOOLS_WORD_RE.test(text))) return true;
-  return ZH_SKILLS_WORD_RE.test(text) && (underSkillsSection || !parseCompanyHeading(normalizePandocLine(line)));
+  return (ZH_SKILLS_WORD_RE.test(text) || PL_PT_IT_SKILLS_WORD_RE.test(text))
+    && (underSkillsSection || !parseCompanyHeading(normalizePandocLine(line)));
 }
 
 /**

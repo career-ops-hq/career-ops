@@ -14,6 +14,7 @@
 // including a newer caller's live lock after an ENOENT (#5358).
 
 import { acquireDirLock, releaseOrWarn } from './lib/dir-lock.mjs';
+import { canonicalLockPath } from './lib/lock-path.mjs';
 
 // Re-exported rather than redeclared: the floor is applied inside
 // lockRecoveryVerdict, so a local copy of the number would be a constant this
@@ -32,8 +33,20 @@ export class LockTimeoutError extends Error {
   }
 }
 
+/**
+ * The lock directory for a data file.
+ *
+ * Resolved through lib/lock-path.mjs for the same reason pipeline-lock is: a
+ * symlinked or junctioned data root gives one file two spellings, and a lock
+ * built from the spelling locks nothing. `pipeline-lock.mjs` fixed this for
+ * `data/pipeline.md` (#4957/#5358); this lock kept appending `.lock` to whatever
+ * the caller wrote, so the two locks disagreed about what "the same file" means.
+ *
+ * @param {string} filePath
+ * @returns {string}
+ */
 function lockDirFor(filePath) {
-  return `${filePath}.lock`;
+  return `${canonicalLockPath(filePath)}.lock`;
 }
 
 /**

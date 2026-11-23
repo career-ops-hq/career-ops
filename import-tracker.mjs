@@ -48,7 +48,8 @@ Simplify, a spreadsheet) to data/applications.md. Dry run by default.
 
   --confirm     Add the rows (default is a preview that writes nothing)
   --day-first   Read slash dates as day/month/year (default: inferred from
-                the file, month/day/year when every date fits both)
+                the file, month/day/year when every date fits both; dotted
+                dates such as 05.11.2026 are day/month/year)
   -h, --help    Show this help and exit
 
 The file needs a company column and a role column. Recognized headers:
@@ -156,7 +157,9 @@ export function readSourceDate(raw, dayFirst) {
 /**
  * Decide how to read the file's slash dates from the dates themselves.
  * A first part above 12 proves day/month, a second part above 12 proves
- * month/day. A file with both is refused rather than half misread.
+ * month/day. A dotted date (05.11.2026) is day/month too: that is how the
+ * locales that write dates with dots order them. A file with both is refused
+ * rather than half misread.
  * @param {string[]} values
  * @returns {boolean} true for day/month/year.
  */
@@ -164,9 +167,10 @@ export function inferDayFirst(values) {
   let dayFirst = false;
   let monthFirst = false;
   for (const v of values) {
-    const m = SLASH_DATE.exec(String(v ?? '').trim());
+    const s = String(v ?? '').trim();
+    const m = SLASH_DATE.exec(s);
     if (!m) continue;
-    if (+m[1] > 12) dayFirst = true;
+    if (+m[1] > 12 || s[m[1].length] === '.') dayFirst = true;
     if (+m[2] > 12) monthFirst = true;
   }
   if (dayFirst && monthFirst) {

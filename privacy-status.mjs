@@ -28,10 +28,26 @@
  */
 
 import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 // Load .env before reading privacy-guard config so PRIVACY_GUARD and
 // PRIVACY_BYPASS_TOKEN from .env are applied consistently with other
 // evaluator entrypoints.
-import 'dotenv/config';
+//
+// The same two files in the same order those entrypoints use: the data root's
+// .env first (doctor.mjs, scan.mjs and the plugin engine all read it there),
+// then the working directory's. Bare `dotenv/config` loaded only the second, so
+// on a split-root or plugin install this diagnostic read a different config than
+// the evaluators run with — and reported "active" while every LLM call ran
+// bypassed, which is the exact failure this command exists to expose.
+try {
+  const { config } = await import('dotenv');
+  // quiet: dotenv's startup banner goes to stdout, which --json reserves for its
+  // own output. Same call as the scanner's (scan.mjs).
+  config({ path: [join(getCareerOpsRoot(), '.env'), join(process.cwd(), '.env')], quiet: true });
+} catch {
+  // dotenv is optional: fall back to process.env, as the evaluators do.
+}
 import {
   AUTO_DETECT_DEFAULTS,
   PrivacyConfigError,

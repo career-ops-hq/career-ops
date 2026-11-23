@@ -16274,9 +16274,6 @@ try {
   if (r.present.includes('Python')) pass('keyword coverage: exact match (Python)');
   else fail('keyword coverage: Python should be present');
 
-  if (!r.thin.includes('Python')) pass('keyword coverage: count>1 keyword not flagged thin (Python x2)');
-  else fail('keyword coverage: Python appears twice and must not be thin');
-
   if (r.present.includes('Kubernetes')) pass('keyword coverage: synonym match (k8s -> Kubernetes)');
   else fail('keyword coverage: Kubernetes should match via k8s synonym');
 
@@ -16295,8 +16292,8 @@ try {
   if (r.missing.includes('gRPC')) pass('keyword coverage: genuine miss reported (gRPC)');
   else fail('keyword coverage: gRPC should be missing');
 
-  if (r.thin.includes('observability')) pass('keyword coverage: count-1 keyword flagged thin (observability)');
-  else fail('keyword coverage: observability should be thin');
+  if (r.present.includes('observability')) pass('keyword coverage: one occurrence counts as present (observability)');
+  else fail('keyword coverage: one mention of observability should count as present');
 
   if (r.coveragePct === 80) pass('keyword coverage: percentage computed correctly (8/10 = 80%)');
   else fail(`keyword coverage: percentage wrong: ${r.coveragePct} (expected 80)`);
@@ -17368,10 +17365,12 @@ try {
     const cadKeys = Object.keys(DEFAULT_CADENCE);
     const schemaOk = defaults && typeof defaults === 'object'
       && cadKeys.length > 0
-      && cadKeys.every((k) => Number.isInteger(defaults[k]) && defaults[k] >= 0)
+      && cadKeys.every((k) => k === 'interview_followups'
+        ? defaults[k] === true
+        : Number.isInteger(defaults[k]) && defaults[k] >= 0)
       && Object.keys(defaults).length === cadKeys.length;
     if (schemaOk) {
-      pass('followup-cadence --json emits a complete integer cadenceDefaults for the web to derive from (#2369)');
+      pass('followup-cadence --json emits a complete cadenceDefaults for the web to derive from (#2369)');
     } else {
       fail(`cadenceDefaults payload broken — the web cadence form loses its baseline (#2369): ${JSON.stringify(defaults)}`);
     }
@@ -17402,7 +17401,7 @@ try {
     // would be reverting to, which is the #2369 mistake exactly.
     const emptyOk = emptyDefaults && typeof emptyDefaults === 'object'
       && Object.keys(emptyDefaults).length === cadKeys.length
-      && cadKeys.every((k) => Number.isInteger(emptyDefaults[k]) && emptyDefaults[k] === DEFAULT_CADENCE[k]);
+      && cadKeys.every((k) => emptyDefaults[k] === DEFAULT_CADENCE[k]);
     if (emptyOk) {
       pass('followup-cadence emits cadenceDefaults even when the tracker is empty (#4005)');
     } else {

@@ -727,7 +727,7 @@ Lưu bản đánh giá đầy đủ vào `reports/{###}-{company-slug}-{YYYY-MM-
 (danh sách 15-20 từ khóa từ JD để tối ưu ATS)
 
 ## Keyword Coverage
-(tự tạo bởi `keyword-match.mjs` (1b) — coverage %, present, thin, missing)
+(tự tạo bởi `keyword-match.mjs` (1b) — coverage %, present, missing)
 
 ## Job Description (archived verbatim)
 (toàn văn tin tuyển dụng, dán nguyên văn — xem yêu cầu bên dưới)
@@ -764,7 +764,7 @@ process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1
 
 Mặc định lệnh quét `cv.md` gốc -- đọc kết quả như **danh sách khoảng trống trước khi điều chỉnh** (từ khóa JD nào cần đưa vào khi điều chỉnh CV), không phải phán quyết về tài liệu bạn sẽ gửi; đầu ra ghi rõ nó đã quét gì. Để kiểm tra CV cuối cùng đã điều chỉnh, thêm `"cv": "{path}"` vào file JSON (mode `pdf` làm việc này trên HTML đã tạo).
 
-**Chỉ để chẩn đoán:** nó đánh dấu từ khóa thiếu/mỏng để người dùng quyết định nên củng cố gì. Không bao giờ bịa -- chỉ thêm từ khóa nếu nó phản ánh kinh nghiệm thật của người dùng (xem `_shared.md`).
+**Chỉ để chẩn đoán:** kết quả liệt kê các từ khóa không tìm thấy. CV có thể mô tả cùng kỹ năng bằng cách diễn đạt khác. Không bao giờ bịa -- chỉ thêm từ khóa nếu nó phản ánh kinh nghiệm thật của người dùng (xem `_shared.md`).
 
 ### 2. Ghi vào tracker
 

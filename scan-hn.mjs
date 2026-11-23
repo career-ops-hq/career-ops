@@ -237,5 +237,9 @@ if (isMainModule(import.meta.url)) {
   // through to one. Inside the main-module guard because
   // tests/hn-scanner.test.mjs imports this module.
   validateFlags(process.argv.slice(2), KNOWN_FLAGS, USAGE);
-  main().catch(err => { console.error("Fatal:", err.message); process.exit(1); });
+  // process.exitCode, not process.exit(1): a fatal error here comes after the
+  // HN requests, and on Windows Node 24 aborts when process.exit() runs right
+  // after a request (nodejs/node#56645, the crash in #3788), printing a libuv
+  // assertion and a crash code instead of this message and exit 1.
+  main().catch(err => { console.error("Fatal:", err.message); process.exitCode = 1; });
 }
