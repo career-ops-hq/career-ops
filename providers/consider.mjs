@@ -43,8 +43,8 @@ import { workplaceField } from './_workplace-type.mjs';
 // `consider_posted_since` (optional, off by default) is the board's own
 // "Posted" filter: an ISO 8601 duration such as "P7D", sent as
 // `query.postedSince`. The board then returns only jobs posted in that window,
-// so a large board (Lightspeed lists about 17,700 jobs) is read for the window
-// and not cut at `max_pages`. An entry without it reads the whole board, as
+// so a large board (Lightspeed lists about 17,700 jobs) is read for the window,
+// and cut at `max_pages` only if the window holds more jobs than that. An entry without it reads the whole board, as
 // before.
 //
 // `salary` is read from the job's `salary` object when its period is a year.
