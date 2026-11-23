@@ -165,6 +165,9 @@ export function extractLabels(body) {
   return labels;
 }
 
+// A labeled segment (see extractLabels) is never a positional company or title cell.
+const LABEL_CELL_RE = /^(?:posted|trust|yrs|note|rank):/;
+
 /**
  * Extract the company name (positional 2nd cell) from a pipeline row body.
  * @param {string} body - Raw pipeline row body.
@@ -172,7 +175,7 @@ export function extractLabels(body) {
  */
 export function lineCompany(body) {
   const parts = body.split('|').map((s) => s.trim());
-  return parts.length > 1 ? parts[1] || '' : '';
+  return parts.length > 1 && !LABEL_CELL_RE.test(parts[1]) ? parts[1] : '';
 }
 
 /**
@@ -182,7 +185,7 @@ export function lineCompany(body) {
  */
 export function lineTitle(body) {
   const parts = body.split('|').map((s) => s.trim());
-  return parts.length > 2 ? parts[2] || '' : '';
+  return parts.length > 2 && !LABEL_CELL_RE.test(parts[2]) ? parts[2] : '';
 }
 
 /**

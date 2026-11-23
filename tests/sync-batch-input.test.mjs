@@ -186,6 +186,18 @@ try {
     '- [ ] https://jobs.example.com/y/3 | Yar | Role',
   ]).join() === 'https://jobs.example.com/z/1,https://jobs.example.com/y/3');
 
+  // Labeled segments (scan.mjs formatPipelineOffer, rank-pipeline.mjs) are not company/title cells.
+  const labeled = dedupe([
+    '- [ ] https://jobs.example.com/a/20 | posted: 2026-06-18 | trust: 80',
+    '- [ ] https://www.linkedin.com/jobs/view/21 | posted: 2026-06-18 | trust: 80',
+  ]);
+  check('labeled segments are not matched as company and title', labeled.length === 2);
+  const labeledTitle = dedupe([
+    '- [ ] https://jobs.example.com/a/22 | Acme | posted: 2026-06-18',
+    '- [ ] https://www.linkedin.com/jobs/view/23 | Acme | posted: 2026-06-18',
+  ]);
+  check('a labeled segment is not matched as a title', labeledTitle.length === 2);
+
   // ── SSRF: bracketed unspecified IPv6 address ──
   check('bracketed unspecified IPv6 ([::]) is rejected', !isSafePublicHttpUrl('http://[::]/'));
   check('bracketed unspecified IPv6 with port is rejected', !isSafePublicHttpUrl('http://[::]:8080/'));
