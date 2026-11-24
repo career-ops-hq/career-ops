@@ -467,6 +467,29 @@ try {
     fail(`lever.fetch() inherited-name salaries = ${JSON.stringify([salaryRows[11]?.salary, salaryRows[12]?.salary])}`);
   }
 
+  // A { min: 0, max: 0 } salaryRange is a placeholder seen on public Lever
+  // boards (62 postings in a 576-board sample, 2026-11-24). Mapped as salary
+  // { min: 0, max: 0 }, it failed any salary_filter min and so dropped the
+  // job. A 0 floor under a real maximum is a real range and stays.
+  const zeroRows = await lever.fetch(
+    { name: 'Acme', careers_url: 'https://jobs.lever.co/acme' },
+    { fetchJson: async () => [
+      { text: 'Zero placeholder', hostedUrl: 'https://jobs.lever.co/acme/z1', salaryRange: { currency: 'CAD', interval: 'per-month-salary', min: 0, max: 0 } },
+      { text: 'Zero min only', hostedUrl: 'https://jobs.lever.co/acme/z2', salaryRange: { currency: 'USD', interval: 'per-year-salary', min: 0 } },
+      { text: 'Up to', hostedUrl: 'https://jobs.lever.co/acme/z3', salaryRange: { currency: 'USD', interval: 'per-year-salary', min: 0, max: 150000 } },
+    ] },
+  );
+  if (zeroRows.length === 3 && zeroRows[0].salary === undefined && zeroRows[1].salary === undefined) {
+    pass('lever.fetch() keeps a posting whose salaryRange has no bound above 0, with salary off');
+  } else {
+    fail(`lever.fetch() zero-range rows = ${JSON.stringify(zeroRows.map(r => [r.title, r.salary]))}`);
+  }
+  if (salaryEq(zeroRows[2]?.salary, { min: 0, max: 150000, currency: 'USD' })) {
+    pass('lever.fetch() keeps a 0 floor under a real maximum');
+  } else {
+    fail(`lever.fetch() up-to salary = ${JSON.stringify(zeroRows[2]?.salary)}`);
+  }
+
   // locations and country (#6910)
   const locRows = await lever.fetch(
     { name: 'Acme', careers_url: 'https://jobs.lever.co/acme' },
