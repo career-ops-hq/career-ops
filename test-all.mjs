@@ -24,6 +24,13 @@
  *                                             # below run at the same time as the
  *                                             # discovered suites, in one of the N slots.
  *
+ *   node test-all.mjs --shard <i>/<n>         # Run the i-th of n slices of a full run (CI
+ *                                             # splits a slow leg across machines): every
+ *                                             # n-th discovered suite from the i-th, and the
+ *                                             # inline sections in shard 1 only. Every
+ *                                             # suite is in exactly one shard. See
+ *                                             # tests/shard.mjs.
+ *
  *   A full run (anything but --only) waits for any other full run on this
  *   machine to finish first; CAREER_OPS_TEST_QUEUE=0 skips the wait. See
  *   lib/test-queue.mjs.
@@ -89,6 +96,7 @@ import { MARKER_FILE } from './tests/data-root-guard.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { holdTestQueue } from './lib/test-queue.mjs';
 import { nodeFloor } from './lib/node-floor.mjs';
+import { parseShard, pickShard, runsInlineSections } from './tests/shard.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -657,7 +665,7 @@ async function runDiscoveredParallel(files, jobs, { withInlineSections = false }
 // (#1633/#1635) and reply-watch.mjs: an unknown flag outranks --help, so
 // `--help --bogus` is still an error (#2745). `-h` is the only single-dash
 // flag, since the suite has no short flags for it to collide with.
-const FLAGS_WITH_VALUE = new Set(['--only', '--needs', '--jobs', '--inline-child']);
+const FLAGS_WITH_VALUE = new Set(['--only', '--needs', '--jobs', '--shard', '--inline-child']);
 const KNOWN_FLAGS = new Set([...FLAGS_WITH_VALUE, '--quick', '--help']);
 const USAGE = [
   'Usage:',
@@ -666,6 +674,7 @@ const USAGE = [
   '  node test-all.mjs --only <substring>    Run only the discovered tests/**/*.test.mjs whose path matches',
   '  node test-all.mjs --needs <tool,...>    Run only the suites that declare one of these tools',
   '  node test-all.mjs --jobs <N>            At most N discovered suites at a time',
+  '  node test-all.mjs --shard <i>/<n>       The i-th of n slices of a full run (inline sections in shard 1)',
 ].join('\n');
 const ARGS = process.argv.slice(2);
 const UNKNOWN_FLAGS = [];
@@ -797,6 +806,31 @@ const ONLY = hasFlag(process.argv, '--only') ? (flagValue(process.argv, '--only'
 // are installed: the tool-suites CI job, in the cv-visual image. Composes with
 // --only. Like --only, it skips every inline section.
 const NEEDS = hasFlag(process.argv, '--needs') ? (flagValue(process.argv, '--needs') ?? '') : null;
+
+// `--shard i/n`: one slice of a full run (tests/shard.mjs). Only of a full run,
+// and only in parallel: --only and --needs already pick their own subset, and
+// the serial loop runs the inline sections in this process, where a shard
+// other than the first could not leave them out. Checked before either of
+// those runs starts, so a combination is a usage error rather than a run of
+// something else. The inline sections' child is started with the same command
+// line and serial by design, so it skips the checks.
+const SHARD = (() => {
+  if (!hasFlag(process.argv, '--shard')) return null;
+  const parsed = parseShard(flagValue(process.argv, '--shard') ?? '');
+  if (parsed.error) {
+    console.log(`  ❌ ${parsed.error}`);
+    process.exit(1);
+  }
+  if (INLINE_CHILD === null && (ONLY !== null || NEEDS !== null)) {
+    console.log('  ❌ --shard slices a full run; it cannot be combined with --only or --needs');
+    process.exit(1);
+  }
+  if (INLINE_CHILD === null && JOBS === 1) {
+    console.log('  ❌ --shard runs the suites in parallel; it cannot be combined with --jobs 1 or CAREER_OPS_TEST_JOBS=1');
+    process.exit(1);
+  }
+  return parsed;
+})();
 if (NEEDS !== null) {
   const tools = NEEDS.split(',').map((t) => t.trim()).filter(Boolean);
   const unknown = tools.filter((t) => !Object.hasOwn(REQUIRED_TOOL_ENV, t));
@@ -847,9 +881,19 @@ if (INLINE_CHILD === null) {
 // its own, as in runDiscovered(), and none at all is the hard failure
 // runDiscovered() reports once the sections have run.
 if (INLINE_CHILD === null && JOBS > 1) {
-  const files = discoverTests(TESTS_DIR);
-  if (files.length > 1) {
-    await runDiscoveredParallel(files, JOBS, { withInlineSections: true });
+  const all = discoverTests(TESTS_DIR);
+  const files = SHARD ? pickShard(all, SHARD) : all;
+  if (SHARD) {
+    const inline = runsInlineSections(SHARD) ? ', and the inline sections' : '; the inline sections run in shard 1';
+    console.log(`\n🧪 shard ${SHARD.index}/${SHARD.count}: ${files.length} of ${all.length} discovered suites${inline}\n`);
+    if (files.length === 0) {
+      // More shards than suites. Green here would read as a slice that passed.
+      fail(`shard ${SHARD.index}/${SHARD.count} has no suites to run (${all.length} discovered): use fewer shards`);
+      finish();
+    }
+  }
+  if (files.length > 1 || SHARD) {
+    await runDiscoveredParallel(files, JOBS, { withInlineSections: !SHARD || runsInlineSections(SHARD) });
     finish();
   }
 }

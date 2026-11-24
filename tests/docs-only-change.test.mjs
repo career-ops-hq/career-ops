@@ -257,62 +257,95 @@ before(() => {
   jobs = load(readFileSync(join(ROOT, '.github', 'workflows', 'test.yml'), 'utf8')).jobs;
 });
 
-test('the three required legs keep their names, so the checks still report', () => {
-  assert.deepEqual(jobs.test.strategy.matrix.os, ['ubuntu-latest', 'macos-latest', 'windows-latest']);
-  assert.equal(jobs.test.name, undefined, 'a job name would change the required check names');
+// The three required checks, by the name each job reports under.
+const checkName = (id, job) => job.name ?? (job.strategy?.matrix?.os ? `${id} (${job.strategy.matrix.os[0]})` : id);
+const reporters = (check) => Object.entries(jobs).filter(([id, job]) => checkName(id, job) === check).map(([id]) => id);
+
+test('the three required checks are each reported by exactly one job', () => {
+  // A second job under the same name would make the check ambiguous; none
+  // would leave it waiting forever.
+  assert.deepEqual(jobs.test.strategy.matrix.os, ['ubuntu-latest']);
+  assert.equal(jobs.test.name, undefined, 'a job name would change the Ubuntu check name');
+  assert.deepEqual(reporters('test (ubuntu-latest)'), ['test']);
+  assert.deepEqual(reporters('test (macos-latest)'), ['test-macos']);
+  assert.deepEqual(reporters('test (windows-latest)'), ['test-windows']);
 });
 
-test('a failed or skipped classifier cannot stop the required legs', () => {
-  assert.equal(jobs.test.needs, 'changes');
-  assert.match(jobs.test.if, /!cancelled\(\)/);
-  assert.doesNotMatch(jobs.test.if, /docs_only/, 'the job must run so its check reports; only its steps skip');
-});
-
-test('a leg skips on a pull request or a docs-only answer, and never the Ubuntu one', () => {
-  // macOS and Windows run in the merge queue, before anything reaches main;
-  // on a PR only Ubuntu runs the suite. A docs-only change skips them in the
-  // queue too.
-  assert.equal(jobs.test.env.SKIP_LEG, "${{ matrix.os != 'ubuntu-latest' && (github.event_name == 'pull_request' || needs.changes.outputs.docs_only == 'true') }}");
-});
-
-test('in the merge queue, a code change runs every leg', () => {
-  // The rule above, evaluated the way Actions would for each case. A merge_group
-  // run that is not docs-only must skip nothing: that is what keeps the PR-only
-  // skip from letting a macOS or Windows failure reach main.
-  const skip = ({ os, event, docsOnly }) => os !== 'ubuntu-latest' && (event === 'pull_request' || docsOnly === 'true');
-  for (const os of ['ubuntu-latest', 'macos-latest', 'windows-latest']) {
-    assert.equal(skip({ os, event: 'merge_group', docsOnly: 'false' }), false, os);
-    assert.equal(skip({ os, event: 'merge_group', docsOnly: '' }), false, `${os}, classifier failed`);
+test('a failed or skipped classifier cannot stop a required check', () => {
+  for (const id of ['test', 'test-macos', 'test-windows']) {
+    assert.match(jobs[id].if, /^\$\{\{ !cancelled\(\) \}\}$/, id);
   }
-  assert.equal(skip({ os: 'ubuntu-latest', event: 'pull_request', docsOnly: 'true' }), false);
-  assert.equal(skip({ os: 'windows-latest', event: 'pull_request', docsOnly: 'false' }), true);
-  // The expression is the one modelled here, token for token.
-  assert.match(jobs.test.env.SKIP_LEG, /matrix\.os != 'ubuntu-latest' && \(github\.event_name == 'pull_request' \|\| needs\.changes\.outputs\.docs_only == 'true'\)/);
+  assert.equal(jobs.test.needs, 'changes');
+});
+
+test('Ubuntu runs the whole suite everywhere: no skip, no shard', () => {
+  assert.equal(jobs.test.env?.SKIP_LEG, undefined);
+  for (const step of jobs.test.steps) assert.doesNotMatch(String(step.if ?? ''), /SKIP_LEG|docs_only/, step.name || step.run || step.uses);
+  assert.ok(jobs.test.steps.some((step) => step.run === 'node test-all.mjs --quick'));
+});
+
+const SHARDED = { macos: { suite: 'suite-macos', gate: 'test-macos', os: 'macos-latest', n: 2 }, windows: { suite: 'suite-windows', gate: 'test-windows', os: 'windows-latest', n: 3 } };
+
+test('macOS and Windows shards run only in the merge queue, for a change that is not docs-only', () => {
+  for (const { suite, os, n } of Object.values(SHARDED)) {
+    const job = jobs[suite];
+    assert.equal(job['runs-on'], os);
+    assert.equal(job.if, "${{ !cancelled() && github.event_name == 'merge_group' && needs.changes.outputs.docs_only != 'true' }}", suite);
+    assert.deepEqual(job.strategy.matrix.shard, Array.from({ length: n }, (_, i) => i + 1), suite);
+    assert.equal(job.strategy['fail-fast'], false, `${suite}: one shard failing must not cancel the others`);
+    const run = job.steps.find((step) => String(step.run).startsWith('node test-all.mjs'));
+    assert.equal(run.run, `node test-all.mjs --quick --shard "\${{ matrix.shard }}/${n}"`, suite);
+  }
+});
+
+test('the shard rule, evaluated: the queue runs them for code, never on a PR, and a failed classifier runs them', () => {
+  const runs = ({ event, docsOnly }) => event === 'merge_group' && docsOnly !== 'true';
+  assert.equal(runs({ event: 'merge_group', docsOnly: 'false' }), true);
+  assert.equal(runs({ event: 'merge_group', docsOnly: '' }), true, 'classifier failed');
+  assert.equal(runs({ event: 'merge_group', docsOnly: 'true' }), false);
+  assert.equal(runs({ event: 'pull_request', docsOnly: 'false' }), false);
+});
+
+test('macOS and Windows run the same steps, so the two legs cannot drift apart', () => {
+  const strip = (steps) => JSON.stringify(steps).replace(/\/[23]\\"/g, '/N\\"');
+  assert.equal(strip(jobs['suite-macos'].steps), strip(jobs['suite-windows'].steps));
+});
+
+test('a gate passes on every shard passing, or on a skip that was meant, and on nothing else', () => {
+  for (const { suite, gate } of Object.values(SHARDED)) {
+    const job = jobs[gate];
+    assert.equal(job['runs-on'], 'ubuntu-latest', `${gate} must not wait for a macOS or Windows runner`);
+    assert.deepEqual(job.needs, ['changes', suite]);
+    const [step] = job.steps;
+    assert.equal(step.env.RESULT, `\${{ needs.${suite}.result }}`);
+    assert.equal(step.env.MAY_SKIP, "${{ github.event_name == 'pull_request' || needs.changes.outputs.docs_only == 'true' }}");
+    // The script, run for every outcome GitHub reports.
+    const outcome = (RESULT, MAY_SKIP) => spawnSync('bash', ['-c', step.run], { env: { ...process.env, RESULT, MAY_SKIP }, encoding: 'utf8' }).status;
+    if (process.platform === 'win32') continue; // bash semantics checked where bash is native
+    assert.equal(outcome('success', 'false'), 0);
+    assert.equal(outcome('skipped', 'true'), 0, 'a PR or docs-only change');
+    assert.equal(outcome('skipped', 'false'), 1, 'skipped in a merge queue run of code: never green');
+    for (const r of ['failure', 'cancelled', '']) assert.equal(outcome(r, 'true'), 1, `"${r}"`);
+  }
 });
 
 test('the workflow still runs in the merge queue', () => {
   const on = load(readFileSync(join(ROOT, '.github', 'workflows', 'test.yml'), 'utf8')).on;
-  assert.ok(Object.hasOwn(on, 'merge_group'), 'without merge_group the queue would never run the macOS and Windows legs');
+  assert.ok(Object.hasOwn(on, 'merge_group'), 'without merge_group the queue would never run the macOS and Windows shards');
 });
 
-test('the Go dashboard tests start early and still decide the leg', () => {
-  const steps = jobs.test.steps;
-  const start = steps.findIndex((step) => step.id === 'go_start');
-  const wait = steps.findIndex((step) => step.name === 'Go dashboard tests');
-  const suite = steps.findIndex((step) => step.run === 'node test-all.mjs --quick');
-  assert.ok(start > 0 && start < suite && suite < wait, `start ${start}, suite ${suite}, wait ${wait}`);
-  assert.match(steps[start].run, /go test \.\/\.\.\./);
-  assert.match(steps[wait].if, /steps\.go_start\.outcome == 'success'/, 'never wait for a run that did not start');
-  assert.match(steps[wait].run, /exit "\$\(cat "\$out\/go-test\.exit"\)"/, 'the leg ends with the Go exit code');
-});
-
-test('every step of a skipped leg is skipped, apart from the one saying why', () => {
-  const [notice, ...rest] = jobs.test.steps;
-  assert.equal(notice.if, "env.SKIP_LEG == 'true'");
-  for (const step of rest) {
-    assert.match(String(step.if), /env\.SKIP_LEG != 'true'/, `step without the guard: ${step.name || step.run || step.uses}`);
+test('the Go dashboard tests start early and still decide the leg (shard 1 only when sharded)', () => {
+  for (const id of ['test', 'suite-macos', 'suite-windows']) {
+    const steps = jobs[id].steps;
+    const start = steps.findIndex((step) => step.id === 'go_start');
+    const wait = steps.findIndex((step) => step.name === 'Go dashboard tests');
+    const suite = steps.findIndex((step) => String(step.run).startsWith('node test-all.mjs'));
+    assert.ok(start > 0 && start < suite && suite < wait, `${id}: start ${start}, suite ${suite}, wait ${wait}`);
+    assert.match(steps[start].run, /go test \.\/\.\.\./);
+    assert.match(steps[wait].if, /steps\.go_start\.outcome == 'success'/, 'never wait for a run that did not start');
+    assert.match(steps[wait].run, /exit "\$\(cat "\$out\/go-test\.exit"\)"/, 'the leg ends with the Go exit code');
+    if (id !== 'test') assert.equal(steps[start].if, '${{ matrix.shard == 1 }}', id);
   }
-  assert.ok(rest.some((step) => step.run === 'node test-all.mjs --quick'), 'the suite is still a step of this job');
 });
 
 test('the optional jobs skip on a docs-only PR, and a failed classifier runs them', () => {
