@@ -30,9 +30,16 @@ ${preloadBody}`);
 }
 
 test('a miss exits 1, silently, without calling process.exit', () => {
-  const result = runFetchJd(`globalThis.fetch = async () => new Response('', { status: 404 });`);
+  const result = runFetchJd(`globalThis.fetch = async () => new Response('', { status: 500 });`);
   assert.equal(result.status, 1, describeSpawn(result));
   assert.equal(result.stdout, '');
+  assert.equal(result.stderr, '');
+});
+
+test('a posting page answering 404 exits 3 as closed, without calling process.exit', () => {
+  const result = runFetchJd(`globalThis.fetch = async () => new Response('', { status: 404 });`);
+  assert.equal(result.status, 3, describeSpawn(result));
+  assert.equal(result.stdout, 'CLOSED_POSTING HTTP 404');
   assert.equal(result.stderr, '');
 });
 
