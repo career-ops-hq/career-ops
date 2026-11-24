@@ -1,7 +1,7 @@
 // Paylocity holds a client to a request rate (5 requests inside about a second
 // earned a 30 s block). The provider spaces requests for every worker and
 // pauses all of them for a 429's Retry-After.
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 // The interval is read at import time, so pin it before loading the provider.
 process.env.CAREER_OPS_PAYLOCITY_MIN_INTERVAL_MS = '400';
@@ -52,12 +52,13 @@ test('a 429 that lands while a caller sleeps extends that caller\'s wait', async
 
 test('fetch on the real HTTP transport waits its turn; a stub context is not paced', async () => {
   reset();
+  mock.timers.enable({ apis: ['Date'], now: 10_000 });
   const slept = [];
   const http = { transport: 'http', sleep: async (ms) => { slept.push(ms); }, fetchText: async () => PAGE };
   await provider.fetch({ name: 'A', careers_url: `https://recruiting.paylocity.com/Recruiting/Jobs/All/${GUID}` }, http);
   await provider.fetch({ name: 'A', careers_url: `https://recruiting.paylocity.com/Recruiting/Jobs/All/${GUID}` }, http);
-  assert.equal(slept.length, 1, 'the second request waits for the first slot');
-  assert.ok(slept[0] > 300 && slept[0] <= 400, `slept ${slept[0]}`);
+  assert.deepEqual(slept, [400]);
+  mock.timers.reset();
   const stubSlept = [];
   const stub = { sleep: async (ms) => { stubSlept.push(ms); }, fetchText: async () => PAGE };
   await provider.fetch({ name: 'A', careers_url: `https://recruiting.paylocity.com/Recruiting/Jobs/All/${GUID}` }, stub);
