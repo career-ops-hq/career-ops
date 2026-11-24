@@ -19,7 +19,6 @@
 // every other call (set-status) runs for real.
 import { pass, fail, rmSync, ROOT, NODE } from './helpers.mjs';
 import assert from 'node:assert';
-import { test } from 'node:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -142,7 +141,7 @@ const appliedUrl = 'https://job-boards.greenhouse.io/acme/jobs/102';
 const reportlessRow = (url) =>
   `| 12 | 2026-10-01 | Acme | Platform Engineer | — | Applied | ❌ | — | applied | ${url} |`;
 
-test('a reportless row does not take a same-company capture keyed to another report', () => {
+ok('a reportless row does not take a same-company capture keyed to another report', () => {
   const { read, archiveCalls } = outcome(
     [row(5, 12, otherUrl), reportlessRow(appliedUrl)],
     { [`012-2026-10-01_acme_platform-engineer_${captureIdentity(otherUrl)}.pdf`]: '%PDF another application' },
@@ -156,7 +155,7 @@ test('a reportless row does not take a same-company capture keyed to another rep
   assert.ok(!archiveCalls[0].some((arg) => arg.startsWith('--report=')), 'a tracker number must not be written as a report number');
 });
 
-test('a reportless row links the capture of its URL without a report prefix', () => {
+ok('a reportless row links the capture of its URL without a report prefix', () => {
   const { read, archiveCalls } = outcome(
     [row(5, 12, otherUrl), reportlessRow(appliedUrl)],
     {
@@ -169,7 +168,7 @@ test('a reportless row links the capture of its URL without a report prefix', ()
   assert.deepStrictEqual(archiveCalls, []);
 });
 
-test('a reportless row with no URL does not use a numeric match as posting evidence', () => {
+ok('a reportless row with no URL does not use a numeric match as posting evidence', () => {
   const { read, archiveCalls } = outcome(
     [row(5, 12, otherUrl), reportlessRow('')],
     { [`012-2026-10-01_acme_platform-engineer_${captureIdentity(otherUrl)}.pdf`]: '%PDF another application' },
