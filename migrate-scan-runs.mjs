@@ -169,7 +169,15 @@ export async function writeMigrated(target, snapshot, text, lockOptions = {}) {
     // The backup is written from the snapshot already in memory, so the live
     // file is not read again between the check above and the replace below.
     writeFileSync(`${target}.bak`, snapshot, 'utf-8');
-    atomicWriteFile(target, text);
+    try {
+      atomicWriteFile(target, text);
+    } catch (err) {
+      // atomicWriteFile renames before it fsyncs the directory, so it can throw
+      // with the migrated text already in place. Record which side of the
+      // rename it failed on; the lock is still held, so nothing else wrote.
+      err.written = readFileSync(target, 'utf-8') === text;
+      throw err;
+    }
     return { written: true, reason: null };
   }, lockOptions);
 }
@@ -178,7 +186,8 @@ export async function writeMigrated(target, snapshot, text, lockOptions = {}) {
  * Migrate the text read from `target`, print the summary, and with `apply`
  * write the result. Returns the process exit code: 0; 2 when the write was
  * refused because the file changed after it was read; 1 when the write threw
- * (the pipeline lock timed out, or the filesystem failed).
+ * (the pipeline lock timed out, or the filesystem failed). A throw after the
+ * rename still reports `applied: true`, since the migrated file is in place.
  *
  * The --json summary prints after the write, so `applied` reports what
  * happened rather than what was attempted, and it prints when the write
@@ -216,7 +225,10 @@ export async function runMigration(target, before, {
     try {
       outcome = await writeMigrated(target, before, result.text, lockOptions);
     } catch (err) {
-      error(`Could not write ${target}: ${err.message}`);
+      applied = err.written === true;
+      error(applied
+        ? `Migrated ${target}, but the write did not complete cleanly: ${err.message}`
+        : `Could not write ${target}: ${err.message}`);
       code = 1;
     }
     if (outcome?.written) {
