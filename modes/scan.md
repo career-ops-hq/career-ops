@@ -2,7 +2,7 @@
 
 Scans configured job portals, filters by title relevance, and adds new offers to the pipeline for subsequent evaluation.
 
-> **Note (v1.6+):** `scan.mjs` (`npm run scan`) spends no LLM tokens. It loads every provider module in `providers/` whose filename does not start with `_`, then runs the provider the `portals.yml` entry names, or the first provider whose `detect()` matches that entry. A configured local parser is tried before the other detectors. Playwright and WebSearch, in the levels below, are work the agent does. `scan.mjs` does not run them. When no provider matches an entry, scan skips it, names it, and counts it under `skipped — no provider matched`. Do Level 1 (Playwright) for those named companies, and for a company whose local parser failed without a working fallback. Keep Level 3 general queries on, so a company outside `tracked_companies` can still be found. Do not add a company-specific WebSearch for a company a provider already covered.
+> **Note (v1.6+):** `scan.mjs` (`npm run scan`) spends no LLM tokens. It loads every provider module in `providers/` whose filename does not start with `_`, then runs the provider the `portals.yml` entry names, or the first provider whose `detect()` matches that entry. A configured local parser is tried before the other detectors. Playwright and WebSearch, in the levels below, are work the agent does. `scan.mjs` does not run them. When no provider matches an entry, scan skips it, names it, and counts it under `skipped — no provider matched`. Do Level 1 (Playwright) for those named companies, and for a company whose local parser failed without a working fallback. Keep Level 3 general queries on, so a company outside `tracked_companies` can still be found. Do not add a company-specific WebSearch for a company a provider already covered. A provider covers a company only when `fetch()` returns. When `fetch()` throws, scan retries a network or server error once, then names the company in the errors list. Leave that company out of Playwright and the API step, and report the error. It is not a skip. Level 3 still keeps that company's hits.
 >
 > **Rule (v1.8+):** If a company's local parser completes successfully in Level 0, the agent **must not** repeat that company in Playwright (Level 1) or API (Level 2). In Level 3, general queries remain active, but results from companies already covered by a parser are discarded. See [Rule: Successful Local Parser](#rule-successful-local-parser--no-expensive-scraping-repetition).
 
@@ -123,11 +123,11 @@ During the agent's scan, keep the **`local_parser_ok`** set in memory. This set 
 - Level 3: do not deactivate cross-cutting queries (`site:jobs.ashbyhq.com`, `site:boards.greenhouse.io`, etc.) — these are used to discover **new** companies. Only filter out results for companies already in `tracked_companies` with a successful parser.
 - Do not create dedicated `search_queries` for a company with an active local parser (e.g. `site:jobs.ashbyhq.com/cohere "AI Engineer"`); use the parser or, if it fails, Playwright/API.
 
-**Recommended Level 0:** run `node scan.mjs` (or `npm run scan`) at the start of the agent's workflow. This covers local parsers and every provider in `providers/` in one zero-token step. The summary counts how many companies used a local parser. It does not name them. Scan names the companies no provider claimed. Those, and a company whose local parser failed, are the ones for Level 1 (Playwright). Level 3 general queries stay on.
+**Recommended Level 0:** run `node scan.mjs` (or `npm run scan`) at the start of the agent's workflow. This covers local parsers and every provider in `providers/` in one zero-token step. The summary counts how many companies used a local parser. It does not name them. Scan names the companies no provider claimed. Those, and a company whose local parser failed, are the ones for Level 1 (Playwright). A provider whose fetch threw is not one of them. Scan names that company in the errors list. Report the error, and leave the company out of Playwright and the API step. Level 3 general queries stay on, and that company's hits stay in.
 
 ### Level 1 — Direct Playwright (PRIMARY)
 
-**For each company scan named as unmatched, and each company whose local parser failed:** Navigate to its `careers_url` with Playwright (`browser_navigate` + `browser_snapshot`), read ALL visible job listings, and extract the title + URL for each. A company a provider already covered stays out of this step. This is the most reliable method because:
+**For each company scan named as unmatched, and each company whose local parser failed:** Navigate to its `careers_url` with Playwright (`browser_navigate` + `browser_snapshot`), read ALL visible job listings, and extract the title + URL for each. A company stays out of this step when a provider's fetch returned, and when that fetch threw. A thrown fetch is in the scan errors list. Report it. This is the most reliable method because:
 - It views the page in real time (not cached Google results)
 - It works with SPAs (Ashby, Lever, Workday)
 - It detects new offers instantly
@@ -139,7 +139,7 @@ During the agent's scan, keep the **`local_parser_ok`** set in memory. This set 
 
 ### Level 2 — ATS APIs / Feeds (COMPLEMENTARY)
 
-For a company scan skipped, or one whose local parser failed, when it has a public API or structured feed, use the JSON/XML response as a fast complement to Level 1. A company a provider already covered stays out of this step. This is faster than Playwright and reduces visual scraping errors.
+For a company scan skipped, or one whose local parser failed, when it has a public API or structured feed, use the JSON/XML response as a fast complement to Level 1. A company stays out of this step when a provider's fetch returned, and when that fetch threw. Report the error. Do not call that API again. This is faster than Playwright and reduces visual scraping errors.
 
 **Current Support (variables inside `{}`):**
 - Full provider table: [Supported job boards](../docs/SUPPORTED_JOB_BOARDS.md)
@@ -165,17 +165,17 @@ For a company scan skipped, or one whose local parser failed, when it has a publ
 
 ### Level 3 — WebSearch Queries (BROAD DISCOVERY)
 
-The `search_queries` with `site:` filters cover portals transversally (all Ashby, all Greenhouse, etc.). Useful for discovering NEW companies that are not yet in `tracked_companies`, but results might be outdated. After filtering out hits from companies in `local_parser_ok` or already covered by a provider, the remaining results are deduplicated with Levels 0–2.
+The `search_queries` with `site:` filters cover portals transversally (all Ashby, all Greenhouse, etc.). Useful for discovering NEW companies that are not yet in `tracked_companies`, but results might be outdated. After filtering out hits from companies in `local_parser_ok` or already covered by a provider, the remaining results are deduplicated with Levels 0–2. A fetch that threw is not coverage, so those hits stay.
 
 > **Caution — Level-3 hits can be weeks stale.** WebSearch is fed by a search index that lags the live board, so a result can describe a posting that has already closed. Treat every Level-3 hit as unverified: before adding it to `data/pipeline.md` or evaluating it, confirm liveness against the real posting (`node check-liveness.mjs <url>` for ATS-hosted pages, or Playwright for non-ATS pages). Unlike the real-time ATS responses in Level 2, a Level-3 snippet is never proof a role is still open.
 
 **Execution Priority:**
 1. Level 0: Local Parser → companies with a configured `parser:` and existing script; build `local_parser_ok`
-2. Level 1: Playwright → companies scan named as unmatched, and companies whose local parser failed
-3. Level 2: API → those same companies when they have an `api:`
-4. Level 3: WebSearch → all `search_queries` with `enabled: true`; discard hits from companies a provider or a successful local parser already covered
+2. Level 1: Playwright → companies scan named as unmatched, and companies whose local parser failed. A provider fetch that threw stays off this list. Report the error from the scan errors list.
+3. Level 2: API → those same companies when they have an `api:`. A provider fetch that threw stays off this list too.
+4. Level 3: WebSearch → all `search_queries` with `enabled: true`; discard hits from companies a provider or a successful local parser already covered. A fetch that threw is not coverage, so keep that company's hits.
 
-Levels are additive — they are executed in order, and results are merged and deduplicated. Companies in `local_parser_ok`, and companies a provider already covered, **do not** go through Levels 1 or 2. In Level 3, they only contribute transversal discovery (other companies on the same portal).
+Levels are additive — they are executed in order, and results are merged and deduplicated. Companies in `local_parser_ok`, and companies a provider already covered, **do not** go through Levels 1 or 2. A company whose provider fetch threw also stays out of Levels 1 and 2. Report that error. In Level 3, a covered company only contributes transversal discovery (other companies on the same portal), and a company whose fetch threw keeps its own hits.
 
 ## Workflow
 
@@ -198,6 +198,8 @@ Levels are additive — they are executed in order, and results are merged and d
 4. **Level 1 — Playwright Scan** (sequential — NEVER parallel Playwright):
    Browser-backed workers share one browser session, so concurrent `browser_navigate`/`browser_snapshot` calls cross-contaminate and a snapshot can return another company's page (#2551). Batching stays correct for the fetch-based levels below (Level 2 APIs/feeds, Level 3 queries), which open no shared session.
    For each company scan named as unmatched, and each company whose local parser failed, with `enabled: true` and a defined `careers_url`:
+   A company whose provider fetch threw is not in this loop. Report the error scan printed.
+
    a. `browser_navigate` to `careers_url`.
    b. `browser_snapshot` to read all job listings.
    c. If the page has filters/departments, navigate the relevant sections.
@@ -207,7 +209,7 @@ Levels are additive — they are executed in order, and results are merged and d
    g. If `careers_url` fails (404, redirect), attempt `scan_query` as a fallback and note it to update the URL later.
 
 5. **Level 2 — ATS APIs / Feeds** (parallel):
-   For each of those companies with a defined `api:` and `enabled: true`:
+   For each of those companies with a defined `api:` and `enabled: true` (a provider fetch that threw is not in this list):
    a. WebFetch the API/feed URL.
    b. If `api_provider` is defined, use its parser; if undefined, infer by domain (`boards-api.greenhouse.io`, `api.ashbyhq.com`, `api.(eu.)?lever.co`, `*.bamboohr.com`, `*.teamtailor.com`, `*.myworkdayjobs.com`, `*.breezy.hr`).
    c. For **Ashby**, send a GET request to `https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true` (slug from `careers_url`). Parse `jobs[]` → `title`, `jobUrl`, `location` (fold in `secondaryLocations[]`), `compensation`. No GraphQL needed.
@@ -223,7 +225,7 @@ Levels are additive — they are executed in order, and results are merged and d
       - **title**: from the result title (before " @ " or " | ")
       - **url**: URL of the result
       - **company**: after " @ " in the title, or extract from the domain/path
-   c. **Skip** the result if the normalized `company` matches any name in `local_parser_ok`, or a company a provider already covered.
+   c. **Skip** the result if the normalized `company` matches any name in `local_parser_ok`, or a company a provider already covered. A provider whose fetch threw did not cover that company, so keep the hit.
    d. Accumulate the rest in the candidates list (deduplicated against Levels 0+1+2).
 
 6. **Filter by Title** using `title_filter` from `portals.yml`:

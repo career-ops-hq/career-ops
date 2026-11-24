@@ -30,6 +30,9 @@ test('the scan mode does not tell the agent to ignore every other provider', () 
   assert.match(level0, /local parser failed/);
   assert.match(level0, /Level 1 \(Playwright\)/);
   assert.match(level0, /Level 3 general queries stay on/);
+  assert.match(level0, /fetch threw/);
+  assert.match(level0, /errors list/);
+  assert.match(level0, /Report the error/);
   assert.doesNotMatch(level0, /Level 1 \(Playwright\) or Level 3 \(WebSearch\)/);
   assert.doesNotMatch(level0, /local-parser` successfully/);
 });
