@@ -351,6 +351,7 @@ export function reportToObservation(content, num, date, candidateLocation = null
         ? 'from report Machine Summary; band: ' + salarySelection.band
         : 'from report Machine Summary',
       parsed: salarySelection.parsed,
+      ...(salarySelection.band ? { salaryBand: salarySelection.band } : {}),
       ...(salarySelection.bands.length ? { salaryBands: salarySelection.bands } : {}),
       period: compensationPeriod(adv), postingLocation,
     },
@@ -651,7 +652,7 @@ function pickEffective(type, candidates) {
     currency: top.currency, raw: top.amount,
     period: top.period ?? compensationPeriod(top.amount),
     postingLocation: top.postingLocation ?? null,
-    ...(top.note ? { note: top.note } : {}),
+    ...(top.salaryBand ? { note: 'band: ' + top.salaryBand } : {}),
     // only present when true, so output for data without third-party rows is unchanged
     ...(top.source === 'third-party' ? { unverified: true } : {}),
   };
