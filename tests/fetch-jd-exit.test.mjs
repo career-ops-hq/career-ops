@@ -29,7 +29,9 @@ const exit = process.exit;
 process.exit = (code) => { writeSync(2, 'process.exit called with ' + code + '\\n'); exit(99); };
 ${preloadBody}`);
     return spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, join(ROOT, 'fetch-jd.mjs'), POSTING],
-      { cwd: ROOT, encoding: 'utf8', timeout: 20000 });
+      // Either variable set in the caller's shell makes the page fetch miss
+      // before the stubbed status is read.
+      { cwd: ROOT, encoding: 'utf8', timeout: 20000, env: { ...process.env, CAREER_OPS_NO_DNS_CACHE: '', NODE_USE_ENV_PROXY: '' } });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
