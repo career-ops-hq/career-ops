@@ -1,7 +1,7 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
-// Jobindex (Denmark) provider: jobindex.dk, the largest Danish job board.
+// Jobindex (Denmark) provider: jobindex.dk, a Danish job board.
 // A `job_boards:` feed. Wire it in with a Jobindex search URL, copied from the
 // browser after setting the search on the site:
 //
@@ -33,6 +33,9 @@
 // with the employer name as ALT, and a short teaser. The teaser is not the
 // job description, so it is not returned as `description`. The card's job
 // link is the Jobindex posting page; the feed carries no employer link.
+// The area is free text ("København og mulighed for hjemmearbejde": a place
+// plus a work model), so it becomes `location` as given and is not split into
+// `locations`.
 // Every non-ASCII character in the feed is an entity, and the card HTML is
 // entity-escaped once more inside the XML.
 
@@ -58,6 +61,13 @@ const MAX_PAGES_CAP = 250;
 const INTER_PAGE_DELAY_MS = 250;
 
 const ITEM_RE = /<item\b[^>]*>[\s\S]*?<\/item>/gi;
+
+// Same-length filler over CDATA and comments, so text inside them is never
+// read as an <item> tag and positions stay aligned with the real feed (as in
+// germantechjobs.mjs).
+function maskCdataAndComments(str) {
+  return str.replace(/<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->/g, (m) => '#'.repeat(m.length));
+}
 
 /**
  * Parse a careers_url into a Jobindex search URL. Throws on anything else.
@@ -118,7 +128,7 @@ function stripTags(s) {
 
 /** Decode, drop zero-width spaces, collapse whitespace. */
 function clean(s) {
-  return decodeEntities(String(s)).replace(/​/g, '').replace(/\s+/g, ' ').trim();
+  return decodeEntities(String(s)).replace(/\u200B/g, '').replace(/\s+/g, ' ').trim();
 }
 
 function cleanUrl(value) {
@@ -138,19 +148,28 @@ function toEpochMs(value) {
 
 /**
  * Parse one page of the Jobindex RSS feed. Exported for unit tests.
- * Keeps ads placed on Jobindex (`PaidJob` cards); counts collected postings in `collected`.
- * Throws when the body is not an RSS channel, or when it has items and none is recognised.
+ * Keeps ads placed on Jobindex (`PaidJob` cards); counts collected postings in
+ * `collected`, and items it cannot read (another card kind, or a placed ad with
+ * no Jobindex link or title) in `unrecognised`.
+ * Throws when the body is not a complete RSS channel, when its <item> tags do
+ * not pair up (a page cut short), or when it has items and none is recognised.
  * @param {string} xml
- * @returns {{ jobs: {title: string, url: string, company: string, location: string, postedAt?: number}[], rawCount: number, collected: number }}
+ * @returns {{ jobs: {title: string, url: string, company: string, location: string, postedAt?: number}[], rawCount: number, collected: number, unrecognised: number }}
  */
 export function parseJobindexFeed(xml) {
   const body = String(xml ?? '');
-  if (!/<rss\b[\s\S]*<channel\b/i.test(body)) {
+  const masked = maskCdataAndComments(body);
+  if (!/<rss\b[\s\S]*<channel\b[\s\S]*<\/channel>/i.test(masked)) {
     throw new Error(`jobindex: unexpected response — expected an RSS <channel>, got: ${JSON.stringify(body.slice(0, 80))}`);
   }
-  const items = body.match(ITEM_RE) || [];
+  const items = [...masked.matchAll(ITEM_RE)].map((m) => body.slice(m.index, m.index + m[0].length));
+  const opened = (masked.match(/<item\b/gi) || []).length;
+  if (opened !== items.length) {
+    throw new Error(`jobindex: ${opened} <item> tag(s) but ${items.length} complete item(s) — the feed page is malformed or cut short`);
+  }
   const jobs = [];
   let collected = 0;
+  let unrecognised = 0;
   for (const item of items) {
     // The card HTML is escaped once inside the XML: decode it once to get HTML,
     // then decode each text node again.
@@ -159,14 +178,23 @@ export function parseJobindexFeed(xml) {
       collected++;
       continue;
     }
-    if (!/class="PaidJob"/i.test(card)) continue;
+    if (!/class="PaidJob"/i.test(card)) {
+      unrecognised++;
+      continue;
+    }
     const url = cleanUrl(tagText(item, 'link'));
-    if (!url) continue;
+    if (!url) {
+      unrecognised++;
+      continue;
+    }
     const feedTitle = clean(tagText(item, 'title'));
     const h4 = card.match(/<h4\b[^>]*>([\s\S]*?)<\/h4>/i);
     const cardTitle = h4 ? clean(stripTags(h4[1])) : '';
     const title = cardTitle || feedTitle;
-    if (!title) continue;
+    if (!title) {
+      unrecognised++;
+      continue;
+    }
     let company = '';
     if (cardTitle && feedTitle.startsWith(`${cardTitle}, `)) company = feedTitle.slice(cardTitle.length + 2).trim();
     if (!company) {
@@ -181,7 +209,7 @@ export function parseJobindexFeed(xml) {
   if (items.length && !jobs.length && !collected) {
     throw new Error(`jobindex: ${items.length} feed item(s) but none recognised — the feed format may have changed`);
   }
-  return { jobs, rawCount: items.length, collected };
+  return { jobs, rawCount: items.length, collected, unrecognised };
 }
 
 /** @param {{ max_pages?: unknown }} entry */
@@ -216,16 +244,17 @@ export default {
     let stop = 'cap';
     for (let page = 1; page <= maxPages; page++) {
       if (page > 1) await sleep(INTER_PAGE_DELAY_MS, ctx);
-      let xml;
+      let parsed;
       try {
-        xml = await fetchTextWithRetry(ctx, buildFeedUrl(entry?.careers_url, page), { redirect: 'error' });
+        parsed = parseJobindexFeed(await fetchTextWithRetry(ctx, buildFeedUrl(entry?.careers_url, page), { redirect: 'error' }));
       } catch (err) {
         if (page === 1 || probing) throw err;
-        stop = 'fetch-error'; // keep the pages already read
+        stop = 'fetch-error'; // a failed or broken later page: keep the pages already read
         break;
       }
-      const { jobs, rawCount, collected } = parseJobindexFeed(xml);
+      const { jobs, rawCount, collected, unrecognised } = parsed;
       if (collected) stats.dropped.collected = (stats.dropped.collected || 0) + collected;
+      if (unrecognised) stats.dropped.unrecognised = (stats.dropped.unrecognised || 0) + unrecognised;
       for (const job of jobs) if (!byUrl.has(job.url)) byUrl.set(job.url, job);
       if (rawCount < PAGE_SIZE) {
         stop = 'complete';
@@ -237,7 +266,7 @@ export default {
     // Read by scan.mjs for the per-source summary; not part of the job list.
     Object.defineProperty(jobs, 'providerStats', { value: stats, enumerable: false });
     if (stop === 'fetch-error') {
-      console.error(`⚠️  jobindex: ${entry?.name || 'entry'} stopped on a fetch error; kept ${jobs.length} posting(s) from the pages already read`);
+      console.error(`⚠️  jobindex: ${entry?.name || 'entry'} stopped on a failed or broken page; kept ${jobs.length} posting(s) from the pages already read`);
       markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
     } else if (stop === 'cap' && !probing) {
       console.error(`⚠️  jobindex: ${entry?.name || 'entry'} truncated at max_pages=${entryMax} (${jobs.length} postings) — raise max_pages on this entry or narrow the search`);

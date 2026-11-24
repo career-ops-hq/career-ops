@@ -195,6 +195,56 @@ try {
     }
   }
 
+  // A page cut short must not read as a shorter, complete page: the walk
+  // stops on a short page, so a cut page would end it early without a sign.
+  {
+    const whole = page(3);
+    for (const [label, body] of [
+      ['a page with no </channel>', whole.slice(0, whole.indexOf('</channel>'))],
+      ['a page cut inside an item', whole.slice(0, whole.lastIndexOf('</item>')) + '</channel>\n</rss>\n'],
+    ]) {
+      try {
+        const out = parseJobindexFeed(body);
+        fail(`parseJobindexFeed should throw on ${label}, got ${out.jobs.length} job(s)`);
+      } catch (err) {
+        if (/expected an RSS <channel>|malformed or cut short/.test(err.message)) pass(`parseJobindexFeed throws on ${label}`);
+        else fail(`parseJobindexFeed ${label}: ${err.message}`);
+      }
+    }
+  }
+
+  // <item> inside a comment or CDATA is text, not an item.
+  try {
+    const link = 'https://www.jobindex.dk/vis-job/h7';
+    const body = feed([
+      '<!-- <item> -->\n',
+      item({ title: 'XML Developer, Acme', link, description: card({ href: link, title: 'XML Developer', area: 'Odense', alt: 'Acme' }) })
+        .replace('<title>XML Developer, Acme</title>', '<title><![CDATA[XML Developer, Acme]]></title><category><![CDATA[<item>]]></category>'),
+    ]);
+    const out = parseJobindexFeed(body);
+    if (out.rawCount === 1 && out.jobs.length === 1 && out.jobs[0].title === 'XML Developer') pass('parseJobindexFeed does not count <item> inside a comment or CDATA');
+    else fail(`parseJobindexFeed masked items: ${JSON.stringify(out)}`);
+  } catch (err) {
+    fail(`parseJobindexFeed masked items threw: ${err.message}`);
+  }
+
+  // Items it cannot read are counted, never dropped without a trace.
+  {
+    const other = '<div class="SomethingNew">x</div>'.replace(/</g, '&#x3C;').replace(/>/g, '&#x3E;').replace(/"/g, '&#x22;');
+    const body = feed([
+      item({ title: 'Own, Acme', link: 'https://www.jobindex.dk/vis-job/h1', description: card({ href: 'https://www.jobindex.dk/vis-job/h1', title: 'Own', area: 'Aarhus', alt: 'Acme' }) }),
+      item({ title: 'New kind', link: 'https://www.jobindex.dk/vis-job/h2', description: other }),
+      item({ title: 'Off site, Acme', link: 'https://evil.example.com/h3', description: card({ href: 'https://evil.example.com/h3', title: 'Off site', area: 'Aarhus', alt: 'Acme' }) }),
+    ]);
+    const parsed = parseJobindexFeed(body);
+    const out = await jobindex.fetch({ name: 'unknown', careers_url: 'https://www.jobindex.dk/jobsoegning?q=x' }, { sleep: async () => {}, fetchText: async () => body });
+    if (parsed.jobs.length === 1 && parsed.unrecognised === 2 && out.length === 1 && out.providerStats?.dropped?.unrecognised === 2) {
+      pass('parseJobindexFeed and fetch() count another card kind and a placed ad without a Jobindex link as unrecognised');
+    } else {
+      fail(`unrecognised: parsed ${JSON.stringify(parsed)}, stats ${JSON.stringify(out.providerStats)}`);
+    }
+  }
+
   // ── fetch ──
   const entry = { name: 'Jobindex test', careers_url: 'https://www.jobindex.dk/jobsoegning?q=python' };
   const noSleep = async () => {};
@@ -238,6 +288,22 @@ try {
     else fail(`fetch() probe: ${n} calls, truncated=${JSON.stringify(out.truncated)}`);
   }
 
+  {
+    // A broken later page is handled like a failed one: the pages already
+    // read are kept and the board is marked partial.
+    let n = 0;
+    const broken = page(20, 20).replace(/<\/channel>[\s\S]*$/, '');
+    const out = await jobindex.fetch(entry, { sleep: noSleep, fetchText: async () => (++n === 1 ? page(20) : broken) });
+    if (n === 2 && out.length === 20 && out.truncated?.reason === 'fetch-error') pass('fetch() keeps the pages read before a broken page and marks the board fetch-error');
+    else fail(`fetch() broken later page: n=${n}, ${out.length} jobs, truncated=${JSON.stringify(out.truncated)}`);
+  }
+  try {
+    await jobindex.fetch(entry, { sleep: noSleep, fetchText: async () => '<html>Fejl</html>' });
+    fail('fetch() should throw when the first page is broken');
+  } catch (err) {
+    if (/expected an RSS <channel>/.test(err.message)) pass('fetch() throws when the first page is broken');
+    else fail(`fetch() broken first page: ${err.message}`);
+  }
   {
     class FakeSentinel extends Error {}
     const sentinel = Object.assign(new FakeSentinel('budget'), { status: 404 }); // not retryable
