@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Skeleton } from "@/components/ui/skeleton";
 import { progressModel } from "@/lib/analytics/view-model.mjs";
 
 // The cumulative funnel and its conversion rates, straight from stats.mjs via
@@ -37,8 +36,15 @@ export function FunnelRates() {
       <section className="mt-10">
         <h2 className="font-display text-lg text-landing">Conversion</h2>
         <div className="mt-4 grid gap-3" aria-hidden>
+          {/* Inline rather than a shared Skeleton primitive: this branch is
+              independent of the route-loading work, so it carries no dependency
+              on components added there. */}
           {Array.from({ length: 4 }, (_, i) => (
-            <Skeleton key={i} className="h-9 w-full rounded-md" />
+            <div
+              key={i}
+              className="h-9 w-full animate-pulse rounded-md bg-muted/25"
+              style={{ animationDelay: `${i * 80}ms` }}
+            />
           ))}
         </div>
       </section>
