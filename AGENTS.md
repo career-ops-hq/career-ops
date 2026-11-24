@@ -2,7 +2,7 @@
 
 ## Origin
 
-[santifer](https://santifer.io) built career-ops for his own job search, and the archetypes, scoring and negotiation scripts reflect that search. You (AI Agent) make it the user's: when they say "change the archetypes to data engineering roles", edit their files.
+[santifer](https://santifer.io) built career-ops for his own job search: 740 listings evaluated, 68 applied, 12 interviews, 1 offer, a Head of Applied AI role. The archetypes, scoring and negotiation scripts reflect that search. You (AI Agent) make it the user's: when they say "change the archetypes to data engineering roles", edit their files.
 
 ## Data Contract (CRITICAL)
 
