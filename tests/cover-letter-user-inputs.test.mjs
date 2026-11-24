@@ -83,6 +83,33 @@ test('a plan answer does not support a past percentage the letter repeats', () =
   assert.deepEqual(result.invented, ['40%']);
 });
 
+test('a Turkish plan supports its own percentage and leaves completed work to career evidence', () => {
+  const plan = 'İlk 90 günde dönüşüm oranını %20 artırmayı planlıyorum.';
+  assert.deepEqual(check(letter(plan)).invented, ['20%']);
+  assert.equal(check(letter(plan), [plan]).verdict, 'pass');
+  assert.equal(check(letter('Dönüşüm oranını %20 artıracağım.'), [plan]).verdict, 'pass');
+  assert.deepEqual(check(letter('Dönüşüm oranını %20 artırdım ve bunu sürdürmeyi planlıyorum.'), [plan]).invented, ['20%']);
+  assert.deepEqual(check(letter('Geçmişte dönüşümü %20 artırdım ve burada dönüşümü %20 artırmayı planlıyorum.'), [plan]).invented, ['20%']);
+});
+
+test('Turkish percentage plans allow a decimal comma and an explicit rate modifier', () => {
+  const plan = 'Dönüşüm oranını %20,5 oranında artırmayı planlıyorum.';
+  assert.deepEqual(check(letter(plan)).invented, ['20.5%']);
+  assert.equal(check(letter(plan), ['My target is 20.5%.']).verdict, 'pass');
+  assert.equal(check(letter(plan.replace(',', '.')), [plan]).verdict, 'pass');
+  assert.equal(check(letter(plan.toLocaleUpperCase('tr')), [plan]).verdict, 'pass');
+  assert.deepEqual(check(letter('DÖNÜŞÜMÜ %20,5 ARTIRDIM.'), [plan]).invented, ['20.5%']);
+  assert.deepEqual(check(letter('Dönüşümü %20,5 artırdım. ' + plan), [plan]).invented, ['20.5%']);
+});
+
+test('leading percentages distinguish achievements from plans and preserve decimal precision', () => {
+  const plan = ['I will improve conversion by 20%.'];
+  assert.deepEqual(check(letter('I increased conversion by %20 and will improve retention.'), plan).invented, ['20%']);
+  assert.deepEqual(check(letter('I will improve conversion by %20.'), plan).invented, []);
+  assert.deepEqual(check(letter('I will improve conversion by %0,125.'), ['My target is 0.125%.']).invented, []);
+  assert.deepEqual(check(letter('I will improve conversion by 0.125%.'), ['My target is %0,125.']).invented, []);
+});
+
 test('a later percentage in the same sentence can still be the plan', () => {
   const result = check(
     letter('I grew revenue 40% and will grow it 50%.'),
@@ -90,6 +117,26 @@ test('a later percentage in the same sentence can still be the plan', () => {
   );
   assert.equal(result.verdict, 'block');
   assert.deepEqual(result.invented, ['40%']);
+});
+
+test('a completed percentage range requires evidence for both endpoints', () => {
+  const plan = ['I will improve retention by 20%.'];
+  assert.deepEqual(check(letter('I increased conversion from %10 to %20 and will improve retention.'), plan).invented, ['10%', '20%']);
+  assert.deepEqual(check(letter('I increased conversion by %10 and will improve retention by %20.'), plan).invented, ['10%']);
+});
+
+test('a relative clause needs factual evidence for its historical percentage', () => {
+  const plan = ['I will improve conversion by 20%.'];
+  assert.deepEqual(check(letter('I will have increased conversion by %20 to match the %20 I achieved last year.'), plan).invented, ['20%']);
+  assert.deepEqual(check(letter('I will have increased conversion by %20 to match the 10% that we previously achieved.'), plan).invented, ['10%']);
+});
+
+test('future-perfect percentages use plan evidence without excusing independent past claims', () => {
+  const plan = ['I will improve conversion by 20%.'];
+  assert.deepEqual(check(letter('I will have increased conversion by %20.'), plan).invented, []);
+  assert.deepEqual(check(letter('I will have increased conversion by %20.'), []).invented, ['20%']);
+  assert.deepEqual(check(letter('I increased retention from %5 to %10 and will have increased conversion by %20.'), plan).invented, ['5%', '10%']);
+  assert.deepEqual(check(letter('I will have increased conversion by %20 as I improved retention by %10.'), plan).invented, ['10%']);
 });
 
 test('a later percentage stays the plan when the earlier past verb has no percentage', () => {
