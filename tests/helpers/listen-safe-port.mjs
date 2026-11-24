@@ -39,7 +39,13 @@ export async function listenOnSafePort(server, host = '127.0.0.1') {
       if (!BAD_PORTS.has(port)) return port;
       await new Promise((resolve) => server.close(resolve));
       const placeholder = createServer();
-      await listen(placeholder, port, host);
+      try {
+        await listen(placeholder, port, host);
+      } catch (err) {
+        // Another process took the port after the close; try the next one.
+        if (err.code !== 'EADDRINUSE') throw err;
+        continue;
+      }
       held.push(placeholder);
     }
     throw new Error(`no fetch-safe port after ${MAX_ATTEMPTS} attempts`);
