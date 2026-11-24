@@ -254,6 +254,10 @@ function main() {
     process.exit(1);
   }
   const firmQuery = firmFile ? readFileSync(firmFile, 'utf-8').split(/\r?\n/)[0].trim() : flagValue(args, '--firm');
+  if (firmFile && !firmQuery) {
+    console.error(`--firm-file: ${firmFile} has no firm name on its first line.`);
+    process.exit(1);
+  }
 
   const history = readIf(PATHS.history).split(/\r?\n/)
     .filter((l) => l.trim() && !l.startsWith('url\t'))
