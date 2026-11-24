@@ -16,6 +16,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+jobs:
   changes:
     name: Classify the change
     # Answers one question for the jobs below: does this PR or merge queue entry
