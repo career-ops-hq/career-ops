@@ -200,6 +200,37 @@ const yamlStr = (body, key) => {
   return v === 'null' || v === '' ? null : v;
 };
 
+const US_STATE_CODES = new Set((
+  'AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS ' +
+  'MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC'
+).split(/\s+/));
+
+const US_STATE_NAMES = new Map((
+  'Alabama AL|Alaska AK|Arizona AZ|Arkansas AR|California CA|Colorado CO|' +
+  'Connecticut CT|Delaware DE|Florida FL|Georgia GA|Hawaii HI|Idaho ID|' +
+  'Illinois IL|Indiana IN|Iowa IA|Kansas KS|Kentucky KY|Louisiana LA|' +
+  'Maine ME|Maryland MD|Massachusetts MA|Michigan MI|Minnesota MN|' +
+  'Mississippi MS|Missouri MO|Montana MT|Nebraska NE|Nevada NV|' +
+  'New Hampshire NH|New Jersey NJ|New Mexico NM|New York NY|' +
+  'North Carolina NC|North Dakota ND|Ohio OH|Oklahoma OK|Oregon OR|' +
+  'Pennsylvania PA|Rhode Island RI|South Carolina SC|South Dakota SD|' +
+  'Tennessee TN|Texas TX|Utah UT|Vermont VT|Virginia VA|Washington WA|' +
+  'West Virginia WV|Wisconsin WI|Wyoming WY|District of Columbia DC'
+).split('|').map((entry) => {
+  const match = entry.match(/^(.+)\s+([A-Z]{2})$/);
+  return [match[1].toLowerCase(), match[2]];
+}));
+
+const salaryStateCode = (value) => {
+  const normalized = String(value ?? '').trim();
+  const upper = normalized.toUpperCase();
+  if (US_STATE_CODES.has(upper)) return upper;
+  return US_STATE_NAMES.get(normalized.toLowerCase()) ?? null;
+};
+
+const normalizeSalaryLocation = (value) => String(value ?? '')
+  .toLowerCase().replace(/[.,]/g, '').replace(/\s+/g, ' ').trim();
+
 /**
  * Parse location-labelled salary ranges without changing the source text.
  * Per-level labels are intentionally not treated as locations.
@@ -209,40 +240,14 @@ function parseLocationSalaryBands(raw) {
     /\s+(?=[^:;\n]{1,80}:\s*(?:[$€£¥]|\d))/g,
     '\n',
   );
-  const stateCodes = new Set((
-    'AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS ' +
-    'MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC'
-  ).split(/\s+/));
-  const stateNames = new Map((
-    'Alabama AL|Alaska AK|Arizona AZ|Arkansas AR|California CA|Colorado CO|' +
-    'Connecticut CT|Delaware DE|Florida FL|Georgia GA|Hawaii HI|Idaho ID|' +
-    'Illinois IL|Indiana IN|Iowa IA|Kansas KS|Kentucky KY|Louisiana LA|' +
-    'Maine ME|Maryland MD|Massachusetts MA|Michigan MI|Minnesota MN|' +
-    'Mississippi MS|Missouri MO|Montana MT|Nebraska NE|Nevada NV|' +
-    'New Hampshire NH|New Jersey NJ|New Mexico NM|New York NY|' +
-    'North Carolina NC|North Dakota ND|Ohio OH|Oklahoma OK|Oregon OR|' +
-    'Pennsylvania PA|Rhode Island RI|South Carolina SC|South Dakota SD|' +
-    'Tennessee TN|Texas TX|Utah UT|Vermont VT|Virginia VA|Washington WA|' +
-    'West Virginia WV|Wisconsin WI|Wyoming WY|District of Columbia DC'
-  ).split('|').map((entry) => entry.split(' ')));
-  const stateCode = (value) => {
-    const v = String(value ?? '').trim();
-    const upper = v.toUpperCase();
-    if (stateCodes.has(upper)) return upper;
-    return stateNames.get(v.toLowerCase()) ?? null;
-  };
-  const normalize = (value) => String(value ?? '')
-    .toLowerCase().replace(/[.,]/g, '').replace(/\s+/g, ' ').trim();
-
   return separated.split(/[;\n]+/).map((part) => {
     const match = part.trim().match(/^(.{1,100}?)\s*:\s*(.+)$/s);
     if (!match) return null;
     const label = match[1].trim();
-    const amount = match[2].trim();
-    const parsed = parseAmount(amount);
+    const parsed = parseAmount(match[2].trim());
     if (!parsed) return null;
 
-    const normalized = normalize(label);
+    const normalized = normalizeSalaryLocation(label);
     let location = null;
     if (/^(?:all other|other)(?: us)? locations?$/.test(normalized) ||
         /^(?:national|nationwide|united states|usa?|us)$/.test(normalized)) {
@@ -252,13 +257,13 @@ function parseLocationSalaryBands(raw) {
     } else {
       const pieces = label.split(',').map((piece) => piece.trim());
       if (pieces.length >= 2) {
-        const state = stateCode(pieces[1]);
+        const state = salaryStateCode(pieces[1]);
         if (state && pieces[0]) {
-          location = { tier: 'city', city: normalize(pieces[0]), state };
+          location = { tier: 'city', city: normalizeSalaryLocation(pieces[0]), state };
         }
       }
       if (!location) {
-        const state = stateCode(label.replace(/\s+state$/i, '').trim());
+        const state = salaryStateCode(label.replace(/\s+state$/i, '').trim());
         if (state) location = { tier: 'state', state };
       }
     }
@@ -278,16 +283,12 @@ export function selectLocationSalaryBand(raw, candidateLocation) {
     label: entry.label, min: entry.parsed.min, max: entry.parsed.max,
   }));
   const parts = String(candidateLocation ?? '').split(',').map((part) => part.trim());
-  const normalize = (value) => String(value ?? '')
-    .toLowerCase().replace(/[.,]/g, '').replace(/\s+/g, ' ').trim();
-  const stateCodes = new Set((
-    'AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS ' +
-    'MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC'
-  ).split(/\s+/));
-  const candidateCity = parts.length >= 2 ? normalize(parts[0]) : (stateCodes.has((parts[0] || '').toUpperCase()) ? null : normalize(parts[0]));
   const candidateState = parts.length >= 2
-    ? (stateCodes.has((parts[1] || '').toUpperCase()) ? parts[1].toUpperCase() : null)
-    : (stateCodes.has((parts[0] || '').toUpperCase()) ? parts[0].toUpperCase() : null);
+    ? salaryStateCode(parts[1])
+    : salaryStateCode(parts[0]);
+  const candidateCity = parts.length >= 2
+    ? normalizeSalaryLocation(parts[0])
+    : (candidateState ? null : normalizeSalaryLocation(parts[0]));
 
   if (!candidateCity && !candidateState) return { parsed: null, band: null, bands: listedBands };
 
