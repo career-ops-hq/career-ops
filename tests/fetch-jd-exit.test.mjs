@@ -20,7 +20,11 @@ function runFetchJd(preloadBody) {
   const dir = mkdtempSync(join(tmpdir(), 'fetch-jd-exit-'));
   try {
     const preload = join(dir, 'preload.mjs');
+    // The child checks the host with its own DNS before fetch runs; a fixed
+    // answer keeps the stubbed status in charge offline.
     writeFileSync(preload, `import { writeSync } from 'node:fs';
+import { setHostResolver } from ${JSON.stringify(pathToFileURL(join(ROOT, 'liveness-browser.mjs')).href)};
+setHostResolver(async () => ['93.184.216.34']);
 const exit = process.exit;
 process.exit = (code) => { writeSync(2, 'process.exit called with ' + code + '\\n'); exit(99); };
 ${preloadBody}`);
