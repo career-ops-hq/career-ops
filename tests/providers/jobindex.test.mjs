@@ -57,6 +57,13 @@ try {
   else fail(`detect() returned ${JSON.stringify(hit)}`);
   if (jobindex.detect({ careers_url: 'https://jobindex.dk/' })) pass('detect() claims the bare jobindex.dk host');
   else fail('detect() should claim https://jobindex.dk/');
+  try {
+    const whole = buildFeedUrl('https://jobindex.dk/', 1);
+    if (whole === 'https://www.jobindex.dk/jobsoegning.rss') pass('buildFeedUrl reads the bare host as the whole board, so a detected root URL scans');
+    else fail(`buildFeedUrl bare host returned ${whole}`);
+  } catch (err) {
+    fail(`buildFeedUrl bare host threw: ${err.message}`);
+  }
   const junk = [
     { careers_url: 'http://www.jobindex.dk/jobsoegning' },
     { careers_url: 'https://www.jobindex.dk.example.com/jobsoegning' },
@@ -112,7 +119,12 @@ try {
       title: 'Postdoc in Example Studies',
       link: 'https://www.jobindex.dk/vis-job/h102',
       pubDate: 'not a date',
-      description: card({ href: 'https://www.jobindex.dk/vis-job/h102', title: 'Postdoc in Example Studies', area: 'Odense' }),
+      description: card({ href: 'https://www.jobindex.dk/vis-job/h102', title: 'Postdoc in Example Studies', area: 'Odense', alt: 'Example University' }),
+    }),
+    item({
+      title: 'No Employer Named',
+      link: 'https://www.jobindex.dk/vis-job/h105',
+      description: card({ href: 'https://www.jobindex.dk/vis-job/h105', title: 'No Employer Named', area: 'Odense' }),
     }),
     item({
       title: 'Collected Role, ExampleCo',
@@ -127,9 +139,12 @@ try {
     item({ title: 'No link, Acme', link: '', description: card({ href: '', title: 'No link', area: 'x' }) }),
     item({ title: 'Off-host, Acme', link: 'https://evil.example.com/vis-job/h9', description: card({ href: '', title: 'Off-host', area: 'x' }) }),
   ]);
-  const { jobs, rawCount, collected } = parseJobindexFeed(sample);
-  if (rawCount === 7 && jobs.length === 4) pass('parseJobindexFeed drops rows with no link or an off-host link');
-  else fail(`parseJobindexFeed returned ${jobs.length} of ${rawCount}`);
+  const { jobs, rawCount, collected, unrecognised } = parseJobindexFeed(sample);
+  if (rawCount === 8 && jobs.length === 4 && unrecognised === 3 && !jobs.some((j) => j.url.endsWith('/h105'))) {
+    pass('parseJobindexFeed drops and counts rows with no link, an off-host link or no employer');
+  } else {
+    fail(`parseJobindexFeed returned ${jobs.length} of ${rawCount}, unrecognised=${unrecognised}`);
+  }
   if (collected === 1 && !jobs.some((j) => j.url.endsWith('/r104'))) pass('parseJobindexFeed leaves out postings Jobindex collected from elsewhere, and counts them');
   else fail(`parseJobindexFeed collected=${collected}, urls=${jobs.map((j) => j.url).join(' ')}`);
   const [a, b, c, d] = jobs;
@@ -140,8 +155,8 @@ try {
   }
   if (b.title === 'AI-udvikler / AI Engineer' && b.company === 'Acme') pass('parseJobindexFeed drops zero-width spaces');
   else fail(`parseJobindexFeed second row: ${JSON.stringify(b)}`);
-  if (c.company === '' && c.location === 'Odense' && c.title === 'Postdoc in Example Studies' && !('postedAt' in c)) {
-    pass('parseJobindexFeed leaves company empty when the feed names none, and skips an unparseable date');
+  if (c.company === 'Example University' && c.location === 'Odense' && c.title === 'Postdoc in Example Studies' && !('postedAt' in c)) {
+    pass('parseJobindexFeed takes the employer from the logo ALT when the title has none, and skips an unparseable date');
   } else {
     fail(`parseJobindexFeed third row: ${JSON.stringify(c)}`);
   }

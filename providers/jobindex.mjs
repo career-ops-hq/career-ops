@@ -46,7 +46,9 @@ import { markTruncated } from '../lib/board-truncation.mjs';
 const ORIGIN = 'https://www.jobindex.dk';
 const FEED_PATH = '/jobsoegning.rss';
 const ALLOWED_HOSTS = new Set(['www.jobindex.dk', 'jobindex.dk']);
-const SEARCH_PATHS = new Set(['/jobsoegning', '/jobsoegning/', '/jobsoegning.rss']);
+// The bare host ('/') reads the whole board, like an empty search; max_pages
+// caps it, with the usual warning.
+const SEARCH_PATHS = new Set(['/', '/jobsoegning', '/jobsoegning/', '/jobsoegning.rss']);
 
 /** Measured page size; a shorter page is the last one. */
 const PAGE_SIZE = 20;
@@ -150,7 +152,7 @@ function toEpochMs(value) {
  * Parse one page of the Jobindex RSS feed. Exported for unit tests.
  * Keeps ads placed on Jobindex (`PaidJob` cards); counts collected postings in
  * `collected`, and items it cannot read (another card kind, or a placed ad with
- * no Jobindex link or title) in `unrecognised`.
+ * no Jobindex link, title or employer) in `unrecognised`.
  * Throws when the body is not a complete RSS channel, when its <item> tags do
  * not pair up (a page cut short), or when it has items and none is recognised.
  * @param {string} xml
@@ -200,6 +202,12 @@ export function parseJobindexFeed(xml) {
     if (!company) {
       const alt = card.match(/<img\b[^>]*\balt\s*=\s*"([^"]*)"/i);
       if (alt) company = clean(alt[1]);
+    }
+    // Rule 1: a listing must name its employer. None was missing on the live
+    // feed (2026-11-24), so one without is counted rather than kept.
+    if (!company) {
+      unrecognised++;
+      continue;
     }
     const area = card.match(/class="jix_robotjob--area"[^>]*>([\s\S]*?)<\/span>/i);
     const location = area ? clean(stripTags(area[1])) : '';
