@@ -683,6 +683,21 @@ node contact-lookup.mjs --self-test
 
 **Exit codes:** `0` on a successful lookup (including zero matches), `1` for a missing `--company`, self-test failure, or an unrecognized flag.
 
+## recruiter-signal
+
+Which recruiters and search firms are hiring in your niche, and which mandates they hold (discussion #7694). Zero-LLM and read-only. A firm counts as a recruiter when it is the Via of a tracker row, a `recruiter` contact in `data/contacts.tsv` works there, it has a row in `data/mandates.tsv`, or its name looks like a search or staffing firm. For each firm it reports, over the look-back window of `data/scan-history.tsv`: postings seen, postings whose title passes `portals.yml` → `title_filter` (on-target), the last date seen, up to three on-target titles, tracker rows through it, saved contacts there, and its expected / open / closed mandates. Firms are ranked by on-target postings, then open and expected mandates. A firm whose postings never fit you still ranks when it posts at your level: that is the point.
+
+The `scan` mode shows the top five after its summary. When you skip an agency posting, the agent runs `--firm` on that firm and offers once to draft an introduction (`modes/_shared.md` → Skipped agency posting).
+
+```bash
+node recruiter-signal.mjs                       # JSON: firms, window, mandates.tsv quality
+node recruiter-signal.mjs --summary             # ranked table
+node recruiter-signal.mjs --firm "Acme Search"  # one firm, counted even if nothing else knows it yet
+node recruiter-signal.mjs --days 180 --top 10   # wider window, first ten firms
+```
+
+**Exit codes:** `0` on success (including no firm found), `1` for an unknown flag or a non-positive `--days` / `--top`.
+
 ## contact-extract
 
 Extract a recruiter or interviewer from a pasted reply, attach the contact to a
