@@ -41,12 +41,6 @@
  *                                                (same, but the posting location is read
  *                                                 from a file instead of a shell argument —
  *                                                 see CWE-78 note below)
- *      node salary-gap.mjs --relocation --gross <amount> --posting-location-b64 <base64>
- *                          [--home-location "<city, province>"] [--currency <code>]
- *                                                (same, but the posting location arrives as
- *                                                 base64 the caller computed as text; the
- *                                                 only characters that reach argv are
- *                                                 A-Z a-z 0-9 + / = — see CWE-78 note below)
  *      node salary-gap.mjs --self-test
  *
  * `--posting-location` vs `--posting-location-file` (#4696 CodeRabbit CWE-78
@@ -138,12 +132,6 @@ const relocPostingLocation = flagValue(args, '--posting-location') ?? null;
 // shell metacharacters in the JD text are never given to a shell to expand in
 // the first place. See the file header comment for the full rationale.
 const relocPostingLocationFile = flagValue(args, '--posting-location-file') ?? null;
-// Base64 form (#4696 follow-up): the caller encodes the location as a pure text
-// transformation and passes only the resulting base64, so nothing but
-// `A-Z a-z 0-9 + / =` ever reaches argv. That removes the temp file and the
-// `node -e` decode step the prompt used to require, while keeping the location
-// out of the shell entirely.
-const relocPostingLocationB64 = flagValue(args, '--posting-location-b64') ?? null;
 // `flagValue` alone cannot distinguish "flag absent" from "flag present but
 // given a missing/invalid operand" — both collapse to `undefined`/`null`
 // above. `hasFlag` sees the token itself, so the two cases can be told apart
@@ -151,37 +139,7 @@ const relocPostingLocationB64 = flagValue(args, '--posting-location-b64') ?? nul
 // falling back to --posting-location or misreading the next flag as a path
 // (#4696 CodeRabbit follow-up finding).
 const relocPostingLocationFileFlagPresent = hasFlag(args, '--posting-location-file');
-const relocPostingLocationB64FlagPresent = hasFlag(args, '--posting-location-b64');
 const relocHomeLocationFlag = flagValue(args, '--home-location') ?? null;
-
-/**
- * Decode a base64 posting location (#4696).
- *
- * The caller computes this value as a pure text transformation on the JD text it
- * already has, so the only characters that ever reach argv are `A-Z a-z 0-9 + / =`
- * — none of them shell-special. `Buffer.from(..., 'base64')` is lenient (it skips
- * junk and stops at the first bad byte), so validate the alphabet and the padding
- * first, and treat a decode that produced U+FFFD as a failure: silently accepting
- * it would hand the tax table a corrupted location.
- *
- * @param {string} value
- * @returns {{ ok: true, text: string } | { ok: false, error: string }}
- */
-export function decodePostingLocationB64(value) {
-  const raw = String(value ?? '').trim();
-  if (!raw) return { ok: false, error: 'empty value' };
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(raw) || raw.length % 4 !== 0) {
-    return {
-      ok: false,
-      error: 'not base64 (expected A-Z a-z 0-9 + / = only, padded to a multiple of 4)',
-    };
-  }
-  const text = Buffer.from(raw, 'base64').toString('utf8');
-  if (!text || text.includes('\uFFFD')) {
-    return { ok: false, error: 'decoded bytes are not valid UTF-8' };
-  }
-  return { ok: true, text: text.trim() };
-}
 
 const TRUST = {
   actual: { contract: 3, 'offer-letter': 2, 'recruiter-verbal': 1, user: 0 },
@@ -242,16 +200,140 @@ const yamlStr = (body, key) => {
   return v === 'null' || v === '' ? null : v;
 };
 
+const US_STATE_CODES = new Set((
+  'AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS ' +
+  'MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC'
+).split(/\s+/));
+
+const US_STATE_NAMES = new Map((
+  'Alabama AL|Alaska AK|Arizona AZ|Arkansas AR|California CA|Colorado CO|' +
+  'Connecticut CT|Delaware DE|Florida FL|Georgia GA|Hawaii HI|Idaho ID|' +
+  'Illinois IL|Indiana IN|Iowa IA|Kansas KS|Kentucky KY|Louisiana LA|' +
+  'Maine ME|Maryland MD|Massachusetts MA|Michigan MI|Minnesota MN|' +
+  'Mississippi MS|Missouri MO|Montana MT|Nebraska NE|Nevada NV|' +
+  'New Hampshire NH|New Jersey NJ|New Mexico NM|New York NY|' +
+  'North Carolina NC|North Dakota ND|Ohio OH|Oklahoma OK|Oregon OR|' +
+  'Pennsylvania PA|Rhode Island RI|South Carolina SC|South Dakota SD|' +
+  'Tennessee TN|Texas TX|Utah UT|Vermont VT|Virginia VA|Washington WA|' +
+  'West Virginia WV|Wisconsin WI|Wyoming WY|District of Columbia DC'
+).split('|').map((entry) => {
+  const match = entry.match(/^(.+)\s+([A-Z]{2})$/);
+  return [match[1].toLowerCase(), match[2]];
+}));
+
+const salaryStateCode = (value) => {
+  const normalized = String(value ?? '').trim();
+  const upper = normalized.toUpperCase();
+  if (US_STATE_CODES.has(upper)) return upper;
+  return US_STATE_NAMES.get(normalized.toLowerCase()) ?? null;
+};
+
+const normalizeSalaryLocation = (value) => String(value ?? '')
+  .toLowerCase().replace(/[.,]/g, '').replace(/\s+/g, ' ').trim();
+
+/**
+ * Parse location-labelled salary ranges without changing the source text.
+ * Per-level labels are intentionally not treated as locations.
+ */
+function parseLocationSalaryBands(raw) {
+  const stateLabels = [
+    ...US_STATE_CODES,
+    ...[...US_STATE_NAMES.keys()].sort((a, b) => b.length - a.length),
+  ].join('|');
+  // Split only before a recognizable state/city label. Splitting at every
+  // space before a colon breaks multiword cities ("New York"), fallback
+  // labels ("All other locations"), and numbered regions ("Zone 1").
+  const nextLocationLabel = new RegExp(
+    "(?<=[\\dkK])\\s+(?=(?:[A-Z][A-Za-z .'-]*,\\s*)?(?:" + stateLabels + "):\\s*(?:[$€£¥]|\\d))",
+    'i',
+  );
+  const separated = String(raw ?? '').replace(nextLocationLabel, '\n');
+  return separated.split(/[;\n]+/).map((part) => {
+    const match = part.trim().match(/^(.{1,100}?)\s*:\s*(.+)$/s);
+    if (!match) return null;
+    const label = match[1].trim();
+    const parsed = parseAmount(match[2].trim());
+    if (!parsed) return null;
+
+    const normalized = normalizeSalaryLocation(label);
+    let location = null;
+    if (/^(?:all other|other)(?: us)? locations?$/.test(normalized) ||
+        /^(?:national|nationwide|united states|usa?|us)$/.test(normalized)) {
+      location = { tier: 'other' };
+    } else if (/\b(?:zone|region)\b/.test(normalized)) {
+      location = { tier: 'zone' };
+    } else {
+      const pieces = label.split(',').map((piece) => piece.trim());
+      if (pieces.length >= 2) {
+        const state = salaryStateCode(pieces[1]);
+        if (state && pieces[0]) {
+          location = { tier: 'city', city: normalizeSalaryLocation(pieces[0]), state };
+        }
+      }
+      if (!location) {
+        const state = salaryStateCode(label.replace(/\s+state$/i, '').trim());
+        if (state) location = { tier: 'state', state };
+      }
+    }
+    return location ? { label, parsed, location } : null;
+  }).filter(Boolean);
+}
+
+/**
+ * Select city, then state, then national/all-other compensation. If the text
+ * has no location-labelled bands, preserve parseAmount()'s original behavior.
+ */
+export function selectLocationSalaryBand(raw, candidateLocation) {
+  const bands = parseLocationSalaryBands(raw);
+  if (!bands.length) return { parsed: parseAmount(raw), band: null, bands: [] };
+
+  const listedBands = bands.map((entry) => ({
+    label: entry.label, min: entry.parsed.min, max: entry.parsed.max,
+  }));
+  const parts = String(candidateLocation ?? '').split(',').map((part) => part.trim());
+  // A lone full state name can also be a city name ("New York").
+  // Treat a one-part profile value as a state only when it is an unambiguous
+  // two-letter code; otherwise retain it as a city-only location.
+  const candidateState = parts.length >= 2
+    ? salaryStateCode(parts[1])
+    : (US_STATE_CODES.has((parts[0] || '').toUpperCase()) ? parts[0].toUpperCase() : null);
+  const candidateCity = parts.length >= 2
+    ? normalizeSalaryLocation(parts[0])
+    : (candidateState ? null : normalizeSalaryLocation(parts[0]));
+
+  if (!candidateCity && !candidateState) return { parsed: null, band: null, bands: listedBands };
+
+  const cityMatch = candidateCity && bands.find((entry) =>
+    entry.location.tier === 'city' &&
+    entry.location.city === candidateCity &&
+    (!candidateState || entry.location.state === candidateState)
+  );
+  if (cityMatch) return { parsed: cityMatch.parsed, band: cityMatch.label, bands: listedBands };
+
+  const stateMatch = candidateState && bands.find((entry) =>
+    entry.location.tier === 'state' && entry.location.state === candidateState
+  );
+  if (stateMatch) return { parsed: stateMatch.parsed, band: stateMatch.label, bands: listedBands };
+
+  const otherMatch = bands.find((entry) => entry.location.tier === 'other');
+  if (otherMatch) return { parsed: otherMatch.parsed, band: otherMatch.label, bands: listedBands };
+
+  return { parsed: null, band: null, bands: listedBands };
+}
+
 // --- Report-derived advertised observations ---
 // Extracts advertised_comp + company + role from one report's Machine Summary.
 // num/date come from the filename ({###}-{slug}-{YYYY-MM-DD}.md).
-export function reportToObservation(content, num, date) {
+export function reportToObservation(content, num, date, candidateLocation = null) {
   const fence = machineSummarySection(content).match(FENCE_RE);
   if (!fence) return null;
   const body = fence[1];
   const company = yamlStr(body, 'company');
   const role = yamlStr(body, 'role');
   const adv = yamlStr(body, 'advertised_comp');
+  const salarySelection = adv === null
+    ? { parsed: null, band: null, bands: [] }
+    : selectLocationSalaryBand(adv, candidateLocation);
   // posting_location (#4694): the JD's own stated work location, verbatim,
   // when it requires relocation — feeds the relocation purchasing-power
   // comparison (see computeRelocationAdjustment below). null when the JD
@@ -276,7 +358,13 @@ export function reportToObservation(content, num, date) {
     company, role, postingLocation,
     observation: adv === null ? null : {
       num, date, type: 'advertised', amount: adv, currency: currencyGuess,
-      source: 'jd', note: 'from report Machine Summary', parsed: parseAmount(adv),
+      source: 'jd',
+      note: salarySelection.band
+        ? 'from report Machine Summary; band: ' + salarySelection.band
+        : 'from report Machine Summary',
+      parsed: salarySelection.parsed,
+      ...(salarySelection.band ? { salaryBand: salarySelection.band } : {}),
+      ...(salarySelection.bands.length ? { salaryBands: salarySelection.bands } : {}),
       period: compensationPeriod(adv), postingLocation,
     },
   };
@@ -576,6 +664,7 @@ function pickEffective(type, candidates) {
     currency: top.currency, raw: top.amount,
     period: top.period ?? compensationPeriod(top.amount),
     postingLocation: top.postingLocation ?? null,
+    ...(top.salaryBand ? { note: 'band: ' + top.salaryBand } : {}),
     // only present when true, so output for data without third-party rows is unchanged
     ...(top.source === 'third-party' ? { unverified: true } : {}),
   };
@@ -599,7 +688,10 @@ export function fold(observations, apps, profileDesired) {
   const currencyMismatches = [];
   const unparseable = observations
     .filter(o => o.parsed === null && o.amount && o.amount !== '?')
-    .map(o => ({ num: normalizeId(o.num), type: o.type, raw: o.amount }));
+    .map(o => ({
+      num: normalizeId(o.num), type: o.type, raw: o.amount,
+      ...(o.salaryBands?.length ? { bands: o.salaryBands } : {}),
+    }));
   // pickEffective only trusts sources in TRUST[type]'s vocabulary — anything else
   // (e.g. the `recruiter_verbal` underscore typo) must be reported, not silently
   // dropped. Report-derived obs are always `jd` and profile obs `profile`, so in
@@ -1500,13 +1592,14 @@ export function mapTrackerToApps(rows, reportsByNum) {
 function readReportsByNum() {
   const reportsByNum = new Map();
   if (!existsSync(REPORTS_DIR)) return reportsByNum;
+  const candidateLocation = loadProfileLocation();
   for (const file of readdirSync(REPORTS_DIR)) {
     const m = file.match(REPORT_FILE_RE);
     if (!m) continue;
     const [, num, date] = m;
     let content;
     try { content = readFileSync(join(REPORTS_DIR, file), 'utf-8'); } catch { continue; }
-    const r = reportToObservation(content, num, date);
+    const r = reportToObservation(content, num, date, candidateLocation);
     // A report with no Machine Summary is still a real application, so it
     // registers with null company/role rather than being dropped.
     reportsByNum.set(normalizeId(num), r ?? { company: null, role: null, observation: null });
@@ -1649,7 +1742,12 @@ function printSummary(result) {
   console.log('\n  Data quality:');
   if (quality.unparseable.length) {
     console.log(`  ⚠ ${quality.unparseable.length} unparseable amount${quality.unparseable.length === 1 ? '' : 's'} (excluded from all math):`);
-    for (const u of quality.unparseable) console.log(`      #${u.num} ${u.type}: "${u.raw}"`);
+    for (const u of quality.unparseable) {
+      console.log(`      #${u.num} ${u.type}: "${u.raw}"`);
+      if (u.bands?.length) {
+        console.log(`          bands: ${u.bands.map((b) => `${b.label}: ${fmtVal(b.min)}–${fmtVal(b.max)}`).join('; ')}`);
+      }
+    }
   } else {
     console.log('  unparseable amounts: none');
   }
@@ -1731,26 +1829,6 @@ function main() {
     // over the inline flag rather than silently falling back to the one a
     // caller may have meant to replace.
     let postingLocation = relocPostingLocation;
-    // Base64 form (#4696 follow-up) — the safe path the prompts now use. The
-    // file form still wins when both are present, because it is the older
-    // documented escape hatch and silently preferring a different operand
-    // would be a surprise.
-    if (relocPostingLocationB64FlagPresent && !relocPostingLocationFileFlagPresent) {
-      if (!relocPostingLocationB64 || relocPostingLocationB64.startsWith('-')) {
-        console.error(
-          `Usage: --posting-location-b64 requires a base64 operand (got ${
-            relocPostingLocationB64 ? `'${relocPostingLocationB64}', which looks like another flag` : 'none'
-          })`
-        );
-        process.exit(1);
-      }
-      const decoded = decodePostingLocationB64(relocPostingLocationB64);
-      if (!decoded.ok) {
-        console.error(`Invalid --posting-location-b64: ${decoded.error}`);
-        process.exit(1);
-      }
-      postingLocation = decoded.text;
-    }
     if (relocPostingLocationFileFlagPresent) {
       // The flag is present — require a real operand before ever touching
       // the filesystem. Missing (`--posting-location-file` as the last
@@ -1776,7 +1854,7 @@ function main() {
       }
     }
     if (gross === null || !postingLocation) {
-      console.error('Usage: node salary-gap.mjs --relocation --gross <amount> (--posting-location "<city, province>" | --posting-location-file <path> | --posting-location-b64 <base64>) [--home-location "<city, province>"] [--currency <code>]');
+      console.error('Usage: node salary-gap.mjs --relocation --gross <amount> (--posting-location "<city, province>" | --posting-location-file <path>) [--home-location "<city, province>"] [--currency <code>]');
       process.exit(1);
     }
     const jurisdictions = loadRelocationTable();
