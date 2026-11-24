@@ -198,6 +198,7 @@ Levels are additive — they are executed in order, and results are merged and d
 4. **Level 1 — Playwright Scan** (sequential — NEVER parallel Playwright):
    Browser-backed workers share one browser session, so concurrent `browser_navigate`/`browser_snapshot` calls cross-contaminate and a snapshot can return another company's page (#2551). Batching stays correct for the fetch-based levels below (Level 2 APIs/feeds, Level 3 queries), which open no shared session.
    For each company on the unmatched list, and each company whose local parser failed without a working fallback, with `enabled: true` and a defined `careers_url`:
+   A name not listed in `local_parser_ok` is not enough by itself to enter this loop.
    Any other company whose provider fetch threw is not in this loop. Report the error scan printed.
 
    a. `browser_navigate` to `careers_url`.

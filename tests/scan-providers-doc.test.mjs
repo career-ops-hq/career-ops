@@ -44,6 +44,7 @@ test('the scan mode does not tell the agent to ignore every other provider', () 
   assert.match(level0, /returned without some job descriptions/);
   assert.match(level0, /descriptions omitted/);
   assert.match(scan, /add those jobs to candidates/);
+  assert.match(scan, /name not listed in `local_parser_ok`/);
   assert.match(scan, /run Level 0 by hand/);
   assert.doesNotMatch(level0, /Level 1 \(Playwright\) or Level 3 \(WebSearch\)/);
   assert.doesNotMatch(level0, /local-parser` successfully/);
