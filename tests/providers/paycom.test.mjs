@@ -131,6 +131,23 @@ else fail(`paycom.id is ${JSON.stringify(paycom.id)}`);
   else fail(`string-id row: ${JSON.stringify(str)}`);
 }
 
+// fetch(): a tenant reporting more postings than were returned is marked truncated
+{
+  const origWarn = console.warn;
+  const warnings = [];
+  console.warn = (m) => warnings.push(String(m));
+  try {
+    const capped = await paycom.fetch(entry, makeCtx({ jobPostingPreviews: [row(1, 'A'), row(2, 'B')], jobPostingPreviewsCount: 5 }));
+    if (capped.length === 2 && capped.truncated?.reason === 'page-cap' && capped.truncated.fetched === 2 && capped.truncated.total === 5 && warnings.length === 1) pass('a reported total above the rows read marks the list truncated and warns');
+    else fail(`capped: ${JSON.stringify(capped.truncated)} warnings=${warnings.length}`);
+    const whole = await paycom.fetch(entry, makeCtx({ jobPostingPreviews: [row(1, 'A'), row(2, 'B')], jobPostingPreviewsCount: 2 }));
+    if (!('truncated' in whole)) pass('a complete board is not marked truncated');
+    else fail(`complete board marked: ${JSON.stringify(whole.truncated)}`);
+  } finally {
+    console.warn = origWarn;
+  }
+}
+
 // fetch(): guards that run before the search request
 {
   const ctx = makeCtx({ jobPostingPreviews: [] }, pageHtml('https://evil.example/'));

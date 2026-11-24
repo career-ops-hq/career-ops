@@ -23,6 +23,7 @@
 
 import { BROWSER_LIKE_USER_AGENT } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const PAYCOM_HOST = 'www.paycomonline.net';
 const PAYCOM_ORIGIN = `https://${PAYCOM_HOST}`;
@@ -116,6 +117,7 @@ export default {
     const total = payload.jobPostingPreviewsCount;
     if (typeof total === 'number' && total > payload.jobPostingPreviews.length) {
       console.warn(`paycom: ${entry.name} reports ${total} postings, read ${payload.jobPostingPreviews.length}`);
+      markTruncated(jobs, 'page-cap', { fetched: payload.jobPostingPreviews.length, total });
     }
     return jobs;
   },
