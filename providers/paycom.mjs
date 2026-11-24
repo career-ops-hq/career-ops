@@ -125,8 +125,16 @@ export default {
 
 /** @returns {{ats_provider: string, board_slug: string, posting_id: string}|undefined} */
 function paycomListingIdentity(clientKey, jobId) {
-  if (typeof jobId !== 'number' || !Number.isSafeInteger(jobId) || jobId <= 0) return undefined;
-  return { ats_provider: 'paycom', board_slug: clientKey, posting_id: String(jobId) };
+  let postingId;
+  if (typeof jobId === 'number') {
+    if (!Number.isSafeInteger(jobId) || jobId <= 0) return undefined;
+    postingId = String(jobId);
+  } else if (typeof jobId === 'string' && jobId !== '' && jobId === jobId.trim() && !/[\u0000-\u001f\u007f]/u.test(jobId)) {
+    postingId = jobId;
+  } else {
+    return undefined;
+  }
+  return { ats_provider: 'paycom', board_slug: clientKey, posting_id: postingId };
 }
 
 /**

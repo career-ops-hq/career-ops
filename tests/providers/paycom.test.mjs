@@ -127,8 +127,13 @@ else fail(`paycom.id is ${JSON.stringify(paycom.id)}`);
   else fail('different jobId collided');
 
   const [str] = await paycom.fetch(entry, makeCtx({ jobPostingPreviews: [row('104', 'String id')] }));
-  if (str && !('listingIdentity' in str)) pass('a non-integer jobId leaves listingIdentity off');
+  if (str?.listingIdentity?.posting_id === '104' && str.listingIdentity.board_slug === KEY) pass('a string jobId keeps its listingIdentity, uncoerced');
   else fail(`string-id row: ${JSON.stringify(str)}`);
+  for (const bad of [' 104', '104 ', 'a\nb', 1.5, 0, -3, true]) {
+    const [r] = parsePaycom({ jobPostingPreviews: [row(bad, 'Odd id')] }, KEY, 'Acme');
+    if (r && !('listingIdentity' in r)) pass(`jobId ${JSON.stringify(bad)} leaves listingIdentity off`);
+    else fail(`jobId ${JSON.stringify(bad)}: ${JSON.stringify(r)}`);
+  }
 }
 
 // fetch(): a tenant reporting more postings than were returned is marked truncated
