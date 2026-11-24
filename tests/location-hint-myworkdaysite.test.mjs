@@ -1,11 +1,8 @@
-// Workday boards on myworkdaysite.com put the city in the URL and the
-// display location as "5 Locations". The hint reader only looked at
-// myworkdayjobs.com, so a blocked country in that path still passed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildLocationFilter, locationHintFromUrl } from '../scan.mjs';
 
-const SITE = 'https://wd5.myworkdaysite.com/recruiting/guidewire/external/job/Hyderabad-Telangana-India/Network-Engineer_R-1';
+const SITE = 'https://wd5.myworkdaysite.com/recruiting/acme/external/job/Hyderabad-Telangana-India/Network-Engineer_R-1';
 const JOBS = 'https://acme.wd5.myworkdayjobs.com/en-US/External/job/Hyderabad-Telangana-India/Network-Engineer_R-1';
 
 test('a myworkdaysite path supplies the city the display line omitted', () => {
