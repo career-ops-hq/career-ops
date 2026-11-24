@@ -1995,13 +1995,14 @@ async function main() {
   // at the very end, so a plain kill loses everything found so far. In --json mode
   // we instead flush the matches collected up to this point as a well-formed but
   // PARTIAL result (`stoppedEarly: true`) so the caller can still surface those
-  // roles. CLI/human runs keep the default terminate behavior (no handler).
+  // roles. A plain run gets its own handler below.
   // spawnSync with a timeout drops the JSON this handler writes to stdout.
   // Live deltas for the partial (stoppedEarly) report, so a mid-source SIGTERM
   // reports the work ACTUALLY done. totalCompaniesScanned is bumped by a whole
   // source's planned entries up front, and its errors fold into totalErrors only
   // once it finishes. The handler and the checkpoint both read stoppedScanCounts.
   let writeStopCheckpoint = () => false;
+  let flushDeadBoards = () => {};
   const restingCounters = () => stoppedScanCounts({ totalCompaniesScanned, totalErrors });
   let liveCounters = restingCounters;
   if (opts.json) {
@@ -2097,6 +2098,48 @@ async function main() {
         }
       })();
     });
+  } else {
+    // A plain run (a terminal, cron, or a systemd unit with a time limit) had no
+    // handler, so SIGTERM or Ctrl-C lost every match since the last periodic
+    // checkpoint. Write the resume point and the dead-board memory, save the
+    // matches found so far, and exit nonzero so the run reads as interrupted.
+    let stopping = false;
+    const stopOn = (signal, code) => {
+      if (stopping || mainSettled) return;
+      stopping = true;
+      void (async () => {
+        let saved = false;
+        let checkpointed = false;
+        try {
+          if (!opts.dryRun) {
+            flushDeadBoards();
+            checkpointed = writeStopCheckpoint() === true;
+          }
+          const kept = filterBlacklistedOffers(newOffers.slice(), blacklist, {
+            includeBlacklisted: opts.includeBlacklisted,
+          }).offers;
+          // --liveness verifies before any write; an unverified match stays in
+          // the checkpoint's offers for the resumed run to verify.
+          if (!opts.dryRun && !opts.liveness && kept.length) {
+            if (!existsSync(PIPELINE_PATH)) {
+              mkdirSync(path.dirname(PIPELINE_PATH), { recursive: true });
+              writeFileSync(PIPELINE_PATH, '# Pipeline\n\n## Pendientes\n', 'utf-8');
+            }
+            await appendToPipeline(kept);
+            await appendToScanHistory(kept, date);
+            saved = true;
+          }
+          const fate = saved ? 'saved to pipeline'
+            : (opts.liveness && !opts.dryRun ? 'held in the checkpoint for the --resume liveness pass' : 'not saved');
+          console.error(`\n⛔ ${signal}: sweep stopped — ${newOffers.length} matches so far, ${fate}, ${checkpointed ? 'checkpoint written (continue with --resume)' : 'no checkpoint written'}.`);
+        } catch (err) {
+          console.error(`\n⛔ ${signal}: sweep stopped; saving failed (${err.message}).`);
+        }
+        process.exit(code);
+      })();
+    };
+    process.on('SIGTERM', () => stopOn('SIGTERM', 143));
+    process.on('SIGINT', () => stopOn('SIGINT', 130));
   }
 
 
@@ -2230,6 +2273,7 @@ async function main() {
     let errors = 0;
     let deadBoardsSkipped = 0;
     const deadBoards = loadDeadBoards(DEAD_BOARDS_PATH);
+    flushDeadBoards = () => saveDeadBoardsBestEffort(deadBoards);
     let consecutiveResolverFailures = 0;
     let resolverOutage = false;
     // The board whose failure tripped the breaker. `name` is only the ATS
