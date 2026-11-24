@@ -78,7 +78,8 @@ export function pickAwaitingDecision(applications, scoreOf, limit = 6, closedOf 
 // "Check the posting first" is what applyLineLabel returns for a flagged
 // posting at or above the line (#5300). It has to be a group here too: a label
 // that is not in this list matches no group, and the row would drop off Today.
-const AWAITING_GROUPS = ["Recommended", "Check the posting first", "Below the apply line", "Not scored yet"];
+// A closed posting keeps its card but goes after every open group.
+const AWAITING_GROUPS = ["Recommended", "Check the posting first", "Below the apply line", "Not scored yet", "Closed"];
 
 /**
  * Splits the ranked queue into the groups the Today page renders, keeping the
@@ -93,10 +94,11 @@ const AWAITING_GROUPS = ["Recommended", "Check the posting first", "Below the ap
  * @template {{score?: string}} T
  * @param {T[]} awaiting  output of pickAwaitingDecision
  * @param {(row: T) => string | null | undefined} [legitimacyOf]
+ * @param {(row: T) => boolean} [closedOf]
  * @returns {[string, T[]][]}  only the non-empty groups, in display order
  */
-export function groupAwaiting(awaiting, legitimacyOf = () => undefined) {
-  const labelOf = (a) => applyLineLabel(a.score, legitimacyOf(a)) ?? "Not scored yet";
+export function groupAwaiting(awaiting, legitimacyOf = () => undefined, closedOf = () => false) {
+  const labelOf = (a) => (closedOf(a) ? "Closed" : applyLineLabel(a.score, legitimacyOf(a)) ?? "Not scored yet");
   return AWAITING_GROUPS
     .map((label) => /** @type {[string, T[]]} */ ([label, awaiting.filter((a) => labelOf(a) === label)]))
     .filter(([, group]) => group.length > 0);

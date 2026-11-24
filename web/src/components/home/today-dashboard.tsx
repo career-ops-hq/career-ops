@@ -160,7 +160,10 @@ export function TodayDashboard({
   const awaiting = useMemo(() => includeApplyTarget(ranked, applyTarget), [ranked, applyTarget]);
   // With the legitimacy, a flagged posting is grouped as the report page
   // labels it (#5300).
-  const awaitingGroups = useMemo(() => groupAwaiting(awaiting, (a) => legitimacy[a.n]), [awaiting, legitimacy]);
+  const awaitingGroups = useMemo(
+    () => groupAwaiting(awaiting, (a) => legitimacy[a.n], (a) => ages[a.n]?.open.state === "closed"),
+    [awaiting, legitimacy, ages],
+  );
 
   const newThisWeek = freshCount;
   const dataLoading = followupsLoading || freshLoading;

@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { wholeDaysSince, awaitingAge, ageLabels } from "../../src/lib/home/awaiting-age.mjs";
-import { pickAwaitingDecision } from "../../src/lib/home/awaiting.mjs";
+import { pickAwaitingDecision, groupAwaiting } from "../../src/lib/home/awaiting.mjs";
 
 const TODAY = "2026-11-23";
 const scoreOf = (s) => {
@@ -60,4 +60,20 @@ test("a closed posting stays listed but sorts after every open one", () => {
   assert.deepEqual(pickAwaitingDecision(rows, scoreOf, 6, closed).map((r) => r.n), ["3", "2", "1"]);
   assert.deepEqual(pickAwaitingDecision(rows, scoreOf, 2, closed).map((r) => r.n), ["3", "2"], "closed rows are the first cut by the limit");
   assert.deepEqual(pickAwaitingDecision(rows, scoreOf).map((r) => r.n), ["1", "3", "2"], "no closedOf keeps the old order");
+});
+
+test("closed postings render after every open group, whatever their score", () => {
+  const rows = [
+    { n: "1", date: "2026-11-01", score: "4.9/5", status: "Evaluated" },
+    { n: "2", date: "2026-11-01", score: "3.0/5", status: "Evaluated" },
+    { n: "3", date: "2026-11-01", score: "", status: "Evaluated" },
+  ];
+  const closed = (r) => r.n === "1";
+  const groups = groupAwaiting(pickAwaitingDecision(rows, scoreOf, 6, closed), () => undefined, closed);
+  assert.deepEqual(groups.map(([label, g]) => [label, g.map((r) => r.n)]), [
+    ["Below the apply line", ["2"]],
+    ["Not scored yet", ["3"]],
+    ["Closed", ["1"]],
+  ]);
+  assert.deepEqual(groupAwaiting(rows).map(([label]) => label), ["Recommended", "Below the apply line", "Not scored yet"], "no closedOf keeps the old groups");
 });
