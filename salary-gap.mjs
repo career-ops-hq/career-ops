@@ -200,16 +200,128 @@ const yamlStr = (body, key) => {
   return v === 'null' || v === '' ? null : v;
 };
 
+/**
+ * Parse location-labelled salary ranges without changing the source text.
+ * Per-level labels are intentionally not treated as locations.
+ */
+function parseLocationSalaryBands(raw) {
+  const separated = String(raw ?? '').replace(
+    /\s+(?=[^:;\n]{1,80}:\s*(?:[$€£¥]|\d))/g,
+    '\n',
+  );
+  const stateCodes = new Set((
+    'AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS ' +
+    'MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC'
+  ).split(/\s+/));
+  const stateNames = new Map((
+    'Alabama AL|Alaska AK|Arizona AZ|Arkansas AR|California CA|Colorado CO|' +
+    'Connecticut CT|Delaware DE|Florida FL|Georgia GA|Hawaii HI|Idaho ID|' +
+    'Illinois IL|Indiana IN|Iowa IA|Kansas KS|Kentucky KY|Louisiana LA|' +
+    'Maine ME|Maryland MD|Massachusetts MA|Michigan MI|Minnesota MN|' +
+    'Mississippi MS|Missouri MO|Montana MT|Nebraska NE|Nevada NV|' +
+    'New Hampshire NH|New Jersey NJ|New Mexico NM|New York NY|' +
+    'North Carolina NC|North Dakota ND|Ohio OH|Oklahoma OK|Oregon OR|' +
+    'Pennsylvania PA|Rhode Island RI|South Carolina SC|South Dakota SD|' +
+    'Tennessee TN|Texas TX|Utah UT|Vermont VT|Virginia VA|Washington WA|' +
+    'West Virginia WV|Wisconsin WI|Wyoming WY|District of Columbia DC'
+  ).split('|').map((entry) => entry.split(' ')));
+  const stateCode = (value) => {
+    const v = String(value ?? '').trim();
+    const upper = v.toUpperCase();
+    if (stateCodes.has(upper)) return upper;
+    return stateNames.get(v.toLowerCase()) ?? null;
+  };
+  const normalize = (value) => String(value ?? '')
+    .toLowerCase().replace(/[.,]/g, '').replace(/\s+/g, ' ').trim();
+
+  return separated.split(/[;\n]+/).map((part) => {
+    const match = part.trim().match(/^(.{1,100}?)\s*:\s*(.+)$/s);
+    if (!match) return null;
+    const label = match[1].trim();
+    const amount = match[2].trim();
+    const parsed = parseAmount(amount);
+    if (!parsed) return null;
+
+    const normalized = normalize(label);
+    let location = null;
+    if (/^(?:all other|other)(?: us)? locations?$/.test(normalized) ||
+        /^(?:national|nationwide|united states|usa?|us)$/.test(normalized)) {
+      location = { tier: 'other' };
+    } else if (/\b(?:zone|region)\b/.test(normalized)) {
+      location = { tier: 'zone' };
+    } else {
+      const pieces = label.split(',').map((piece) => piece.trim());
+      if (pieces.length >= 2) {
+        const state = stateCode(pieces[1]);
+        if (state && pieces[0]) {
+          location = { tier: 'city', city: normalize(pieces[0]), state };
+        }
+      }
+      if (!location) {
+        const state = stateCode(label.replace(/\s+state$/i, '').trim());
+        if (state) location = { tier: 'state', state };
+      }
+    }
+    return location ? { label, parsed, location } : null;
+  }).filter(Boolean);
+}
+
+/**
+ * Select city, then state, then national/all-other compensation. If the text
+ * has no location-labelled bands, preserve parseAmount()'s original behavior.
+ */
+export function selectLocationSalaryBand(raw, candidateLocation) {
+  const bands = parseLocationSalaryBands(raw);
+  if (!bands.length) return { parsed: parseAmount(raw), band: null, bands: [] };
+
+  const listedBands = bands.map((entry) => ({
+    label: entry.label, min: entry.parsed.min, max: entry.parsed.max,
+  }));
+  const parts = String(candidateLocation ?? '').split(',').map((part) => part.trim());
+  const normalize = (value) => String(value ?? '')
+    .toLowerCase().replace(/[.,]/g, '').replace(/\s+/g, ' ').trim();
+  const stateCodes = new Set((
+    'AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS ' +
+    'MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC'
+  ).split(/\s+/));
+  const candidateCity = parts.length >= 2 ? normalize(parts[0]) : (stateCodes.has((parts[0] || '').toUpperCase()) ? null : normalize(parts[0]));
+  const candidateState = parts.length >= 2
+    ? (stateCodes.has((parts[1] || '').toUpperCase()) ? parts[1].toUpperCase() : null)
+    : (stateCodes.has((parts[0] || '').toUpperCase()) ? parts[0].toUpperCase() : null);
+
+  if (!candidateCity && !candidateState) return { parsed: null, band: null, bands: listedBands };
+
+  const cityMatch = candidateCity && bands.find((entry) =>
+    entry.location.tier === 'city' &&
+    entry.location.city === candidateCity &&
+    (!candidateState || entry.location.state === candidateState)
+  );
+  if (cityMatch) return { parsed: cityMatch.parsed, band: cityMatch.label, bands: listedBands };
+
+  const stateMatch = candidateState && bands.find((entry) =>
+    entry.location.tier === 'state' && entry.location.state === candidateState
+  );
+  if (stateMatch) return { parsed: stateMatch.parsed, band: stateMatch.label, bands: listedBands };
+
+  const otherMatch = bands.find((entry) => entry.location.tier === 'other');
+  if (otherMatch) return { parsed: otherMatch.parsed, band: otherMatch.label, bands: listedBands };
+
+  return { parsed: null, band: null, bands: listedBands };
+}
+
 // --- Report-derived advertised observations ---
 // Extracts advertised_comp + company + role from one report's Machine Summary.
 // num/date come from the filename ({###}-{slug}-{YYYY-MM-DD}.md).
-export function reportToObservation(content, num, date) {
+export function reportToObservation(content, num, date, candidateLocation = null) {
   const fence = machineSummarySection(content).match(FENCE_RE);
   if (!fence) return null;
   const body = fence[1];
   const company = yamlStr(body, 'company');
   const role = yamlStr(body, 'role');
   const adv = yamlStr(body, 'advertised_comp');
+  const salarySelection = adv === null
+    ? { parsed: null, band: null, bands: [] }
+    : selectLocationSalaryBand(adv, candidateLocation);
   // posting_location (#4694): the JD's own stated work location, verbatim,
   // when it requires relocation — feeds the relocation purchasing-power
   // comparison (see computeRelocationAdjustment below). null when the JD
@@ -234,7 +346,12 @@ export function reportToObservation(content, num, date) {
     company, role, postingLocation,
     observation: adv === null ? null : {
       num, date, type: 'advertised', amount: adv, currency: currencyGuess,
-      source: 'jd', note: 'from report Machine Summary', parsed: parseAmount(adv),
+      source: 'jd',
+      note: salarySelection.band
+        ? 'from report Machine Summary; band: ' + salarySelection.band
+        : 'from report Machine Summary',
+      parsed: salarySelection.parsed,
+      ...(salarySelection.bands.length ? { salaryBands: salarySelection.bands } : {}),
       period: compensationPeriod(adv), postingLocation,
     },
   };
@@ -534,6 +651,7 @@ function pickEffective(type, candidates) {
     currency: top.currency, raw: top.amount,
     period: top.period ?? compensationPeriod(top.amount),
     postingLocation: top.postingLocation ?? null,
+    ...(top.note ? { note: top.note } : {}),
     // only present when true, so output for data without third-party rows is unchanged
     ...(top.source === 'third-party' ? { unverified: true } : {}),
   };
@@ -557,7 +675,10 @@ export function fold(observations, apps, profileDesired) {
   const currencyMismatches = [];
   const unparseable = observations
     .filter(o => o.parsed === null && o.amount && o.amount !== '?')
-    .map(o => ({ num: normalizeId(o.num), type: o.type, raw: o.amount }));
+    .map(o => ({
+      num: normalizeId(o.num), type: o.type, raw: o.amount,
+      ...(o.salaryBands?.length ? { bands: o.salaryBands } : {}),
+    }));
   // pickEffective only trusts sources in TRUST[type]'s vocabulary — anything else
   // (e.g. the `recruiter_verbal` underscore typo) must be reported, not silently
   // dropped. Report-derived obs are always `jd` and profile obs `profile`, so in
@@ -1458,13 +1579,14 @@ export function mapTrackerToApps(rows, reportsByNum) {
 function readReportsByNum() {
   const reportsByNum = new Map();
   if (!existsSync(REPORTS_DIR)) return reportsByNum;
+  const candidateLocation = loadProfileLocation();
   for (const file of readdirSync(REPORTS_DIR)) {
     const m = file.match(REPORT_FILE_RE);
     if (!m) continue;
     const [, num, date] = m;
     let content;
     try { content = readFileSync(join(REPORTS_DIR, file), 'utf-8'); } catch { continue; }
-    const r = reportToObservation(content, num, date);
+    const r = reportToObservation(content, num, date, candidateLocation);
     // A report with no Machine Summary is still a real application, so it
     // registers with null company/role rather than being dropped.
     reportsByNum.set(normalizeId(num), r ?? { company: null, role: null, observation: null });
@@ -1607,7 +1729,12 @@ function printSummary(result) {
   console.log('\n  Data quality:');
   if (quality.unparseable.length) {
     console.log(`  ⚠ ${quality.unparseable.length} unparseable amount${quality.unparseable.length === 1 ? '' : 's'} (excluded from all math):`);
-    for (const u of quality.unparseable) console.log(`      #${u.num} ${u.type}: "${u.raw}"`);
+    for (const u of quality.unparseable) {
+      console.log(`      #${u.num} ${u.type}: "${u.raw}"`);
+      if (u.bands?.length) {
+        console.log(`          bands: ${u.bands.map((b) => `${b.label}: ${fmtVal(b.min)}–${fmtVal(b.max)}`).join('; ')}`);
+      }
+    }
   } else {
     console.log('  unparseable amounts: none');
   }
