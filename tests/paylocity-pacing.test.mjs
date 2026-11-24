@@ -3,7 +3,9 @@
 // pauses all of them for a 429's Retry-After.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import provider, { pacing, waitForSlot, noteRateLimit } from '../providers/paylocity.mjs';
+// The interval is read at import time, so pin it before loading the provider.
+process.env.CAREER_OPS_PAYLOCITY_MIN_INTERVAL_MS = '400';
+const { default: provider, pacing, waitForSlot, noteRateLimit } = await import('../providers/paylocity.mjs');
 
 const GUID = '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
 const PAGE = 'x<script>window.pageData = {"Jobs":[{"JobId":1,"JobTitle":"Director"}]};</script>';
