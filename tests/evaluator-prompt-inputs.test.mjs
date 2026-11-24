@@ -1,6 +1,7 @@
 // The evaluator user message carries the JD once; context still reserves its tokens.
 // Run: node test-all.mjs --only evaluator-prompt-inputs
 import assert from 'node:assert/strict';
+import { listenOnSafePort } from './helpers/listen-safe-port.mjs';
 import { execFile } from 'node:child_process';
 import { copyFileSync, cpSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -58,10 +59,7 @@ async function fixture(engine, scenario, check) {
         res.end(complete(engine));
       });
     });
-    await new Promise((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, '127.0.0.1', resolve);
-    });
+    await listenOnSafePort(server);
     const url = `http://127.0.0.1:${server.address().port}`;
     let output;
     try {

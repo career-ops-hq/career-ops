@@ -4,6 +4,7 @@
 // behaviour that prevents that: each unit gets its own pool, and every socket
 // in it is closed when the unit ends, whether it resolved or threw.
 import http from 'node:http';
+import { listenOnSafePort } from './helpers/listen-safe-port.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { pass, fail, ROOT } from './helpers.mjs';
@@ -87,7 +88,7 @@ delete process.env.CAREER_OPS_CONNECTION_SCOPE;
       open++; peak = Math.max(peak, open);
       socket.on('close', () => { open--; });
     });
-    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    await listenOnSafePort(server);
     servers.push(server);
   }
   try {

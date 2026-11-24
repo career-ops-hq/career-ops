@@ -4,6 +4,7 @@
 // mock Ollama server. This proves profile content reaches the model without
 // touching a contributor's local career-ops data.
 import { execFile } from 'node:child_process';
+import { listenOnSafePort } from './helpers/listen-safe-port.mjs';
 import { createServer } from 'node:http';
 import {
   copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync,
@@ -113,7 +114,7 @@ const server = createServer((req, res) => {
 });
 
 try {
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await listenOnSafePort(server);
   const port = server.address().port;
   const result = await new Promise((resolve) => {
     execFile(

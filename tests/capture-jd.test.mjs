@@ -9,6 +9,7 @@ import { atomicWrite, captureJd, captureName, commitCapture, deriveLabels, appen
 import { captureIdentity, findCaptureForUrl } from '../jd-capture.mjs';
 import { ensureToken, createServer, startEvaluation, isLoopbackHost } from '../capture-server.mjs';
 import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
+import { listenOnSafePort } from './helpers/listen-safe-port.mjs';
 
 // Isolate every Git subprocess, including production calls inheriting process.env.
 for (const key of Object.keys(process.env)) {
@@ -374,7 +375,7 @@ test('the capture endpoint refuses a request without the token', async () => {
   const root = scratch();
   const token = ensureToken(root);
   const server = createServer({ dataRoot: root, token, evalEnabled: false });
-  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  await listenOnSafePort(server);
   const { port } = server.address();
 
   try {
@@ -410,7 +411,7 @@ test('server-side evaluation disable overrides an evaluate request', async () =>
   const root = scratch();
   const token = ensureToken(root);
   const server = createServer({ dataRoot: root, token, evalEnabled: false });
-  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  await listenOnSafePort(server);
   const { port } = server.address();
 
   try {
@@ -745,7 +746,7 @@ test('the capture endpoint commits without pushing unless the request asks for i
   const { root, git, remoteHead } = initRepoWithRemote();
   const token = ensureToken(root);
   const server = createServer({ dataRoot: root, token, evalEnabled: false });
-  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  await listenOnSafePort(server);
   const { port } = server.address();
   const post = (payload) => fetch(`http://127.0.0.1:${port}/capture`, {
     method: 'POST',
@@ -867,7 +868,7 @@ test('the server answers 400 to a request target new URL() cannot parse, and kee
   const http = await import('node:http');
   const root = scratch();
   const server = createServer({ dataRoot: root, token: ensureToken(root), evalEnabled: false });
-  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  await listenOnSafePort(server);
   const { port } = server.address();
   try {
     const status = await new Promise((resolve, reject) => {

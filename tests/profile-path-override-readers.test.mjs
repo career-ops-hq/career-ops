@@ -20,6 +20,7 @@
 // Recording the set, rather than stopping at the first hit, is what catches a
 // module that reads the right file at one site and the wrong one at another.
 import { pass, fail, rmSync, ROOT, NODE } from './helpers.mjs';
+import { listenOnSafePort } from './helpers/listen-safe-port.mjs';
 import { spawn, spawnSync } from 'child_process';
 import { createServer } from 'http';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync } from 'fs';
@@ -103,7 +104,7 @@ globalThis.fetch = function (input, ...a) {
 
 // ollama-eval probes /api/tags before it loads any context.
 const ollama = createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end('{}'); });
-await new Promise((r) => ollama.listen(0, '127.0.0.1', r));
+await listenOnSafePort(ollama);
 const ollamaUrl = `http://127.0.0.1:${ollama.address().port}`;
 
 let logCounter = 0;

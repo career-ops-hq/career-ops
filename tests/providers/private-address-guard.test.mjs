@@ -15,6 +15,7 @@
 // Run:  node --test tests/providers/private-address-guard.test.mjs
 
 import { test } from 'node:test';
+import { listenOnSafePort } from '../helpers/listen-safe-port.mjs';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import dnsModule from 'node:dns';
@@ -30,8 +31,8 @@ const { RESOLVER_FAILURE_CODES } = await import(spec('providers/_dns-cache.mjs')
 
 /** Start a loopback server; returns its port and a close(). */
 async function localServer(body = 'SECRET-LOCAL-DATA') {
-  const srv = http.createServer((_q, s) => s.end(body)).listen(0, '127.0.0.1');
-  await new Promise((r) => srv.once('listening', r));
+  const srv = http.createServer((_q, s) => s.end(body));
+  await listenOnSafePort(srv);
   return { port: srv.address().port, close: () => srv.close() };
 }
 

@@ -1,12 +1,12 @@
 import { test } from 'node:test';
+import { listenOnSafePort } from '../helpers/listen-safe-port.mjs';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { fetchText, fetchResponse } from '../../providers/_http.mjs';
 import { describeSpawn } from '../helpers/describe-spawn.mjs';
 
 async function listening(server) {
-  server.listen(0, '127.0.0.1');
-  await new Promise((resolve) => server.once('listening', resolve));
+  await listenOnSafePort(server);
   return `http://127.0.0.1:${server.address().port}`;
 }
 

@@ -3,6 +3,7 @@
 // stalls the body used to hang fetchJson forever, which could silently freeze
 // a full-directory sweep partway through with no error output.
 import { spawnSync } from 'node:child_process';
+import { listenOnSafePort } from '../helpers/listen-safe-port.mjs';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -43,7 +44,7 @@ const server = createServer((req, res) => {
   res.end('{"ok":true}');
 });
 server.on('connection', (s) => { sockets.add(s); s.on('close', () => sockets.delete(s)); });
-await new Promise((r) => server.listen(0, '127.0.0.1', r));
+await listenOnSafePort(server);
 // The provider guard refuses a loopback destination, so the requests go to a
 // public-looking origin and the transport is pointed at the local server.
 const base = 'http://stalls.example.test';
