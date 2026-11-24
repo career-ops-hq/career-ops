@@ -75,8 +75,20 @@ export function looksLikeScoreCell(v) {
  * @param {string} [s] - Raw score cell such as `4.2/5` or `**4.2/5**`.
  * @returns {number} Parsed score, or 0 when no numeric value is present.
  */
+function foldScoreText(s) {
+  // Fullwidth digits and a fullwidth dot or comma (a CJK keyboard, or a paste
+  // from Word) are the same number. Leaving them out made the regex skip to
+  // the ASCII "5" after the slash, and dedup then kept that row as a 5.
+  return String(s ?? '').replace(/[\uFF10-\uFF19\uFF0E\uFF0C]/g, (ch) => {
+    const code = ch.charCodeAt(0);
+    if (code === 0xFF0E) return '.';
+    if (code === 0xFF0C) return ',';
+    return String.fromCharCode(code - 0xFEE0);
+  });
+}
+
 export function parseScore(s) {
-  const m = String(s ?? '').replace(/\*\*/g, '').match(/(\d+(?:[.,]\d+)?)/);
+  const m = foldScoreText(s).replace(/\*\*/g, '').match(/(\d+(?:[.,]\d+)?)/);
   return m ? parseFloat(m[1].replace(',', '.')) : 0;
 }
 
