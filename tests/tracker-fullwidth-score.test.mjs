@@ -1,6 +1,3 @@
-// A fullwidth score, the kind a CJK keyboard or Word paste leaves in the
-// cell, was read as the "/5" on the end. Dedup keeps the highest score, so
-// it deleted the real row and kept the fullwidth one.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';

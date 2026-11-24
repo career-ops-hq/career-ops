@@ -65,16 +65,6 @@ export function looksLikeScoreCell(v) {
   return SCORE_CELL_RE.test(t) || t === 'N/A' || t === 'DUP' || t === '—' || t === '-';
 }
 
-/**
- * Parse numeric score from a Score cell string.
- *
- * Extracts the first number (including decimals), stripping markdown bold syntax.
- * Normalizes European decimal comma to dot. Returns 0 when no numeric value is
- * present, preserving the documented tracker 'no score' sentinel (#2803).
- *
- * @param {string} [s] - Raw score cell such as `4.2/5` or `**4.2/5**`.
- * @returns {number} Parsed score, or 0 when no numeric value is present.
- */
 function foldScoreText(s) {
   // Fullwidth digits and a fullwidth dot or comma (a CJK keyboard, or a paste
   // from Word) are the same number. Leaving them out made the regex skip to
@@ -87,6 +77,16 @@ function foldScoreText(s) {
   });
 }
 
+/**
+ * Parse numeric score from a Score cell string.
+ *
+ * Extracts the first number (including decimals), stripping markdown bold syntax.
+ * Normalizes European decimal comma to dot. Returns 0 when no numeric value is
+ * present, preserving the documented tracker 'no score' sentinel (#2803).
+ *
+ * @param {string} [s] - Raw score cell such as `4.2/5` or `**4.2/5**`.
+ * @returns {number} Parsed score, or 0 when no numeric value is present.
+ */
 export function parseScore(s) {
   const m = foldScoreText(s).replace(/\*\*/g, '').match(/(\d+(?:[.,]\d+)?)/);
   return m ? parseFloat(m[1].replace(',', '.')) : 0;
