@@ -48,6 +48,7 @@ test('the scan mode does not tell the agent to ignore every other provider', () 
   assert.match(level0, /does not say `used API fallback`/);
   assert.match(level0, /prints that line under `unreachable \(slug\?\)` and `FIX NEEDED`/);
   assert.match(level0, /takes precedence/);
+  assert.match(level0, /unverified zero takes precedence/);
   assert.match(scan, /add those jobs to candidates/);
   assert.match(scan, /name not listed in `local_parser_ok`/);
   assert.match(scan, /run Level 0 by hand/);
