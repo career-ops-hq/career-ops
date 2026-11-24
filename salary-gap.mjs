@@ -283,9 +283,12 @@ export function selectLocationSalaryBand(raw, candidateLocation) {
     label: entry.label, min: entry.parsed.min, max: entry.parsed.max,
   }));
   const parts = String(candidateLocation ?? '').split(',').map((part) => part.trim());
+  // A lone full state name can also be a city name ("New York").
+  // Treat a one-part profile value as a state only when it is an unambiguous
+  // two-letter code; otherwise retain it as a city-only location.
   const candidateState = parts.length >= 2
     ? salaryStateCode(parts[1])
-    : salaryStateCode(parts[0]);
+    : (US_STATE_CODES.has((parts[0] || '').toUpperCase()) ? parts[0].toUpperCase() : null);
   const candidateCity = parts.length >= 2
     ? normalizeSalaryLocation(parts[0])
     : (candidateState ? null : normalizeSalaryLocation(parts[0]));
