@@ -49,6 +49,18 @@ try {
     fail(`personio.detect() with slug pin returned ${JSON.stringify(pinned)}`);
   }
 
+  const mixedPin = personio.detect({
+    name: 'N26',
+    provider: 'personio',
+    personio: 'N26',
+    careers_url: 'https://n26.com/en/careers/',
+  });
+  if (mixedPin && mixedPin.url === 'https://n26.jobs.personio.de/') {
+    pass('personio.detect() lowercases a mixed-case personio: <slug> pin');
+  } else {
+    fail(`personio.detect() with mixed-case slug pin returned ${JSON.stringify(mixedPin)}`);
+  }
+
   // The pin must not become an injection point for an arbitrary host.
   const badPin = personio.detect({
     name: 'Evil',
@@ -451,6 +463,35 @@ try {
       pass('parsePersonioListing: page without a payload / empty / non-string → empty');
     } else {
       fail('parsePersonioListing should yield nothing without a payload');
+    }
+  }
+
+  // The careers page carries the type as slugs, the XML feed's own values in
+  // every tenant language, beside translated labels (live 1komma5grad and
+  // tado pages, 2026-11-22). fetch() reads the type from the slugs, on the
+  // page path, without the feed.
+  {
+    const typed = (id, type, schedule, labels = {}) => posting(id, `Role ${id}`, ['de'], 'de', {
+      employment_type_slug: type, schedule_slug: schedule, ...labels,
+    });
+    const urls = [];
+    const jobs = await personio.fetch(
+      { name: 'Acme', careers_url: 'https://acme.jobs.personio.de/' },
+      { fetchText: async (url) => { urls.push(url); return flightPage(
+        typed(201, 'permanent', 'full-time', { employment_type: 'Festanstellung', schedule: 'Vollzeit' }),
+        typed(202, 'permanent', 'part-time'),
+        typed(203, 'intern', 'full-time'),
+        typed(204, 'permanent', 'full-or-part-time'),
+        posting(205, 'Role 205', ['de'], 'de'),
+        typed(206, 'trainee', 'full-time'),
+        typed(207, 'working_student', 'part-time'),
+      ); } },
+    );
+    const got = jobs.map((j) => j.employmentType ?? '<absent>');
+    if (JSON.stringify(got) === '["full_time","part_time","internship","<absent>","<absent>","<absent>","part_time"]' && urls.length === 1) {
+      pass('personio.fetch(): careers-page postings carry the type from employment_type_slug and schedule_slug');
+    } else {
+      fail(`personio.fetch() careers-page types = ${JSON.stringify(got)}, fetches = ${urls.length}`);
     }
   }
 

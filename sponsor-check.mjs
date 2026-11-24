@@ -76,9 +76,10 @@
  * the arguments were unusable.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { normalizeCompany } from './tracker-utils.mjs';
+import { renameSyncWithRetry } from './lib/rename-retry.mjs';
 import { companyTokens, matchCompany, parseCsv } from './linkedin-join.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { flagValue, hasFlag, safeIntFlag, validateFlags } from './lib/cli-flags.mjs';
@@ -1056,7 +1057,7 @@ function writeAtomic(filePath, text) {
   const tempPath = `${filePath}.tmp-${process.pid}`;
   try {
     writeFileSync(tempPath, text, 'utf-8');
-    renameSync(tempPath, filePath);
+    renameSyncWithRetry(tempPath, filePath);
   } catch (err) {
     try { unlinkSync(tempPath); } catch { /* best effort */ }
     throw err;

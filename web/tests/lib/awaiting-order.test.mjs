@@ -17,8 +17,8 @@ import { cardReason } from "../../src/lib/machine-summary.mjs";
 // This stub must stay behaviourally identical for the cases below: a leading
 // number wins, anything unparseable is NaN.
 const scoreOf = (s) => {
-  const m = String(s).match(/(\d+(?:\.\d+)?)/);
-  return m ? parseFloat(m[1]) : NaN;
+  const m = String(s).match(/(\d+(?:[.,]\d+)?)/);
+  return m ? parseFloat(m[1].replace(",", ".")) : NaN;
 };
 
 const row = (date, score, status = "Evaluated") => ({ date, score, status, company: `${date}|${score}` });
@@ -280,4 +280,34 @@ test("without legitimacy, grouping is by score alone", () => {
     groupAwaiting([row("2026-08-01", "4.5/5")]).map(([label]) => label),
     ["Recommended"],
   );
+});
+
+test("Apply next skips a posting that closed before today", () => {
+  const rows = [
+    { ...queued("2", "4.8/5", "Fixture Closed"), closesAt: "2026-11-01" },
+    { ...queued("3", "3.0/5", "Fixture Open"), closesAt: "2026-12-01" },
+  ];
+  const target = pickApplyNext(rows, scoreOf, () => "Apply", () => "", "2026-11-15");
+  assert.equal(target?.company, "Fixture Open");
+  assert.ok(pickAwaitingDecision(rows, scoreOf).some((row) => row.company === "Fixture Closed"));
+});
+
+test("a later day drops today's close, and a row with no call is not the replacement", () => {
+  const rows = [
+    { ...queued("2", "4.8/5", "Fixture Today"), closesAt: "2026-11-15" },
+    queued("3", "3.0/5", "Fixture Seventh"),
+  ];
+  const calls = (row) => (row.n === "2" ? "Apply" : "");
+  assert.equal(pickApplyNext(rows, scoreOf, calls, () => "", "2026-11-15")?.company, "Fixture Today");
+  assert.equal(pickApplyNext(rows, scoreOf, calls, () => "", "2026-11-16"), null);
+});
+
+test("a posting that closes today is still Apply next", () => {
+  const rows = [{ ...queued("2", "4.8/5", "Fixture Today"), closesAt: "2026-11-15" }];
+  assert.equal(pickApplyNext(rows, scoreOf, () => "Apply", () => "", "2026-11-15")?.company, "Fixture Today");
+});
+
+test("a row with no close date stays Apply next", () => {
+  const rows = [queued("2", "4.8/5", "Fixture Undated")];
+  assert.equal(pickApplyNext(rows, scoreOf, () => "Apply", () => "", "2026-11-15")?.company, "Fixture Undated");
 });

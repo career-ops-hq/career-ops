@@ -217,3 +217,76 @@ test('a shortened employer shared by multiple jobs is left ambiguous', () => {
   const sourceText = CV.replace('### Globex', '### Acme Labs');
   assert.deepEqual(contexts(check('At Acme, I cut claim-form rendering 92%.', { sourceText })), []);
 });
+
+const BOLD_CV = `## Experience
+
+**Acme Corp** - Engineer
+2020 - Present
+
+- Cut duplicate records 92%.
+- Cut claim-form rendering 40%.
+`;
+const NO_BLOCK = /no job entry in the source/;
+
+test('an employer named only in a bold line is reported as not checked (#7577)', () => {
+  for (const html of [true, false]) {
+    const result = check('At Acme Corp, I cut claim-form rendering 92%.', { sourceText: BOLD_CV, html });
+    assert.equal(result.verdict, 'warn', JSON.stringify(result));
+    assert.match(result.coverage.message, NO_BLOCK);
+    assert.deepEqual(contexts(result), []);
+  }
+});
+
+test('a #### heading or an unrecognized section is reported the same way', () => {
+  for (const sourceText of [CV.replace(/### /g, '#### '), CV.replace('## Experience', '## Career')]) {
+    for (const html of [true, false]) {
+      const result = check('At Acme Corp, I cut claim-form rendering 92%.', { sourceText, html });
+      assert.equal(result.verdict, 'warn', JSON.stringify(result));
+      assert.match(result.coverage.message, NO_BLOCK);
+      assert.deepEqual(contexts(result), []);
+    }
+  }
+});
+
+test('no gap when the metric-context comparison would not have run', () => {
+  const noMetric = check('At Acme Corp, I led the claims team.', { sourceText: BOLD_CV });
+  assert.equal(noMetric.verdict, 'pass', JSON.stringify(noMetric));
+  assert.equal(noMetric.coverage, null, JSON.stringify(noMetric));
+  for (const config of [{ allow_metrics: ['92%'] }, { allow_facts: ['Acme Corp'] }]) {
+    const result = check('At Acme Corp, I cut claim-form rendering 92%.', { sourceText: BOLD_CV, config });
+    assert.ok(!result.coverage || !NO_BLOCK.test(result.coverage.message), JSON.stringify(result));
+  }
+});
+
+test('a job block under ### still gets metric-context, not the gap', () => {
+  const result = check('At Acme Corp, I cut claim-form rendering 92%.');
+  assert.equal(contexts(result).length, 1);
+  assert.ok(!(result.coverage && NO_BLOCK.test(result.coverage.message)), JSON.stringify(result));
+});
+
+test('the CLI prints the not-checked note for the issue\'s repro', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cover-metric-noblock-'));
+  try {
+    const cv = join(dir, 'cv.md'), cover = join(dir, 'cover.md'), facts = join(dir, 'facts.json');
+    writeFileSync(cv, BOLD_CV);
+    writeFileSync(cover, 'At Acme Corp, I cut claim-form rendering 92%.\n');
+    writeFileSync(facts, '{}');
+    const result = spawnSync(process.execPath, [
+      fileURLToPath(new URL('../verify-cv-facts.mjs', import.meta.url)), cover, '--source', cv, '--config', facts,
+    ], { encoding: 'utf8', timeout: 30_000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stderr, /not checked:.*no job entry in the source/s);
+    assert.doesNotMatch(result.stdout, /CV fact check passed/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a name the source mentions only inside another job\'s bullet gets the note, not a pass', () => {
+  const sourceText = CV.replace('- Cut cloud spend 92%.', '- Cut cloud spend 92%.\n- Migrated Google Cloud workloads.');
+  const result = check('At Google, I cut claim-form rendering 92%.', { sourceText });
+  assert.equal(result.verdict, 'warn', JSON.stringify(result));
+  assert.match(result.coverage.message, NO_BLOCK);
+  assert.deepEqual(result.invented, []);
+  assert.deepEqual(result.unsupportedFacts, []);
+});

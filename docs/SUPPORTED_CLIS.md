@@ -9,14 +9,25 @@ Career-ops is AI-agnostic and runs on several command-line agent tools. The core
 | Codex | `CODEX.md` (see [`docs/CODEX.md`](CODEX.md)) | Interactive: `codex` (then use plain text). Headless/Batch: `codex exec "prompt"` |
 | OpenCode | `OPENCODE.md` | Interactive: `opencode` (then `/career-ops`). Headless/Batch: `opencode run "prompt"` |
 | Pi | `AGENTS.md` | Interactive: `pi` (then `/skill:career-ops`). Headless/Batch: `pi -p --no-approve --no-skills --skill .agents/skills/career-ops "/skill:career-ops <request>"` (Pi 0.79.1+) |
-| Antigravity CLI | `AGENTS.md` | Interactive: `agy` (then `/career-ops`). Headless/Batch: `agy -p "prompt"` |
-| Grok Build CLI | `AGENTS.md` | Interactive: `grok` (then `/career-ops`). Headless/Batch: `grok -p "prompt"` (add `--yolo` to auto-approve tool executions) |
+| Antigravity CLI | `AGENTS.md` | Interactive: `agy` (then `/career-ops`). Headless: `agy -p "prompt"`. Batch: not supported by `batch/batch-runner.sh` yet, see [Antigravity CLI and batch](#antigravity-cli-and-batch) |
+| Grok Build CLI | `AGENTS.md` | Interactive: `grok` (then `/career-ops`). Headless/Batch: `grok -p "prompt"` |
 | Qwen | `AGENTS.md` | Interactive: `qwen`. Headless/Batch: `qwen -p "prompt"` |
 | Kimi | `KIMI.md` | Interactive: `kimi` |
 | GitHub Copilot CLI | `AGENTS.md` | Headless/Batch: `copilot -p "prompt"` |
 | Gemini | `GEMINI.md` | Legacy wrapper redirecting to `AGENTS.md` (transitioned to Antigravity CLI). |
 | Hermes Agent | `AGENTS.md` | Interactive: `hermes` (then ask for a career-ops task). Web read-only workers: `hermes chat -q "prompt" --oneshot -Q --no-restore-cwd`. Batch ranking: unsupported. |
 | Oh My Pi | `.omp/AGENTS.md` | Interactive: `omp` (then `/skill:career-ops`). Headless/Batch: `omp -p "prompt"` |
+
+## Antigravity CLI and batch
+
+`agy -p` works for one-off headless runs, but `batch/batch-runner.sh --cli antigravity` is not supported yet (the runner stops with "Unknown --cli"). A batch worker has to run `node` scripts, and headless `agy` denies shell commands unless a rule allows them. That leaves two options, and neither fits the rule in `AGENTS.md` ([#2876](https://github.com/career-ops-hq/career-ops/issues/2876)), which says a headless worker never gets a blanket auto-approve flag and that a CLI with no way to express the restriction stays out:
+
+- `--dangerously-skip-permissions` is a blanket approve flag, so it is ruled out.
+- A per-run `--settings` file with `command(regex:node .*)` runs the `node` commands, but it is only a guard against accidents. Tested on Windows, `node -v; Get-Date -Format yyyy` ran both parts, and a stricter pattern that excludes `;` did not block it either, so the check seems to read only the first command on the line. `node -e` can also run any code, and the batch prompt uses it.
+
+Two more things the next attempt will meet: a denied action still exits 0 (the result JSON lists it under `denied_actions`), so the runner has to treat a missing report or TSV as a failure, and on Windows the system prompt plus the job is too long for one `-p` argument ("Argument list too long"), so the task has to go through a file like the one Grok uses.
+
+If `agy` later gets a permission check that covers the whole command line, [#7527](https://github.com/career-ops-hq/career-ops/issues/7527) is the place to pick this up again.
 
 ## Hermes Agent
 

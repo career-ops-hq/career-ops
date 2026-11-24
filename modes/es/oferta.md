@@ -428,7 +428,7 @@ Guardar la evaluación completa en `reports/{###}-{company-slug}-{YYYY-MM-DD}.md
 (lista de 15-20 palabras clave de la oferta para optimización ATS)
 
 ## Keyword Coverage
-(generado por `keyword-match.mjs` (1b) — cobertura en %, present, thin, missing)
+(generado por `keyword-match.mjs` (1b) — cobertura en %, present, missing)
 
 ## Job Description (archived verbatim)
 (el texto completo de la oferta, pegado tal cual — ver el requisito más abajo)

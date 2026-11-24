@@ -15,7 +15,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { ROOT, copyEmployerRegistry, employerRegistryToday, unlistedEmployerBoard, unusedEmployerContributionDay } from './helpers.mjs';
+import { ROOT, copyEmployerRegistry, employerRegistryToday, unlistedEmployerBoard, unusedEmployerContributionDay, writeOwnDomainInbox } from './helpers.mjs';
+import { OWN_DOMAIN_ATS } from '../lib/ats-board-url.mjs';
 import { listTree } from '../lib/walk-tree.mjs';
 
 import { applyFold, formatManifest, looseManifest, planFold } from '../seeds/employers-fold.mjs';
@@ -308,33 +309,40 @@ test('end to end: the committed boards plus new ones, imported, validated, folde
   const dir = mkdtempSync(join(tmpdir(), 'co-employers-e2e-'));
   try {
     copyEmployerRegistry(dir);
-    const urls = [];
+    const registered = [];
+    const ownDomain = [];
     for (const ats of readdirSync(join(dir, 'employers/boards'))) {
       for (const f of readdirSync(join(dir, 'employers/boards', ats))) {
-        for (const l of readFileSync(join(dir, 'employers/boards', ats, f), 'utf8').split('\n').filter(Boolean)) urls.push(JSON.parse(l).careers_url);
+        for (const l of readFileSync(join(dir, 'employers/boards', ats, f), 'utf8').split('\n').filter(Boolean)) {
+          const row = JSON.parse(l);
+          if (OWN_DOMAIN_ATS.includes(row.ats)) ownDomain.push(row);
+          else registered.push(`${row.careers_url},"${row.name.replaceAll('"', '""')}"`);
+        }
       }
     }
-    assert.equal(urls.length, validateRegistry({ root: ROOT }).stats.rows);
+    const total = registered.length + ownDomain.length;
+    assert.equal(total, validateRegistry({ root: ROOT }).stats.rows);
     const list = join(dir, 'list.csv');
     const [one, two] = [unlistedEmployerBoard('lever', 'newco-one'), unlistedEmployerBoard('lever', 'newco-two')];
-    writeFileSync(list, ['url,name', ...urls.map((u) => `${u},`), `https://jobs.lever.co/${one},Newco One`, `https://jobs.eu.lever.co/${two}/abc,Newco Two`].join('\n'));
+    writeFileSync(list, ['url,name', ...registered, `https://jobs.lever.co/${one},Newco One`, `https://jobs.eu.lever.co/${two}/abc,Newco Two`].join('\n'));
     const imp = node(IMPORTER, [list, '--login', 'octocat', '--date', DATE], dir);
     assert.equal(imp.status, 0, imp.stderr);
+    writeOwnDomainInbox(dir, ownDomain, DATE);
 
     const v1 = node(VALIDATOR, [], dir);
     assert.equal(v1.status, 0, v1.stderr);
-    // The warning is one for each inbox file, and a registry above the size of one file is imported in parts.
+    // Warnings across the inbox files count every known board.
     const already = [...v1.stderr.matchAll(/: (\d+) boards? (?:is|are) already in the registry/g)].reduce((sum, m) => sum + Number(m[1]), 0);
-    assert.equal(already, urls.length);
+    assert.equal(already, total);
 
     const dry = node(FOLD, [], dir);
     assert.equal(dry.status, 0, dry.stderr);
-    assert.match(dry.stdout, new RegExp(`2 new board\\(s\\), ${urls.length} already in the registry skipped`));
+    assert.match(dry.stdout, new RegExp(`2 new board\\(s\\), ${total} already in the registry skipped`));
 
     const applied = node(FOLD, ['--apply'], dir);
     assert.equal(applied.status, 0, applied.stderr);
     const v2 = node(VALIDATOR, ['--base', ROOT], dir);
     assert.equal(v2.status, 0, v2.stderr);
-    assert.match(v2.stdout, new RegExp(`valid: ${urls.length + 2} rows`));
+    assert.match(v2.stdout, new RegExp(`valid: ${total + 2} rows`));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

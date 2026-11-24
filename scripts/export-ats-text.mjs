@@ -9,6 +9,7 @@ import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { loadYaml } from '../lib/yaml-document.mjs';
+import { parseCompanyHeading } from '../lib/cv-markdown.mjs';
 import { isMainModule } from '../lib/is-main-module.mjs';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from '../path-resolver.mjs';
 import { validateFlags } from '../lib/cli-flags.mjs';
@@ -26,6 +27,29 @@ export function sanitizeAtsText(text) {
     .replace(/\u00A0/g, ' ')
     .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
     .trim();
+}
+
+// A job date line. Year-first ("2020-2024"), a month and a year
+// ("Jan 2020 - Present"), or a numeric month ("09/2021 - Present").
+const CV_DATE_LINE = /^(?:\d{4}\b|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{4}|\d{1,2}\/\d{4}\b)/i;
+
+function looksLikeCvDate(line) {
+  return CV_DATE_LINE.test(line);
+}
+
+function bulletItems(body) {
+  return String(body ?? '')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => /^[-*•]\s+/.test(line))
+    .map(line => line.replace(/^[-*•]\s+/, '').trim())
+    .filter(Boolean);
+}
+
+function firstList(primary, fallback) {
+  if (Array.isArray(primary) && primary.length > 0) return primary;
+  if (Array.isArray(fallback) && fallback.length > 0) return fallback;
+  return [];
 }
 
 /**
@@ -46,6 +70,8 @@ export function parseCvMarkdown(markdown) {
     experience: [],
     education: [],
     skills: [],
+    certifications: [],
+    projects: [],
   };
 
   // 1. Parse top-level Header for Name
@@ -105,8 +131,10 @@ export function parseCvMarkdown(markdown) {
           const h3ActualEnd = h3End === -1 ? body.length : h3End;
           const h3Body = body.slice(h3Curr.index, h3ActualEnd).trim();
 
+          const heading = parseCompanyHeading(`### ${h3Curr.title}`);
           const entry = {
-            company: h3Curr.title,
+            company: heading ? heading.company : h3Curr.title,
+            location: heading ? heading.location : '',
             role: '',
             duration: '',
             bullets: [],
@@ -117,7 +145,7 @@ export function parseCvMarkdown(markdown) {
             const roleMatch = l.match(/^\*\*(.+?)\*\*$/);
             if (roleMatch && !entry.role) {
               entry.role = roleMatch[1].trim();
-            } else if (/^\d{4}/.test(l) && !entry.duration) {
+            } else if (looksLikeCvDate(l) && !entry.duration) {
               entry.duration = l.trim();
             } else if (l.startsWith('- ') || l.startsWith('* ') || l.startsWith('• ')) {
               entry.bullets.push(l.replace(/^[-*•]\s+/, '').trim());
@@ -153,6 +181,29 @@ export function parseCvMarkdown(markdown) {
             result.skills.push(item);
           }
         }
+      }
+    } else if (titleLower.includes('certification')) {
+      result.certifications = bulletItems(body);
+    } else if (titleLower.includes('project')) {
+      const h3Regex = /^###\s+(.+)$/gm;
+      let h3Match;
+      const h3Sections = [];
+      while ((h3Match = h3Regex.exec(body)) !== null) {
+        h3Sections.push({
+          title: h3Match[1].trim(),
+          start: h3Match.index,
+          index: h3Match.index + h3Match[0].length,
+        });
+      }
+      if (h3Sections.length > 0) {
+        for (let j = 0; j < h3Sections.length; j++) {
+          const h3Curr = h3Sections[j];
+          const h3End = (j + 1 < h3Sections.length) ? h3Sections[j + 1].start : body.length;
+          const h3Body = body.slice(h3Curr.index, h3End).trim();
+          result.projects.push({ name: h3Curr.title, bullets: bulletItems(h3Body) });
+        }
+      } else {
+        result.projects = bulletItems(body).map(name => ({ name, bullets: [] }));
       }
     }
   }
@@ -207,7 +258,10 @@ export function normalizeProfile(raw = {}, cvData = {}) {
     education = cvData.education;
   }
 
-  return { name, email, phone, location, linkedin, summary, experience, education, skills };
+  const certifications = firstList(raw.certifications, cvData.certifications);
+  const projects = firstList(raw.projects, cvData.projects);
+
+  return { name, email, phone, location, linkedin, summary, experience, education, skills, certifications, projects };
 }
 
 /**
@@ -309,11 +363,13 @@ export function formatAtsText(profile = {}, options = {}) {
       .map(e => {
         const role = sanitizeAtsText(e.role || '');
         const company = sanitizeAtsText(e.company || '');
+        const place = sanitizeAtsText(e.location || '');
+        const where = [company, place].filter(Boolean).join(', ');
         const headerParts = [];
-        if (role && company) {
-          headerParts.push(`${role} at ${company}`);
-        } else if (role || company) {
-          headerParts.push(role || company);
+        if (role && where) {
+          headerParts.push(`${role} at ${where}`);
+        } else if (role || where) {
+          headerParts.push(role || where);
         }
         if (e.duration) {
           headerParts.push(`(${sanitizeAtsText(e.duration)})`);
@@ -356,6 +412,32 @@ export function formatAtsText(profile = {}, options = {}) {
     }
   }
 
+  if (Array.isArray(normalized.certifications) && normalized.certifications.length > 0) {
+    const lines = normalized.certifications.map(item => {
+      if (typeof item === 'string') return sanitizeAtsText(item);
+      if (item && typeof item === 'object') {
+        const bits = [item.name, item.title, item.org, item.year].filter(bit => typeof bit === 'string' && bit.trim());
+        return sanitizeAtsText(bits.join(', '));
+      }
+      return '';
+    }).filter(Boolean);
+    if (lines.length) sections.certifications = `--- CERTIFICATIONS ---\n${lines.join('\n')}`;
+  }
+
+  if (Array.isArray(normalized.projects) && normalized.projects.length > 0) {
+    const blocks = normalized.projects.map(item => {
+      if (typeof item === 'string') return sanitizeAtsText(item);
+      if (!item || typeof item !== 'object') return '';
+      const name = sanitizeAtsText(item.name || item.title || '');
+      const bullets = Array.isArray(item.bullets)
+        ? item.bullets.filter(b => typeof b === 'string' && b.trim()).map(b => `- ${sanitizeAtsText(b)}`).join('\n')
+        : '';
+      if (name && bullets) return `${name}\n${bullets}`;
+      return name || bullets;
+    }).filter(Boolean);
+    if (blocks.length) sections.projects = `--- PROJECTS ---\n${blocks.join('\n\n')}`;
+  }
+
   if (sectionFilter) {
     if (sections[sectionFilter]) {
       return sections[sectionFilter];
@@ -377,7 +459,7 @@ if (isMainModule(import.meta.url)) {
 Export profile and CV sections as plain text for ATS forms.
 
 Options:
-  --section <name>  Export personal, summary, skills, experience or education only
+  --section <name>  Export personal, summary, skills, experience, education, certifications, or projects only
   --out <path>      Write to a file instead of stdout
   --profile <path>  Profile YAML (default: CAREER_OPS_PROFILE, else config/profile.yml in the data root)
   --cv <path>       CV Markdown (default: CAREER_OPS_CV, else cv.md in the data root, when present)

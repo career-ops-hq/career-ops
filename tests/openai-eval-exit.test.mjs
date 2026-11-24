@@ -23,7 +23,7 @@ const URL_BASE = 'http://127.0.0.1:1234/v1';
 // The requests made are written to requests.txt, so a check can tell which exit
 // the run reached. `passExit` lets a process.exit() call through with its own
 // code instead of 99.
-function runEval({ preloadBody, passExit = false }) {
+function runEval({ preloadBody, passExit = false, apiKey = '' }) {
   const dir = mkdtempSync(join(tmpdir(), 'openai-eval-exit-'));
   try {
     mkdirSync(join(dir, 'config'), { recursive: true });
@@ -51,7 +51,9 @@ ${preloadBody}`);
     // DOTENV_CONFIG_QUIET keeps dotenv's own banner out of the stderr checks.
     Object.assign(env, { CAREER_OPS_ROOT: dir, OPENAI_TIMEOUT_MS: '10000', DOTENV_CONFIG_QUIET: 'true' });
     const result = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, join(ROOT, 'openai-eval.mjs'),
-      '--url', URL_BASE, '--model', 'synthetic-test', '--no-save', 'Synthetic JD: build reliable software.'],
+      '--url', URL_BASE, '--model', 'synthetic-test', '--no-save',
+      ...(apiKey ? ['--key', apiKey] : []),
+      'Synthetic JD: build reliable software.'],
     { cwd: dir, encoding: 'utf8', timeout: 30000, env });
     let requests = [];
     try { requests = readFileSync(log, 'utf8').split('\n').filter(Boolean); } catch { /* the run never exited */ }
@@ -99,4 +101,15 @@ test('a failed run whose event loop stays open still exits 1 once the backstop f
   const result = runEval({ preloadBody: `${STREAM_ERROR}\nsetInterval(() => {}, 1000);`, passExit: true });
   assert.equal(result.status, 1, describeSpawn(result));
   assert.equal(result.stderr, '❌  API call failed: model crashed\nprocess.exit called with 1\n');
+});
+
+test('an error body that quotes the API key is redacted before it is printed', () => {
+  const key = 'sk-synthetic-secret-value-1234567890';
+  const result = runEval({
+    apiKey: key,
+    preloadBody: `const answer = () => new Response('bad request: key ${key} is not valid', { status: 400 });`,
+  });
+  assert.equal(result.status, 1, describeSpawn(result));
+  assert.doesNotMatch(result.stderr, /sk-synthetic-secret-value-1234567890/, 'the key must not reach stderr');
+  assert.match(result.stderr, /\[REDACTED\]/);
 });

@@ -43,6 +43,59 @@ test("'no output' canned message -> auth hint", () => {
   assert.equal(hint?.kind, "auth");
 });
 
+test("a rate limit, an empty reply, and a Grok error are not a sign-in hint", () => {
+  assert.equal(jobErrorHint(errorJob("Rate limit. Wait and try again. (429 rate limit exceeded, try again later)")), null);
+  assert.equal(jobErrorHint(errorJob("Rate limit. Wait and try again. (429 rate limit exceeded for API key)")), null);
+  assert.equal(jobErrorHint(errorJob("Rate limit. Wait and try again. (429 rate limit on login endpoint)")), null);
+  assert.equal(jobErrorHint(errorJob("429 rate limit exceeded for API key")), null);
+  assert.equal(
+    jobErrorHint(errorJob("Authentication failed: invalid credentials (request ID req-429-abc)"))?.kind,
+    "auth",
+  );
+  assert.equal(
+    jobErrorHint(errorJob("The CLI exited with an error. (credentials loaded successfully; network connection failed)")),
+    null,
+  );
+  assert.equal(jobErrorHint(errorJob("429 rate limit on login endpoint")), null);
+  assert.equal(jobErrorHint(errorJob("The CLI returned nothing.")), null);
+  assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (API key loaded successfully)")), null);
+  assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (API key loaded successfully) (career-ops is best on Claude Code.)")), null);
+  assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (career-ops is best on Claude Code.)")), null);
+  assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (API key configured)")), null);
+  assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (API key configured; report not found)")), null);
+  assert.equal(jobErrorHint(errorJob("The CLI exited with an error. (Error: proxy not configured)")), null);
+  assert.equal(
+    jobErrorHint(errorJob("This run hit an error before finishing, so it isn't recorded as a confident result — re-run it to verify. (API key loaded successfully)")),
+    null,
+  );
+  assert.equal(
+    jobErrorHint(errorJob(("This run hit an error before finishing, so it isn't recorded as a confident result — re-run it to verify. (API key loaded successfully; " + "x".repeat(120)).slice(0, 200))),
+    null,
+  );
+  assert.equal(jobErrorHint(errorJob("The CLI exited with an error. (API key loaded successfully)")), null);
+  assert.equal(jobErrorHint(errorJob("rate limit reached for this account")), null);
+});
+
+test("a real sign-in line still asks you to sign in", () => {
+  assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (please login)"))?.kind, "auth");
+  assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (please login) (career-ops is best on Claude Code.)"))?.kind, "auth");
+  assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (No CLI configured; login required)"))?.kind, "auth");
+  assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (API key configured; authentication failed)"))?.kind, "auth");
+  assert.equal(
+    jobErrorHint(errorJob("This run hit an error before finishing, so it isn't recorded as a confident result — re-run it to verify. (please login)"))?.kind,
+    "auth",
+  );
+  assert.equal(
+    jobErrorHint(errorJob("This run hit an error before finishing, so it isn't recorded as a confident result — re-run it to verify. (authentication failed (HTTP 401))"))?.kind,
+    "auth",
+  );
+  assert.equal(jobErrorHint(errorJob("The CLI exited with an error. (Configuration loaded; please login)"))?.kind, "auth");
+  assert.equal(jobErrorHint(errorJob("The CLI exited with an error. (not authenticated)"))?.kind, "auth");
+  assert.equal(jobErrorHint(errorJob("The CLI exited with an error. (Invalid API key)"))?.kind, "auth");
+  assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (API key not configured)"))?.kind, "auth");
+  assert.equal(jobErrorHint(errorJob("Invalid API key"))?.kind, "auth");
+});
+
 test("a raw 401 unauthorized label -> auth hint", () => {
   assert.equal(jobErrorHint(errorJob("401 unauthorized"))?.kind, "auth");
 });

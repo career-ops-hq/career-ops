@@ -8,17 +8,13 @@ import { useJobs } from "@/components/jobs/job-store";
 import { CostBadge } from "@/components/cost/cost-badge";
 import { coverDraftButtonState } from "@/lib/pdf-button-state.mjs";
 import { COVER_TONES } from "@/lib/cover-tones.mjs";
+import { COVER_QUESTIONS, storedCoverBrief } from "@/lib/cover-answers.mjs";
 import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
 
 // Fires the real career-ops `cover` mode (worker kind "cover") for THIS
 // application. cover.md will not draft until the candidate answers its four
 // Step 6 prompts, so the button opens those questions first. The draft lands in
 // the run log. Rendering it to PDF is still the CLI's Step 9.
-const QUESTIONS = [
-  { name: "why", label: "Why this role or company?", hint: "One or two angles: scale, mission, stage, or what you would learn." },
-  { name: "problem", label: "What problem would you solve for them?", hint: "The research step checks this against what the company says publicly." },
-  { name: "approach", label: "How would you approach it on day one?", hint: "One or two sentences. This is the most specific part of the letter." },
-] as const;
 
 const fieldClass =
   "mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-brand/50 focus:outline-none";
@@ -34,6 +30,9 @@ export function CoverDraftButton({ n, company }: { n: string; company: string })
     [jobs, n],
   );
   const state = coverDraftButtonState(job);
+  // savedBrief is lost when the user leaves the page, typically to read a failed
+  // run's log, so fall back to the answers that run kept (#7441).
+  const prefill = savedBrief ?? storedCoverBrief(job?.brief);
 
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -93,16 +92,16 @@ export function CoverDraftButton({ n, company }: { n: string; company: string })
       )}
       {open && (
         <form onSubmit={submit} aria-label="Cover letter questions" className="basis-full rounded-2xl border border-border bg-surface/50 p-4">
-          {QUESTIONS.map((q) => (
+          {COVER_QUESTIONS.map((q) => (
             <label key={q.name} className="mb-3 block text-sm font-medium text-foreground">
               {q.label}
               <span className="block text-xs font-normal text-muted">{q.hint}</span>
-              <textarea name={q.name} required maxLength={1000} rows={2} defaultValue={savedBrief?.[q.name] ?? ""} className={fieldClass} />
+              <textarea name={q.name} required maxLength={1000} rows={2} defaultValue={prefill?.[q.name] ?? ""} className={fieldClass} />
             </label>
           ))}
           <label className="mb-4 block text-sm font-medium text-foreground">
             Tone
-            <select name="tone" defaultValue={savedBrief?.tone ?? "mirror"} className={fieldClass}>
+            <select name="tone" defaultValue={prefill?.tone || "mirror"} className={fieldClass}>
               {Object.entries(COVER_TONES).map(([id, label]) => (
                 <option key={id} value={id}>{label}</option>
               ))}

@@ -1,0 +1,18 @@
+{
+  "id": "2026-11-23-santifer.5",
+  "contributor": "santifer",
+  "signed_by": "career-ops maintainers",
+  "rows": 3,
+  "source": "web-index:commoncrawl@2026-11-22",
+  "origin": "Board addresses whose sites appear in the Common Crawl URL index (cc-index CDX of crawls CC-MAIN-2026-34, -39 and -43; host and site name only), each checked live; the employer's name is the one each board gives itself; checked on 2026-11-23 by an automated job of the maintainers, written with AI assistance: each board answered and listed at least one posting.",
+  "no_conflicting_contract": true,
+  "personal_data": false,
+  "exclusive": false,
+  "license": "CC-BY-4.0",
+  "also_permits": [
+    "ODbL-1.0",
+    "CC0-1.0"
+  ],
+  "attribution": "Sites from the Common Crawl URL index, CC-MAIN-2026-34, -39 and -43 (Common Crawl terms of use)",
+  "date": "2026-11-23"
+}

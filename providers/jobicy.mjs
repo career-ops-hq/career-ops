@@ -1,6 +1,7 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { hasControlChar } from './_config-utils.mjs';
 import { decodeEntities } from './_html-entities.mjs';
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
 
@@ -36,9 +37,6 @@ const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const SLUG_LISTS = { geo: 'locations', industry: 'industries' };
 const MAX_TAG_LENGTH = 100;
 const MAX_CURSOR_LENGTH = 4096;
-
-/** @param {string} text */
-const hasControlChar = (text) => [...text].some((c) => c < ' ' || c === '\u007f');
 
 /**
  * The entry's optional Jobicy filters, validated. Exported for unit tests.

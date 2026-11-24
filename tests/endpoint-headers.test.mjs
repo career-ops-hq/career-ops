@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { endpointHeaders } from '../lib/endpoint-headers.mjs';
+import { endpointHeaders, buildTokenLimit } from '../lib/endpoint-headers.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SESSION = '3b241101-e2bb-4255-8caf-4136c566a962';
@@ -64,3 +64,25 @@ test('openai-eval.mjs generates the session id once per run, at module level', (
   assert.equal(calls.length, 1, 'exactly one randomUUID() call');
   assert.match(src, /^const \w+ = randomUUID\(\);/m, 'assigned at module level (column 0)');
 });
+
+test('api.openai.com gets max_completion_tokens and no max_tokens', () => {
+  const cap = buildTokenLimit(1234, 'api.openai.com');
+  assert.deepEqual(cap, { max_completion_tokens: 1234 });
+  assert.equal('max_tokens' in cap, false);
+});
+
+for (const host of ['openrouter.ai', 'localhost', 'api.openai.com.evil.com', 'notapi.openai.com', '', undefined]) {
+  test(`host ${JSON.stringify(host)} gets max_tokens and no max_completion_tokens`, () => {
+    const cap = buildTokenLimit(1234, host);
+    assert.deepEqual(cap, { max_tokens: 1234 });
+    assert.equal('max_completion_tokens' in cap, false);
+  });
+}
+
+for (const file of ['openai-eval.mjs', 'openai-tailor.mjs']) {
+  test(`${file} imports buildTokenLimit instead of defining its own`, () => {
+    const src = readFileSync(join(ROOT, file), 'utf-8');
+    assert.match(src, /import \{[^}]*\bbuildTokenLimit\b[^}]*\} from '\.\/lib\/endpoint-headers\.mjs'/);
+    assert.doesNotMatch(src, /function buildTokenLimit/);
+  });
+}

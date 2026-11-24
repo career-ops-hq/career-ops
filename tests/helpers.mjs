@@ -11,6 +11,10 @@ import { localToday } from '../lib/local-today.mjs';
 import { getCareerOpsRoot } from '../path-resolver.mjs';
 import { describeDrift, diffSnapshots, snapshotDataRoot } from './data-root-guard.mjs';
 import { REQUIRED_TOOL_ENV, toolRequired } from './required-tools.mjs';
+import { formatManifest, looseManifest } from '../seeds/employers-fold.mjs';
+import { chunkInbox } from '../seeds/employers-import.mjs';
+import { INBOX_DIR } from '../seeds/employers-inbox.mjs';
+import { loadOwnDomainContributors } from '../seeds/employers-validate.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one level down)
@@ -257,6 +261,20 @@ const TRANSIENT_UNLINK_ERRORS = new Set(['EBUSY', 'EMFILE', 'ENFILE', 'ENOTEMPTY
  * this comment, not by the compiler: change one, change the other.
  */
 export const DEFAULT_SCRIPT_TIMEOUT_MS = 30_000;
+
+/**
+ * How many times DEFAULT_SCRIPT_TIMEOUT_MS test-all.mjs gives a `node:test`
+ * suite, which spawns child processes per test and shares the machine with
+ * the rest of the pool.
+ *
+ * 4 was measured on 8 cores: a file takes about 1.7x as long at 8 jobs as
+ * alone, and the slowest is 16s alone. On the windows-latest runner (4 vCPU,
+ * 4 jobs) the same suites take about twice as long as on ubuntu-latest, and
+ * that baseline swings 1.7x between runs of the same tree, so a suite that
+ * used 40% of 120s on ubuntu overran it on a slow Windows run (#7713).
+ * Windows gets double the factor for the doubled baseline.
+ */
+export const NODE_TEST_BUDGET_FACTOR = process.platform === 'win32' ? 8 : 4;
 
 let passed = 0;
 let failed = 0;
@@ -1976,6 +1994,22 @@ export function copyEmployerRegistry(destDir) {
   const src = join(ROOT, 'employers');
   const inbox = join(src, 'inbox');
   cpSync(src, join(destDir, 'employers'), { recursive: true, filter: (p) => p !== inbox && !p.startsWith(inbox + sep) });
+}
+
+/** Write the own-domain rows as a separate contribution beside the imported files. */
+export function writeOwnDomainInbox(root, rows, date) {
+  if (rows.length === 0) return [];
+  const [login] = loadOwnDomainContributors(root);
+  if (!login) throw new Error('expected an authorized own-domain contributor');
+  const id = `${date}-${login}`;
+  const inbox = join(root, INBOX_DIR);
+  const lines = rows.map(({ ats, board, name, own_domain_mark }) => ({ ats, board, name, own_domain_mark }));
+  const chunks = chunkInbox(lines, id);
+  for (const chunk of chunks) {
+    writeFileSync(join(inbox, chunk.name), `${chunk.lines.map((line) => JSON.stringify(line)).join('\n')}\n`, { flag: 'wx' });
+  }
+  writeFileSync(join(inbox, `${id}.json`), formatManifest(looseManifest({ id, login, date, rows: lines.length })), { flag: 'wx' });
+  return chunks.map(({ name }) => name);
 }
 
 /** Every row of the committed employer registry, parsed. */

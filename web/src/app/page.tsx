@@ -1,5 +1,5 @@
-import { readApplications, readInbox, requestReportReader, doctorState } from "@/lib/career-ops";
-import { pickAwaitingDecision, pickApplyNext, includeApplyTarget } from "@/lib/home/awaiting.mjs";
+import { readApplications, readInbox, requestReportReader, doctorState, withCloseDates, readAwaitingAges } from "@/lib/career-ops";
+import { pickAwaitingDecision, pickApplyNext, includeApplyTarget, localDay } from "@/lib/home/awaiting.mjs";
 import { cardReason } from "@/lib/machine-summary.mjs";
 import type { CardReason } from "@/lib/machine-summary.mjs";
 import { todaySnapshot } from "@/lib/home/today-snapshot.mjs";
@@ -16,7 +16,9 @@ import { TodayDashboard } from "@/components/home/today-dashboard";
 export const dynamic = "force-dynamic"; // always read fresh local files at request time (never at build — CI has no user data)
 
 export default async function Home() {
-  const snapshot = { applications: readApplications(), inbox: readInbox() };
+  // Pipeline already joins scan-history closes_at. Today has to as well, or
+  // Apply next can name a posting that closed.
+  const snapshot = { applications: await withCloseDates(readApplications()), inbox: readInbox() };
   const { phase, onboardingNeeded } = doctorState(snapshot);
   // First run (truly empty install): the CV-upload takeover IS the home — value
   // before commitment. The full dashboard returns once they have a CV or any data.
@@ -43,12 +45,18 @@ export default async function Home() {
     loaded.set(app.n, entry);
     return entry;
   };
-  const shown = pickAwaitingDecision(applications, scoreNum);
+  // One calendar day for the server and the browser. A second local day, after
+  // midnight or in another time zone, can drop the target and then miss the
+  // next open Apply, because only these rows carry a decision.
+  const applyDay = localDay();
+  const ages = await readAwaitingAges(applications, applyDay, (app) => applyPostingUrl(readApp(app).reportUrl, app.url, app.applyLink));
+  const shown = pickAwaitingDecision(applications, scoreNum, 6, (app) => ages[app.n]?.open.state === "closed");
   const applyTarget = pickApplyNext(
     applications,
     scoreNum,
-    (app) => readApp(app).reason?.decision ?? "",
+    (app) => (ages[app.n]?.open.state === "closed" ? "" : readApp(app).reason?.decision ?? ""),
     (app) => readApp(app).legitimacy,
+    applyDay,
   );
   const awaiting = includeApplyTarget(shown, applyTarget);
   for (const app of awaiting) {
@@ -77,7 +85,7 @@ export default async function Home() {
   // Once there is a tracker or an inbox, that work leads. Setup stays on the
   // page, under the queue, until the profile panel is complete.
   const dashboard = (
-    <TodayDashboard applications={applications} reasons={reasons} legitimacy={legitimacy} inbox={inbox} inBetween={phase === "in-between"} applyFacts={applyFacts} />
+    <TodayDashboard applications={applications} reasons={reasons} legitimacy={legitimacy} inbox={inbox} inBetween={phase === "in-between"} applyFacts={applyFacts} ages={ages} applyDay={applyDay} />
   );
   const lead = homeLead(snapshot.applications.length > 0 || snapshot.inbox.length > 0);
   return (

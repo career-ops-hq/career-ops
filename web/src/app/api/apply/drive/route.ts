@@ -1,4 +1,5 @@
-import { getSession, finalizeDrivenSession, extractCurrent, isApplicationFormFn, handoffSession, fillSession } from "@/lib/apply/session";
+import { getSession, finalizeDrivenSession, extractCurrent, isApplicationFormFn, handoffSession, fillSession, refusedDestination } from "@/lib/apply/session";
+import { unsupportedSessionJson } from "@/lib/apply/unsupported-ats.mjs";
 import { driveSession } from "@/lib/apply/drive";
 import { classifyEmpty, verifyFill } from "@/lib/apply/diagnose";
 import { resolveSessionCv, uploadNameForCv } from "@/lib/apply/cv";
@@ -61,7 +62,15 @@ export async function POST(req: Request) {
           }
         };
         const budget = goal === "full" ? 16 : 7;
-        const result = await driveSession(page, cliId, goal, isFormReady, (step) => emit({ t: "step", ...step }), budget, safeAnswers);
+        // A refused host (Workday, iCIMS, UKG or apply.handoff_hosts) ends the
+        // drive with the same refusal panel the session open shows; its window
+        // is already closed by then.
+        const refuse = (hit: { vendor: string; label: string; postingUrl: string }) => emit({ t: "unsupported", ...unsupportedSessionJson(hit, body.application, true) });
+        const result = await driveSession(page, cliId, goal, isFormReady, (step) => emit({ t: "step", ...step }), budget, safeAnswers, () => refusedDestination(s.id));
+        if (result.unsupported) {
+          refuse(result.unsupported);
+          return;
+        }
 
         if (goal === "full") {
           // Open the window only when required screening answers have values and a claimed résumé file landed.
@@ -85,6 +94,10 @@ export async function POST(req: Request) {
           // Snapshot first. Finalizing replaces s.fields and reassigns positional ids.
           const beforeFields = Array.isArray(s.fields) ? s.fields.slice() : [];
           const fin = await finalizeDrivenSession(s.id, cliId);
+          if (fin && "unsupported" in fin) {
+            refuse(fin.unsupported);
+            return;
+          }
           if (!fin) {
             const unread = { level: "warn" as const, code: "fill-unverified", message: "Couldn't read the form back, so it is not counted as pre-filled." };
             emit({
@@ -145,6 +158,10 @@ export async function POST(req: Request) {
 
         if (result.reached) {
           const fin = await finalizeDrivenSession(s.id, cliId);
+          if (fin && "unsupported" in fin) {
+            refuse(fin.unsupported);
+            return;
+          }
           if (fin) {
             emit({ t: "done", reached: true, turns: result.turns, title: fin.title, fields: fin.fields, issues: fin.issues });
             return;

@@ -27,7 +27,7 @@ import { readLockedSections } from './theme-style.mjs';
 import { redactIfEnabled, restoreIfEnabled } from './utils/privacy-filter.mjs';
 import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
 import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
-import { endpointHeaders } from './lib/endpoint-headers.mjs';
+import { endpointHeaders, buildTokenLimit } from './lib/endpoint-headers.mjs';
 
 // Ambient guard over global fetch (idempotent); the explicit gate below is the
 // primary layer.
@@ -278,13 +278,6 @@ export function buildSystemMessage(prompt, host) {
 // so one setting covers both steps of the budget workflow.
 const DEFAULT_MAX_TOKENS = 32768;
 
-// Same host gate as buildSystemMessage: api.openai.com's reasoning models
-// reject `max_tokens` and take `max_completion_tokens`, which its other chat
-// models accept as well; gateways and local servers read `max_tokens`.
-function buildTokenLimit(limit, host) {
-  return host === 'api.openai.com' ? { max_completion_tokens: limit } : { max_tokens: limit };
-}
-
 // ---------------------------------------------------------------------------
 // Ending a run after a request
 // ---------------------------------------------------------------------------
@@ -365,7 +358,11 @@ try {
   if (!res.ok) {
     const body = await res.text();
     console.error(`❌  API error: HTTP ${res.status}`);
-    console.error(`    ${body.slice(0, 300)}`);
+    // The body is the gateway's own text, and the one place this request's key
+    // can come back out. gemini-eval.mjs redacts its key from error text the
+    // same way; redact before truncating so a long key cannot survive in pieces.
+    const shown = apiKey ? body.split(apiKey).join('[REDACTED]') : body;
+    console.error(`    ${shown.slice(0, 300)}`);
     if (res.status === 402) {
       console.error(`    → Not enough credit at ${endpointHost} for the prompt plus the ${maxTokens}-token output cap.`);
       console.error(`      Top up, or lower CAREER_OPS_MAX_TOKENS.`);

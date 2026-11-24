@@ -1,0 +1,18 @@
+{
+  "id": "2026-11-23-santifer.44",
+  "contributor": "santifer",
+  "signed_by": "career-ops maintainers",
+  "rows": 9,
+  "source": "web-index:wayback@2026-11-14",
+  "origin": "Board addresses found in the Wayback Machine's public index, each checked live; the employer's name is the one each board gives itself; websites only where the board declares one; checked on 2026-11-17 by an automated job of the maintainers, written with AI assistance: each board answered and listed at least one posting.",
+  "no_conflicting_contract": true,
+  "personal_data": false,
+  "exclusive": false,
+  "license": "CC-BY-4.0",
+  "also_permits": [
+    "ODbL-1.0",
+    "CC0-1.0"
+  ],
+  "attribution": "Found by the project's discoverer in a public web index",
+  "date": "2026-11-23"
+}

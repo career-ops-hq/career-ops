@@ -20,19 +20,32 @@ function runFetchJd(preloadBody) {
   const dir = mkdtempSync(join(tmpdir(), 'fetch-jd-exit-'));
   try {
     const preload = join(dir, 'preload.mjs');
+    // The child checks the host with its own DNS before fetch runs; a fixed
+    // answer keeps the stubbed status in charge offline.
     writeFileSync(preload, `import { writeSync } from 'node:fs';
+import { setHostResolver } from ${JSON.stringify(pathToFileURL(join(ROOT, 'liveness-browser.mjs')).href)};
+setHostResolver(async () => ['93.184.216.34']);
 const exit = process.exit;
 process.exit = (code) => { writeSync(2, 'process.exit called with ' + code + '\\n'); exit(99); };
 ${preloadBody}`);
     return spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, join(ROOT, 'fetch-jd.mjs'), POSTING],
-      { cwd: ROOT, encoding: 'utf8', timeout: 20000 });
+      // Either variable set in the caller's shell makes the page fetch miss
+      // before the stubbed status is read.
+      { cwd: ROOT, encoding: 'utf8', timeout: 20000, env: { ...process.env, CAREER_OPS_NO_DNS_CACHE: '', NODE_USE_ENV_PROXY: '' } });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
 test('a miss exits 1, silently, without calling process.exit', () => {
-  const result = runFetchJd(`globalThis.fetch = async () => new Response('', { status: 404 });`);
+  const result = runFetchJd(`globalThis.fetch = async () => new Response('', { status: 500 });`);
   assert.equal(result.status, 1, describeSpawn(result));
   assert.equal(result.stdout, '');
+  assert.equal(result.stderr, '');
+});
+
+test('a posting page answering 404 exits 3 as closed, without calling process.exit', () => {
+  const result = runFetchJd(`globalThis.fetch = async () => new Response('', { status: 404 });`);
+  assert.equal(result.status, 3, describeSpawn(result));
+  assert.equal(result.stdout, 'CLOSED_POSTING HTTP 404');
   assert.equal(result.stderr, '');
 });
 
