@@ -387,6 +387,11 @@ type PipelineModel struct {
 	// pendingLastSkip is the URL of the last row `x` skipped in this session,
 	// which `u` puts back (pipeline_pending_skip.go). "" when there is none.
 	pendingLastSkip string
+	// pendingRankAsk is the rank the footer is asking about (`a` or `A`),
+	// waiting for `y`; pendingRanking is the rank that runs. Both are nil
+	// otherwise (pipeline_pending_rank.go).
+	pendingRankAsk *pendingRankRequest
+	pendingRanking *pendingRankRequest
 }
 
 // IsTextInputActive returns true if the search or any other text input is currently focused
@@ -457,7 +462,9 @@ func (m PipelineModel) WithReloadedData(apps []model.CareerApplication, metrics 
 	selectedReportPath := ""
 	selectedCompany := ""
 	selectedRole := ""
+	selectedApp := model.CareerApplication{}
 	if app, ok := m.CurrentApp(); ok {
+		selectedApp = app
 		selectedReportPath = app.ReportPath
 		selectedCompany = app.Company
 		selectedRole = app.Role
@@ -476,6 +483,8 @@ func (m PipelineModel) WithReloadedData(apps []model.CareerApplication, metrics 
 	reloaded.pendingSort = m.pendingSort
 	reloaded.pendingErr = m.pendingErr
 	reloaded.pendingLastSkip = m.pendingLastSkip
+	reloaded.pendingRankAsk = m.pendingRankAsk
+	reloaded.pendingRanking = m.pendingRanking
 	reloaded.viewMode = m.viewMode
 	// Preserve search state across refresh — otherwise pressing `r` silently drops a
 	// committed query and the user loses their place mid-investigation.
@@ -510,16 +519,72 @@ func (m PipelineModel) WithReloadedData(apps []model.CareerApplication, metrics 
 		return reloaded
 	}
 
-	for i, app := range reloaded.filtered {
-		if selectedReportPath != "" && app.ReportPath == selectedReportPath {
-			reloaded.cursor = i
-			reloaded.adjustScroll()
-			return reloaded
+	// Identity first, in its own pass. Company and role do not identify a row:
+	// two report-less rows for the same company and role (a leveled variant and
+	// its bare title) both match, and a status change can reorder them, so the
+	// cursor could land on the sibling. That matters beyond navigation — a retry
+	// after a partial save writes to whatever the cursor is on.
+	if selectedReportPath != "" {
+		for i, app := range reloaded.filtered {
+			if app.ReportPath == selectedReportPath {
+				reloaded.cursor = i
+				reloaded.adjustScroll()
+				return reloaded
+			}
 		}
-		if selectedReportPath == "" && app.Company == selectedCompany && app.Role == selectedRole {
-			reloaded.cursor = i
-			reloaded.adjustScroll()
-			return reloaded
+	} else if data.HasTrackerIdentity(selectedApp) {
+		// Candidates are resolved over the WHOLE reloaded tracker, never over the
+		// visible rows. A tab filter can hide a row's twin, which makes an
+		// ambiguous selector look unique, and it can hide the selected row
+		// itself, which leaves a twin as the only visible candidate. Both end
+		// with the cursor on a different opening (#7331 review).
+		sharing := 0
+		for _, app := range reloaded.apps {
+			if data.SameTrackerRow(app, selectedApp) {
+				sharing++
+			}
+		}
+		// Several rows answer to the selector, so the tracker holds a duplicate #
+		// (#1704). Company and role narrow it, still tracker-wide, and only a
+		// single survivor is restorable — two rows alike in #, company and role
+		// are indistinguishable here, so the cursor keeps its index instead.
+		narrowing := sharing > 1
+		restorable := sharing == 1
+		if narrowing {
+			narrowed := 0
+			for _, app := range reloaded.apps {
+				if data.SameTrackerRow(app, selectedApp) && app.Company == selectedCompany && app.Role == selectedRole {
+					narrowed++
+				}
+			}
+			restorable = narrowed == 1
+		}
+		if restorable {
+			for i, app := range reloaded.filtered {
+				if !data.SameTrackerRow(app, selectedApp) {
+					continue
+				}
+				if narrowing && (app.Company != selectedCompany || app.Role != selectedRole) {
+					continue
+				}
+				reloaded.cursor = i
+				reloaded.adjustScroll()
+				return reloaded
+			}
+		}
+	}
+	// Then company and role, which is all a row with neither a report link nor a
+	// usable # has — and still better than an index into a re-sorted table. A row
+	// that HAS an identity is deliberately excluded: if its own row is gone from
+	// the filtered list, a sibling sharing its company and role is a different
+	// opening, and the cursor is what a retry after a partial save writes to.
+	if selectedReportPath == "" && !data.HasTrackerIdentity(selectedApp) {
+		for i, app := range reloaded.filtered {
+			if app.Company == selectedCompany && app.Role == selectedRole {
+				reloaded.cursor = i
+				reloaded.adjustScroll()
+				return reloaded
+			}
 		}
 	}
 
@@ -551,6 +616,9 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		m.flash = ""
+		if m.pendingRankAsk != nil {
+			return m.handleRankConfirm(msg)
+		}
 		if m.hiredStep > 0 {
 			return m.handleHiredFlow(msg)
 		}
@@ -607,6 +675,8 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 		return m.onQueueEvalDone(msg), nil
 	case PipelineSkipDoneMsg:
 		return m.onSkipDone(msg), nil
+	case PipelineRankDoneMsg:
+		return m.onRankDone(msg), nil
 	case pipelineStartDiscardPickerMsg:
 		// The status change that starts this flow came from a tracker tab; if
 		// the user has since moved to the Inbox, which has no tracker rows, go
@@ -2614,6 +2684,14 @@ func (m PipelineModel) renderHelp() string {
 	budget := m.width - 2
 	if budget < 1 {
 		budget = 1
+	}
+
+	if prompt := m.rankPrompt(); prompt != "" {
+		promptStyle := lipgloss.NewStyle().
+			Foreground(m.theme.Peach).
+			Background(m.theme.Surface).
+			Padding(0, 1)
+		return oneLine(m.width, promptStyle, fitPlain(budget, sanitizeFlash(prompt)))
 	}
 
 	if m.flash != "" {

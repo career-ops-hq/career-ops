@@ -7,10 +7,12 @@
 // the parallel loop says `killed after 120s` for the same thing. A contributor
 // re-running one red suite alone was told it crashed, when it ran out of time.
 //
-// The sandbox's copy of helpers.mjs gets a 2 s budget instead of 30 s, so the
-// case takes seconds; both spellings of the budget in that file are patched,
-// and the case fails if either is missing.
-import { pass, fail } from './helpers.mjs';
+// The sandbox's copy of helpers.mjs gets a 500 ms budget instead of 30 s, so
+// the case takes seconds; both spellings of the budget in that file are
+// patched, and the case fails if either is missing. The in-process loop runs
+// node:test suites at NODE_TEST_BUDGET_FACTOR × the script default, so
+// patching the default to 500 ms puts the kill line at 2 s (4 s on Windows).
+import { pass, fail, NODE_TEST_BUDGET_FACTOR } from './helpers.mjs';
 import { createRunnerSandbox } from './test-all-sandbox.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -25,12 +27,13 @@ try {
   const helpersFile = join(sandbox, 'tests', 'helpers.mjs');
   const src = readFileSync(helpersFile, 'utf-8');
   const patched = src
-    .replace('export const DEFAULT_SCRIPT_TIMEOUT_MS = 30_000;', 'export const DEFAULT_SCRIPT_TIMEOUT_MS = 2_000;')
-    .replace("encoding: 'utf-8', timeout: 30000,", "encoding: 'utf-8', timeout: 2000,");
-  const both = (patched.match(/2_000;|timeout: 2000,/g) ?? []).length === 2;
+    .replace('export const DEFAULT_SCRIPT_TIMEOUT_MS = 30_000;', 'export const DEFAULT_SCRIPT_TIMEOUT_MS = 500;')
+    .replace("encoding: 'utf-8', timeout: 30000,", "encoding: 'utf-8', timeout: 500,");
+  const both = (patched.match(/500;|timeout: 500,/g) ?? []).length === 2;
   check('the sandbox budget is shortened in both places helpers.mjs spells it', both);
   writeFileSync(helpersFile, patched);
 
+  const killedAfter = (500 * NODE_TEST_BUDGET_FACTOR) / 1000;
   suite('slow/a-slow.test.mjs', [RUNNER_IMPORT, "test('outlives the budget', async () => { await new Promise((r) => setTimeout(r, 8000)); });"]);
 
   for (const args of [['--only', 'slow/'], ['--only', 'slow/', '--jobs', '1']]) {
@@ -38,7 +41,7 @@ try {
     const line = r.verdicts.find((l) => l.includes('slow/a-slow.test.mjs')) ?? '(no line for the suite)';
     check(`${args.join(' ')}: the suite fails`, r.status === 1, `status=${r.status}\n${r.all}`);
     check(`${args.join(' ')}: the failure says it was killed after the budget`,
-      line === '❌ tests/slow/a-slow.test.mjs — node:test suite failed (killed after 2s)', line);
+      line === `❌ tests/slow/a-slow.test.mjs — node:test suite failed (killed after ${killedAfter}s)`, line);
   }
 
   // A suite that fails inside its budget keeps its exit status.

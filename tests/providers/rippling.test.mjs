@@ -303,6 +303,27 @@ try {
   if (probeOpts?.redirect === 'error') pass('rippling.fetch() probe request still passes redirect:"error"');
   else fail(`rippling.fetch() probe request redirect = ${JSON.stringify(probeOpts?.redirect)}`);
 
+  // max_pages: 1 on the entry: the probe's one page is also the entry's last.
+  // It is still a probe, so nothing warns and the board is not tagged (#7180).
+  const { result: probedAtCap, errors: probeAtCapErrors } = await captureConsoleErrors(() => rippling.fetch({ ...bigEntry, max_pages: 1 }, {
+    maxPages: 1,
+    fetchJson: async () => pageOf(0, 1000),
+  }));
+  if (!probeAtCapErrors.some((e) => /raise max_pages/.test(e)) && probedAtCap.ripplingTruncated === undefined) {
+    pass('rippling.fetch() warns nothing and tags nothing for a probe on a max_pages: 1 entry');
+  } else {
+    fail(`rippling.fetch() probe at max_pages: 1: ripplingTruncated=${probedAtCap.ripplingTruncated}, errors ${JSON.stringify(probeAtCapErrors)}`);
+  }
+  const { result: scannedAtCap, errors: scanAtCapErrors } = await captureConsoleErrors(() => rippling.fetch({ ...bigEntry, max_pages: 1 }, {
+    sleep: async () => {},
+    fetchJson: async () => pageOf(0, 1000),
+  }));
+  if (scanAtCapErrors.some((e) => /raise max_pages/.test(e)) && scannedAtCap.ripplingTruncated === true) {
+    pass('rippling.fetch() still warns and tags a real scan of a max_pages: 1 entry');
+  } else {
+    fail(`rippling.fetch() scan at max_pages: 1: ripplingTruncated=${scannedAtCap.ripplingTruncated}, errors ${JSON.stringify(scanAtCapErrors)}`);
+  }
+
   // A ctx.fetch* rejection while ctx.maxPages is set (a probe) propagates
   // UNWRAPPED — verify-portals identifies ProbePageBudgetReached by instanceof,
   // so it must not be caught/swallowed/rewrapped here.
@@ -347,6 +368,135 @@ try {
     pass('rippling.fetch() tags a fetch-error stop ripplingTruncated');
   } else {
     fail(`rippling fetch-error stop should carry ripplingTruncated, got ${laterFail.ripplingTruncated}`);
+  }
+
+  // listingIdentity (#6908): the posting id the payload already carries
+  // becomes the strong ATS-native identity, next to the board slug.
+  {
+    const { ripplingListingIdentity } = ripplingModule;
+    const { isOfferSeen, markOfferSeen, listingIdentityToken } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+    const postingId = '4f9a2c1e-7b3d-4e8a-9c6f-1a2b3c4d5e6f';
+    const fetchItems = (slug, items) => rippling.fetch(
+      { name: 'Acme', careers_url: `https://ats.rippling.com/${slug}/jobs` },
+      { fetchJson: async () => ({ page: 0, pageSize: 1000, totalItems: items.length, totalPages: 1, items }) },
+    );
+    const item = (id, slug = 'acme-corp') => ({ id, name: 'Staff Engineer', url: `https://ats.rippling.com/${slug}/jobs/${id}`, locations: [] });
+
+    const [row] = await fetchItems('acme-corp', [item(postingId)]);
+    const identity = row?.listingIdentity;
+    if (identity?.ats_provider === 'rippling' && identity?.board_slug === 'acme-corp' && identity?.posting_id === postingId
+        && Object.keys(identity).length === 3) {
+      pass('rippling.fetch() returns the rippling/<slug>/<posting id> listingIdentity');
+    } else {
+      fail(`rippling identity = ${JSON.stringify(identity)}`);
+    }
+
+    // The same posting reached through a second URL (an employer's branded
+    // careers page linking it, or the posting URL with tracking query
+    // parameters) is one listing, not two. URL dedup alone cannot join these.
+    const branded = { ...row, url: `https://careers.acme.example/jobs/${postingId}?source=linkedin` };
+    const seen = new Set();
+    markOfferSeen(row, seen);
+    if (isOfferSeen(branded, seen)) {
+      pass('the same Rippling posting under another URL is already seen (one row, not two)');
+    } else {
+      fail('Rippling posting under another URL was not recognised as the same posting');
+    }
+
+    const [otherBoard] = await fetchItems('other-co', [item(postingId, 'other-co')]);
+    if (listingIdentityToken(otherBoard) && listingIdentityToken(otherBoard) !== listingIdentityToken(row) && !isOfferSeen(otherBoard, seen)) {
+      pass('the same Rippling posting id on another board is a different listing');
+    } else {
+      fail(`other-board token = ${listingIdentityToken(otherBoard)}`);
+    }
+
+    // A row the provider keeps but whose id cannot be a posting key gets no identity.
+    const [numeric, padded, missing] = await fetchItems('acme-corp', [
+      { ...item('n'), id: 42 },
+      { ...item('p'), id: ` ${postingId} ` },
+      { ...item('m'), id: undefined },
+    ]);
+    if (numeric && padded && missing && !('listingIdentity' in numeric) && !('listingIdentity' in padded) && !('listingIdentity' in missing)) {
+      pass('a numeric, padded or missing Rippling id keeps the row but leaves listingIdentity off');
+    } else {
+      fail(`no-identity rows = ${JSON.stringify([numeric, padded, missing])}`);
+    }
+
+    if (ripplingListingIdentity('acme-corp', postingId)?.posting_id === postingId
+        && ripplingListingIdentity('acme-corp', '') === undefined
+        && ripplingListingIdentity('acme-corp', 'a\u0007b') === undefined
+        && ripplingListingIdentity('acme-corp', 7) === undefined
+        && ripplingListingIdentity('', postingId) === undefined
+        && ripplingListingIdentity(undefined, postingId) === undefined) {
+      pass('ripplingListingIdentity() accepts only a clean slug and a clean string id');
+    } else {
+      fail('ripplingListingIdentity() accepted an id or slug that cannot form a strong identity');
+    }
+  }
+
+  // Fanned-out location rows and country folding (live Rippling board shape):
+  // Rippling emits one items[] row per location sharing the same posting id/url,
+  // and puts the country in `country` while `name` is often just "New York, NY"
+  // or "Remote, US".
+  {
+    const sharedUrl = 'https://ats.rippling.com/rippling/jobs/51ec1407-4563-4927-8b39-ee89d589dc7c';
+    const fanned = parseRipplingPage({
+      items: [
+        { id: '51ec1407', name: 'Engineering Manager, HRIS Flow Platform', url: sharedUrl, locations: [{ name: 'New York, NY', country: 'United States', workplaceType: 'ON_SITE' }] },
+        { id: '51ec1407', name: 'Engineering Manager, HRIS Flow Platform', url: sharedUrl, locations: [{ name: 'Toronto, Canada', country: 'Canada', workplaceType: 'ON_SITE' }] },
+        { id: '51ec1407', name: 'Engineering Manager, HRIS Flow Platform', url: sharedUrl, locations: [{ name: 'Remote (United States)', country: 'United States', workplaceType: 'REMOTE' }] },
+        { id: '51ec1407', name: 'Engineering Manager, HRIS Flow Platform', url: sharedUrl, locations: [{ name: 'new york, ny', country: 'United States', workplaceType: 'ON_SITE' }] },
+        { id: 'ad23b635', name: 'Claims Lead', url: 'https://ats.rippling.com/rippling/jobs/ad23b635', locations: [{ name: 'Remote, US', country: 'United States', workplaceType: 'REMOTE' }] },
+        { id: 'remote-uk', name: 'Payroll Engineer', url: 'https://ats.rippling.com/rippling/jobs/remote-uk', locations: [{ name: 'London, United Kingdom', country: 'United Kingdom', workplaceType: 'REMOTE' }] },
+      ],
+    }, 'Rippling', 'rippling');
+
+    if (fanned.rawCount === 6 && fanned.jobs.length === 3) {
+      pass('parseRipplingPage folds fanned-out sibling items sharing a posting URL while keeping rawCount exact');
+    } else {
+      fail(`parseRipplingPage fanned-out counts = rawCount:${fanned.rawCount}, jobs:${fanned.jobs.length} (expected 6 and 3)`);
+    }
+
+    if (fanned.jobs[0]?.location === 'New York, NY, United States · Toronto, Canada · Remote (United States)'
+        && fanned.jobs[0]?.listingIdentity?.posting_id === '51ec1407') {
+      pass('parseRipplingPage joins distinct sibling locations in order and appends missing country names without duplicating existing ones');
+    } else {
+      fail(`parseRipplingPage folded row 0 = ${JSON.stringify(fanned.jobs[0])}`);
+    }
+
+    if (fanned.jobs[1]?.location === 'Remote, US, United States'
+        && fanned.jobs[2]?.location === 'London, United Kingdom, Remote') {
+      pass('parseRipplingPage appends full country to ISO-abbreviated names and marks REMOTE workplaceType when absent from name');
+    } else {
+      fail(`parseRipplingPage country/remote rows = ${JSON.stringify([fanned.jobs[1]?.location, fanned.jobs[2]?.location])}`);
+    }
+
+    // Cross-page sibling folding: when a posting's fanned-out rows straddle a
+    // page boundary, fetch() folds them into one Job rather than emitting two.
+    const crossUrl = 'https://ats.rippling.com/bigco/jobs/straddle-uuid';
+    let straddlePage = 0;
+    const straddleJobs = await rippling.fetch(bigEntry, {
+      sleep: async () => {},
+      fetchJson: async () => {
+        straddlePage++;
+        if (straddlePage === 1) {
+          const p0 = pageOf(0, 999);
+          p0.items.push({ id: 'straddle-uuid', name: 'Staff Engineer', url: crossUrl, locations: [{ name: 'Seattle, WA', country: 'United States' }] });
+          return p0;
+        }
+        return {
+          page: 1, pageSize: 1000, totalItems: 1001, totalPages: 2,
+          items: [{ id: 'straddle-uuid', name: 'Staff Engineer', url: crossUrl, locations: [{ name: 'Toronto, Canada', country: 'Canada' }] }],
+        };
+      },
+    });
+    const straddled = straddleJobs.filter((j) => j.url === crossUrl);
+    if (straddleJobs.length === 1000 && straddled.length === 1
+        && straddled[0].location === 'Seattle, WA, United States · Toronto, Canada') {
+      pass('rippling.fetch() folds fanned-out sibling rows across page boundaries');
+    } else {
+      fail(`rippling.fetch() cross-page fold: total=${straddleJobs.length}, straddled=${JSON.stringify(straddled)}`);
+    }
   }
 
 } catch (e) {

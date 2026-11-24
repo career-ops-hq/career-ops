@@ -56,7 +56,8 @@ Full-stack AI engineer with 6 years building production ML systems.
   assert.equal(parsed.linkedin, 'linkedin.com/in/alexchen');
   assert.match(parsed.summary, /Full-stack AI engineer/);
   assert.equal(parsed.experience.length, 1);
-  assert.equal(parsed.experience[0].company, 'TechFin Corp -- Austin, TX');
+  assert.equal(parsed.experience[0].company, 'TechFin Corp');
+  assert.equal(parsed.experience[0].location, 'Austin, TX');
   assert.equal(parsed.experience[0].role, 'Senior ML Engineer / ML Platform Lead');
   assert.equal(parsed.experience[0].duration, '2020-2024');
   assert.equal(parsed.experience[0].bullets.length, 2);

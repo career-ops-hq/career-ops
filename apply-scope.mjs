@@ -2,6 +2,7 @@ import { realpathSync } from 'node:fs';
 import { isAbsolute, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { chromiumSandboxStatus } from './lib/browser-launch.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { pathIsInsideCanonical } from './tracker-utils.mjs';
 
@@ -74,7 +75,10 @@ export function freshLaunchOptions(requested = {}) {
   if (!Array.isArray(args) || args.some((arg) => ATTACH_ARG.test(String(arg)))) {
     throw new ApplyScopeError('Apply refused to attach to an existing browser.');
   }
-  const options = {};
+  // An application form is a third-party page. Set here rather than accepted as
+  // a key, so no caller can ask for a launch without the sandbox. The channel
+  // names the browser, whose sandbox helper decides it on Linux.
+  const options = { chromiumSandbox: chromiumSandboxStatus({ channel: requested.channel }).enabled };
   if (requested.headless !== undefined) options.headless = Boolean(requested.headless);
   if (requested.channel !== undefined) options.channel = requested.channel;
   if (requested.timeout !== undefined) options.timeout = requested.timeout;
@@ -105,10 +109,14 @@ export function locateApplyReport(dataRoot, ref, io) {
     if (!io.exists(file)) return { ok: false, reason: 'missing' };
     return { ok: true, path: file };
   }
-  const num = ref.trim().padStart(3, '0');
+  const wanted = Number(ref.trim());
+  if (!Number.isInteger(wanted) || wanted < 0) return { ok: false, reason: 'missing' };
   const reportsDir = resolveInsideProject(dataRoot, 'reports');
   const names = io.list(reportsDir);
-  const match = names.find((name) => name.startsWith(num));
+  const match = names.find((name) => {
+    const parsed = /^(\d+)-/.exec(name);
+    return parsed != null && Number(parsed[1]) === wanted;
+  });
   if (!match) return { ok: false, reason: 'missing' };
   return { ok: true, path: resolveInsideProject(dataRoot, join('reports', match)) };
 }

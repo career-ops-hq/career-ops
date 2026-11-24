@@ -136,3 +136,17 @@ test("trailing USD qualifies compensation without accepting other currencies", (
     assert.equal(enrichAnalyticsApplication(application(notes)).payMax, expected, notes);
   }
 });
+
+test("a negated remote in the notes is not charted as Remote", () => {
+  const mode = (notes, role) => enrichAnalyticsApplication(application(notes, role)).workMode;
+  for (const notes of ["On-site only, no remote", "Austin, TX; not remote", "Non-remote role in NYC", "Remote not available; onsite Berlin"]) {
+    assert.equal(mode(notes), "Full", notes);
+  }
+  assert.equal(mode("Hybrid, no remote Fridays"), "Hybrid");
+  assert.equal(mode("Fully remote (US)"), "Remote");
+  assert.equal(mode("Remote; nonprofit"), "Remote");
+  assert.equal(mode("", "Nonprofit Program Manager - Remote"), "Remote", "the negation never crosses a letter");
+  assert.equal(mode("On-site; no. Remote ok"), "Remote", "a period ends the negation");
+  assert.equal(mode("remote work is not available"), "Full");
+  assert.equal(mode("Remote\nwork is not available"), "Remote", "a line break ends the negation");
+});

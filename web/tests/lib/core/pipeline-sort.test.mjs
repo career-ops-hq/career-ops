@@ -30,7 +30,7 @@ const skipTs = tsSkipReason();
 
 // Dynamic imports on purpose: a static specifier resolves before the loader
 // hook above is installed, so format.ts would fail as an unresolved "@/lib".
-const { scoreNum } = skipTs ? { scoreNum: null } : await import('../../../src/lib/format.ts');
+const { scoreNum, scoreTone } = skipTs ? { scoreNum: null, scoreTone: null } : await import('../../../src/lib/format.ts');
 const { sortRows } = await import('../../../src/lib/core/pipeline-sort.mjs');
 
 /** A tracker row, with only the fields these tests care about. */
@@ -193,4 +193,15 @@ test('scoreNum reports unusable cells as NaN, never as 0', { skip: skipTs }, () 
   for (const v of ['', 'abc', 'N/A']) assert.ok(Number.isNaN(scoreNum(v)), String(v));
   assert.equal(scoreNum('7'), 7);
   assert.equal(scoreNum('4.2/5'), 4.2);
+});
+
+// The Dutch modes write `4,2/5`. The core's parseScore reads the comma as a
+// decimal point; scoreNum read it as 4, so 4,2 sorted below 4.1.
+test('a decimal-comma score reads as a decimal', { skip: skipTs }, () => {
+  assert.equal(scoreNum('4,2/5'), 4.2);
+  assert.equal(scoreNum('**3,8/5**'), 3.8);
+  // 4,5 read as 4 was coloured amber, not green.
+  assert.equal(scoreTone('4,5/5'), 'good');
+  const rows = [row(1, '2026-09-18', { score: '4.1/5' }), row(2, '2026-09-18', { score: '4,2/5' })];
+  assert.deepEqual(names(sortRows(rows, { key: 'score', dir: -1 }, scoreNum)), ['Role 2', 'Role 1']);
 });

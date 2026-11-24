@@ -8,9 +8,12 @@ Resolve `UPDATE_CHANNEL` once using the updater's channel precedence: an explici
 
 Run `node update-system.mjs check --force --channel "$UPDATE_CHANNEL"` and parse the JSON output. `--force` because the user asked: a release they said no to earlier is shown too.
 
+**When the user asks for the latest `main` instead of the release** (checkout only; a plugin install refuses), run `node update-system.mjs check --force --channel main` instead, so an up-to-date release cannot end the flow, and follow Steps 2 to 4 with `main` as the target: Step 2 fetches `main` instead of the release tag, and Step 4 runs `node update-system.mjs apply --channel main --confirm` after the user confirms. The `check` without `--channel main` reports releases only, never commits merged to `main` between them. Following `main` is a one-off: the choice is not saved, and the session-start check still looks only at releases, so staying on `main` means running this flow again.
+
 - If `up-to-date`: Tell the user "career-ops is up to date (v{version})." and stop.
 - If `offline`: Tell the user "Cannot reach GitHub to check for updates. Try again later." and stop. If the JSON carries a `detail` field, show it verbatim after that sentence: it is a fixed-English diagnostic naming what failed (for example `ENOENT` when curl is not installed, or a proxy or TLS error), and that is what the user needs to fix it.
 - If `no-remote-version`: Tell the user "Couldn't determine the latest career-ops release right now. Try again later." and stop.
+- If `managed-by-plugin`: career-ops runs as a Claude Code plugin, and `apply` and `rollback` refuse. Tell the user that Claude updates the plugin: from the career-ops entry under `/plugin` → **Installed** (**Update now**), or, for a plugin added in Claude desktop, with **Check for updates** under **Customize → Plugins**. Stop.
 - If `worktree-without-main`: Tell the user:
   > "This is a linked git worktree on branch '{worktree_branch}', and no checkout has 'main' checked out, so there is no main checkout to update. Check out main in your main checkout and re-run, or set CAREER_OPS_UPDATE_IN_WORKTREE=1 to update this worktree's branch instead."
   (If the JSON carries a `detail` field, show it verbatim). Stop the workflow here — do not proceed with preview, baseline, or apply against this worktree.
@@ -145,7 +148,7 @@ If the user says "rollback" or runs `/career-ops update rollback`:
 - Exception: `modes/_profile.md` may be edited **only** in Step 4.7, and **only** after the user explicitly confirms each individual rename/removal. Never batch-edit without per-change consent.
 - User-specific customizations (archetypes, scoring weights, narrative) belong in `modes/_profile.md` or `config/profile.yml`, never in `modes/_shared.md`
 - CLAUDE.md's local additions (everything after the two-line `@AGENTS.md` header) MUST be saved before apply and checked immediately after — on both the success AND failure path (Step 4.2, Step 4.4). Restore them only when they are no longer in CLAUDE.md. `apply` keeps a CLAUDE.md this install changed unless `--force` is given, and appending the saved content to a file that still has it duplicates the additions on every update.
-- After a successful apply, `node hired-share.mjs --status` may report a hire that was never asked about, or one marked "later" more than 30 days ago. That earns **at most ONE** gentle mention of the Hired Wall, then the answer is respected — never a scheduled reminder. Cadence and wording: `AGENTS.md` → "Celebrating a hire (the Hired Wall)".
+- After a successful apply, `node hired-share.mjs --status` may report a hire that was never asked about, or one marked "later" more than 30 days ago. That earns **at most ONE** gentle mention of the Hired Wall, then the answer is respected — never a scheduled reminder. Cadence and wording: `modes/_community-asks.md` → "Celebrating a hire (the Hired Wall)".
 - Never trim the staged-but-uncommitted notice or its recovery commands (Step 4.8).
 - In a linked git worktree, `update-system.mjs` updates the checkout with `main`. Step 2 preview, Step 4.1 baseline, and Step 4.6 validation commands must execute in that target checkout (`TARGET_DIR`) rather than the calling worktree.
 - If anything goes wrong, tell the user to run `node update-system.mjs rollback`

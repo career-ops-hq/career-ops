@@ -44,6 +44,7 @@
 
 import { sleep, fetchTextWithRetry } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
+import { stripHtmlComments } from './_html-to-text.mjs';
 import { markTruncated } from '../lib/board-truncation.mjs';
 
 const SEARCH_BASE = 'https://www.themuse.com/search';
@@ -130,8 +131,10 @@ function assertMuseUrl(url) {
  * @param {string} s
  */
 function cleanText(s) {
+  // stripHtmlComments, not /<!--[\s\S]*?-->/: the lazy regex rescans the rest
+  // of the text from every `<!--` that has no `-->`.
   return decodeEntities(
-    String(s).replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^>]*>/g, ' '),
+    stripHtmlComments(String(s)).replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag)),
   ).replace(/\s+/g, ' ').trim();
 }
 

@@ -6,6 +6,7 @@
  */
 import fs from 'node:fs/promises';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { stripMarkup } from './lib/jd-parse.mjs';
 
 const MAX_BODY = 1024 * 1024;
 const TIMEOUT_MS = 15_000;
@@ -58,8 +59,8 @@ export function classifyHimalayasPosting(originalUrl, status, body, metadata = {
       || !Array.isArray(job.locationRestrictions) || !Array.isArray(job.timezoneRestrictions)
       || !epoch(job.pubDate) || !epoch(job.expiryDate)) return unknown('partial_job');
   if (CHALLENGE.test(job.description) || /^(?:just a moment|access denied|sign in|log in|forbidden)\b/i.test(job.title)) return unknown('challenge_or_login_wall');
-  const plain = job.description.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<[^>]*>|&(?:#\w+|\w+);/g, ' ').replace(/\s+/g, ' ').trim();
+  const plain = stripMarkup(job.description, { unclosedPayloadIsText: true })
+    .replace(/&(?:#\w+|\w+);/g, ' ').replace(/\s+/g, ' ').trim();
   if (plain.length < 500) return unknown('insufficient_description');
   // An inconsistent expiry is uncertainty; only the documented 410 closes it.
   if (job.expiryDate <= Date.parse(observed) / 1000) return unknown('inconsistent_expiry');
@@ -71,14 +72,14 @@ export function classifyHimalayasPosting(originalUrl, status, body, metadata = {
 }
 
 /** One anonymous GET; callers must treat every returned string as job data. */
-export async function retrieveHimalayasPosting(originalUrl, { fetchFn = globalThis.fetch, now = Date.now } = {}) {
+export async function retrieveHimalayasPosting(originalUrl, { fetchFn = globalThis.fetch, now = Date.now, timeoutMs = TIMEOUT_MS } = {}) {
   const identity = resolveHimalayasPosting(originalUrl);
   if (!identity) return classifyHimalayasPosting(originalUrl, null, null);
   const metadata = { retrievedAt: new Date(now()).toISOString() };
   const fail = code => ({ ...evidence(identity, null, metadata), publisherStatus: 'unknown', code });
   try {
     const response = await fetchFn(identity.apiUrl, { method: 'GET', redirect: 'error',
-      headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+      headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(timeoutMs) });
     if (response.url && response.url !== identity.apiUrl) {
       await response.body?.cancel();
       return fail('response_url_mismatch');

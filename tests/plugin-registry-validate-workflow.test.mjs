@@ -96,6 +96,9 @@ const VALIDATOR = join(ROOT, 'validate-plugin-registry.mjs');
 function prCheckout(mutate) {
   const dir = mkdtempSync(join(tmpdir(), 'co-registry-pr-'));
   cpSync(join(ROOT, 'plugins-registry'), join(dir, 'plugins-registry'), { recursive: true });
+  // The PR checkout also carries the bundled plugins, which a supersedesBundled
+  // entry is checked against.
+  cpSync(join(ROOT, 'plugins'), join(dir, 'plugins'), { recursive: true });
   if (mutate) mutate(dir);
   return dir;
 }

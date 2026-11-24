@@ -682,6 +682,20 @@ export function parseArgs(argv) {
   // CodeRabbit flagged on #2745/#2746).
   validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
 
+  const consumed = new Set();
+  args.forEach((token, idx) => {
+    if (!VALUE_FLAGS.includes(token)) return;
+    const next = args[idx + 1];
+    if (typeof next === 'string' && !next.startsWith('-')) consumed.add(idx + 1);
+  });
+  const unexpected = args.find((token, idx) => !consumed.has(idx) && typeof token === 'string' && !token.startsWith('-'));
+  // "" is a present argument. A truthiness check treated it as absent and the
+  // run selected every source.
+  if (unexpected !== undefined) {
+    console.error(`Error: unexpected argument "${unexpected}". Pass a source with --ats, for example --ats ${unexpected}.`);
+    process.exit(1);
+  }
+
   const valueOf = (flag) => {
     const idx = args.indexOf(flag);
     if (idx !== -1 && args[idx + 1] && !args[idx + 1].startsWith('--')) return args[idx + 1];
@@ -726,10 +740,22 @@ export function parseArgs(argv) {
     limit = Number(raw);
   }
   const atsArg = valueOf('--ats');
+  if (hasFlag(args, '--ats')) {
+    const listed = String(atsArg ?? '').split(',').map(s => s.trim()).filter(Boolean);
+    if (listed.length === 0) {
+      const valid = [...new Set([...Object.keys(SOURCES), ...KNOWN_ATS_VENDORS])].join(', ');
+      console.error(`Error: --ats needs a source, for example --ats greenhouse. Valid: ${valid}`);
+      process.exit(1);
+    }
+  }
   // --seeds: optional comma-separated VC portfolio sources (e.g. yc,a16z).
   // When set, the seed companies are fetched and probed via the ATS providers
   // instead of (or in addition to) the regular ATS directory walk.
   const seedsArg = valueOf('--seeds');
+  if (hasFlag(args, '--seeds') && !String(seedsArg ?? '').split(',').some(s => s.trim())) {
+    console.error(`Error: --seeds needs a source, for example --seeds yc. Valid: ${Object.keys(SEED_SOURCES).join(', ')}`);
+    process.exit(1);
+  }
   const seeds = seedsArg
     ? seedsArg.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
     : [];
@@ -1665,7 +1691,7 @@ export async function parallelEach(items, limit, fn, onItemDone = null, shouldSt
 async function filterLive(offers) {
   let chromium, checkUrlLiveness, newLivenessPage;
   try {
-    ({ chromium } = await import('playwright'));
+    ({ chromium } = await import('./lib/hardened-chromium.mjs'));
     ({ checkUrlLiveness, newLivenessPage } = await import('./liveness-browser.mjs'));
   } catch (err) {
     throw new Error(

@@ -10,6 +10,14 @@ Two things this log deliberately is not: a ranking, and a promise. Rule 4 says i
 
 ---
 
+## Rule 6 changed (2026-11-18)
+
+Until 2026-11-18 the rule said that the shared listings layer "does not copy the text of the posting". It now says what the layer does with that text: it does not serve or republish it, and it keeps a private working copy, used only to derive the fields of the card. The copy lets a field be derived again when the method improves, without asking the employer's site a second time. It is not served, it is not part of anything that can be downloaded, and it is deleted when an employer asks not to be read.
+
+Later the same day the rule was made more exact on four points. How long: the copy is kept while the posting is published and for 90 days after. What for: the fields of the card and other closed facts about the posting, such as its level, its work mode or its salary. With whom: to derive them, the text may be sent, without email addresses, phone numbers or links, to an outside AI model provider that processes it for the project under a data processing agreement and does not train on it. And what stays after a removal: when an employer asks not to be read, the copy of its postings is deleted, and the facts already derived from them are kept, with the employer's name, to study the job market.
+
+---
+
 ## Rules 4 and 6 changed (2026-11-12)
 
 **Rule 6.** Until 2026-11-12 the rule described one reader only: a provider on the job seeker's own machine, which builds no index. The project's shared listings layer (rule 5) does build one: it reads the public job pages of employers and serves a card for each posting, with a link to the employer's own page and without the text of the posting. The rule now says so, and says how that layer reads: only public pages, a user agent that says who it is, one request at a time per host at the pace the host asks for, and removal on request. A source's `robots.txt` is still not a gate. The reason given is no longer "it builds no index", which is true of a provider and is not true of the layer. What the layer honours instead is the operator's own request, which removes the source for good.
@@ -287,3 +295,56 @@ UK and international teaching jobs from schools and other education employers. T
 **Rule 6 (read like a visitor).** The requests are the ones the public search page makes, one per page, 250 ms apart, bounded by `max_pages` (default 150, cap 400). `robots.txt` (checked 2026-11-09) disallows `/auth/`, `/registration/`, attachment paths and `/api/career-profile`, `/api/job-application` and `/api/schools` at the root; none covers `/jobs/api/trpc/jobs.search` or `/jobs/vacancy/`.
 
 **Rules 4 and 5.** The provider reads only Tes; nothing is ranked or merged at the source.
+
+---
+
+## wellfound.com
+
+| | |
+|---|---|
+| **Proposed by** | @vliggio in issue [#4903](https://github.com/career-ops-hq/career-ops/issues/4903) (not the operator); research and provider by @ilyakanevskiy (not the operator) |
+| **Provider** | `providers/wellfound.mjs` |
+| **PR** | this PR · issue [#4903](https://github.com/career-ops-hq/career-ops/issues/4903) |
+| **Status** | Listed |
+
+Startup jobs. The provider reads Wellfound in two ways: the jobs page of one company (`wellfound.com/company/<slug>/jobs`, for `tracked_companies:`) and the search pages of the board (`/role/…`, `/location/…`, for `job_boards:`, with required filters). Both are server-rendered pages that any visitor reads without a login. The full research is in [the plan on #4903](https://github.com/career-ops-hq/career-ops/issues/4903#issuecomment-6819631636), measured on 2026-11-12; the board checks below were repeated on 2026-11-18.
+
+**Rule 1 (real listings, identifiable employer, free for candidates).** Every listing belongs to a named company: the company page is the company's own, and every board result is grouped under a company. Reading needs no account. On 2026-11-12, "Apply Now" on a job without a login opened Wellfound's application form (name, email and other fields, "or Log in"); the form was not sent.
+
+**Rule 2 (canonical URL is the employer's).** The list pages carry no employer or ATS URL. Some rows name the ATS the job comes from (`atsSource`: Ashby, Greenhouse or Workable), but without a URL or a board slug. The pages of 4 jobs, one for each kind of `atsSource` and one without, link out only to company homepages, and their JSON-LD `JobPosting` has `directApply: true`. Wellfound describes these jobs as [Applicant Sync](https://help.wellfound.com/article/734-applicant-sync): the candidate applies on Wellfound, and the application goes to the employer's ATS. So `url` is the Wellfound job page, `https://wellfound.com/jobs/<id>-<slug>`, as the maintainers confirmed on #4903. Jobs with no `atsSource` are posted on Wellfound by the company itself.
+
+**Rule 3 (complete inventory, no paid placement).** A company page lists all jobs of the company, 20 per page; the provider reads every page, bounded by `max_pages`. The board is grouped by company, 20 companies per page, and shows at most 3 jobs of each company: on 10 board pages read on 2026-11-18 (role, remote, role + location and location pages), no company showed more than 3. The provider reads every board page up to the page count the board reports, bounded by `max_pages`. When the jobs it read are fewer than the job count the board reports, it reads the company page of each company that showed 3 jobs, bounded by `wellfound.max_companies`, and marks the result as partial when a bound cut it. It keeps every row it reads and does not reorder them. Whether placement on the board can be paid: unverified.
+
+**Rule 4 (operator declared).** Operator: Wellfound. Neither the proposer nor the PR author is affiliated with it.
+
+**Rule 5 (aggregation stays in core).** The provider reads only wellfound.com.
+
+**Rule 6 (read what is public).** No page needs a login, and no request got a CAPTCHA. career-ops' default User-Agent gets the same pages as a browser. `robots.txt` (checked 2026-11-12) has only a `User-agent: *` group and no `Crawl-delay`, and disallows none of the paths the provider reads (`/company/<slug>/jobs`, `/role/…`, `/location/…`). The provider waits 250 ms between requests and bounds them with at most 20 search URLs per entry, each read up to `max_pages`, and with `wellfound.max_companies`.
+
+**Not in this PR.** AGENTS.md ("Aggregator Listings — Confirm at the Employer") names Wellfound, and a job with no `atsSource` may exist only on Wellfound. The maintainers chose a separate PR for that rule and for passing `atsSource` on with each job (#4903).
+
+---
+
+## itjobs.pt
+
+| | |
+|---|---|
+| **Proposed by** | @SalvadorCorreia in issue [#7686](https://github.com/career-ops-hq/career-ops/issues/7686) (not the operator) |
+| **Provider** | `providers/itjobs.mjs` |
+| **PR** | this PR · issue [#7686](https://github.com/career-ops-hq/career-ops/issues/7686) |
+| **Status** | Proposed |
+
+Portugal's IT job board. The provider reads the board's public RSS feed, `https://feeds.itjobs.pt/feed/emprego`, linked from the site's home page, with `limit=5000`. Measured on 2026-11-23: 714 items in one response, the same "714 ofertas" the site shows, newest first. The feed also accepts the site's search filters (`q`, `location`, `company`); the provider does not use them, because the whole board fits in one request. ITJobs also has a keyed JSON API, which the provider does not use.
+
+**Rule 1 (real listings, identifiable employer, free for candidates).** Every one of the 714 items names its employer on the `Empresa` line of its description; the provider drops a row without one. Many employers are IT consultancies and staffing firms (Neotalent Conclusion, Dellent and Olisipo were the most frequent). Offers are free to read without an account. To see an offer's application address (email or site), a candidate signs in with a free ITJobs account, as on Computrabajo. The terms ask candidates not to send mass or automated applications; the provider only reads.
+
+**Rule 2 (canonical URL).** The feed links each item to its ITJobs offer page (`https://www.itjobs.pt/oferta/<id>/<slug>`) and carries no employer link; the employer's application address is on the offer page, for signed-in candidates. The provider keeps the offer page without its query string.
+
+**Rule 3 (complete inventory, no paid placement).** ITJobs sells featured ads ("Anúncios em destaque", on its plans page). The feed does not mark them, but it lists every offer newest first, and its count matches the site's, so a featured ad cannot change what the provider reads or its order.
+
+**Rule 4 (operator declared).** Red Maze, per the copyright line in the site footer. The proposer is not the operator but a candidate using the board.
+
+**Rule 5 (aggregation stays in core).** The provider reads only itjobs.pt.
+
+**Rule 6 (read what is public).** The feed and the offer pages need no login, and no request got a CAPTCHA. `www.itjobs.pt/robots.txt` (read 2026-11-23) sets `Crawl-delay: 1` and disallows search and filter query strings on the site, which the provider does not request; `feeds.itjobs.pt` serves no `robots.txt` (404). The provider makes one request per scan.
+

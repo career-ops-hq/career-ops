@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import { fenceArgs } from "./cli-fencing.mjs";
+import { assertPiVersionSupported } from "./cli-fencing-probe.mjs";
 import { prepareCliLaunch } from "./cli-launch.mjs";
+import { withSpendTierModel } from "./spend-tier-model.mjs";
 
 // Plain .mjs (same pattern as tracker-table.mjs/clean-chips.mjs) so
 // tests/lib/spawn-cli.test.mjs can import it directly under Node. Import it with the
@@ -34,10 +36,13 @@ import { prepareCliLaunch } from "./cli-launch.mjs";
  * rather than pretending.
  *
  * The one thing that legitimately spawns a CLI without coming through here is
- * cli-fencing-probe.mjs, which runs `--help` to ask whether the binary supports
- * the flags it would be fenced with. That executes no prompt, no model and no
- * tools, so there is nothing to fence — and it cannot import this module anyway
- * without making the two a cycle.
+ * cli-fencing-probe.mjs, which runs `--help` (or `pi --version`) to ask whether
+ * the binary supports the flags it would be fenced with. That executes no
+ * prompt, no model and no tools, so there is nothing to fence — and it cannot
+ * import this module anyway without making the two a cycle.
+ *
+ * Pi is version-checked here, before fencing, so no route can start a Pi older
+ * than cli-fencing.mjs's PI_MIN_VERSION (see that constant for why).
  *
  * @param {string} binPath
  * @param {string[]} args
@@ -57,6 +62,7 @@ export function spawnHeadlessCli(binPath, args, options, fencing) {
         "Declare what the worker needs (worker-capabilities.mjs) so its permissions can be applied.",
     );
   }
+  if (fencing.cliId === "pi") assertPiVersionSupported(binPath);
   const { args: fencedArgs } = fenceArgs({ ...fencing, args });
   // On Windows an npm-installed CLI is a script shim spawn() cannot run without a
   // shell, so launch the .js/.exe it wraps (a no-op elsewhere; cli-launch.mjs).
@@ -75,9 +81,11 @@ export function spawnHeadlessCli(binPath, args, options, fencing) {
   const detached = process.platform !== "win32";
   // windowsHide stays in this call. The launch census reads the argument
   // text, and a variable would look like the child can inherit the console.
-  const child = spawn(launch.command, launch.args, { ...options, windowsHide: true, detached });
+  // The model for the user's spend_tier (spend-tier-model.mjs); Claude Code only.
+  const spawnOptions = withSpendTierModel(fencing.cliId, options);
+  const child = spawn(launch.command, launch.args, { ...spawnOptions, windowsHide: true, detached });
   child.stdin?.end();
-  armCliStop(child, { ...options, windowsHide: true, detached });
+  armCliStop(child, { ...spawnOptions, windowsHide: true, detached });
   return child;
 }
 

@@ -52,6 +52,17 @@ try {
     ([bad, good]) => bad === null && good !== null && good.url.includes('ok-123'),
   );
 
+  // goldman.toJob — role URL built from externalSource.sourceId.
+  const { toJob: goldmanToJob } = await load('goldman.mjs');
+  check(
+    'goldman.toJob',
+    () => [
+      goldmanToJob({ jobTitle: 'Bad', externalSource: { sourceId: `${LONE}bad` } }, 'Acme'),
+      goldmanToJob({ jobTitle: 'Good', externalSource: { sourceId: 'g-1' } }, 'Acme'),
+    ],
+    ([bad, good]) => bad === null && good !== null && good.url.endsWith('/roles/g-1'),
+  );
+
   // deel.parseDeelBoard — .map() over the board's jobPostings array.
   const { parseDeelBoard } = await load('deel.mjs');
   const deelPage = (rows) => `<script>self.__next_f.push([1,${JSON.stringify(`2:{"jobPostings":${JSON.stringify(rows)}}\n`)}])</script>`;
@@ -73,6 +84,20 @@ try {
       'X', 'https://x.bamboohr.com',
     ),
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.bamboohr.com/careers/5',
+  );
+
+  // inhire.parseInhireResponse — for…of over jobsPage[]; jobId feeds the posting URL.
+  const { parseInhireResponse } = await load('inhire.mjs');
+  check(
+    'inhire.parseInhireResponse',
+    () => parseInhireResponse(
+      { jobsPage: [
+        { jobId: `${LONE}bad`, displayName: 'Bad Id', status: 'published' },
+        { jobId: 'ok-5', displayName: 'Good Id', status: 'published' },
+      ] },
+      'X', 'x',
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.inhire.app/vagas/ok-5/good-id',
   );
 
   // taleez.parseTaleezResponse — for…of over the site's jobs[]; slug feeds the posting URL.
@@ -366,6 +391,14 @@ try {
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://acme.zohorecruit.com/jobs/Careers/101',
   );
 
+  // paycom.parsePaycom — for…of over jobPostingPreviews; jobId feeds the posting URL.
+  const { parsePaycom } = await load('paycom.mjs');
+  check(
+    'paycom.parsePaycom',
+    () => parsePaycom({ jobPostingPreviews: [{ jobId: `${LONE}bad`, jobTitle: 'Bad Id' }, { jobId: 101, jobTitle: 'Good Id' }] }, '0123456789ABCDEF0123456789ABCDEF', 'Acme'),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://www.paycomonline.net/v4/ats/web.php/portal/0123456789ABCDEF0123456789ABCDEF/jobs/101',
+  );
+
   // paylocity.parsePaylocityBoard — for…of over window.pageData.Jobs; JobId feeds the posting URL.
   const { parsePaylocityBoard } = await load('paylocity.mjs');
   check(
@@ -440,6 +473,24 @@ try {
     ).jobs,
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://www.themuse.com/jobs/acme/good-id',
   );
+
+  // successfactors-classic.parseSearchReply — for…of over the DWR search
+  // reply's postings; the posting id ends the public detail URL (the dedup key).
+  const { parseSearchReply: parseSfClassicReply } = await load('successfactors-classic.mjs');
+  check(
+    'successfactors-classic.parseSearchReply',
+    () => parseSfClassicReply(
+      [{
+        detailURLPrefix: '/career?career%5fns=job%5flisting&company=ACME001&navBarLevel=JOB%5fSEARCH&rcm%5fsite%5flocale=es%5fES&career_job_req_id=',
+        postingCount: 2,
+        postings: [{ id: `${LONE}9`, title: 'Bad' }, { id: 7, title: 'Good' }],
+      }],
+      { origin: 'https://career5.successfactors.eu', company: 'ACME001' },
+      'Acme',
+      'es',
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url.endsWith('career_job_req_id=7'),
+  );
 } catch (e) {
   fail(`per-provider surrogate tests crashed: ${e.message}`);
 }
@@ -480,12 +531,14 @@ try {
     'feishu-jobs.mjs',
     'garena.mjs',
     'hibob.mjs',
+    'inhire.mjs',
     'jibeapply.mjs',
     'kalibrr.mjs',
     'keka.mjs',
     'manfred.mjs',
     'meituan.mjs',
     'mokahr.mjs',
+    'paycom.mjs',
     'paylocity.mjs',
     'phenom.mjs',
     'platsbanken.mjs',

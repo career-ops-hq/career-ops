@@ -26,6 +26,8 @@
 //   max_pages: 60        # a 6,000-posting walk
 
 import { intInRange } from './_config-utils.mjs';
+import { employmentTypeField } from './_employment-type.mjs';
+import { departmentTeamFields } from './_department-team.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 import { coerceId } from './_ids.mjs';
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
@@ -35,10 +37,11 @@ const ALLOWED_SMARTRECRUITERS_HOSTS = new Set(['api.smartrecruiters.com']);
 const SR_CAREERS_HOSTS = new Set(['careers.smartrecruiters.com', 'jobs.smartrecruiters.com']);
 const SR_PAGE_SIZE = 100;
 const SR_MAX_PAGES = 50;  // default cap (5000 postings @ 100/page) when the entry sets no max_pages
-// Upper bound an entry may opt in to with `max_pages` (10,000 postings). Bosch
-// alone listed 5,104 on 2026-11-10, past the default; the bound stays finite so
-// a typo can't walk a board forever.
-export const SR_HARD_MAX_PAGES = 100;
+// Upper bound an entry may opt in to with `max_pages` (30,000 postings). Bosch
+// alone listed 5,104 on 2026-11-10, past the default, and one board listed
+// 25,125 on 2026-11-18, which the API serves past offset 10,000; the bound stays
+// finite so a typo can't walk a board forever.
+export const SR_HARD_MAX_PAGES = 300;
 const SR_DETAIL_BATCH = 5;
 // A raised max_pages can mean 100 list requests to one public API host, so the
 // walk spaces its pages and retries a transient failure (429, 5xx, a dropped
@@ -342,6 +345,7 @@ export function parseSmartRecruitersResponse(json, companyName, companySlug) {
       url,
       location,
       company: companyName,
+      ...departmentTeamFields(j.department?.label),
       id: typeof j.id === 'string' || typeof j.id === 'number' ? String(j.id) : undefined,
       // The id exactly as the payload typed it, for the listing identity only:
       // a numeric id is stringified above for the detail call, but identity
@@ -350,6 +354,11 @@ export function parseSmartRecruitersResponse(json, companyName, companySlug) {
       ...(requisitionId ? { requisitionId } : {}),
       ...(language ? { language } : {}),
       ...(postedAt !== undefined ? { postedAt } : {}),
+      // typeOfEmployment.label: "Full-time", "Part-time", "Contract", "Intern".
+      // An internship is often labelled "Full-time" with experienceLevel.id
+      // "internship" (BoschGroup, 2026-11-22: 18 of the first 100), so that
+      // level decides, as Workable's experience level does.
+      ...employmentTypeField(j.experienceLevel?.id === 'internship' ? 'Internship' : j.typeOfEmployment?.label),
     }];
   });
 }

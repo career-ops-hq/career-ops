@@ -1,6 +1,9 @@
-import { fillSession, handoffSession, getSession } from "@/lib/apply/session";
+import { fillSession, handoffSession, getSession, refusedDestination } from "@/lib/apply/session";
+import { unsupportedSessionJson } from "@/lib/apply/unsupported-ats.mjs";
 import { resolveSessionCv, uploadNameForCv } from "@/lib/apply/cv";
 import { handoffDecision } from "@/lib/apply/handoff-gate.mjs";
+import { prepareFillAnswers, readApplyProfile } from "@/lib/apply/blank-unknown.mjs";
+import { careerOpsRoot } from "@/lib/career-ops";
 import type { ApplyField } from "@/lib/apply/extract";
 import type { ApplyIssue } from "@/lib/apply/issue";
 import { readJsonObject } from "@/lib/json-body";
@@ -13,9 +16,10 @@ export const maxDuration = 120;
 // each step for the "behind the scenes" strip, then bring the window to the front
 // so the HUMAN reviews and submits. NEVER submits — there is no submit path here.
 export async function POST(req: Request) {
-  const body = await readJsonObject<{ sessionId?: string; answers?: Record<string, string>; fields?: ApplyField[]; handoff?: boolean; company?: string; application?: string }>(req);
+  const body = await readJsonObject<{ sessionId?: string; answers?: Record<string, string>; fields?: ApplyField[]; edited?: string[]; handoff?: boolean; company?: string; application?: string }>(req);
   if (!body) return Response.json({ error: "bad json" }, { status: 400 });
   const { sessionId, answers = {}, fields = [], handoff, company, application } = body;
+  const edited = Array.isArray(body.edited) ? body.edited.filter((id): id is string => typeof id === "string") : [];
   if (!sessionId) return Response.json({ error: "sessionId required" }, { status: 400 });
   if (company !== undefined && typeof company !== "string") {
     return Response.json({ error: "company must be a string" }, { status: 400 });
@@ -31,13 +35,26 @@ export async function POST(req: Request) {
 
   try {
     const cvUploadName = cvPath ? uploadNameForCv({ application, title: session?.title }) : undefined;
-    const result = await fillSession(sessionId, answers, fields, cvPath, cvUploadName);
+    const safeAnswers = prepareFillAnswers({
+      fields,
+      answers,
+      profile: readApplyProfile(careerOpsRoot()),
+      edited,
+    });
+    // A page that moved onto a refused host (Workday, iCIMS, UKG or
+    // apply.handoff_hosts) since the session opened is not filled: its window is
+    // closed and the answer is the same refusal the session open and the drive
+    // give. Checked here, after the CV lookup and right before the first write,
+    // so nothing awaited in between can move the page past it.
+    const refused = await refusedDestination(sessionId);
+    if (refused) return Response.json(unsupportedSessionJson(refused, application, true));
+    const result = await fillSession(sessionId, safeAnswers, fields, cvPath, cvUploadName);
     const unmetLabels = (result.issues ?? []).flatMap((issue) =>
       issue.code === "required-empty" && Array.isArray(issue.labels) ? issue.labels : [],
     );
     const decision = handoffDecision({
       fields,
-      answers,
+      answers: safeAnswers,
       cvAttached: !!cvPath,
       steps: result.steps,
       unmetLabels,

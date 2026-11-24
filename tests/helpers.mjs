@@ -2,7 +2,7 @@
 // Moved verbatim from test-all.mjs (issue #1440); no framework by design:
 // the suite must run on a fresh clone with only Node.
 import { execFileSync } from 'child_process';
-import { accessSync, constants, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync as _rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
+import { accessSync, constants, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync as _rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { basename, join, dirname, resolve, sep, delimiter } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -11,6 +11,10 @@ import { localToday } from '../lib/local-today.mjs';
 import { getCareerOpsRoot } from '../path-resolver.mjs';
 import { describeDrift, diffSnapshots, snapshotDataRoot } from './data-root-guard.mjs';
 import { REQUIRED_TOOL_ENV, toolRequired } from './required-tools.mjs';
+import { formatManifest, looseManifest } from '../seeds/employers-fold.mjs';
+import { chunkInbox } from '../seeds/employers-import.mjs';
+import { INBOX_DIR } from '../seeds/employers-inbox.mjs';
+import { loadOwnDomainContributors } from '../seeds/employers-validate.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one level down)
@@ -214,7 +218,36 @@ export function isolatedBatchStatePath(additionsDir) {
 // option still wins, and a removal that keeps failing still throws. Same
 // wrapper test-all.mjs applies to its own call sites (#3066), shared so the
 // suites under tests/ cannot drift from it.
-export const rmSync = (target, opts = {}) => _rmSync(target, { maxRetries: 10, retryDelay: 100, ...opts });
+export const rmSync = (target, opts = {}) => {
+  // A junction (or directory symlink) reports itself as a directory, so
+  // _rmSync treats it as a real directory and throws ERR_FS_EISDIR instead of
+  // dropping the link. Match Node's own rmSync semantics: a symbolic link is
+  // removed as the link itself, never recursed into — even with recursive.
+  const targetStat = lstatSync(target, { throwIfNoEntry: false });
+  if (targetStat?.isSymbolicLink()) {
+    // unlinkSync has no retry support of its own, so give the link removal
+    // the same transient-failure policy _rmSync applies below — the very
+    // Windows handle window (EBUSY/EMFILE/ENFILE/ENOTEMPTY/EPERM) this
+    // wrapper exists for — still removing only the link. Node retries with
+    // linear backoff (retry 1 waits retryDelay, retry 2 waits 2×retryDelay,
+    // …), so the wait scales with the attempt; Atomics.wait is the blocking
+    // sleep a synchronous retry loop needs.
+    const maxRetries = opts.maxRetries ?? 10;
+    const retryDelay = opts.retryDelay ?? 100;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        unlinkSync(target);
+        return;
+      } catch (err) {
+        if (attempt >= maxRetries || !TRANSIENT_UNLINK_ERRORS.has(err?.code)) throw err;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, (attempt + 1) * retryDelay);
+      }
+    }
+  }
+  return _rmSync(target, { maxRetries: 10, retryDelay: 100, ...opts });
+};
+
+const TRANSIENT_UNLINK_ERRORS = new Set(['EBUSY', 'EMFILE', 'ENFILE', 'ENOTEMPTY', 'EPERM']);
 
 /**
  * The per-script budget run() applies when a caller does not override it.
@@ -228,6 +261,20 @@ export const rmSync = (target, opts = {}) => _rmSync(target, { maxRetries: 10, r
  * this comment, not by the compiler: change one, change the other.
  */
 export const DEFAULT_SCRIPT_TIMEOUT_MS = 30_000;
+
+/**
+ * How many times DEFAULT_SCRIPT_TIMEOUT_MS test-all.mjs gives a `node:test`
+ * suite, which spawns child processes per test and shares the machine with
+ * the rest of the pool.
+ *
+ * 4 was measured on 8 cores: a file takes about 1.7x as long at 8 jobs as
+ * alone, and the slowest is 16s alone. On the windows-latest runner (4 vCPU,
+ * 4 jobs) the same suites take about twice as long as on ubuntu-latest, and
+ * that baseline swings 1.7x between runs of the same tree, so a suite that
+ * used 40% of 120s on ubuntu overran it on a slow Windows run (#7713).
+ * Windows gets double the factor for the doubled baseline.
+ */
+export const NODE_TEST_BUDGET_FACTOR = process.platform === 'win32' ? 8 : 4;
 
 let passed = 0;
 let failed = 0;
@@ -1947,6 +1994,22 @@ export function copyEmployerRegistry(destDir) {
   const src = join(ROOT, 'employers');
   const inbox = join(src, 'inbox');
   cpSync(src, join(destDir, 'employers'), { recursive: true, filter: (p) => p !== inbox && !p.startsWith(inbox + sep) });
+}
+
+/** Write the own-domain rows as a separate contribution beside the imported files. */
+export function writeOwnDomainInbox(root, rows, date) {
+  if (rows.length === 0) return [];
+  const [login] = loadOwnDomainContributors(root);
+  if (!login) throw new Error('expected an authorized own-domain contributor');
+  const id = `${date}-${login}`;
+  const inbox = join(root, INBOX_DIR);
+  const lines = rows.map(({ ats, board, name, own_domain_mark }) => ({ ats, board, name, own_domain_mark }));
+  const chunks = chunkInbox(lines, id);
+  for (const chunk of chunks) {
+    writeFileSync(join(inbox, chunk.name), `${chunk.lines.map((line) => JSON.stringify(line)).join('\n')}\n`, { flag: 'wx' });
+  }
+  writeFileSync(join(inbox, `${id}.json`), formatManifest(looseManifest({ id, login, date, rows: lines.length })), { flag: 'wx' });
+  return chunks.map(({ name }) => name);
 }
 
 /** Every row of the committed employer registry, parsed. */

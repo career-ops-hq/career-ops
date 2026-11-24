@@ -14,6 +14,8 @@
 import { fetchJsonWithRetry, fetchTextWithRetry } from './_http.mjs';
 import { coerceId } from './_ids.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { departmentTeamFields } from './_department-team.mjs';
+import { employmentTypeField } from './_employment-type.mjs';
 import { workplaceField } from './_workplace-type.mjs';
 import { isWorkModelOnly } from './greenhouse.mjs';
 
@@ -532,6 +534,8 @@ async function fetchFromEmbed(entry, ctx) {
       // (compensationTierSummary), which is not parsed: a bare "$" names no
       // currency. An absent date means "unknown", never
       // "stale", so nothing is invented here.
+      // employmentType carries the same values as on the API path.
+      ...employmentTypeField(p.employmentType),
     };
   }).filter((/** @type {any} */ j) => j && j.title && j.url);
 }
@@ -648,6 +652,10 @@ export default {
         salary: parseCompensation(j),
         postedAt: toEpochMs(j.publishedAt),
         ...workplaceField(j.workplaceType),
+        // "FullTime" | "PartTime" | "Intern" | "Contract" | "Temporary".
+        // Left off when absent or unrecognized (_employment-type.mjs).
+        ...employmentTypeField(j.employmentType),
+        ...departmentTeamFields(j.department, j.team),
       };
     });
   },

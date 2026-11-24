@@ -252,3 +252,24 @@ test("web canonicalJobKey matches the CLI on Greenhouse, LinkedIn, and tracking 
     webCanonical("https://boards.greenhouse.io/acme/jobs/2"),
   );
 });
+
+// The core's Microsoft cases (#7292): one requisition in both URL shapes is one
+// posting, so the web reads a tracked Microsoft role as evaluated whichever
+// shape the scan or the tracker carries.
+test("web mirror keys one Microsoft requisition the same in both URL shapes, as core does", () => {
+  const job = "https://apply.careers.microsoft.com/careers/job/1970000000000001";
+  const pid = "https://apply.careers.microsoft.com/careers?pid=1970000000000001&domain=microsoft.com&hl=en&start=20";
+  const other = "https://apply.careers.microsoft.com/careers/job/1970000000000002";
+  const tagged = "https://apply.careers.microsoft.com/careers/job/1970000000000001?gh_jid=42";
+  const results = "https://apply.careers.microsoft.com/careers?start=0&sort_by=timestamp";
+  const lookalike = "https://careers.example.com/careers/job/42";
+  for (const url of [job, pid, other, tagged, results, lookalike, "https://apply.careers.microsoft.com./careers/job/1970000000000001"]) {
+    assert.equal(webKey(url), coreKey(url), `normalizeUrl parity: ${url}`);
+    assert.equal(webCanonical(url), coreCanonical(url), `canonicalJobKey parity: ${url}`);
+  }
+  assert.equal(webKey(job), webKey(pid));
+  assert.equal(webRelation(job, pid), "same");
+  assert.equal(webRelation(job, pid), coreRelation(job, pid));
+  assert.equal(webRelation(pid, other), "distinct");
+  assert.notEqual(webCanonical(tagged), "greenhouse:42");
+});

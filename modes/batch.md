@@ -19,7 +19,7 @@ Conductor (headed browser mode)
   └─ End: merge tracker-additions → applications.md + summary
 ```
 
-Each worker is a headless child process with a clean 200K token context. The conductor only orchestrates. See the **Headless / Batch Mode** table in `AGENTS.md` for the correct command per CLI.
+Each worker is a headless child process with a clean 200K token context. The conductor only orchestrates. See the headless command table in `modes/_headless.md` for the correct command per CLI.
 
 ## Pre-screen gate (standard / premium tiers only)
 
@@ -55,7 +55,7 @@ batch/
    d. Execute via Bash:
 
       ```bash
-      # Use your CLI's headless command (see AGENTS.md — Headless / Batch Mode)
+      # Use your CLI's headless command (see `modes/_headless.md`)
       <headless-cmd> "Process this job. URL: {url}. JD: /tmp/batch-jd-{id}.txt. Report: {num}. ID: {id}"
       ```
 
@@ -100,10 +100,10 @@ batch/batch-runner.sh [OPTIONS]
 ```
 
 Options:
-- `--cli NAME` — worker CLI: `claude` (default), `opencode`, `gemini`, `qwen` or `grok`; every CLI except `claude` runs one job at a time, with a single attempt per run (a later run still retries a failed job, up to `--max-retries`)
+- `--cli NAME` — worker CLI: `claude` (default), `opencode`, `gemini`, `qwen` or `grok`. Only `claude` runs jobs in parallel. Claude and `grok` retry a rate limit. The others run one job at a time, one attempt each (a later run still retries a failed job, up to `--max-retries`)
 - `--dry-run` — list pending jobs without executing
 - `--retry-failed` — retry only failed jobs
-- `--resume-paused` — resume jobs paused after a Claude session/rate limit
+- `--resume-paused` — resume jobs paused after a session or rate limit
 - `--start-from N` — start from ID N
 - `--limit N` — max number of jobs to process in this run (positive integer; `0` is rejected, omit the flag for no limit)
 - `--parallel N` — N workers in parallel (`claude` only; other CLIs always use one worker)
@@ -139,7 +139,7 @@ The standalone script cannot ask a human or authenticate a conversational answer
 
 ## Workers (headless mode)
 
-Each worker receives `batch-prompt.md` as a system prompt. It is self-contained. Use your CLI's headless command — see the **Headless / Batch Mode** table in `AGENTS.md`.
+Each worker receives `batch-prompt.md` as a system prompt. It is self-contained. Use your CLI's headless command — see the headless command table in `modes/_headless.md`.
 
 The worker produces:
 1. `.md` report in `reports/`

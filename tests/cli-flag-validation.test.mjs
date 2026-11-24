@@ -712,3 +712,31 @@ test('validate-portals.mjs --self-test still runs the self-test', () => {
   assert.equal(r.status, 0, describeSpawn(r, `validate-portals.mjs --self-test exited ${r.status}, want 0`));
   assert.doesNotMatch(r.all, /unrecognized flag|Usage:/i, '--self-test no longer reaches the self-test');
 });
+
+// build-dashboard.mjs (#3565): --help/-h print usage and exit 0 without
+// running `go build`; an unknown flag exits 1 and prints the usage block along
+// with the error. None of these cases may reach the Go toolchain: every one
+// exits before it, so the test does not need Go installed.
+for (const flag of ['--help', '-h']) {
+  test(`build-dashboard.mjs ${flag} exits 0 and prints usage without building`, () => {
+    const r = runScript('build-dashboard.mjs', flag);
+    assert.equal(r.status, 0, describeSpawn(r, `build-dashboard.mjs ${flag} exited ${r.status}, want 0`));
+    assert.match(r.all, /Usage:/, `build-dashboard.mjs ${flag} printed no usage block`);
+    assert.doesNotMatch(r.all, /Built dashboard|Go toolchain not found|Build failed/, `build-dashboard.mjs ${flag} reached go build`);
+  });
+}
+
+test('build-dashboard.mjs rejects an unknown flag and prints the usage block', () => {
+  const r = runScript('build-dashboard.mjs', '--hlep');
+  assert.equal(r.status, 1, describeSpawn(r, `build-dashboard.mjs --hlep exited ${r.status}, want 1`));
+  assert.match(r.all, /unrecognized flag/i, 'build-dashboard.mjs did not name the unrecognized flag');
+  assert.ok(r.all.includes('--hlep'), 'build-dashboard.mjs did not echo --hlep back');
+  assert.match(r.all, /Usage:/, 'build-dashboard.mjs printed no usage block with the error');
+  assert.doesNotMatch(r.all, /Built dashboard|Go toolchain not found|Build failed/, 'an unknown flag reached go build');
+});
+
+test('build-dashboard.mjs --help --bogus still errors', () => {
+  const r = runScript('build-dashboard.mjs', '--help', '--bogus');
+  assert.equal(r.status, 1, describeSpawn(r, `build-dashboard.mjs --help --bogus exited ${r.status}, want 1`));
+  assert.match(r.all, /unrecognized flag/i);
+});

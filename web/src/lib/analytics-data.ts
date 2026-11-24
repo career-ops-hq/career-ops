@@ -59,7 +59,13 @@ function normalizeWorkMode(raw: string, text: string): string {
     if (explicit.includes("remote")) return "Remote";
     if (explicit.includes("onsite") || explicit.includes("on-site") || explicit.includes("in-office")) return "Full";
   }
-  const value = text.toLowerCase();
+  // A negated remote is an on-site statement: "On-site only, no remote" was
+  // charted as Remote. Same negation rule as scan.mjs REMOTE_NEGATED_RE, which
+  // web/ cannot import; it never crosses a letter, so "nonprofit … remote"
+  // keeps its remote.
+  const value = text.toLowerCase()
+    .replace(/\b(?:non|not|no)[^a-z.!;?\n]*remote\b/g, " on-site ")
+    .replace(/\bremote(?:[^\S\n]+work)?[^a-z.!;?\n]*(?:is[^\S\n]+)?(?:not|n't)[^\S\n]+(?:available|possible|allowed|offered|an option)\b/g, " on-site ");
   if (value.includes("hybrid")) return "Hybrid";
   if (value.includes("remote") && (value.includes("flex") || value.includes("remote-first") || value.includes("remote first"))) return "RemoteFlex";
   if (value.includes("remote")) return "Remote";

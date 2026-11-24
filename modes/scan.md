@@ -55,7 +55,7 @@ Recommended Contract:
   enabled: true
 ```
 
-The script must resolve inside the repo root (security boundary in `providers/local-parser.mjs`). Keep a private, non-contributed parser under a gitignored path — `local/` is ignored by default — so it is never staged; `scripts/parsers/` is for a parser you intend to upstream. See `docs/local-parser-cookbook.md`.
+The script must resolve inside the repo root or the data root's `local/` folder (security boundary in `providers/local-parser.mjs`). Keep a private, non-contributed parser in `local/`: gitignored in a checkout, so it is never staged, and under the data root in a Claude Code plugin install, where a plugin update replaces the code root. `scripts/parsers/` is for a parser you intend to upstream. See `docs/local-parser-cookbook.md`.
 
 Typically, the parser is company-specific and already knows the URL, selectors, and pagination. `args` is optional: use it however it helps the script author, for example, to reuse it across companies, pass `{careers_url}` or `{company}`, activate a debug flag, save a JSON snapshot, or control any parser-specific behavior.
 
@@ -155,9 +155,9 @@ For companies with a public API or structured feed **that are not in `local_pars
 **Parsing Conventions by Provider:**
 - `greenhouse`: `jobs[]` → `title`, `absolute_url`, `location.name`
 - `ashby`: GET REST API → `jobs[]` with `title`, `jobUrl`, `location` (fold in `secondaryLocations[]` — Ashby lists extra hiring regions there), `compensation` (`minValue`/`maxValue`/`currency`; already fetched via `?includeCompensation=true`), `publishedAt`; slug derived from `careers_url` pattern `jobs.ashbyhq.com/{slug}`
-- `bamboohr`: list `result[]` → `jobOpeningName`, `id`, `location` (city + state; append "Remote" when `isRemote`); build detail URL `https://{company}.bamboohr.com/careers/{id}/detail`; to read full JD, make a GET request to the detail URL and use `result.jobOpening` (`jobOpeningName`, `description`, `datePosted`, `minimumExperience`, `compensation`, `jobOpeningShareUrl`)
+- `bamboohr`: list `result[]` → `jobOpeningName`, `id`, `location` (city + state, else `atsLocation` city + state or province + country, where a remote opening has its place; append "Remote" when `locationType` is `"1"` or `isRemote` is set); build detail URL `https://{company}.bamboohr.com/careers/{id}/detail`; to read full JD, make a GET request to the detail URL and use `result.jobOpening` (`jobOpeningName`, `description`, `datePosted`, `minimumExperience`, `compensation`, `jobOpeningShareUrl`)
 - `lever`: root array `[]` → `text`, `hostedUrl` (fallback: `applyUrl`), `categories.location`, and the JD body as `descriptionPlain` (or the `description` HTML when it is empty) + the labeled `lists` + `additionalPlain` (the list API ships all three — feeds `content_filter` and the #1597 cross-listing fingerprint)
-- `teamtailor`: RSS items → `title`, `link`, `location` (from the `tt:` block — `tt:city` / `tt:country`)
+- `teamtailor`: RSS items → `title`, `link`, `location` (from the `tt:` block — `tt:city` / `tt:country`); the feed holds 100 items per request, so page it with `?offset=100`, `?offset=200`, … until a page returns fewer than 100 items (a page that is not a complete RSS feed, closed by `</channel>`, is a failed read, not the end; stop at about 20 pages, and when a page only repeats earlier items the server ignored the offset: a partial read cannot show that a role is absent)
 - `workday`: `jobPostings[]`/`jobPostings` (based on tenant) → `title`, `externalPath` or URL built from the host, `locationsText` (fallback: derive from the URL path)
 - `breezy`: top-level array `[]` → `name`, `url` (absolute), `location.name` (or city/state/country + `is_remote`), `published_date`
 
@@ -325,6 +325,7 @@ If a non-publicly accessible URL is found:
 | 14 | `language` | `en-GB` | Language of the posting text as the source names it (a code or a name), when the provider reports it (`Job.language`); empty otherwise. Read by the opt-in `scan_history.dedup_include_language` |
 | 15 | `listing_key` | `listing_v1_…` | Strong local ATS identity key when the provider supplies a complete resolved identity; blank when it cannot |
 | 16 | `closes_at` | `2026-03-31` | Calendar day the posting closes, when the source already carried one. Empty when it did not. |
+| 17 | `employment_type` | `contract` | `full_time`, `part_time`, `contract`, `temporary` or `internship`, when the provider reads the type from a dedicated field (`Job.employmentType`); empty otherwise. Read by nothing in the scan: `employment_type_filter` judges the live posting |
 
 Columns are append-only: readers index by position, so new columns arrive at the end and older files keep their shorter rows. Never renumber or reorder. The header is written only when the file is created, so an existing file may still carry a shorter header than the rows being appended to it — that is expected, not corruption.
 
@@ -341,12 +342,12 @@ The scanner writes the other statuses in that list itself: `skipped_invalid_url`
 `skipped_dup` lasts as long as whatever made the URL seen. Without `scan_history.recheck_after_days` it counts as seen for good. With that window set, the row follows the URL's other rows here, such as an `added` or `skipped_expired` row or a cooldown: while any of them still pins the URL it stays seen, and once none does, the URL is eligible again however recent its `skipped_dup` rows are, so a repeat sighting never restarts the clock. A `skipped_dup` row with none of those rows here, which is what the agent workflow leaves when the original lives in the tracker or pipeline, ages out by its own `first_seen`. That ends only the row's own pin: a tracker or pipeline entry for the URL keeps it seen as before.
 
 ```tsv
-url	first_seen	portal	title	company	status	location	fingerprint	posted_at	trust_score	trust_flags	normalized_company	requisition_id	language	listing_key	closes_at
-https://...	2026-02-10	Ashby — AI PM	PM AI	Acme	added	Remote	a3f1c8d2e4b70592	2026-02-08			acme			listing_v1_…
-https://...	2026-02-11	ExampleCo	QA Engineer	ExampleCo	added	Hamburg, Germany		2026-02-11			exampleco	REF1234X	de	listing_v1_example	2026-03-31
+url	first_seen	portal	title	company	status	location	fingerprint	posted_at	trust_score	trust_flags	normalized_company	requisition_id	language	listing_key	closes_at	employment_type
+https://...	2026-02-10	Ashby — AI PM	PM AI	Acme	added	Remote	a3f1c8d2e4b70592	2026-02-08			acme			listing_v1_…		full_time
+https://...	2026-02-11	ExampleCo	QA Engineer	ExampleCo	added	Hamburg, Germany		2026-02-11			exampleco	REF1234X	de	listing_v1_example	2026-03-31	
 ```
 
-The first row comes from a provider that reports no requisition id or language, so its `requisition_id` and `language` cells are empty while `listing_key` still carries the key from its resolved ATS identity. The second comes from one that reports all three, and a close day. The first row leaves `closes_at` empty.
+The first row comes from a provider that reports no requisition id or language, so its `requisition_id` and `language` cells are empty while `listing_key` still carries the key from its resolved ATS identity. The second comes from one that reports all three, and a close day. The first row leaves `closes_at` empty and carries an employment type; the second comes from a source with no such field, so that cell is empty.
 
 ### Filtering by posted date
 

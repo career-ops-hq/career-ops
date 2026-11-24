@@ -99,7 +99,7 @@ export function parseMeituanResponse(json, companyName) {
       postedAt: toEpochMs(p.refreshTime ?? p.firstPostTime),
     });
   }
-  return { jobs, total };
+  return { jobs, total, rawCount: list.length };
 }
 
 /** @type {Provider} */
@@ -130,7 +130,7 @@ export default {
     let firstRequest = true;
     let succeededOnce = false;
     // Why part of the board went unread, first cause first; null while it is whole.
-    /** @type {'source-reports-more' | null} */
+    /** @type {'source-reports-more' | 'page-cap' | null} */
     let partialReason = null;
 
     for (const keyword of keywords) {
@@ -139,6 +139,7 @@ export default {
       for (let pageNo = 1; pageNo <= maxPages; pageNo++) {
         /** @type {import('./_types.js').Job[]|null} */
         let jobs = null;
+        let rawCount = 0;
 
         for (let attempt = 0; attempt <= EMPTY_RETRIES; attempt++) {
           if (firstRequest) firstRequest = false;
@@ -166,7 +167,7 @@ export default {
           const parsed = parseMeituanResponse(json, entry.name || '美团');
           succeededOnce = true;
           if (parsed.total) total = parsed.total;
-          if (parsed.jobs.length > 0) { jobs = parsed.jobs; break; }
+          if (parsed.jobs.length > 0) { jobs = parsed.jobs; rawCount = parsed.rawCount; break; }
           if (total && (pageNo - 1) * PAGE_SIZE >= total) break; // legitimately past the end
         }
 
@@ -185,8 +186,11 @@ export default {
         if (total && pageNo * PAGE_SIZE >= total) break;
         // The page cap, not the board, ended this keyword. Stay quiet when the
         // cap is the health probe's, not max_pages.
-        if (pageNo === maxPages && probeMaxPages > entryMaxPages) {
+        // A short page is the board's natural end, even at the cap and with no
+        // totalCount: the cut needs a full page by the source's own row count.
+        if (pageNo === maxPages && rawCount >= PAGE_SIZE && probeMaxPages > entryMaxPages) {
           console.error(`  ⚠ meituan: keyword "${keyword}" truncated at ${pageNo * PAGE_SIZE}${total ? ` of ${total}` : ''} postings — raise max_pages on this entry for complete coverage`);
+          partialReason ??= 'page-cap';
         }
       }
     }

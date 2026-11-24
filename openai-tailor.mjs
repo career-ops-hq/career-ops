@@ -27,7 +27,7 @@ import { readLockedSections } from './theme-style.mjs';
 import { redactIfEnabled, restoreIfEnabled } from './utils/privacy-filter.mjs';
 import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
 import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
-import { endpointHeaders } from './lib/endpoint-headers.mjs';
+import { endpointHeaders, buildTokenLimit } from './lib/endpoint-headers.mjs';
 
 // Ambient guard over global fetch (idempotent); the explicit gate below is the
 // primary layer.
@@ -278,11 +278,24 @@ export function buildSystemMessage(prompt, host) {
 // so one setting covers both steps of the budget workflow.
 const DEFAULT_MAX_TOKENS = 32768;
 
-// Same host gate as buildSystemMessage: api.openai.com's reasoning models
-// reject `max_tokens` and take `max_completion_tokens`, which its other chat
-// models accept as well; gateways and local servers read `max_tokens`.
-function buildTokenLimit(limit, host) {
-  return host === 'api.openai.com' ? { max_completion_tokens: limit } : { max_tokens: limit };
+// ---------------------------------------------------------------------------
+// Ending a run after a request
+// ---------------------------------------------------------------------------
+// Once the request has been made, the run ends by setting the exit code and
+// letting the event loop drain, not with process.exit(). On Windows, some Node
+// versions can abort in process.exit() after a request (nodejs/node#56645), and
+// the run then ends with exit code 3221226505 instead of 1; ollama-eval.mjs has
+// the versions and the measurement (#7096).
+//
+// This is top-level code, so the caller awaits the promise returned here. It
+// never settles, so nothing after the await runs, and Node exits with
+// process.exitCode once nothing else is pending: an exit code that is already
+// set wins over the unsettled-await code 13. The unref'd timer still ends a run
+// that something holds open, without holding the process open itself.
+function exitWhenDrained(code) {
+  process.exitCode = code;
+  setTimeout(() => process.exit(code), 5_000).unref();
+  return new Promise(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -345,12 +358,16 @@ try {
   if (!res.ok) {
     const body = await res.text();
     console.error(`❌  API error: HTTP ${res.status}`);
-    console.error(`    ${body.slice(0, 300)}`);
+    // The body is the gateway's own text, and the one place this request's key
+    // can come back out. gemini-eval.mjs redacts its key from error text the
+    // same way; redact before truncating so a long key cannot survive in pieces.
+    const shown = apiKey ? body.split(apiKey).join('[REDACTED]') : body;
+    console.error(`    ${shown.slice(0, 300)}`);
     if (res.status === 402) {
       console.error(`    → Not enough credit at ${endpointHost} for the prompt plus the ${maxTokens}-token output cap.`);
       console.error(`      Top up, or lower CAREER_OPS_MAX_TOKENS.`);
     }
-    process.exit(1);
+    await exitWhenDrained(1);
   }
 
   const data = await res.json();
@@ -363,7 +380,7 @@ try {
   if (finishReason === 'length') {
     console.error(`❌  The reply stopped at the ${maxTokens}-token output cap, so the tailored CV is cut short. Nothing was saved.`);
     console.error(`    Raise CAREER_OPS_MAX_TOKENS to allow a longer reply.`);
-    process.exit(1);
+    await exitWhenDrained(1);
   }
   // Any other stated reason than "stop" is a reply that did not finish: a
   // content filter or a provider error mid-generation leaves a partial CV,
@@ -371,15 +388,15 @@ try {
   // the same replies (#3949). A server that omits finish_reason is not refused.
   if (finishReason != null && finishReason !== 'stop') {
     console.error(`❌  The reply ended with finish_reason "${String(finishReason).slice(0, 40)}", not "stop", so the tailored CV may be incomplete. Nothing was saved.`);
-    process.exit(1);
+    await exitWhenDrained(1);
   }
   if (!tailoredHtml) {
     console.error('❌  The endpoint returned an empty response.');
-    process.exit(1);
+    await exitWhenDrained(1);
   }
 } catch (err) {
   console.error(`❌  API call failed: ${err.message}`);
-  process.exit(1);
+  await exitWhenDrained(1);
 }
 
 // Clean up markdown block wrapping if the LLM adds it despite instructions
@@ -434,5 +451,5 @@ try {
 
 } catch (err) {
   console.warn(`⚠️   Could not save HTML: ${err.message}`);
-  process.exit(1);
+  await exitWhenDrained(1);
 }

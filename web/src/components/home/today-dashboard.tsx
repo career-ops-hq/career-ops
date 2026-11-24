@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Bell, CircleHelp, Sparkles, ArrowRight, Undo2, X } from "lucide-react";
 import { instrumentSerif } from "@/lib/fonts";
-import type { Application, InboxJob } from "@/lib/career-ops";
+import type { AwaitingAge, Application, InboxJob } from "@/lib/career-ops";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { DiscoveryCard } from "@/components/explore/discovery-card";
 import { FollowUpCard, type FollowUp } from "@/components/home/follow-up-card";
@@ -35,6 +35,8 @@ export function TodayDashboard({
   legitimacy,
   inbox,
   applyFacts = {},
+  ages = {},
+  applyDay,
 }: {
   applications: Application[];
   reasons: Record<string, CardReason>;
@@ -43,6 +45,10 @@ export function TodayDashboard({
   inbox: Pick<InboxJob, "url" | "done">[];
   inBetween: boolean;
   applyFacts?: Record<string, { pdfOnDisk: boolean; postingUrl: string }>;
+  /** Days since found and posted, and the last still-open check, per row number. */
+  ages?: Record<string, AwaitingAge>;
+  /** Server calendar day. Apply next does not read the browser clock. */
+  applyDay: string;
 }) {
   const [followups, setFollowups] = useState<FollowUp[]>([]);
   const [overdue, setOverdue] = useState(0);
@@ -140,20 +146,24 @@ export function TodayDashboard({
   // Awaiting decision: scored (Evaluated) but no terminal status yet. The
   // ordering lives in lib/home/awaiting.mjs so it can be tested — see the file
   // for why "first six in the array" was a bug waiting for #3529.
-  const ranked = useMemo(() => pickAwaitingDecision(applications, scoreNum), [applications]);
+  const ranked = useMemo(() => pickAwaitingDecision(applications, scoreNum, 6, (row) => ages[row.n]?.open.state === "closed"), [applications, ages]);
   const applyTarget = useMemo(
     () => pickApplyNext(
       applications,
       scoreNum,
-      (row) => reasons[row.n]?.decision ?? "",
+      (row) => (ages[row.n]?.open.state === "closed" ? "" : reasons[row.n]?.decision ?? ""),
       (row) => legitimacy[row.n],
+      applyDay,
     ),
-    [applications, reasons, legitimacy],
+    [applications, reasons, legitimacy, applyDay, ages],
   );
   const awaiting = useMemo(() => includeApplyTarget(ranked, applyTarget), [ranked, applyTarget]);
   // With the legitimacy, a flagged posting is grouped as the report page
   // labels it (#5300).
-  const awaitingGroups = useMemo(() => groupAwaiting(awaiting, (a) => legitimacy[a.n]), [awaiting, legitimacy]);
+  const awaitingGroups = useMemo(
+    () => groupAwaiting(awaiting, (a) => legitimacy[a.n], (a) => ages[a.n]?.open.state === "closed"),
+    [awaiting, legitimacy, ages],
+  );
 
   const newThisWeek = freshCount;
   const dataLoading = followupsLoading || freshLoading;
@@ -300,7 +310,7 @@ export function TodayDashboard({
 
       {/* B. Awaiting your decision */}
       {awaiting.length > 0 && (
-        <Section icon={CircleHelp} title="Awaiting your decision" hint="Best score first">
+        <Section icon={CircleHelp} title="Awaiting your decision" hint="Best score first, closed postings last">
           {applyTarget && (
             <ApplyNext
               n={applyTarget.n}
@@ -319,6 +329,7 @@ export function TodayDashboard({
                     key={a.n}
                     app={a}
                     reason={reasons[a.n]}
+                    age={ages[a.n]}
                     onDecided={(status) => {
                       const company = companyPresentation(a).label;
                       setDecisionUndo({ n: a.n, label: status === "Applied" ? `Marked ${company} applied` : `Skipped ${company}` });

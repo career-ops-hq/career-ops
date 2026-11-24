@@ -10,14 +10,14 @@
       "properties": {
         "ats": {
           "description": "The ATS that hosts the board.",
-          "enum": ["greenhouse", "ashby", "lever", "workable", "smartrecruiters", "rippling", "join", "recruitee", "breezy", "bamboohr", "pinpoint", "applicantpro", "hibob", "hirehive", "homerun", "jazzhr", "keka", "personio", "prevueaps", "schoolspring", "taleez", "teamtailor", "trakstar", "turbohire", "zoho-recruit", "workday"]
+          "enum": ["greenhouse", "ashby", "lever", "workable", "smartrecruiters", "rippling", "join", "recruitee", "breezy", "bamboohr", "pinpoint", "applicantpro", "hibob", "hirehive", "homerun", "jazzhr", "keka", "personio", "prevueaps", "schoolspring", "taleez", "teamtailor", "trakstar", "turbohire", "zoho-recruit", "avature", "clearcompany", "jobvite", "eightfold", "adp-myjobs", "successfactors-classic", "oraclecloud", "csod", "phenom", "successfactors", "peoplesoft", "workday"]
         },
         "region": {
           "description": "The region or host the board is on. Greenhouse and Lever: us or eu, always. Personio: com for <id>.jobs.personio.com, absent for <id>.jobs.personio.de. Zoho Recruit: the data-centre domain when it is not zohorecruit.com (au: .com.au, ca, cn: .com.cn, eu, in, jp, sa).",
           "enum": ["us", "eu", "com", "au", "ca", "cn", "in", "jp", "sa"]
         },
         "board": {
-          "description": "The board id. Workday: tenant/wdN/site. Ashby and the Workday site keep their case; the ATS whose board is a subdomain (recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit) are lowercase; all but the first four (recruitee, breezy, bamboohr, pinpoint) are one DNS label of at most 63 characters; those four are not limited yet.",
+          "description": "The board id. Workday: tenant/wdN/site. SuccessFactors classic: label/eu|com/company, for <label>.successfactors.<eu|com>/career?company=<company>. Oracle Recruiting Cloud: host/siteNumber, for the tenant host on Oracle's cloud. ClearCompany: the career site's id, a lowercase GUID. Ashby and the Workday site keep their case; the ATS whose board is a subdomain (recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, avature, eightfold) are lowercase; all but the first four (recruitee, breezy, bamboohr, pinpoint) are one DNS label of at most 63 characters; those four are not limited yet.",
           "type": "string",
           "minLength": 2,
           "maxLength": 200
@@ -25,6 +25,16 @@
         "workday_host": {
           "description": "Workday only. jobs: https://<tenant>.<wdN>.myworkdayjobs.com/<site>. site: https://<wdN>.myworkdaysite.com/recruiting/<tenant>/<site>.",
           "enum": ["jobs", "site"]
+        },
+        "own_domain_mark": {
+          "description": "Phenom, SuccessFactors and PeopleSoft only, on a company's own domain: the ATS's mark seen on the site, and the date it was checked. Such rows come only from contributors listed in OWN_DOMAIN_CONTRIBUTORS.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mark", "checked_on"],
+          "properties": {
+            "mark": { "enum": ["phenompeople-assets", "rmkcdn-assets", "jobs2web", "hrs-cg-search"] },
+            "checked_on": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+          }
         },
         "careers_url": {
           "description": "The canonical board URL, built from ats, region, board and workday_host. The registry's unique key.",
@@ -58,7 +68,7 @@
         "contribution": {
           "description": "The id of the manifest in contributions/ that added this row.",
           "type": "string",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\\.(?:[2-9]|[1-9]\\d))?$"
         },
         "added": {
           "description": "The date the row was added (YYYY-MM-DD).",
@@ -97,14 +107,37 @@
           },
           "else": {
             "not": { "required": ["workday_host"] },
-            "properties": { "board": { "pattern": "^[A-Za-z0-9._-]+$" } }
+            "if": { "properties": { "ats": { "const": "successfactors-classic" } }, "required": ["ats"] },
+            "then": { "properties": { "board": { "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?/(?:eu|com)/[A-Za-z0-9_-]{1,64}$" } } },
+            "else": {
+              "if": { "properties": { "ats": { "const": "oraclecloud" } }, "required": ["ats"] },
+              "then": { "properties": { "board": { "pattern": "^[a-z0-9-]+\\.fa\\.(?:[a-z0-9-]+\\.)?(?:ocs\\.)?oraclecloud(?:[1-9][0-9]?)?\\.com/[A-Za-z0-9_-]{1,64}$" } } },
+              "else": {
+                "if": { "properties": { "ats": { "const": "csod" } }, "required": ["ats"] },
+                "then": { "properties": { "board": { "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?/[1-9][0-9]{0,2}/[A-Za-z0-9_-]{1,60}$" } } },
+                "else": {
+                "if": { "properties": { "ats": { "enum": ["phenom", "successfactors", "peoplesoft"] } }, "required": ["ats"] },
+                "then": { "properties": { "board": { "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?(?:/[A-Za-z0-9_-]{1,64})?$" } } },
+                "else": { "properties": { "board": { "pattern": "^[A-Za-z0-9._-]+$" } } }
+                }
+              }
+            }
           }
+        },
+        {
+          "if": { "properties": { "ats": { "enum": ["phenom", "successfactors", "peoplesoft"] } }, "required": ["ats"] },
+          "then": { "required": ["own_domain_mark"] },
+          "else": { "not": { "required": ["own_domain_mark"] } }
         },
         { "if": { "required": ["retired"] }, "then": { "required": ["retired_reason"] } },
         { "if": { "required": ["retired_reason"] }, "then": { "required": ["retired"] } },
         {
-          "if": { "properties": { "ats": { "enum": ["applicantpro", "hibob", "hirehive", "homerun", "jazzhr", "keka", "personio", "prevueaps", "schoolspring", "taleez", "teamtailor", "trakstar", "turbohire", "zoho-recruit"] } }, "required": ["ats"] },
+          "if": { "properties": { "ats": { "enum": ["applicantpro", "hibob", "hirehive", "homerun", "jazzhr", "keka", "personio", "prevueaps", "schoolspring", "taleez", "teamtailor", "trakstar", "turbohire", "zoho-recruit", "avature", "eightfold"] } }, "required": ["ats"] },
           "then": { "properties": { "board": { "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$" } } }
+        },
+        {
+          "if": { "properties": { "ats": { "const": "clearcompany" } }, "required": ["ats"] },
+          "then": { "properties": { "board": { "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" } } }
         }
       ]
     },
@@ -114,9 +147,9 @@
       "required": ["id", "contributor", "signed_by", "rows", "source", "origin", "no_conflicting_contract", "personal_data", "exclusive", "license", "also_permits", "attribution", "date"],
       "properties": {
         "id": {
-          "description": "<YYYY-MM-DD>-<slug>, the same as the file name without .json.",
+          "description": "<YYYY-MM-DD>-<slug>, or <YYYY-MM-DD>-<slug>.<n> (n from 2 to 99) for a later contribution of the same day; the same as the file name without .json.",
           "type": "string",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\\.(?:[2-9]|[1-9]\\d))?$"
         },
         "contributor": {
           "description": "GitHub username of the account that opens the pull request, without @.",
@@ -182,12 +215,13 @@
       }
     },
     "source": {
-      "description": "Where a pointer came from: community, ats-directory, vc-portfolio, employer-list:<org>, prior-mit:<owner>/<repo>@<commit>, or web-index:<name>@<YYYY-MM-DD>.",
+      "description": "Where a pointer came from: community, ats-directory, vc-portfolio, employer-list:<org>, prior-mit:<owner>/<repo>@<commit>, web-index:<name>@<YYYY-MM-DD>, or user-submissions@<YYYY-MM-DD>.",
       "anyOf": [
         { "enum": ["community", "ats-directory", "vc-portfolio"] },
         { "type": "string", "pattern": "^employer-list:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$" },
         { "type": "string", "pattern": "^prior-mit:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{7,40}$" },
-        { "type": "string", "pattern": "^web-index:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?@\\d{4}-\\d{2}-\\d{2}$" }
+        { "type": "string", "pattern": "^web-index:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?@\\d{4}-\\d{2}-\\d{2}$" },
+        { "type": "string", "pattern": "^user-submissions@\\d{4}-\\d{2}-\\d{2}$" }
       ]
     }
   }

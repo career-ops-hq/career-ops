@@ -3,6 +3,8 @@
 import { coerceId } from './_ids.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
+import { departmentTeamFields } from './_department-team.mjs';
+import { employmentTypeField } from './_employment-type.mjs';
 import { workplaceField } from './_workplace-type.mjs';
 import { isWorkModelOnly } from './greenhouse.mjs';
 
@@ -349,6 +351,11 @@ export default {
         // field, so requisitionId stays unset rather than being inferred.
         externalId: coerceId(j.id),
         ...workplaceField(j.workplaceType),
+        // `categories.commitment` is free text each employer writes ("Full-time",
+        // "Internship", "Fixed-Term", "Contractor"). "Permanent" states the term,
+        // not the type, and is left off with anything else unrecognized.
+        ...employmentTypeField(j.categories?.commitment),
+        ...departmentTeamFields(j.categories?.department, j.categories?.team),
       };
     });
     if (/** @type {any} */ (json).leverTruncated) /** @type {any} */ (mapped).leverTruncated = /** @type {any} */ (json).leverTruncated;

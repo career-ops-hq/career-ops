@@ -379,7 +379,10 @@ export default {
     // or short page proves the end; a stated total that the boundary page
     // reaches is not proof, because the count can be wrong.
     if (!walkEnded) {
-      stopReason = probing && pagesToFetch < entryMaxPages ? 'probe-cap' : 'cap';
+      // A probe never reports a cap. On a max_pages: 1 entry the probe's one
+      // page is also the entry's last, so comparing the two caps cannot tell
+      // which one ended the walk (#7180).
+      stopReason = probing ? 'probe-cap' : 'cap';
     }
     if (stopReason === 'cap') {
       console.error(`⚠️  rexx: ${entry.name} truncated at max_pages=${entryMaxPages} (${jobs.length}${total !== null ? ` of ${total}` : ''} jobs) — raise max_pages on this entry for more`);

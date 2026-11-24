@@ -30,7 +30,7 @@ import { pathToFileURL } from 'url';
 import { resolveAndValidate } from './_net.mjs';
 import { normalizeUrl, aggregatorPostingId } from '../url-key.mjs';
 import { getCareerOpsRoot } from '../path-resolver.mjs';
-import { readLock, writeLockEntry, diffPlugin, describeDrift, hashPluginTree, consentSurface } from './_lock.mjs';
+import { readLock, readLockForUpdate, writeLockEntry, diffPlugin, describeDrift, hashPluginTree, consentSurface } from './_lock.mjs';
 import { loadRegistry } from './_registry.mjs';
 
 /** The complete, closed set of hook kinds. Anything else (apply/submit/…) is rejected. */
@@ -683,12 +683,18 @@ function pluginSource(manifest, root) {
 /**
  * Integrity gate run on an ENABLED plugin before importing it (the rug-pull
  * defense). Returns { load }. Re-pins the lock on the benign cases (silent).
- * Fail-open on the engine itself (a lock-read error never blocks).
+ * An absent lock is a first pin. A damaged lock is not an empty one: loading
+ * would skip the drift check, so the plugin stays unloaded until the file is repaired.
  */
 export function lockGate(manifest, root) {
   const source = pluginSource(manifest, root);
   let lock;
-  try { lock = readLock(root); } catch { return { load: true }; }
+  try {
+    lock = readLockForUpdate(root);
+  } catch (err) {
+    warnSkip(manifest.id, `plugins.lock is damaged, so this plugin will not load until it is repaired — ${err.message}`);
+    return { load: false };
+  }
   const entry = lock.plugins?.[manifest.id];
   let d;
   try { d = diffPlugin(manifest, entry); }
@@ -760,19 +766,20 @@ export async function loadDotenvOnce(root = null) {
  *
  * @param {string} kind
  * @param {*} payload   For provider this is unused; for ingest none; search a query; export a snapshot; notify a payload.
- * @param {{ root: string, dataRoot?: string, dryRun?: boolean, timeoutMs?: number, pluginId?: string }} opts
+ * @param {{ root: string, dataRoot?: string, dryRun?: boolean, timeoutMs?: number, pluginId?: string, admitJobs?: (jobs: object[]) => object[] }} opts
  * @returns {Promise<Array<{ id: string, ok: boolean, result?: any, error?: string }>>}
  */
-export async function runHook(kind, payload, { root, dataRoot = root, dryRun = false, timeoutMs = DEFAULT_HOOK_TIMEOUT_MS, pluginId = null }) {
+export async function runHook(kind, payload, { root, dataRoot = root, dryRun = false, timeoutMs = DEFAULT_HOOK_TIMEOUT_MS, pluginId = null, admitJobs = null }) {
   await loadDotenvOnce(dataRoot);
   const loaded = await loadPlugins(kind, { root, dataRoot, dryRun, pluginId });
   const results = [];
   for (const { id, hook, ctx } of loaded) {
+    const hookCtx = admitJobs ? { ...ctx, admitJobs } : ctx;
     const invoke = kind === 'search'
-      ? Promise.resolve().then(() => hook(payload, ctx))
+      ? Promise.resolve().then(() => hook(payload, hookCtx))
       : kind === 'export' || kind === 'notify'
-        ? Promise.resolve().then(() => hook(payload, ctx))
-        : Promise.resolve().then(() => hook(ctx)); // ingest
+        ? Promise.resolve().then(() => hook(payload, hookCtx))
+        : Promise.resolve().then(() => hook(hookCtx)); // ingest
     let timer;
     const timeout = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`timed out after ${timeoutMs}ms`)), timeoutMs); });
     try {

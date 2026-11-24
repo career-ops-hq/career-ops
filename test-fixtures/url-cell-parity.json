@@ -1,5 +1,5 @@
 {
-  "_comment": "One table, two readers. Node (tracker-parse.mjs extractCellUrl, asserted in tracker-columns-tests.mjs) and Go (dashboard/internal/data extractCellURL, asserted in career_test.go) must each map every cell to this href. Generated from the Node reader; a change to either reader that breaks parity fails CI. #3516 / #3854.",
+  "_comment": "One table, two readers. Node (tracker-parse.mjs extractCellUrl, asserted in tests/tracker-columns.test.mjs) and Go (dashboard/internal/data extractCellURL, asserted in career_test.go) must each map every cell to this href. Generated from the Node reader; a change to either reader that breaks parity fails CI. #3516 / #3854.",
   "cases": [
     {
       "name": "bare URL (pre-#3516 row)",

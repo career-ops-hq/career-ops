@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { tryAcquireDirLockSync, releaseOrWarn } from './lib/dir-lock.mjs';
 
 export const APPLICATION_ANSWERS_HEADING = '## Application Answers';
 
@@ -501,10 +502,19 @@ export function upsertApplicationAnswersSection(reportText, snapshot = {}) {
   return updated.endsWith('\n') ? updated : `${updated}\n`;
 }
 
+const ANSWER_FLAGS = new Set([
+  '--help', '-h', '--read', '--read-draft', '--strict',
+  '--report', '--input', '--state', '--date',
+]);
+
 function parseArgs(argv) {
   const args = {};
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
+    if (arg.startsWith('-')) {
+      const name = arg.split('=')[0];
+      if (!ANSWER_FLAGS.has(name)) throw new Error(`Unrecognized flag: ${name}`);
+    }
     if (arg === '--help' || arg === '-h') args.help = true;
     else if (arg === '--read') args.read = true;
     else if (arg === '--read-draft') args.readDraft = true;
@@ -612,8 +622,14 @@ async function main() {
     state: args.state || input.state,
   };
   const reportPath = resolve(args.report);
-  const updated = upsertApplicationAnswersSection(readFileSync(reportPath, 'utf-8'), snapshot);
-  writeFileSync(reportPath, updated, 'utf-8');
+  const lock = tryAcquireDirLockSync(`${reportPath}.lock`, { staleMs: 30_000 });
+  if (!lock) throw new Error(`report is busy: ${reportPath}; retry saving the answers`);
+  try {
+    const updated = upsertApplicationAnswersSection(readFileSync(reportPath, 'utf-8'), snapshot);
+    writeFileSync(reportPath, updated, 'utf-8');
+  } finally {
+    releaseOrWarn(lock);
+  }
 
   const normalized = normalizeApplicationAnswersSnapshot(snapshot);
   console.log(JSON.stringify({ report: reportPath, date: normalized.date, state: normalized.state }, null, 2));

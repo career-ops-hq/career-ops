@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkLivenessViaApi, classifyWorkday403 } from '../liveness-api.mjs';
+import { checkLivenessViaApi, classifyWorkday403, resolveAtsApi } from '../liveness-api.mjs';
+import { workdayCxsUrl } from '../browser-extract.mjs';
 
 const posting = 'https://acme.wd3.myworkdayjobs.com/en-US/External/job/Berlin/QA-Engineer_R0419758-1';
 
@@ -58,4 +59,39 @@ test('a 403 is read as a body only for providers that opt in', async () => {
   const greenhouse = await withFetch(json(WITHDRAWN, 403),
     () => checkLivenessViaApi('https://boards.greenhouse.io/acme/jobs/4567890'));
   assert.equal(greenhouse, null);
+});
+
+test('myworkdaysite.com postings resolve to the per-job CXS endpoint with or without a locale prefix', async () => {
+  const expectedApi = 'https://wd5.myworkdaysite.com/wday/cxs/guidewire/external/job/India---Bangalore/Staff-Product-Security-Engineer_JR_15441';
+  const scannerUrl = 'https://wd5.myworkdaysite.com/recruiting/guidewire/external/job/India---Bangalore/Staff-Product-Security-Engineer_JR_15441';
+  const browserUrl = 'https://wd5.myworkdaysite.com/en-US/recruiting/Guidewire/external/job/India---Bangalore/Staff-Product-Security-Engineer_JR_15441/';
+
+  for (const url of [scannerUrl, browserUrl]) {
+    const resolved = resolveAtsApi(url);
+    assert.equal(resolved?.ats, 'workday');
+    assert.equal(resolved?.apiUrl, expectedApi);
+    assert.equal(workdayCxsUrl(url), expectedApi);
+  }
+
+  let requestedUrl = null;
+  const live = await withFetch(async (url) => {
+    requestedUrl = url;
+    return new Response(JSON.stringify(LIVE), { status: 200 });
+  }, () => checkLivenessViaApi(browserUrl));
+  assert.equal(requestedUrl, expectedApi);
+  assert.equal(live?.result, 'active');
+  assert.equal(live?.code, 'workday_api_ok');
+
+  const withdrawn = await withFetch(json(WITHDRAWN, 403), () => checkLivenessViaApi(scannerUrl));
+  assert.equal(withdrawn?.result, 'expired');
+  assert.equal(withdrawn?.code, 'workday_api_withdrawn');
+
+  const missing = await withFetch(json(MISSING_S21, 404), () => checkLivenessViaApi(scannerUrl));
+  assert.equal(missing?.result, 'expired');
+  assert.equal(missing?.code, 'workday_api_gone');
+
+  assert.equal(resolveAtsApi('https://www.myworkdaysite.com/recruiting/guidewire/external/job/Remote/Role_R1'), null);
+  assert.equal(resolveAtsApi('https://wd5.myworkdaysite.com/guidewire/external/job/Remote/Role_R1'), null);
+  assert.equal(resolveAtsApi('https://wd5.myworkdaysite.com/recruiting/guidewire/external/job/Remote/Role..R1'), null);
+  assert.equal(resolveAtsApi('http://wd5.myworkdaysite.com/recruiting/guidewire/external/job/Remote/Role_R1'), null);
 });

@@ -42,10 +42,12 @@ export function statusDot(status: string): string {
   return "bg-zinc-500"; // Evaluated / unknown
 }
 
-/** First number in a score string ("4.1/5", "B+", "3.0") → numeric, or NaN. */
+/** First number in a score string ("4.1/5", "B+", "3.0") → numeric, or NaN.
+ *  A decimal comma ("4,2/5", which the Dutch modes write) is a decimal point,
+ *  as in the core's parseScore (tracker-parse.mjs); it used to read as 4. */
 export function scoreNum(s: string): number {
-  const m = s.match(/(\d+(?:\.\d+)?)/);
-  return m ? parseFloat(m[1]) : NaN;
+  const m = s.match(/(\d+(?:[.,]\d+)?)/);
+  return m ? parseFloat(m[1].replace(",", ".")) : NaN;
 }
 
 /** Score → tone, mirroring the Go TUI thresholds (>=4.2 green, >=3.8 yellow,

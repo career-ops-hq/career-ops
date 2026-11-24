@@ -8,6 +8,8 @@
 // regex match on `<safe-slug>.recruitee.com` rather than a static
 // allowlist.
 
+import { employmentTypeField } from './_employment-type.mjs';
+import { departmentTeamFields } from './_department-team.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 
 const RECRUITEE_HOST_RE = /^[a-z0-9][a-z0-9-]*\.recruitee\.com$/;
@@ -60,6 +62,26 @@ function entryLanguage(entry) {
   return LANGUAGE_RE.test(language) ? language : null;
 }
 
+/**
+ * The posting's ATS-native identity: the tenant label of the board's host
+ * (`<slug>.recruitee.com`, already checked by RECRUITEE_HOST_RE) and the offer's
+ * integer `id` from the payload, never parsed out of a URL, rendered in its one
+ * decimal form as join.mjs does. Every language version of one offer carries the
+ * same identity: they are one posting. A non-integer, unsafe or non-positive id,
+ * or a slug that is missing, padded or carries control characters, gives no
+ * identity, so that row falls back to URL dedup.
+ * Exported for unit tests.
+ *
+ * @param {string | null | undefined} slug
+ * @param {unknown} id
+ * @returns {{ats_provider: 'recruitee', board_slug: string, posting_id: string} | undefined}
+ */
+export function recruiteeListingIdentity(slug, id) {
+  if (typeof slug !== 'string' || slug === '' || slug !== slug.trim() || /[\u0000-\u001f\u007f]/u.test(slug)) return undefined;
+  if (typeof id !== 'number' || !Number.isSafeInteger(id) || id <= 0) return undefined;
+  return { ats_provider: 'recruitee', board_slug: slug, posting_id: String(id) };
+}
+
 /** @type {Provider} */
 export default {
   id: 'recruitee',
@@ -78,6 +100,7 @@ export default {
       allLanguages: ctx?.dedupIncludeLanguage === true,
       preferredLanguageRank: typeof ctx?.preferredLanguageRank === 'function' ? ctx.preferredLanguageRank : null,
       entryLanguage: entryLanguage(entry),
+      boardSlug: new URL(apiUrl).hostname.split('.')[0],
     });
   },
 };
@@ -250,10 +273,9 @@ function containsWholeWord(text, word) {
  * multi-place postings (`grep -l "' · '" providers/*.mjs`), so scan.mjs's
  * location_filter sees every place a multi-location role is open to.
  *
- * Falls back to the single-place logic — explicit `location` (with the
- * top-level `country` appended when the location doesn't already name it),
- * else assembled from city/country, appending "Remote" when `remote` is true
- * — when `locations` yields 0 or 1 distinct names.
+ * Falls back to the single-place logic — explicit `location` (folding top-level
+ * `city`, `country` and `remote` when not already named), else assembled from
+ * `city`, `country` and `remote` — when `locations` yields 0 or 1 distinct names.
  *
  * The joined multi-place path also honors the top-level `remote` flag: it is
  * a separate signal from the named places (a "remote in Germany" entry names
@@ -283,19 +305,15 @@ function assembleLocation(j) {
     const hasRemote = distinctNames.some(n => n.toLowerCase().includes('remote'));
     return j.remote && !hasRemote ? [...distinctNames, 'Remote'].join(' · ') : distinctNames.join(' · ');
   }
-  const city = j.city || '';
-  const country = j.country || '';
-  const remote = j.remote ? 'Remote' : '';
-  // The flat `location` gets the same country fold every `locations[]` entry
-  // gets above — without it a primary place spelled as a city or subdivision
-  // ("London, England") hides the country location_filter matches on.
-  if (typeof j.location === 'string' && j.location.trim()) {
-    const loc = j.location.trim();
-    return typeof country === 'string' && country.trim() && !containsWholeWord(loc, country.trim())
-      ? `${loc}, ${country.trim()}`
-      : loc;
-  }
-  return [city, country, remote].filter(Boolean).join(', ');
+  const city = typeof j.city === 'string' ? j.city.trim() : '';
+  const country = typeof j.country === 'string' ? j.country.trim() : '';
+  const parts = typeof j.location === 'string' && j.location.trim()
+    ? [j.location.trim()]
+    : [];
+  if (city && !parts.some(p => containsWholeWord(p, city))) parts.push(city);
+  if (country && !parts.some(p => containsWholeWord(p, country))) parts.push(country);
+  if (j.remote && !parts.some(p => p.toLowerCase().includes('remote'))) parts.push('Remote');
+  return parts.join(', ');
 }
 
 // Recruitee publishes a timestamp as `YYYY-MM-DD HH:MM:SS UTC`, which is not an
@@ -440,10 +458,11 @@ function parseSalary(salary) {
  *
  * @param {any} json
  * @param {string} companyName
- * @param {{allLanguages?: boolean, preferredLanguageRank?: ((language: string) => number)|null, entryLanguage?: string|null}} [options]
- * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number, salary?: {min: number, max: number, currency: string}, language?: string}>}
+ * @param {{allLanguages?: boolean, preferredLanguageRank?: ((language: string) => number)|null, entryLanguage?: string|null, boardSlug?: string|null}} [options]
+ *   `boardSlug` is the tenant label the board was fetched at; without it no row carries a `listingIdentity`.
+ * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number, salary?: {min: number, max: number, currency: string}, language?: string, listingIdentity?: {ats_provider: 'recruitee', board_slug: string, posting_id: string}}>}
  */
-export function parseRecruiteeResponse(json, companyName, { allLanguages = false, preferredLanguageRank = null, entryLanguage = null } = {}) {
+export function parseRecruiteeResponse(json, companyName, { allLanguages = false, preferredLanguageRank = null, entryLanguage = null, boardSlug = null } = {}) {
   const offers = json && typeof json === 'object' && Array.isArray(json.offers) ? json.offers : null;
   if (!offers) {
     const got = json && typeof json === 'object' ? Object.keys(json).join(', ') : typeof json;
@@ -484,6 +503,7 @@ export function parseRecruiteeResponse(json, companyName, { allLanguages = false
     const location = assembleLocation(j);
     const postedAt = toEpochMs(j.published_at);
     const salary = parseSalary(j.salary);
+    const listingIdentity = recruiteeListingIdentity(boardSlug, j.id);
 
     for (const version of languageVersions(j, allLanguages, preferredLanguageRank, entryLanguage)) {
       out.push({
@@ -491,10 +511,14 @@ export function parseRecruiteeResponse(json, companyName, { allLanguages = false
         url: version.language ? withLanguage(url, version.language) : url,
         location,
         company: companyName,
+        ...departmentTeamFields(j.department),
         ...(version.description ? { description: version.description } : {}),
         ...(postedAt !== undefined ? { postedAt } : {}),
         ...(salary ? { salary } : {}),
         ...(version.language ? { language: version.language } : {}),
+        ...(listingIdentity ? { listingIdentity } : {}),
+        // employment_type_code: "fulltime_permanent", "parttime_fixed_term", "contract", "internship", "freelance"
+        ...employmentTypeField(j.employment_type_code),
       });
     }
   }

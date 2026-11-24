@@ -145,7 +145,7 @@ export function parseRequisitions(json, cfg) {
   for (const r of list) {
     if (!r || typeof r !== 'object') continue;
     const id = r.requisitionId != null ? String(r.requisitionId) : '';
-    const title = decodeEntities(String(r.displayJobTitle || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+    const title = decodeEntities(String(r.displayJobTitle || '').replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
     if (!id || !title) continue;
     out.push({
       id,

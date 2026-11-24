@@ -1,9 +1,12 @@
-import { getSession, finalizeDrivenSession, extractCurrent, isApplicationFormFn, handoffSession, fillSession } from "@/lib/apply/session";
+import { getSession, finalizeDrivenSession, extractCurrent, isApplicationFormFn, handoffSession, fillSession, refusedDestination } from "@/lib/apply/session";
+import { unsupportedSessionJson } from "@/lib/apply/unsupported-ats.mjs";
 import { driveSession } from "@/lib/apply/drive";
 import { classifyEmpty, verifyFill } from "@/lib/apply/diagnose";
 import { resolveSessionCv, uploadNameForCv } from "@/lib/apply/cv";
 import { answersForRefreshedFields, handoffDecision } from "@/lib/apply/handoff-gate.mjs";
+import { prepareLabeledAnswers, readApplyProfile } from "@/lib/apply/blank-unknown.mjs";
 import { readbackIssues } from "@/lib/apply/prefilled-banner.mjs";
+import { careerOpsRoot } from "@/lib/career-ops";
 import { resolveCliOrFallback } from "@/lib/clis";
 import { readJsonObject } from "@/lib/json-body";
 
@@ -15,14 +18,29 @@ export const maxDuration = 300;
 // REACH a fillable application form (the user watches each step live), then we
 // extract + finalize. NEVER submits (enforced in driveSession).
 export async function POST(req: Request) {
-  const body = await readJsonObject<{ sessionId?: string; cliId?: string; goal?: "reach" | "full"; answers?: { id?: string; label: string; value: string }[]; company?: string; application?: string }>(req);
+  const body = await readJsonObject<{ sessionId?: string; cliId?: string; goal?: "reach" | "full"; answers?: { id?: string; label: string; value: string }[]; editedLabels?: string[]; company?: string; application?: string }>(req);
   if (!body) return Response.json({ error: "bad json" }, { status: 400 });
   const { sessionId, goal = "reach", answers } = body;
+  const editedLabels = Array.isArray(body.editedLabels) ? body.editedLabels.filter((label): label is string => typeof label === "string") : [];
+  if (answers !== undefined && !Array.isArray(answers)) {
+    return Response.json({ error: "answers must be an array" }, { status: 400 });
+  }
   // Same fallback as the session open that precedes every drive, which is where
   // a substitution is reported (#4607); driveSession() itself needs Claude.
   const cliId = (body.cliId && resolveCliOrFallback(body.cliId)?.spec.id) || body.cliId || "";
   const s = sessionId ? getSession(sessionId) : undefined;
   if (!s) return Response.json({ error: "apply session not found (it may have expired)" }, { status: 404 });
+  let safeAnswers = answers;
+  if (answers) {
+    let profile;
+    try {
+      profile = readApplyProfile(careerOpsRoot());
+    } catch (error) {
+      const message = error instanceof Error ? error.message.slice(0, 200) : "could not read the profile";
+      return Response.json({ error: message }, { status: 500 });
+    }
+    safeAnswers = prepareLabeledAnswers(answers, profile, editedLabels, s.fields);
+  }
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -44,7 +62,15 @@ export async function POST(req: Request) {
           }
         };
         const budget = goal === "full" ? 16 : 7;
-        const result = await driveSession(page, cliId, goal, isFormReady, (step) => emit({ t: "step", ...step }), budget, answers);
+        // A refused host (Workday, iCIMS, UKG or apply.handoff_hosts) ends the
+        // drive with the same refusal panel the session open shows; its window
+        // is already closed by then.
+        const refuse = (hit: { vendor: string; label: string; postingUrl: string }) => emit({ t: "unsupported", ...unsupportedSessionJson(hit, body.application, true) });
+        const result = await driveSession(page, cliId, goal, isFormReady, (step) => emit({ t: "step", ...step }), budget, safeAnswers, () => refusedDestination(s.id));
+        if (result.unsupported) {
+          refuse(result.unsupported);
+          return;
+        }
 
         if (goal === "full") {
           // Open the window only when required screening answers have values and a claimed résumé file landed.
@@ -68,6 +94,10 @@ export async function POST(req: Request) {
           // Snapshot first. Finalizing replaces s.fields and reassigns positional ids.
           const beforeFields = Array.isArray(s.fields) ? s.fields.slice() : [];
           const fin = await finalizeDrivenSession(s.id, cliId);
+          if (fin && "unsupported" in fin) {
+            refuse(fin.unsupported);
+            return;
+          }
           if (!fin) {
             const unread = { level: "warn" as const, code: "fill-unverified", message: "Couldn't read the form back, so it is not counted as pre-filled." };
             emit({
@@ -82,7 +112,7 @@ export async function POST(req: Request) {
             return;
           }
           const cvUploadName = cvPath ? uploadNameForCv({ application, title: s.title }) : undefined;
-          const refreshed = answersForRefreshedFields(beforeFields, s.fields, body.answers);
+          const refreshed = answersForRefreshedFields(beforeFields, s.fields, safeAnswers);
           const supplied = refreshed.answers;
           // The agent already typed these answers. An empty fill map attaches
           // the résumé only. `supplied` is what read-back compares.
@@ -128,6 +158,10 @@ export async function POST(req: Request) {
 
         if (result.reached) {
           const fin = await finalizeDrivenSession(s.id, cliId);
+          if (fin && "unsupported" in fin) {
+            refuse(fin.unsupported);
+            return;
+          }
           if (fin) {
             emit({ t: "done", reached: true, turns: result.turns, title: fin.title, fields: fin.fields, issues: fin.issues });
             return;

@@ -120,8 +120,10 @@ running after 600 others in one:
   timer after the suite has finished is reported as a failure of that suite.
 - **A tight time limit.** With every core busy a suite takes noticeably longer
   than it does alone. A `node:test` suite gets four times its usual 30-second
-  budget in a parallel run for that reason; a timeout inside a suite gets no
-  such allowance.
+  budget for that reason, eight times on Windows, where suites run about twice
+  as slow; a timeout inside a suite gets no such allowance. A parallel run
+  names its ten slowest suites after the timing line, so a suite creeping
+  toward its budget shows up before it gets killed.
 
 **If a parallel run looks wrong**, rerun it with `--jobs 1`. A failure that
 disappears there is one of the cases above, in the suite or section that failed

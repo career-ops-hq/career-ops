@@ -27,7 +27,7 @@
  * avoided"), so this never uses it.
  *
  * Usage: node backup.mjs (--dest <dir> | --provider <name>) [--account <text>]
- *                        [--folder <path>] [--include-contacts]
+ *                        [--folder <path>] [--include-contacts [--allow-synced-contacts]]
  *                        [--include-claude-memory | --claude-memory-dir <dir>]
  *                        [--dry-run] [--json] [--quiet]
  *
@@ -37,8 +37,9 @@
 
 import {
   accessSync, closeSync, constants as fsConstants, copyFileSync, existsSync, lstatSync, mkdirSync, openSync,
-  readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync,
+  readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync,
 } from 'fs';
+import { randomUUID } from 'node:crypto';
 import { homedir, platform as osPlatform } from 'os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
@@ -54,6 +55,7 @@ import {
   isGeneratedTemplateArtifact,
   isUserConfiguredTemplateVariant,
 } from './update-system.mjs';
+import { renameSyncWithRetry } from './lib/rename-retry.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 
@@ -320,11 +322,15 @@ export function syncProviderOf(dest, machine = {}) {
   return null;
 }
 
-/** Refuse contact files going into a recognized sync folder: the client would upload them. */
-export function assertContactsNotSynced(dest, includeContacts, machine = {}) {
-  const synced = includeContacts ? syncProviderOf(dest, machine) : null;
+/**
+ * Refuse contact files going into a recognized sync folder: the client would
+ * upload them. `allowSynced` (--allow-synced-contacts) is the separate,
+ * explicit acknowledgement that lets them through.
+ */
+export function assertContactsNotSynced(dest, includeContacts, machine = {}, allowSynced = false) {
+  const synced = includeContacts && !allowSynced ? syncProviderOf(dest, machine) : null;
   if (synced) {
-    throw new Error(`--include-contacts cannot be used with a folder inside ${synced} (${dest}): the sync client would upload the contact files. Use a folder that is not synced.`);
+    throw new Error(`--include-contacts cannot be used with a folder inside ${synced} (${dest}): the sync client would upload the contact files. Use a folder that is not synced, or add --allow-synced-contacts to say they may be uploaded.`);
   }
 }
 
@@ -430,6 +436,13 @@ function listEntry(dataRoot, entry, { include, onError, onSkip = () => {} }) {
       // Nested checkouts (a git-cloned plugin under plugins.local/) are the
       // user's own work, so they are copied rather than skipped.
       allowNestedCheckouts: true,
+      // A symlink nested in a copied directory is skipped (see the default
+      // above), and skipping it silently makes the backup report success while
+      // omitting the user's files. The top-level entry already warns; this makes
+      // the nested case say so too. It goes through the callback `listEntry`
+      // already receives, because `result` belongs to the caller and is not in
+      // scope here.
+      onSkip: (skipped) => onSkip(relative(dataRoot, skipped)),
       skip: (dirent, dir) => {
         const p = join(dir, dirent.name);
         if (isExcluded(relative(dataRoot, p), include)) return true;
@@ -507,7 +520,7 @@ const unchanged = (src, srcPath, destPath) => {
  * (`memoryDirChosen`) is a failure.
  * @returns {{found: number, copied: number, unchanged: number, failed: {path: string, error: string}[], bytes: number, warnings: string[], claudeMemory?: number}}
  */
-export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = false, includeClaudeMemory = false, memoryDir = claudeMemoryDir(), memoryDirChosen = false }) {
+export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = false, allowSyncedContacts = false, includeClaudeMemory = false, memoryDir = claudeMemoryDir(), memoryDirChosen = false }) {
   const syncedTo = syncProviderOf(dest);
   const include = { includeContacts, skipAgentSettings: Boolean(syncedTo) };
   const result = { found: 0, copied: 0, unchanged: 0, failed: [], bytes: 0, warnings: [] };
@@ -515,7 +528,10 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
   // The exported API enforces this too, not only the CLI: a caller must not be
   // able to point a backup at a folder that overlaps what it reads.
   assertSafeDestination(dest, dataRoot);
-  assertContactsNotSynced(dest, includeContacts);
+  assertContactsNotSynced(dest, includeContacts, {}, allowSyncedContacts);
+  if (includeContacts && allowSyncedContacts && syncedTo) {
+    result.warnings.push(`the contact files are being copied into a ${syncedTo} folder (${dest}), which a sync client uploads.`);
+  }
   if (includeClaudeMemory) assertMemoryApartFromDestination(dest, memoryDir);
   if (!dryRun) mkdirSync(dest, { recursive: true });
   // Copy one discovered file from `srcRoot` to `destRel` under the destination.
@@ -530,12 +546,13 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
     }
     if (unchanged(file, source, target)) { result.unchanged++; return; }
     if (dryRun) { result.copied++; result.bytes += file.size; return; }
-    const part = `${target}.part`;
+    // Keep overlapping copies from renaming or cleaning up each other's file.
+    const part = join(dirname(target), `.career-ops-${randomUUID()}.part`);
     try {
       mkdirSync(dirname(target), { recursive: true });
       copyFileSync(source, part);
       utimesSync(part, new Date(), new Date(file.mtimeMs));
-      renameSync(part, target);
+      renameSyncWithRetry(part, target);
       result.copied++;
       result.bytes += file.size;
     } catch (error) {
@@ -637,7 +654,7 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
 
 // ── CLI ──────────────────────────────────────────────────────────────────
 
-const KNOWN_FLAGS = ['--dest', '--provider', '--account', '--folder', '--include-contacts', '--include-claude-memory', '--claude-memory-dir', '--dry-run', '--json', '--quiet', '--help', '-h'];
+const KNOWN_FLAGS = ['--dest', '--provider', '--account', '--folder', '--include-contacts', '--allow-synced-contacts', '--include-claude-memory', '--claude-memory-dir', '--dry-run', '--json', '--quiet', '--help', '-h'];
 const VALUE_FLAGS = ['--dest', '--provider', '--account', '--folder', '--claude-memory-dir'];
 
 const USAGE = `Usage:
@@ -645,7 +662,8 @@ const USAGE = `Usage:
   node backup.mjs --provider google-drive  # <drive>/Backups/career-ops; also dropbox | onedrive | icloud
   node backup.mjs --provider <name> --account <text>   # pick one drive when several are signed in
   node backup.mjs --provider <name> --folder <relative/path>   # folder under the drive (default Backups/career-ops)
-  node backup.mjs ... --include-contacts # also copy Connections.csv, contacts.tsv, reply-candidates.json, output/contacts.vcf and any other .vcf (other people's contact details); not with --provider. A --dest inside a recognized sync folder is refused too, but verify yourself that the destination is not synced
+  node backup.mjs ... --include-contacts # also copy Connections.csv, contacts.tsv, reply-candidates.json, output/contacts.vcf and any other .vcf (other people's contact details); not with --provider or a --dest inside a recognized sync folder unless --allow-synced-contacts is also given (a synced folder moved from its default location is not detected, so verify yourself that the destination is not synced)
+  node backup.mjs ... --include-contacts --allow-synced-contacts # say the contact files may be uploaded by a sync client; the run still warns
   node backup.mjs ... --include-claude-memory # also copy Claude Code's auto-memory for this checkout (~/.claude/projects/<checkout>/memory/) into claude-memory/
   node backup.mjs ... --claude-memory-dir <dir> # the same, from a memory folder you name (when Claude Code keeps it elsewhere)
   node backup.mjs ... --dry-run            # show what would be copied, copy nothing
@@ -660,6 +678,7 @@ function main(args) {
   const quiet = args.includes('--quiet');
   const dryRun = args.includes('--dry-run');
   const includeContacts = args.includes('--include-contacts');
+  const allowSyncedContacts = args.includes('--allow-synced-contacts');
   const refuse = (message) => {
     if (json) console.log(JSON.stringify({ ok: false, error: message }));
     else console.error(`backup: ${message}`);
@@ -673,10 +692,14 @@ function main(args) {
   const includeClaudeMemory = args.includes('--include-claude-memory') || Boolean(chosenMemoryDir);
   const memoryDir = chosenMemoryDir ? resolve(chosenMemoryDir) : claudeMemoryDir();
 
+  if (allowSyncedContacts && !includeContacts) {
+    return refuse('--allow-synced-contacts only applies together with --include-contacts.');
+  }
   // The export holds other people's contact details and a provider folder is
-  // uploaded by a sync client, so the two flags never combine.
-  if (includeContacts && flagValue(args, '--provider')) {
-    return refuse('--include-contacts cannot be combined with --provider (the contact files would be uploaded by the sync client). Use --dest with a folder you control.');
+  // uploaded by a sync client, so the two flags only combine when the caller
+  // says so with --allow-synced-contacts.
+  if (includeContacts && !allowSyncedContacts && flagValue(args, '--provider')) {
+    return refuse('--include-contacts cannot be combined with --provider (the contact files would be uploaded by the sync client). Add --allow-synced-contacts to say they may be uploaded, or use --dest with a folder you control.');
   }
 
   let dataRoot;
@@ -690,7 +713,7 @@ function main(args) {
       folder: flagValue(args, '--folder'),
     });
     assertSafeDestination(target.dest, dataRoot);
-    assertContactsNotSynced(target.dest, includeContacts);
+    assertContactsNotSynced(target.dest, includeContacts, {}, allowSyncedContacts);
     if (includeClaudeMemory) assertMemoryApartFromDestination(target.dest, memoryDir);
     // A provider destination only needs its drive to be there: runBackup creates
     // Backups/career-ops under it. --dest and CAREER_OPS_BACKUP_DIR need their parent.
@@ -704,7 +727,7 @@ function main(args) {
 
   let result;
   try {
-    result = runBackup({ dataRoot, dest: target.dest, dryRun, includeContacts, includeClaudeMemory, memoryDir, memoryDirChosen: Boolean(chosenMemoryDir) });
+    result = runBackup({ dataRoot, dest: target.dest, dryRun, includeContacts, allowSyncedContacts, includeClaudeMemory, memoryDir, memoryDirChosen: Boolean(chosenMemoryDir) });
   } catch (error) {
     return refuse(`cannot write to ${target.dest}: ${error.message}`);
   }

@@ -117,7 +117,7 @@ export function parseHits(xml, entryName) {
   const byId = new Map();
   for (const hit of hits) {
     const meta = metaMap(hit);
-    const title = decodeEntities((meta.get('content_title') || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+    const title = decodeEntities((meta.get('content_title') || '').replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
     const url = decodeEntities((meta.get('content_cta_1_url') || '').trim());
     if (!title || !url) continue;
 

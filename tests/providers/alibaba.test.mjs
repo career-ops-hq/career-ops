@@ -182,7 +182,7 @@ try {
     success: true,
     content: { totalCount: 500, datas: Array.from({ length: 100 }, (_, i) => mkJob(5000 + i, `岗位E${i}`)) },
   }));
-  const { errors: cappedErrors } = await captureConsoleErrors(() =>
+  const { result: cappedJobs, errors: cappedErrors } = await captureConsoleErrors(() =>
     alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI'], max_pages: 1 }, capped.ctx));
   if (capped.calls.length === 1) {
     pass('alibaba.fetch() honors entry.max_pages');
@@ -194,6 +194,40 @@ try {
     pass('alibaba.fetch() warns when max_pages truncates the board instead of stopping silently');
   } else {
     fail(`alibaba.fetch() truncation warnings = ${JSON.stringify(cappedErrors)}`);
+  }
+  // The warned cut is also marked, so scan.mjs logs the board partial, not reachable.
+  if (cappedJobs.truncated?.reason === 'page-cap' && cappedJobs.truncated.fetched === 100) {
+    pass('alibaba.fetch() marks the board page-cap when max_pages truncates it');
+  } else {
+    fail(`alibaba.fetch() max_pages cut: truncated = ${JSON.stringify(cappedJobs.truncated)}`);
+  }
+  // A short page is the board's natural end, even at max_pages and whatever the
+  // reported total says: no cap warning, no mark.
+  const shortAtCap = mkCtx(() => ({ success: true, content: { totalCount: 500, datas: Array.from({ length: 50 }, (_, i) => mkJob(9000 + i, `岗位S${i}`)) } }));
+  const { result: shortJobs, errors: shortErrors } = await captureConsoleErrors(() =>
+    alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI'], max_pages: 1 }, shortAtCap.ctx));
+  if (shortJobs.truncated === undefined && !shortErrors.some((line) => String(line).includes('truncated at'))) {
+    pass('alibaba.fetch() treats a short page at max_pages as the end of the board: no warning, no mark');
+  } else {
+    fail(`alibaba.fetch() short page at max_pages: truncated = ${JSON.stringify(shortJobs.truncated)}, warnings = ${JSON.stringify(shortErrors)}`);
+  }
+  // With no totalCount, a full page cut by max_pages is still a cap, and a
+  // short page ends the walk: the stop reason does not depend on a total.
+  const noTotalFull = mkCtx(({ pageIndex }) => ({ success: true, content: { datas: Array.from({ length: 100 }, (_, i) => mkJob(9500 + pageIndex * 100 + i, `岗位N${i}`)) } }));
+  const { result: noTotalJobs, errors: noTotalErrors } = await captureConsoleErrors(() =>
+    alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI'], max_pages: 1 }, noTotalFull.ctx));
+  if (noTotalJobs.length === 100 && noTotalJobs.truncated?.reason === 'page-cap' && noTotalErrors.some((line) => String(line).includes('truncated at 100 postings'))) {
+    pass('alibaba.fetch() marks a full page cut by max_pages page-cap when the source sends no totalCount');
+  } else {
+    fail(`alibaba.fetch() no totalCount, full page at max_pages: ${noTotalJobs.length} jobs, truncated = ${JSON.stringify(noTotalJobs.truncated)}, warnings = ${JSON.stringify(noTotalErrors)}`);
+  }
+  const noTotalShort = mkCtx(({ pageIndex }) => ({ success: true, content: { datas: Array.from({ length: pageIndex === 1 ? 100 : 30 }, (_, i) => mkJob(9800 + pageIndex * 100 + i, `岗位T${i}`)) } }));
+  const { result: noTotalShortJobs } = await captureConsoleErrors(() =>
+    alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI'], max_pages: 5 }, noTotalShort.ctx));
+  if (noTotalShort.calls.length === 2 && noTotalShortJobs.length === 130 && noTotalShortJobs.truncated === undefined) {
+    pass('alibaba.fetch() walks past page 1 without a totalCount and ends on the first short page, unmarked');
+  } else {
+    fail(`alibaba.fetch() no totalCount walk: ${noTotalShort.calls.length} requests, ${noTotalShortJobs.length} jobs, truncated = ${JSON.stringify(noTotalShortJobs.truncated)}`);
   }
 
   const probe = mkCtx(() => ({
@@ -214,6 +248,8 @@ try {
   } else {
     fail(`alibaba.fetch() ctx.maxPages=1 warned: ${JSON.stringify(probeErrors)}`);
   }
+  if (probeJobs.truncated === undefined) pass('alibaba.fetch() leaves the ctx.maxPages probe unmarked');
+  else fail(`alibaba.fetch() probe was marked: ${JSON.stringify(probeJobs.truncated)}`);
 
   // A board whose reported total never runs out still stops at the
   // DEFAULT_MAX_PAGES runaway guard, and says so.

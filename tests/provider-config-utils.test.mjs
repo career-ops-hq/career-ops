@@ -22,7 +22,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const { intInRange } = await import(pathToFileURL(join(ROOT, 'providers', '_config-utils.mjs')).href);
+const { intInRange, hasControlChar, boundedPositiveInt } = await import(pathToFileURL(join(ROOT, 'providers', '_config-utils.mjs')).href);
 
 test('a value inside the range is returned unchanged', () => {
   assert.equal(intInRange(50, 100, 1, 100), 50);
@@ -93,4 +93,40 @@ test('the real caller bounds hold', () => {
   assert.equal(intInRange(0, 30, 1, 1000), 1, 'vdab days');
   assert.equal(intInRange(5000, 100, 1, 100), 100, 'vdab size');
   assert.equal(intInRange('none', 25, 1, 100), 25, 'smartrecruiters detailLimit');
+});
+
+test('hasControlChar: plain text is false; a newline, a tab and DEL are true', () => {
+  assert.equal(hasControlChar('python'), false);
+  assert.equal(hasControlChar('a\nb'), true, 'newline');
+  assert.equal(hasControlChar('a\tb'), true, 'tab');
+  assert.equal(hasControlChar('a\u007fb'), true, 'DEL');
+});
+
+// boundedPositiveInt guards max_pages and max_jobs in computrabajo.mjs and
+// magneto.mjs. Unlike intInRange it never clamps a bad value up into range: a
+// value that is not already a positive integer means "use the default".
+
+test('boundedPositiveInt: a positive integer is returned, capped at the cap', () => {
+  assert.equal(boundedPositiveInt('5', 15, 20), 5, 'a quoted YAML number is read');
+  assert.equal(boundedPositiveInt(5, 15, 20), 5);
+  assert.equal(boundedPositiveInt(20, 15, 20), 20, 'the cap is inclusive');
+  assert.equal(boundedPositiveInt(999, 15, 20), 20, 'a value over the cap is clamped to the cap');
+});
+
+test('boundedPositiveInt: anything else falls back to the default, not a clamp', () => {
+  for (const bad of [0, -1, 2.5, 'abc', '0', null, '', undefined, Infinity]) {
+    assert.equal(boundedPositiveInt(bad, 15, 20), 15, `${JSON.stringify(String(bad))} did not fall back to the default`);
+  }
+  // The contrast with intInRange, which pulls the same inputs into range.
+  assert.equal(intInRange(0, 15, 1, 20), 1);
+  assert.equal(intInRange(2.5, 15, 1, 20), 2);
+});
+
+test('boundedPositiveInt: the real caller bounds hold', () => {
+  // computrabajo: MAX_PAGES 3 is both the default and the cap; max_jobs 15/15.
+  assert.equal(boundedPositiveInt(50, 3, 3), 3, 'computrabajo max_pages');
+  assert.equal(boundedPositiveInt('x', 15, 15), 15, 'computrabajo max_jobs');
+  // magneto: max_pages 5 up to 20, max_jobs 100 up to 500.
+  assert.equal(boundedPositiveInt(100, 5, 20), 20, 'magneto max_pages');
+  assert.equal(boundedPositiveInt(0, 100, 500), 100, 'magneto max_jobs');
 });
