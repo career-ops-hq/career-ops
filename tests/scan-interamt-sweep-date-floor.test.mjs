@@ -76,6 +76,28 @@ try {
   } else {
     fail(`expected the floor to advance to ${PARTIAL_RUN_DATE} after a full sweep, got ${out2.lastScanDate}`);
   }
+
+  // A --keyword run only ever searches one keyword, never the full
+  // configured list, so shouldAdvanceSweepMarker() must refuse it even
+  // outside --dry-run.
+  const keywordRunSource = `
+    const scan = await import(process.argv.at(-1));
+    process.stdout.write(JSON.stringify({
+      fullSweep: scan.shouldAdvanceSweepMarker({ dryRun: false, singleKeyword: null }),
+      keywordRun: scan.shouldAdvanceSweepMarker({ dryRun: false, singleKeyword: 'Softwareentwickler' }),
+      dryRun: scan.shouldAdvanceSweepMarker({ dryRun: true, singleKeyword: null }),
+    }));
+  `;
+  const out3 = JSON.parse(execFileSync(NODE, [
+    '--input-type=module', '-e', keywordRunSource,
+    pathToFileURL(join(ROOT, 'scan-interamt.mjs')).href,
+  ], { env, encoding: 'utf8' }));
+
+  if (out3.fullSweep === true && out3.keywordRun === false && out3.dryRun === false) {
+    pass(`shouldAdvanceSweepMarker() advances only on a full, non-dry-run sweep (--keyword: ${out3.keywordRun}, --dry-run: ${out3.dryRun})`);
+  } else {
+    fail(`expected {fullSweep:true, keywordRun:false, dryRun:false}, got ${JSON.stringify(out3)}`);
+  }
 } catch (err) {
   fail(`scan-interamt-sweep-date-floor probe crashed: ${err.message}`);
 }

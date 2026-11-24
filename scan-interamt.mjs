@@ -144,6 +144,13 @@ export function recordSweepComplete(date) {
   atomicWriteFile(SWEEP_STATE_PATH, JSON.stringify({ lastCompleteSweep: date }) + '\n');
 }
 
+// A --keyword run only ever searches one keyword, never the full configured
+// list, so it must never advance the marker either — doing so would move the
+// floor past postings the other keywords never saw.
+export function shouldAdvanceSweepMarker({ dryRun, singleKeyword }) {
+  return !dryRun && !singleKeyword;
+}
+
 // Returns the date floor for the "already scanned" check, or null.
 export function loadLastScanDate() {
   if (existsSync(SWEEP_STATE_PATH)) {
@@ -410,7 +417,7 @@ async function main() {
   // per-keyword error is caught above and the loop moves on), so the
   // date-floor marker can advance now. A run killed mid-sweep never reaches
   // this line, so the floor stays where the last full sweep left it.
-  if (!DRY_RUN) {
+  if (shouldAdvanceSweepMarker({ dryRun: DRY_RUN, singleKeyword: SINGLE_KEYWORD })) {
     await withPipelineLock(SWEEP_STATE_PATH, () => recordSweepComplete(date));
   }
 
