@@ -69,7 +69,7 @@ for (const [signal, code] of [['SIGTERM', 143], ['SIGINT', 130]]) {
       });
       assert.equal(result.status, code, result.out.slice(-600));
       assert.match(result.out, new RegExp(`${signal}: sweep stopped — 1 matches so far, saved to pipeline, checkpoint written \\(continue with --resume\\)`));
-      assert.ok(readFileSync(join(dir, 'data', 'pipeline.md'), 'utf-8').includes(FIRST));
+      assert.ok(readFileSync(join(dir, 'data', 'pipeline.md'), 'utf-8').split('\n').some((line) => line.trim() === `- [ ] ${FIRST}` || line.includes(`${FIRST} |`)));
       const checkpoint = join(dir, 'data', 'cache', 'ats-full-checkpoint.json');
       assert.ok(existsSync(checkpoint));
       assert.equal(JSON.parse(readFileSync(checkpoint, 'utf-8')).offers.length, 1);
