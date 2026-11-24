@@ -152,7 +152,7 @@ test('generate-pdf does not treat the data root as outside its workspace', () =>
 // copied fails loudly here instead of silently resolving to the checkout.
 const CLOSURE = {
   'set-status.mjs': [
-    'set-status.mjs', 'path-resolver.mjs', 'tracker-utils.mjs', 'pipeline-lock.mjs', 'lib/dir-lock.mjs', 'lib/lock-path.mjs',
+    'set-status.mjs', 'path-resolver.mjs', 'tracker-utils.mjs', 'pipeline-lock.mjs', 'lib/dir-lock.mjs', 'lib/rename-retry.mjs', 'lib/lock-path.mjs',
     'lib/yaml-document.mjs', 'tracker-parse.mjs', 'lib/local-today.mjs', 'role-matcher.mjs', 'templates/states.yml',
     // lib/status-hooks.mjs (#5536): the hooks around a status change, and
     // session-activity.mjs (#4532), the advisory in-progress claim it takes
@@ -172,7 +172,7 @@ const CLOSURE = {
     'tracker-aliases.json',
   ],
   'generate-pdf.mjs': [
-    'generate-pdf.mjs', 'path-resolver.mjs', 'tracker-utils.mjs', 'pipeline-lock.mjs', 'lib/dir-lock.mjs', 'lib/lock-path.mjs',
+    'generate-pdf.mjs', 'path-resolver.mjs', 'tracker-utils.mjs', 'pipeline-lock.mjs', 'lib/dir-lock.mjs', 'lib/rename-retry.mjs', 'lib/lock-path.mjs',
     'tracker-parse.mjs', 'theme-style.mjs', 'lib/page-format.mjs', 'lib/is-main-module.mjs', 'lib/yaml-document.mjs',
     'lib/browser-launch.mjs',
     'cv-sections-core.mjs', 'cv-experience-order.mjs', 'lib/local-today.mjs',

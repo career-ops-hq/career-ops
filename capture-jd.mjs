@@ -46,7 +46,7 @@ import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   closeSync, existsSync, fchmodSync, fsyncSync, lstatSync, mkdirSync,
-  openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync,
+  openSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -54,6 +54,7 @@ import { withPipelineLock } from './pipeline-lock.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
 import { captureIdentity, captureSlug, findCaptureForUrl, isSupportedCaptureExtension, validateCaptureUrl } from './jd-capture.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { renameSyncWithRetry } from './lib/rename-retry.mjs';
 import { postingUrlRelation } from './url-key.mjs';
 
 const PIPELINE_SKELETON = '# Pipeline\n\n## Pending\n\n## Processed\n';
@@ -83,7 +84,7 @@ export function atomicWrite(filePath, text, { followSymlinks = true } = {}) {
     fsyncSync(fd);
     closeSync(fd);
     fd = null;
-    renameSync(tempPath, targetPath);
+    renameSyncWithRetry(tempPath, targetPath);
   } catch (err) {
     if (fd !== null) { try { closeSync(fd); } catch { /* already closed */ } }
     try { unlinkSync(tempPath); } catch { /* never created, or already renamed */ }

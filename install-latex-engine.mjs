@@ -31,13 +31,14 @@
 
 import { createHash } from 'crypto';
 import { execFileSync } from 'child_process';
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync, copyFileSync, chmodSync, rmSync, readdirSync, renameSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync, copyFileSync, chmodSync, rmSync, readdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { resolveLatexEngine, localTectonicPath } from './generate-latex.mjs';
+import { renameSyncWithRetry } from './lib/rename-retry.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 
@@ -252,7 +253,7 @@ export async function installTectonic({
     if (!version) {
       return { status: 'failed', error: `Downloaded binary did not run; ${target} was left untouched.` };
     }
-    renameSync(staged, target);
+    renameSyncWithRetry(staged, target);
     staged = null;
   } catch (err) {
     return { status: 'failed', error: `Install failed: ${err.message}` };
