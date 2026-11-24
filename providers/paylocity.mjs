@@ -66,23 +66,27 @@ const DEFAULT_BLOCK_MS = 30_000;
 const RETRY_POLICY = { retries: 3, baseDelayMs: 2_000, maxDelayMs: 15_000 };
 
 /** Shared by every board fetch in the process. */
-export const pacing = { nextSlot: 0, blockedUntil: 0 };
+export const pacing = { nextSlot: 0, blockedUntil: 0, lastDispatch: -Infinity };
 
 /**
  * Wait for this request's turn: at least `minIntervalMs` after the previous
- * one, and not before a 429 block has ended. Reserves the slot synchronously,
- * so concurrent workers queue instead of racing.
+ * dispatch, and not before a 429 block has ended. Reserves the slot and records
+ * the dispatch synchronously, so concurrent workers queue instead of racing.
  * @param {{ sleep?: (ms: number) => Promise<void> }} ctx
  * @param {{ now?: () => number, minIntervalMs?: number }} [opts]
  */
 export async function waitForSlot(ctx, { now = Date.now, minIntervalMs = MIN_INTERVAL_MS } = {}) {
-  // A 429 can land while this caller sleeps; re-reserve until no block remains.
+  // A 429 can land while this caller sleeps, and a stalled event loop can wake
+  // several sleepers in one turn; re-reserve until neither applies.
   for (;;) {
-    const at = Math.max(now(), pacing.nextSlot, pacing.blockedUntil);
+    const at = Math.max(now(), pacing.nextSlot, pacing.blockedUntil, pacing.lastDispatch + minIntervalMs);
     pacing.nextSlot = at + minIntervalMs;
     const wait = at - now();
     if (wait > 0) await sleep(wait, ctx);
-    if (pacing.blockedUntil <= at) return;
+    if (pacing.blockedUntil <= at && now() >= pacing.lastDispatch + minIntervalMs) {
+      pacing.lastDispatch = now();
+      return;
+    }
   }
 }
 

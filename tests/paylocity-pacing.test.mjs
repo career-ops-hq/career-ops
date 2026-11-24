@@ -9,16 +9,50 @@ const { default: provider, pacing, waitForSlot, noteRateLimit } = await import('
 
 const GUID = '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
 const PAGE = 'x<script>window.pageData = {"Jobs":[{"JobId":1,"JobTitle":"Director"}]};</script>';
-const reset = () => { pacing.nextSlot = 0; pacing.blockedUntil = 0; };
+const reset = () => { pacing.nextSlot = 0; pacing.blockedUntil = 0; pacing.lastDispatch = -Infinity; };
 
 test('waitForSlot queues concurrent callers at the minimum interval', async () => {
   reset();
-  const t = 1_000;
+  let t = 1_000;
   const slept = [];
-  const ctx = { sleep: async (ms) => { slept.push(ms); } };
+  const pending = [];
+  const ctx = { sleep: (ms) => { slept.push(ms); return new Promise((resolve) => { pending.push({ wake: t + ms, resolve }); }); } };
   const opts = { now: () => t, minIntervalMs: 400 };
-  await Promise.all([waitForSlot(ctx, opts), waitForSlot(ctx, opts), waitForSlot(ctx, opts)]);
+  const done = Promise.all([waitForSlot(ctx, opts), waitForSlot(ctx, opts), waitForSlot(ctx, opts)]);
+  // Fire each timer on time, earliest first.
+  for (let guard = 0; pending.length && guard < 20; guard++) {
+    pending.sort((a, b) => a.wake - b.wake);
+    const next = pending.shift();
+    t = Math.max(t, next.wake);
+    next.resolve();
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  await done;
   assert.deepEqual(slept, [400, 800]);
+});
+
+test('callers whose timers fire late together still dispatch at the minimum interval', async () => {
+  reset();
+  let t = 1_000;
+  const pending = [];
+  const ctx = { sleep: (ms) => new Promise((resolve) => { pending.push({ wake: t + ms, resolve }); }) };
+  const opts = { now: () => t, minIntervalMs: 400 };
+  const dispatched = [];
+  const go = () => waitForSlot(ctx, opts).then(() => { dispatched.push(t); });
+  const done = Promise.all([go(), go(), go()]);
+  const turn = () => new Promise((resolve) => setImmediate(resolve));
+  await turn();
+  // The loop stalls past both reserved slots (1400 and 1800); both timers fire at 2000.
+  t = 2_000;
+  for (const p of pending.splice(0)) p.resolve();
+  for (let guard = 0; dispatched.length < 3 && guard < 20; guard++) {
+    await turn();
+    const next = pending.shift();
+    if (next) { t = Math.max(t, next.wake); next.resolve(); }
+  }
+  await done;
+  assert.equal(dispatched.length, 3);
+  for (let i = 1; i < dispatched.length; i++) assert.ok(dispatched[i] - dispatched[i - 1] >= 400, `dispatches ${dispatched.join(', ')}`);
 });
 
 test('a 429 pauses the next request for its Retry-After', async () => {
@@ -54,7 +88,7 @@ test('fetch on the real HTTP transport waits its turn; a stub context is not pac
   reset();
   mock.timers.enable({ apis: ['Date'], now: 10_000 });
   const slept = [];
-  const http = { transport: 'http', sleep: async (ms) => { slept.push(ms); }, fetchText: async () => PAGE };
+  const http = { transport: 'http', sleep: async (ms) => { slept.push(ms); mock.timers.tick(ms); }, fetchText: async () => PAGE };
   await provider.fetch({ name: 'A', careers_url: `https://recruiting.paylocity.com/Recruiting/Jobs/All/${GUID}` }, http);
   await provider.fetch({ name: 'A', careers_url: `https://recruiting.paylocity.com/Recruiting/Jobs/All/${GUID}` }, http);
   assert.deepEqual(slept, [400]);
