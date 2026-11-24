@@ -16,7 +16,7 @@ const SVC = 'https://portal-applicant-tracking.us-cent.paycomonline.net/';
 const JWT = ['eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9', 'e30', 'c2ln'].join('.');
 const pageHtml = (svc = SVC) =>
   `<script>window.__data = {"anonToken":"${JWT}",` +
-  `"atsPortalMantleServiceUrl":"${svc.replace(/\//g, '\\/')}"};</script>`;
+  `"atsPortalMantleServiceUrl":"${svc.replace(/\\/g, '\\\\').replace(/\//g, '\\/')}"};</script>`;
 
 const row = (jobId, jobTitle, locations = 'Springfield, IL 62701') => ({
   jobId, jobTitle, positionType: '', remoteType: '', locations,
