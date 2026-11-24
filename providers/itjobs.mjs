@@ -121,6 +121,12 @@ export function parseItjobsFeed(xml) {
     throw new Error(`itjobs: unexpected feed response — expected an <rss><channel> envelope, got: ${got}`);
   }
   const items = body.match(/<item\b[^>]*>[\s\S]*?<\/item>/gi) || [];
+  // An <item> that never closes would otherwise drop out silently (or turn a
+  // whole board into an empty one), so the item tags must pair up.
+  const opened = (body.match(/<item\b/gi) || []).length;
+  if (opened !== items.length) {
+    throw new Error(`itjobs: ${opened} <item> tag(s) but ${items.length} complete item(s) — the feed is malformed or cut short`);
+  }
   const jobs = [];
   for (const item of items) {
     const url = cleanUrl(tagText(item, 'link') || tagText(item, 'guid'));
@@ -132,12 +138,16 @@ export function parseItjobsFeed(xml) {
     if (!company) continue; // no identifiable employer
     const places = (fields.get('localidade') || '').split(',').map((s) => s.trim()).filter(Boolean);
     const workplaceType = WORK_MODELS[(fields.get('modelo de trabalho') || '').toLowerCase()];
+    // scan.mjs's location_filter reads only `location`, so a remote row says so
+    // there too (as Ashby does); `locations` keeps the places as listed.
+    const shown = [...places];
+    if (workplaceType === 'remote' && !shown.some((p) => /\bremot[eo]\b/i.test(p))) shown.push('Remote');
     const job = {
       title,
       company,
-      location: places.join(', '),
+      location: shown.join(', '),
       url,
-      ...(places.length > 1 ? { locations: places } : {}),
+      ...(places.length > 0 ? { locations: places } : {}),
       ...(workplaceType ? { workplaceType } : {}),
       ...employmentTypeField(fields.get('tipo')),
     };

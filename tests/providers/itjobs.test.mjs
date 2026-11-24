@@ -95,7 +95,7 @@ try {
   }
   if (a.location === 'Lisboa, Porto' && JSON.stringify(a.locations) === '["Lisboa","Porto"]') pass('parse: several places become locations[]');
   else fail(`parse: locations ${JSON.stringify(a)}`);
-  if (c.location === 'Aveiro' && !('locations' in c)) pass('parse: a single place sets location only');
+  if (c.location === 'Aveiro' && JSON.stringify(c.locations) === '["Aveiro"]') pass('parse: a single place sets location and locations[]');
   else fail(`parse: single place ${JSON.stringify(c)}`);
   if (a.workplaceType === 'hybrid' && b.workplaceType === 'remote' && c.workplaceType === 'onsite') pass('parse: Modelo de trabalho maps to workplaceType');
   else fail(`parse: workplaceType ${[a, b, c].map((j) => j.workplaceType).join(',')}`);
@@ -105,17 +105,44 @@ try {
   else fail(`parse: entities ${JSON.stringify(b)}`);
   if (b.url === 'https://www.itjobs.pt/oferta/101/rd-developer') pass('parse: the query string is dropped from the offer URL');
   else fail(`parse: url ${b.url}`);
-  if (b.location === '' && !('postedAt' in b)) pass('parse: n/d location is empty and an invalid pubDate leaves postedAt unset');
+  if (b.location === 'Remote' && !('locations' in b) && !('postedAt' in b)) pass('parse: a remote row with n/d location reads "Remote", and an invalid pubDate leaves postedAt unset');
   else fail(`parse: n/d / date ${JSON.stringify(b)}`);
   if (a.postedAt === Date.parse('Mon, 23 Nov 2026 13:42:24 +0000')) pass('parse: pubDate becomes postedAt');
   else fail(`parse: postedAt ${a.postedAt}`);
   if (jobs.every((j) => !('description' in j) && !('salary' in j))) pass('parse: the summary block is not passed off as a description, and salary is not read');
   else fail('parse: description or salary set');
 
+  // Remote marker: appended to the display location only, for remote rows only.
+  {
+    const rows = parseItjobsFeed(feed([
+      item({ title: 'Remote City', link: 'https://www.itjobs.pt/oferta/110/a', fields: { ...FULL, Localidade: 'Lisboa', 'Modelo de trabalho': 'Remoto' } }),
+      item({ title: 'Remote Listed', link: 'https://www.itjobs.pt/oferta/111/b', fields: { ...FULL, Localidade: 'Porto, Remoto', 'Modelo de trabalho': 'Remoto' } }),
+    ])).jobs;
+    const [r1, r2] = rows;
+    if (r1.location === 'Lisboa, Remote' && JSON.stringify(r1.locations) === '["Lisboa"]') pass('parse: a remote row keeps its city and adds "Remote" to location only');
+    else fail(`parse: remote marker ${JSON.stringify(r1)}`);
+    if (r2.location === 'Porto, Remoto') pass('parse: a place already saying Remoto is not marked twice');
+    else fail(`parse: remote twice ${JSON.stringify(r2)}`);
+    if (a.location === 'Lisboa, Porto' && c.location === 'Aveiro') pass('parse: hybrid and onsite rows get no "Remote" marker');
+    else fail(`parse: non-remote marked ${a.location} / ${c.location}`);
+  }
+
   // Empty vs broken.
   const empty = parseItjobsFeed(feed([]));
   if (empty.jobs.length === 0 && empty.rawCount === 0) pass('parse: an empty channel is an empty board');
   else fail('parse: empty channel');
+  for (const [label, body] of [
+    ['an unclosed item', feed([item({ title: 'X', link: 'https://www.itjobs.pt/oferta/120/x', fields: FULL }).replace('</item>', '')])],
+    ['a feed cut short after one item', feed([item({ title: 'A', link: 'https://www.itjobs.pt/oferta/121/a', fields: FULL }), item({ title: 'B', link: 'https://www.itjobs.pt/oferta/122/b', fields: FULL }).replace('</item>', '')])],
+  ]) {
+    try {
+      parseItjobsFeed(body);
+      fail(`parse: ${label} should throw`);
+    } catch (err) {
+      if (/malformed or cut short/.test(err.message)) pass(`parse: ${label} throws instead of reading as fewer rows`);
+      else fail(`parse: ${label} → ${err.message}`);
+    }
+  }
   for (const [label, body] of [['an HTML error page', '<html><body>404</body></html>'], ['an empty body', ''], ['a non-string', null]]) {
     try {
       parseItjobsFeed(/** @type {any} */ (body));
