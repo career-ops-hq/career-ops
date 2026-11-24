@@ -68,3 +68,11 @@ test('text after a /5 cell still counts, and a bare number does not', () => {
   assert.equal(readGlobalScore(bare), null);
   assert.match(normalizeEvaluationText(bare, JD), /final_decision: "Apply"/);
 });
+
+test('a SCORE line that does not parse leaves the next SCORE line in play', () => {
+  const text = 'SCORE: N/A\nSCORE: 2.4\nfinal_decision: "Apply"\n';
+  assert.equal(readGlobalScore(text), 2.4);
+  assert.match(normalizeEvaluationText(text, JD), /final_decision: "Skip"/);
+
+  assert.equal(readGlobalScore('**Score:** 4.1\nSCORE: N/A\nSCORE: 2.4\n'), 2.4);
+});
