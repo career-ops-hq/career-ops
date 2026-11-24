@@ -43,7 +43,10 @@ test('main() calls recordLivenessChecks inside the record gate', () => {
 
 test('each verdict carries its local observation time, so a late commit cannot replace a newer one', async () => {
   const { localStamp } = await import('../check-liveness.mjs');
-  assert.equal(localStamp(new Date(2026, 10, 23, 9, 5, 7)), '2026-11-23T09:05:07');
+  const when = new Date(2026, 10, 23, 9, 5, 7);
+  const stamp = localStamp(when);
+  assert.match(stamp, /^2026-11-23T09:05:07[+-]\d{2}:\d{2}$/, 'local wall time plus its UTC offset');
+  assert.equal(Date.parse(stamp), when.getTime());
   const src = readFileSync(join(ROOT, 'check-liveness.mjs'), 'utf-8');
   const body = src.slice(src.indexOf('async function main('));
   assert.match(body, /verdicts\.push\(\{ url, result, code, checkedAt: localStamp\(\) \}\)/);

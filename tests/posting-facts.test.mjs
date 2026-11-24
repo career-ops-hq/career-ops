@@ -83,6 +83,22 @@ test('liveness log: a late commit of an older observation keeps the newer verdic
   assert.equal(parseLivenessLog(log).get(url).result, 'active');
 });
 
+test('liveness log: offset stamps order by real time across a DST change or a move west', () => {
+  const url = 'https://a.example.com/j/1';
+  // Open at 01:30 CDT; closed 40 minutes later at 01:10 CST, after the clocks fell back.
+  let log = mergeLivenessLog('', [{ url, result: 'active', code: 'ok', checkedAt: '2026-11-01T01:30:00-05:00' }], '2026-11-01');
+  log = mergeLivenessLog(log, [{ url, result: 'expired', code: 'expired_banner', checkedAt: '2026-11-01T01:10:00-06:00' }], '2026-11-01');
+  assert.equal(parseLivenessLog(log).get(url).result, 'expired');
+  assert.match(log, /\t2026-11-01T01:10:00-06:00\texpired\n/);
+  // The earlier open check committing late does not replace the closed one.
+  log = mergeLivenessLog(log, [{ url, result: 'active', code: 'ok', checkedAt: '2026-11-01T01:30:00-05:00' }], '2026-11-01');
+  assert.equal(parseLivenessLog(log).get(url).result, 'expired');
+  // Open at 14:00 UTC; closed at 10:00 five hours west, one hour later in real time.
+  log = mergeLivenessLog('', [{ url, result: 'active', code: 'ok', checkedAt: '2026-11-23T14:00:00+00:00' }], '2026-11-23');
+  log = mergeLivenessLog(log, [{ url, result: 'expired', code: 'expired_banner', checkedAt: '2026-11-23T10:00:00-05:00' }], '2026-11-23');
+  assert.deepEqual(postingFactsForUrl(postingFactsIndex('', log), url).check, { result: 'expired', day: '2026-11-23' });
+});
+
 test('liveness log: an older observation from an earlier day does not replace a newer day', () => {
   const url = 'https://a.example.com/j/1';
   let log = mergeLivenessLog('', [{ url, result: 'expired', code: 'expired_banner' }], '2026-11-23');

@@ -173,10 +173,16 @@ export async function recordExpiredVerdicts(verdicts) {
   });
 }
 
-/** Local wall time, YYYY-MM-DDTHH:MM:SS: when one verdict was observed. */
+/**
+ * Local wall time with its UTC offset, YYYY-MM-DDTHH:MM:SS+HH:MM: when one
+ * verdict was observed. The offset keeps the order right across a DST change
+ * or a move to another time zone; the first ten characters stay the local day.
+ */
 export function localStamp(now = new Date()) {
   const p = (n) => String(n).padStart(2, '0');
-  return `${localToday(now)}T${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}`;
+  const off = -now.getTimezoneOffset();
+  const zone = `${off < 0 ? '-' : '+'}${p(Math.floor(Math.abs(off) / 60))}:${p(Math.abs(off) % 60)}`;
+  return `${localToday(now)}T${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}${zone}`;
 }
 
 export const LIVENESS_LOG_PATH = process.env.CAREER_OPS_LIVENESS_LOG || join(DATA_ROOT, 'data', 'liveness-checks.tsv');
