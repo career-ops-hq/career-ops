@@ -66,8 +66,10 @@ const MORE_RE = /^\+\d+ more$/;
 // The start of each inline data block; its JSON runs to a later ", sideChannel:".
 const CALLBACK_START_RE = /AF_initDataCallback\(\{key:\s*'[^']*',\s*hash:\s*'[^']*',\s*data:/g;
 const SIDE_CHANNEL_RE = /,\s*sideChannel:/g;
-// Job descriptions ride in the block, so ", sideChannel:" can also occur inside
-// a JSON string; each candidate end is tried until the JSON parses, up to this many.
+// Job descriptions ride in the block, so ", sideChannel:" (or the text
+// "AF_initDataCallback(") can also occur inside a JSON string. No text is
+// trusted as a boundary: each later ", sideChannel:" is tried as the end until
+// the JSON parses, up to this many.
 const MAX_BLOCK_END_TRIES = 20;
 // A posted epoch before 2000 is a misread field, not a date: emitting it would
 // make max_posting_age_days drop a live posting as stale. One more than a day in
@@ -155,13 +157,11 @@ export function parsePostedDates(html, nowMs = Date.now()) {
   const dates = new Map();
   for (const start of page.matchAll(CALLBACK_START_RE)) {
     const from = /** @type {number} */ (start.index) + start[0].length;
-    const next = page.indexOf('AF_initDataCallback(', from);
-    const segment = page.slice(from, next === -1 ? page.length : next);
+    const ends = new RegExp(SIDE_CHANNEL_RE.source, 'g');
+    ends.lastIndex = from;
     let data;
-    let tries = 0;
-    for (const end of segment.matchAll(SIDE_CHANNEL_RE)) {
-      if (++tries > MAX_BLOCK_END_TRIES) break;
-      try { data = JSON.parse(segment.slice(0, end.index)); break; } catch { /* try the next end */ }
+    for (let tries = 0, end; tries < MAX_BLOCK_END_TRIES && (end = ends.exec(page)); tries++) {
+      try { data = JSON.parse(page.slice(from, end.index)); break; } catch { /* try the next end */ }
     }
     if (!Array.isArray(data) || !Array.isArray(data[0]) || typeof data[2] !== 'number') continue;
     for (const row of data[0]) {
@@ -205,7 +205,6 @@ export default {
     let unrestrictedPageReturned = false;
     let firstPageFailures = 0;
     let firstPageError;
-    let datedPages = 0;
 
     for (const q of queriesToRun) {
       // IDs seen in THIS query's walk: a page that adds none is Google
@@ -242,11 +241,15 @@ export default {
         if (!String(q).trim()) unrestrictedPageReturned = true;
         const cards = parseResultsPage(html);
         const postedDates = parsePostedDates(html);
-        if (postedDates.size > 0) datedPages += 1;
         let newThisQuery = 0;
         for (const { id, slug, title, employer, locations } of cards) {
           if (!seenThisQuery.has(id)) { seenThisQuery.add(id); newThisQuery += 1; }
-          if (byId.has(id)) continue;
+          const known = byId.get(id);
+          if (known) {
+            // Kept from an earlier query; a date this page has fills one it lacked.
+            if (known.postedAt === undefined && postedDates.has(id)) known.postedAt = postedDates.get(id);
+            continue;
+          }
           byId.set(id, {
             title,
             url: `${BASE}${id}-${slug}`,
@@ -268,7 +271,7 @@ export default {
     let jobs = [...byId.values()];
     // Cards but not one date: the inline data block moved or changed shape, so
     // max_posting_age_days has stopped applying to this board. Say so once.
-    if (!probing && jobs.length > 0 && datedPages === 0) {
+    if (!probing && jobs.length > 0 && !jobs.some((j) => typeof j.postedAt === 'number')) {
       console.error(`⚠️  google: ${entry.name} returned ${jobs.length} jobs but no posting dates — the results page's data block may have changed, so max_posting_age_days cannot drop old Google postings`);
     }
     if (truncated) {

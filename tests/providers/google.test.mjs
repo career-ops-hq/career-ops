@@ -403,6 +403,38 @@ try {
       ? pass('google.fetch() warns once when a board returns jobs but no posting dates, and not when it has dates')
       : fail(`google no-dates warning: undated=${JSON.stringify(undatedLog)} dated=${JSON.stringify(datedLog)}`);
   }
+  {
+    // A page whose dates belong to none of its cards still warns: the check is on
+    // the returned jobs, not on whether some date was parsed.
+    const { ctx } = recordingCtx(() => `${dataBlock([dataRow('222', NOV_20)])}${linkPage(['111'])}`);
+    const log = await captureErrors(() => provider.fetch({ name: 'Google', google: { queries: ['x'] } }, ctx));
+    log.filter((l) => /no posting dates/.test(l)).length === 1
+      ? pass('google.fetch() warns when dates were parsed but none matched a returned job')
+      : fail(`google unmatched-dates warning: ${JSON.stringify(log)}`);
+  }
+  {
+    // The text "AF_initDataCallback(" inside a description does not end the block.
+    const { parsePostedDates } = mod;
+    const tricky = dataRow('111', NOV_20);
+    tricky[3] = 'See AF_initDataCallback({key: \'ds:9\', hash: \'1\', data: in our docs';
+    const dates = typeof parsePostedDates === 'function'
+      ? parsePostedDates(dataBlock([tricky, dataRow('222', NOV_20)]))
+      : new Map();
+    dates.size === 2
+      ? pass('parsePostedDates() reads past "AF_initDataCallback(" inside a description string')
+      : fail(`parsePostedDates quoted callback: ${JSON.stringify([...dates])}`);
+  }
+  {
+    // A job kept from an earlier query without a date takes the date a later
+    // query's page has for it; one job per id either way.
+    const { ctx } = recordingCtx((c) => (qOf(c.url) === 'alpha'
+      ? linkPage(['111'])
+      : `${dataBlock([dataRow('111', NOV_20)])}${linkPage(['111'])}`));
+    const jobs = await provider.fetch({ name: 'Google', google: { queries: ['alpha', 'beta'] } }, ctx);
+    jobs.length === 1 && jobs[0].postedAt === NOV_20 * 1000
+      ? pass('google.fetch() fills a missing postedAt from a later query that repeats the job')
+      : fail(`google later-date fill: ${JSON.stringify(jobs)}`);
+  }
 
 } catch (e) {
   fail(`google provider tests crashed: ${e.message}`);
