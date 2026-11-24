@@ -315,10 +315,15 @@ async function main() {
     { headless: true },
     { projectRoot: SCAN_DATA_ROOT, processEnv: BROWSER_PROCESS_ENV },
   ));
-  const context = await browser.newContext({ locale: 'de-DE', timezoneId: 'Europe/Berlin' });
-  const page = await context.newPage();
-
+  // Context and page are created inside the try, so a setup that fails still
+  // reaches the finally that closes the browser: the runner sets
+  // process.exitCode rather than calling process.exit(), and an open browser
+  // would keep the process alive (#7741 review).
+  let context;
   try {
+    context = await browser.newContext({ locale: 'de-DE', timezoneId: 'Europe/Berlin' });
+    const page = await context.newPage();
+
     for (let i = 0; i < keywords.length; i++) {
       const kw = keywords[i];
       process.stdout.write(`  Searching "${kw}"... `);
@@ -361,7 +366,7 @@ async function main() {
       }
     }
   } finally {
-    await context.close();
+    await context?.close();
     await browser.close();
   }
 
