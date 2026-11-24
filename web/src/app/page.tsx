@@ -49,7 +49,7 @@ export default async function Home() {
   // midnight or in another time zone, can drop the target and then miss the
   // next open Apply, because only these rows carry a decision.
   const applyDay = localDay();
-  const ages = await readAwaitingAges(applications, applyDay);
+  const ages = await readAwaitingAges(applications, applyDay, (app) => applyPostingUrl(readApp(app).reportUrl, app.url, app.applyLink));
   const shown = pickAwaitingDecision(applications, scoreNum, 6, (app) => ages[app.n]?.open.state === "closed");
   const applyTarget = pickApplyNext(
     applications,

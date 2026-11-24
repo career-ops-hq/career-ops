@@ -234,14 +234,19 @@ export type AwaitingAge = ReturnType<typeof awaitingAge>;
 
 /** Per tracker row: days since the scan first saw the posting, days since the
  *  board's posting date, and the last conclusive still-open check, keyed by row
- *  number. Reads scan-history.tsv and liveness-checks.tsv only; never fetches. A
+ *  number. `fallbackUrl` supplies the posting URL when the tracker cell has none.
+ *  Reads scan-history.tsv and liveness-checks.tsv only; never fetches. A
  *  missing file or module leaves every fact unknown ("unchecked"), never guessed. */
-export async function readAwaitingAges(applications: Application[], today: string): Promise<Record<string, AwaitingAge>> {
+export async function readAwaitingAges(
+  applications: Application[],
+  today: string,
+  fallbackUrl: (app: Application) => string = () => "",
+): Promise<Record<string, AwaitingAge>> {
   const mod = await loadPostingFactsModule();
   const index = mod ? mod.postingFactsIndex(read("data/scan-history.tsv") ?? "", read("data/liveness-checks.tsv") ?? "") : null;
   const ages: Record<string, AwaitingAge> = {};
   for (const app of applications) {
-    const href = postingHref(app.url);
+    const href = postingHref(app.url) || fallbackUrl(app);
     const facts = mod && index && href ? mod.postingFactsForUrl(index, href) : null;
     ages[app.n] = awaitingAge(facts as Parameters<typeof awaitingAge>[0], today, app.closesAt ?? "");
   }
