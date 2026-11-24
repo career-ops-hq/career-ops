@@ -260,6 +260,7 @@ Options:
     process.exit(1);
   }
 
-  const code = await runMigration(target, readFileSync(target, 'utf-8'), { apply, asJson });
-  if (code) process.exit(code);
+  // exitCode, not exit(): a forced exit can cut off the JSON summary while it
+  // is still draining to a pipe.
+  process.exitCode = await runMigration(target, readFileSync(target, 'utf-8'), { apply, asJson });
 }
