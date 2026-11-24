@@ -48,7 +48,20 @@ export function readReport(md) {
   const normalized = normalizeNewlines(md);
   const lines = normalized.split("\n");
   let cut = lines.findIndex((l, i) => i > 0 && (/^\s*-{3,}\s*$/.test(l) || /^##\s/.test(l)));
-  if (cut === -1) cut = Math.min(lines.length, 10);
+  if (cut === -1) {
+    // No section break. Keep a leading title and **Field:** lines as the
+    // header, and leave the rest of the file in the body. A hard stop at
+    // line 10 dropped the opening of a report that has neither rule.
+    cut = 0;
+    while (cut < lines.length) {
+      const line = lines[cut];
+      if (line.trim() === "" || /^#\s+/.test(line) || /^\s*\*\*.+?:\*\*/.test(line)) {
+        cut += 1;
+        continue;
+      }
+      break;
+    }
+  }
 
   const headerLines = lines.slice(0, cut);
   let bodyStart = cut;

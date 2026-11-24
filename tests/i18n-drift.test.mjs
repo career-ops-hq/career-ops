@@ -34,7 +34,7 @@ function linkForTest(t, target, path, directory = false) {
 function installCLI(root) {
   copyFileSync(join(ROOT, 'i18n-drift.mjs'), join(root, 'i18n-drift.mjs'));
   mkdirSync(join(root, 'lib'), { recursive: true });
-  for (const name of ['is-main-module.mjs', 'mjs-files.mjs', 'scratch-dirs.mjs', 'walk-tree.mjs']) {
+  for (const name of ['is-main-module.mjs', 'mjs-files.mjs', 'mode-sets.mjs', 'scratch-dirs.mjs', 'walk-tree.mjs']) {
     const source = join(ROOT, 'lib', name);
     if (existsSync(source)) copyFileSync(source, join(root, 'lib', name));
   }
@@ -403,4 +403,16 @@ test('CLI help works without a modes directory, while a normal run reports the m
   const result = runCLI(root, []);
   assert.equal(result.status, 1, describeSpawn(result));
   assert.match(result.stderr, /modes/i);
+});
+
+test('leaves market sets out of discovery and refuses to score one', (t) => {
+  const root = fixture(t, {
+    'modes/pipeline.md': '# Pipeline\n## Steps',
+    'modes/sg/README.md': '# career-ops -- Singapore market mode (`modes/sg/`)',
+    'modes/sg/pipeline.md': '# Pipeline (Singapore)',
+    'modes/de/README.md': '# career-ops — Deutsche Modi (`modes/de/`)',
+    'modes/de/pipeline.md': '# Pipeline\n## Schritte',
+  });
+  assert.deepEqual(discoverLangs(root), ['de']);
+  assert.throws(() => checkLang('sg', root), /market set/);
 });

@@ -10,6 +10,7 @@ import { readTrackerFile, resolveTrackerPath, trackerLinkDirs } from "@/lib/core
 import { cachedFileValue } from "@/lib/stat-file-cache.mjs";
 import { resolveCodeRoot, resolveRootScript } from "@/lib/core/code-root.mjs";
 import { classifyTracker, parseApplications } from "@/lib/tracker-table.mjs";
+import { awaitingAge } from "@/lib/home/awaiting-age.mjs";
 import { parseStatusLog } from "@/lib/pipeline-sankey.mjs";
 // Pipeline rows are parsed in a plain .mjs for the same reason as
 // tracker-table.mjs: so `node --test` can exercise the real parser.
@@ -203,6 +204,53 @@ export async function withCloseDates(applications: Application[]): Promise<Appli
     const day = mod.closeDateForUrl(index, href);
     return day ? { ...app, closesAt: day } : app;
   });
+}
+
+type PostingFactsModule = {
+  postingFactsIndex: (scanHistory: string, livenessLog: string) => Map<string, unknown>;
+  postingFactsForUrl: (index: Map<string, unknown>, url: string) => unknown;
+};
+
+let postingFactsModule: PostingFactsModule | null = null;
+
+async function loadPostingFactsModule(): Promise<PostingFactsModule | null> {
+  if (postingFactsModule) return postingFactsModule;
+  const file = path.join(
+    /* turbopackIgnore: true */ resolveCodeRoot(process.cwd(), process.env),
+    "lib",
+    "posting-facts.mjs",
+  );
+  try {
+    const mod = (await import(/* webpackIgnore: true */ pathToFileURL(file).href)) as Partial<PostingFactsModule>;
+    if (typeof mod.postingFactsIndex !== "function" || typeof mod.postingFactsForUrl !== "function") return null;
+    postingFactsModule = mod as PostingFactsModule;
+    return postingFactsModule;
+  } catch {
+    return null;
+  }
+}
+
+export type AwaitingAge = ReturnType<typeof awaitingAge>;
+
+/** Per tracker row: days since the scan first saw the posting, days since the
+ *  board's posting date, and the last conclusive still-open check, keyed by row
+ *  number. `fallbackUrl` supplies the posting URL when the tracker cell has none.
+ *  Reads scan-history.tsv and liveness-checks.tsv only; never fetches. A
+ *  missing file or module leaves every fact unknown ("unchecked"), never guessed. */
+export async function readAwaitingAges(
+  applications: Application[],
+  today: string,
+  fallbackUrl: (app: Application) => string = () => "",
+): Promise<Record<string, AwaitingAge>> {
+  const mod = await loadPostingFactsModule();
+  const index = mod ? mod.postingFactsIndex(read("data/scan-history.tsv") ?? "", read("data/liveness-checks.tsv") ?? "") : null;
+  const ages: Record<string, AwaitingAge> = {};
+  for (const app of applications) {
+    const href = postingHref(app.url) || fallbackUrl(app);
+    const facts = mod && index && href ? mod.postingFactsForUrl(index, href) : null;
+    ages[app.n] = awaitingAge(facts as Parameters<typeof awaitingAge>[0], today, app.closesAt ?? "");
+  }
+  return ages;
 }
 
 export type Application = {
@@ -403,15 +451,13 @@ export async function pdfPathForReport(n: string): Promise<string | null> {
 export type LifecyclePhase = "first-run" | "in-between" | "established";
 /**
  * Server-side lifecycle, mirroring the core doctor.mjs prerequisite list with the
- * SAME existsSync semantics (the SSOT the OnboardingBanner already reads via
- * /api/doctor). The 4 user-layer prereqs: cv.md, config/profile.yml,
+ * same missing-file and empty-YAML checks. The 4 user-layer prereqs: cv.md, config/profile.yml,
  * modes/_profile.md, portals.yml (or CAREER_OPS_PORTALS).
  *   - first-run  → a TRULY empty install (no cv AND no data): the CV takeover.
  *     CRITICAL back-compat (maintainer): NEVER force onboarding on a user who
  *     already has data (a full pipeline/tracker with no cv.md is valid).
  *   - in-between → has cv/data but setup incomplete: dashboard + the nudge banner.
- *   - established → all 4 prereqs present.
- * onboardingNeeded mirrors doctor.mjs: true if ANY prereq is missing → show banner.
+ *   - established → all 4 prereqs present and both YAML files contain settings.
  */
 /** Absolute portals.yml path: CAREER_OPS_PORTALS when set, else <root>/portals.yml. */
 export function portalsConfigPath(root = careerOpsRoot(), env: NodeJS.ProcessEnv = process.env): string {
@@ -427,16 +473,6 @@ export function doctorState(snapshot?: Pick<PipelineSummary, "applications" | "i
   hasData: boolean;
 } {
   const root = careerOpsRoot();
-  const has = (rel: string) => {
-    try {
-      // The profile is where getProfilePath() says, not always <root>/config/profile.yml,
-      // so this agrees with core's `node doctor.mjs --json` under CAREER_OPS_PROFILE.
-      const file = rel === "config/profile.yml" ? getProfilePath(root) : path.join(root, rel);
-      return fs.existsSync(file);
-    } catch {
-      return false;
-    }
-  };
   // Keep this list shaped like doctor.mjs USER_LAYER_PREREQS so the #2369
   // freeze in test-all.mjs can grep the paths. portals.yml alone resolves
   // through portalsConfigPath (CAREER_OPS_PORTALS when set).
@@ -446,24 +482,44 @@ export function doctorState(snapshot?: Pick<PipelineSummary, "applications" | "i
     ["modes/_profile.md", "modes/_profile.md"],
     ["portals.yml", "portals.yml"],
   ];
-  const missing = prereqs
-    .filter(([rel]) => {
-      if (rel === "portals.yml") {
-        try {
-          return !fs.existsSync(portalsConfigPath(root));
-        } catch {
-          return true;
-        }
+  const missing: string[] = [];
+  let emptyYaml = false;
+  for (const [rel, label] of prereqs) {
+    let file: string;
+    try {
+      if (rel === "portals.yml") file = portalsConfigPath(root);
+      else if (rel === "config/profile.yml") file = getProfilePath(root);
+      else file = path.join(root, rel);
+    } catch {
+      missing.push(label);
+      continue;
+    }
+    if (!fs.existsSync(file)) {
+      missing.push(label);
+      continue;
+    }
+    if (rel === "config/profile.yml" || rel === "portals.yml") {
+      try {
+        // Mirror core's hasYamlContent. Malformed or unreadable files are
+        // diagnosed elsewhere and must not be offered for replacement.
+        const source = fs.readFileSync(file, "utf8");
+        const hasContent = source.split("\n").some((line) => {
+          const trimmed = line.trim();
+          return trimmed !== "" && !trimmed.startsWith("#");
+        });
+        const value = hasContent ? yaml.load(source) : null;
+        emptyYaml ||= value == null || (Object.prototype.toString.call(value) === "[object Object]" && Object.keys(value as object).length === 0);
+      } catch {
+        // Match doctor.mjs when a file exists but cannot be read.
       }
-      return !has(rel);
-    })
-    .map(([, label]) => label);
-  const hasCv = has("cv.md");
+    }
+  }
+  const hasCv = !missing.includes("cv.md");
   // Home already reads these files. Reuse that snapshot so its setup check
   // neither parses the tracker twice nor disagrees with the rendered queue.
   const hasData = (snapshot?.applications ?? readApplications()).length > 0 ||
     (snapshot?.inbox ?? readInbox()).some((j) => !j.done);
-  const onboardingNeeded = missing.length > 0;
+  const onboardingNeeded = missing.length > 0 || emptyYaml;
   const phase: LifecyclePhase = !hasCv && !hasData ? "first-run" : onboardingNeeded ? "in-between" : "established";
   return { phase, onboardingNeeded, missing, hasCv, hasData };
 }

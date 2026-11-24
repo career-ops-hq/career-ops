@@ -50,13 +50,14 @@
 import {
   jdHtmlToText,
   fetchJdViaKnownApi,
+  resolveJdApi,
   normalizeAshbyJob,
   normalizeGreenhouseJob,
   normalizeLeverJob,
   normalizeSmartRecruitersJob,
   normalizeWorkdayJob,
 } from './browser-extract.mjs';
-import { resolveAtsApi, JD_TEXT_API_ATS, throttleProviderRequest } from './liveness-api.mjs';
+import { JD_TEXT_API_ATS, throttleProviderRequest } from './liveness-api.mjs';
 import { fetchJsonWithRetry, makeHttpCtx } from './providers/_http.mjs';
 
 /**
@@ -647,7 +648,7 @@ const JD_RETRY_POLICY = { retries: 2 };
  * @returns {Promise<string|null>}
  */
 export async function fetchJdText(url, { boardCache, ctx = makeHttpCtx() } = {}) {
-  const resolved = resolveAtsApi(url);
+  const resolved = resolveJdApi(url);
   if (!resolved || !JD_TEXT_API_ATS.has(resolved.ats)) return null;
   const normalize = JSON_JD[resolved.ats];
   if (!normalize) {

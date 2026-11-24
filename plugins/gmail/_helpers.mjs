@@ -29,28 +29,61 @@ const ASSET_EXT_RE =
 const ASSET_HOST_PREFIXES = ['cdn.', 'static.', 'assets.', 'img.', 'images.', 'media.'];
 
 /**
+ * Mail-vendor and ad-network domains. Matched anywhere in the hostname: a
+ * posting is never hosted on one of these.
+ */
+const TRACKER_HOST_PARTS = [
+  'doubleclick', 'googleadservices', 'googlesyndication', 'mailgun', 'mandrill',
+  'mjml', 'openpixel', 'sendgrid', 'w3.org',
+];
+
+/**
+ * Words that mark a click tracker, pixel or list-management link. Matched only
+ * as a whole hostname word or a whole path segment, never as a substring of the
+ * URL: `boards.greenhouse.io/clickhouse/jobs/1`, `jobs.lever.co/acme/fast-track-engineer`
+ * and `?gh_src=newsletter` are all real postings.
+ */
+const TRACKER_WORDS = new Set([
+  'click', 'clicks', 'newsletter', 'newsletters', 'openpixel', 'opt-out', 'optout',
+  'subscribe', 'track', 'tracker', 'tracking', 'unsubscribe',
+]);
+
+/** Host-plus-path fragments that are account or legal pages, not postings. */
+const NON_POSTING_PATHS = [
+  'github.com/login', 'linkedin.com/help', 'linkedin.com/legal', 'linkedin.com/settings',
+];
+
+/**
  * Is a URL clean and relevant (not a click tracker, unsubscribe link, or pixel)?
+ * The query string is never read for tracker words: ATS postings routinely
+ * carry `gh_src=newsletter` or `utm_medium=click` and are still postings.
  * @param {string} url
  * @returns {boolean}
  */
 export function isCleanUrl(url) {
   try {
     const u = new URL(url);
-    const lowerUrl = url.toLowerCase();
-    const badKeywords = [
-      'click', 'track', 'openpixel', 'sendgrid', 'unsubscribe', 'optout',
-      'newsletter', 'subscribe', 'w3.org', 'doubleclick', 'googlesyndication',
-      'googleadservices', 'mailgun', 'mandrill', 'mjml', 'github.com/login',
-      'linkedin.com/legal', 'linkedin.com/help', 'linkedin.com/settings',
-    ];
-    if (badKeywords.some(kw => lowerUrl.includes(kw))) return false;
+    const host = u.hostname.toLowerCase();
+    const path = u.pathname.toLowerCase();
+    if (TRACKER_HOST_PARTS.some(part => host.includes(part))) return false;
+    // Hostname words: `click.mail.example.com`, `email-tracking.example.com`.
+    // A label is split on `-` so a tracker word joined to another word still
+    // counts, while `clickup.wd5.myworkdayjobs.com` does not.
+    if (host.split('.').flatMap(label => label.split('-')).some(w => TRACKER_WORDS.has(w))) return false;
+    // Path segments, whole, with any file extension dropped: `/ls/click`,
+    // `/track/open`, `/unsubscribe.php`. A slug such as `fast-track-engineer`
+    // or `trackman` is one segment and does not match.
+    const segments = path.split('/').map(seg => {
+      try { return decodeURIComponent(seg); } catch { return seg; }
+    }).map(seg => seg.toLowerCase().replace(/\.[a-z0-9]+$/, ''));
+    if (segments.some(seg => TRACKER_WORDS.has(seg))) return false;
+    if (NON_POSTING_PATHS.some(prefix => `${host}${path}`.includes(prefix))) return false;
     // Page assets, not postings. Job-alert emails embed one company logo per job,
     // and those URLs pass every check above: https, no tracker keyword, hosted on
     // the board's own domain. They land in the pipeline as untitled "job leads" you
     // have to click to discover are 160x160 PNGs. Extension check first (query
     // string included, since CDNs append cache-busters), then the CMS upload paths
     // and asset subdomains that serve files without one.
-    const host = u.hostname.toLowerCase();
     if (ASSET_EXT_RE.test(u.pathname + u.search)) return false;
     if (/\/(wp-content|wp-includes)\//i.test(u.pathname)) return false;
     if (host === 'fonts.googleapis.com' || host === 'fonts.gstatic.com') return false;

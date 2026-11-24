@@ -86,7 +86,11 @@ function loadEnvFile() {
 // ---------------------------------------------------------------------------
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
-const MAX_TOKENS = 8192;
+// Output cap sent as max_tokens. CAREER_OPS_MAX_TOKENS overrides it, the variable
+// openai-eval.mjs and openai-tailor.mjs already read: a reasoning model (glm-5.3,
+// a thinking Qwen) can spend all 8192 tokens reasoning and leave the reply empty,
+// while a full A-G report plus that reasoning fits in openai-eval's 32768.
+const DEFAULT_MAX_TOKENS = 8192;
 const RATE_LIMIT_DELAY_MS = 2500;  // pause between requests on free tier
 const DEFAULT_MODEL_TIMEOUT_MS = 120_000;
 // setTimeout() treats delays above 2^31-1 ms as 1 ms, so larger overrides are rejected.
@@ -103,6 +107,21 @@ const getModelTimeoutMs = () =>
   parseTimeoutOverride(process.env.CAREER_OPS_TIMEOUT_MS) ??
   parseTimeoutOverride(process.env.OPENROUTER_TIMEOUT_MS) ??
   DEFAULT_MODEL_TIMEOUT_MS;
+// Same rules as openai-eval: empty means unset, digits only (so "8k" is not read
+// as 8). An invalid value warns once and keeps the default instead of failing
+// every model in the rotation. Resolved on each call, like the timeout.
+let warnedMaxTokens = null;
+const getMaxTokens = () => {
+  const raw = process.env.CAREER_OPS_MAX_TOKENS?.trim();
+  if (!raw) return DEFAULT_MAX_TOKENS;
+  const parsed = /^\d+$/.test(raw) ? Number(raw) : NaN;
+  if (Number.isSafeInteger(parsed) && parsed > 0) return parsed;
+  if (warnedMaxTokens !== raw) {
+    warnedMaxTokens = raw;
+    console.warn(`⚠️  Invalid CAREER_OPS_MAX_TOKENS: "${raw}" (must be a positive integer of output tokens); using ${DEFAULT_MAX_TOKENS}.`);
+  }
+  return DEFAULT_MAX_TOKENS;
+};
 
 // ---------------------------------------------------------------------------
 // Quota & response validation errors
@@ -404,10 +423,16 @@ export function buildCachedSystemMessage(systemPrompt) {
 // still carry every block heading and the score line validateEvaluationResponse
 // checks, so it would be saved as the report. A reply with no finish_reason is
 // accepted: some servers omit the field, and nothing then says it stopped early.
-function assertReplyFinished(data) {
+//
+// It runs before the empty-content check: a reasoning model that spends the
+// whole cap thinking answers with empty content and finish_reason "length",
+// and "Empty response" would hide that raising CAREER_OPS_MAX_TOKENS fixes it.
+function assertReplyFinished(data, maxTokens = getMaxTokens()) {
   const reason = data.choices?.[0]?.finish_reason;
   if (reason == null || reason === 'stop') return;
-  const hint = reason === 'length' ? ` (cut off at max_tokens ${MAX_TOKENS})` : '';
+  const hint = reason === 'length'
+    ? ` (cut off at max_tokens ${maxTokens}; raise CAREER_OPS_MAX_TOKENS for a reasoning model)`
+    : '';
   throw new Error(`Incomplete reply: finish_reason "${String(reason).slice(0, 40)}"${hint}`);
 }
 
@@ -428,13 +453,14 @@ async function callOpenRouter(systemPrompt, userMessage) {
   if (pinnedModel) {
     activeModel = pinnedModel;
     process.stdout.write(`[model] ${pinnedModel} (pinned) ... `);
+    const maxTokens = getMaxTokens();
     const body = JSON.stringify({
       model: pinnedModel,
       messages: [
         buildCachedSystemMessage(systemPrompt),
         { role: 'user', content: userMessage },
       ],
-      max_tokens: MAX_TOKENS,
+      max_tokens: maxTokens,
     });
     const ctrl = new AbortController();
     const timeoutMs = getModelTimeoutMs();
@@ -463,14 +489,14 @@ async function callOpenRouter(systemPrompt, userMessage) {
       }
       const data = await resp.json();
       if (data.error) throw new Error(data.error.message);
+      assertReplyFinished(data, maxTokens);
       const content = data.choices?.[0]?.message?.content ?? '';
       if (!content) throw new Error('Empty response');
-      assertReplyFinished(data);
       console.log('OK');
       const usage = normalizeOpenAIUsage(data.usage);
       return { content, usage };
     } catch (e) {
-      if (e.name === 'AbortError') throw new Error(`Pinned model timed out after ${timeoutMs / 1000}s`);
+      if (e.name === 'AbortError') throw new Error(`Pinned model timed out after ${timeoutMs / 1000}s (set CAREER_OPS_TIMEOUT_MS to wait longer)`);
       throw e;
     } finally {
       clearTimeout(timerId);
@@ -495,13 +521,14 @@ async function callOpenRouter(systemPrompt, userMessage) {
     process.stdout.write(`[model] ${model} ... `);
 
     try {
+      const maxTokens = getMaxTokens();
       const body = JSON.stringify({
         model,
         messages: [
           buildCachedSystemMessage(systemPrompt),
           { role: 'user', content: userMessage },
         ],
-        max_tokens: MAX_TOKENS,
+        max_tokens: maxTokens,
       });
 
       const controller = new AbortController();
@@ -538,9 +565,9 @@ async function callOpenRouter(systemPrompt, userMessage) {
       }
       if (data.error) throw new Error(data.error.message);
 
+      assertReplyFinished(data, maxTokens);
       const content = data.choices?.[0]?.message?.content ?? '';
       if (!content) throw new Error('Empty response');
-      assertReplyFinished(data);
 
       const usage = normalizeOpenAIUsage(data.usage);
 
@@ -598,6 +625,7 @@ export {
   rateLimitCounts,
   blacklistedModels,
   getModelTimeoutMs,
+  getMaxTokens,
   cmdEvaluate,
   cmdPipeline,
 };
