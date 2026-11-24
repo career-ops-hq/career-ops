@@ -9,8 +9,8 @@ export function normalizeMatchScore(value) {
     : null;
 }
 
-const PATCH_KEYS = new Set(["id", "coverLetter", "outreach", "answers", "cvFile"]);
-const OUTREACH_KEYS = new Set([
+export const PATCH_KEYS = new Set(["id", "coverLetter", "outreach", "answers", "cvFile"]);
+export const OUTREACH_KEYS = new Set([
   "linkedinRecruiterNote",
   "linkedinHiringManagerMessage",
   "referralRequestMessage",
@@ -19,21 +19,21 @@ const OUTREACH_KEYS = new Set([
   "postApplicationEmailSubject",
   "postApplicationEmail",
 ]);
-const MAX_PATCH_BYTES = 120_000;
-const MAX_COVER_LETTER = 40_000;
-const MAX_OUTREACH_FIELD = 20_000;
-const MAX_ANSWERS = 100;
-const MAX_ANSWER_QUESTION = 4_000;
-const MAX_ANSWER = 20_000;
-const MAX_CV_FILE = 500;
+export const MAX_PATCH_BYTES = 120_000;
+export const MAX_COVER_LETTER = 40_000;
+export const MAX_OUTREACH_FIELD = 20_000;
+export const MAX_ANSWERS = 100;
+export const MAX_ANSWER_QUESTION = 4_000;
+export const MAX_ANSWER = 20_000;
+export const MAX_CV_FILE = 500;
 
-function boundedString(value, max, field) {
+export function boundedString(value, max, field) {
   if (typeof value !== "string") return { error: `${field} must be a string.` };
   if (value.length > max) return { error: `${field} is too large.` };
   return { value };
 }
 
-function validateOutreach(value) {
+export function validateOutreach(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return { error: "outreach must be an object." };
   }
@@ -45,7 +45,7 @@ function validateOutreach(value) {
   return { value: Object.fromEntries(Object.entries(value)) };
 }
 
-function validateAnswers(value) {
+export function validateAnswers(value) {
   if (!Array.isArray(value)) return { error: "answers must be an array." };
   if (value.length > MAX_ANSWERS) return { error: "answers contains too many entries." };
   const answers = [];
@@ -70,6 +70,26 @@ function validateAnswers(value) {
     });
   }
   return { value: answers };
+}
+
+/** Validate generated kit editable fields before persistence against shared limits. */
+export function validateKitContent(kit) {
+  if (!kit || typeof kit !== "object" || Array.isArray(kit)) {
+    return { error: "Kit content must be an object." };
+  }
+  if (kit.coverLetter !== undefined) {
+    const res = boundedString(kit.coverLetter, MAX_COVER_LETTER, "coverLetter");
+    if (res.error) return res;
+  }
+  if (kit.outreach !== undefined) {
+    const res = validateOutreach(kit.outreach);
+    if (res.error) return res;
+  }
+  if (kit.answers !== undefined) {
+    const res = validateAnswers(kit.answers);
+    if (res.error) return res;
+  }
+  return { ok: true };
 }
 
 /** Validate and copy the user-editable PATCH payload before any file access. */
@@ -103,10 +123,11 @@ export function validatePatchPayload(body) {
   if (body.cvFile !== undefined) {
     const result = boundedString(body.cvFile, MAX_CV_FILE, "cvFile");
     if (result.error) return result;
-    if (!result.value.startsWith("data/application-kits/") || result.value.includes("..") || result.value.includes("\\")) {
+    const normalized = result.value.replace(/\\/g, "/");
+    if (!normalized.startsWith("data/application-kits/") || normalized.includes("..")) {
       return { error: "cvFile must point to a relative application-kit Markdown file." };
     }
-    value.cvFile = result.value;
+    value.cvFile = normalized;
   }
   return { value };
 }

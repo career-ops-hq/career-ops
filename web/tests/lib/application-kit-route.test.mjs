@@ -28,7 +28,16 @@ const initialKit = {
 };
 
 process.env.CAREER_OPS_ROOT = root;
-const { PATCH, syncKitToTracker, writeAtomicBatch } = await import("../../src/app/api/application-kit/route.ts");
+const {
+  GET,
+  PATCH,
+  syncKitToTracker,
+  writeAtomicBatch,
+  missingKitSource,
+  hasKitMarker,
+  loadProfileData,
+  withKitLock,
+} = await import("../../src/app/api/application-kit/route.ts");
 
 async function patch(body) {
   return PATCH(new Request("http://localhost/api/application-kit", {
@@ -41,6 +50,8 @@ async function patch(body) {
 before(async () => {
   await mkdir(join(root, "data", "application-kits"), { recursive: true });
   await writeFile(kitPath, `${JSON.stringify(initialKit, null, 2)}\n`);
+  const trackerPath = join(root, "data", "applications.md");
+  await writeFile(trackerPath, "# Applications Tracker\n\n| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n|---|------|---------|------|-------|--------|-----|--------|-------|\n");
 });
 
 after(() => {
@@ -63,6 +74,12 @@ test("PATCH persists valid edits and leaves unsupported report conclusions absen
   const report = await readFile(join(root, data.trackerInfo.reportLink), "utf8");
   assert.match(report, /score: null/);
   assert.doesNotMatch(report, /High Confidence|final_decision|Direct match based on candidate profile|PDF:/);
+});
+
+test("missing application-kit source files produce actionable errors", () => {
+  assert.equal(missingKitSource(root, () => false), "Create cv.md first.");
+  assert.equal(missingKitSource(root, (filePath) => filePath.endsWith("cv.md")), "Create the configured profile first.");
+  assert.equal(missingKitSource(root, () => true), null);
 });
 
 test("PATCH rejects malformed values without modifying the kit or tracker", async () => {
@@ -143,6 +160,13 @@ test("special characters are serialized safely and model conclusions are omitted
   assert.doesNotMatch(report, /High Confidence|final_decision|Apply/);
 });
 
+test("marker token matching prevents prefix collisions like kit-1 matching kit-10", () => {
+  assert.equal(hasKitMarker("Application kit: kit-1", "kit-1"), true);
+  assert.equal(hasKitMarker("Application kit: kit-10", "kit-1"), false);
+  assert.equal(hasKitMarker("Applied via Workspace; Application kit: kit-1; follow-up", "kit-1"), true);
+  assert.equal(hasKitMarker("Applied via Workspace; Application kit: kit-10; follow-up", "kit-1"), false);
+});
+
 test("atomic batch restores earlier files after report or tracker write failures", async () => {
   const dir = await mkdtemp(join(tmpdir(), "career-ops-atomic-"));
   const report = join(dir, "report.md");
@@ -171,3 +195,60 @@ test("atomic batch restores earlier files after report or tracker write failures
   assert.throws(() => writeAtomicBatch([{ path: report, content: "new report" }], failingWriter), /write failed/);
   assert.equal(readFileSync(report, "utf8"), "old report");
 });
+
+test("GET returns 500 when a saved kit is unreadable or malformed JSON (not ENOENT)", async () => {
+  const corruptKitPath = join(root, "data", "application-kits", "corrupt.json");
+  await writeFile(corruptKitPath, "{ corrupt json");
+  try {
+    const res = await GET();
+    assert.equal(res.status, 500);
+    const data = await res.json();
+    assert.match(data.error, /Failed to read or parse saved kit corrupt\.json/);
+  } finally {
+    const { unlink } = await import("node:fs/promises");
+    await unlink(corruptKitPath);
+  }
+});
+
+test("profile loading surfaces YAML parse errors and distinguishes ENOENT", async () => {
+  const testRoot = await mkdtemp(join(tmpdir(), "career-ops-profile-test-"));
+  const previous = process.env.CAREER_OPS_ROOT;
+  process.env.CAREER_OPS_ROOT = testRoot;
+  try {
+    // Missing profile -> returns empty fallback {}
+    const emptyResult = loadProfileData();
+    assert.deepEqual(emptyResult, {});
+
+    // Malformed YAML -> throws actionable error
+    const profilePath = join(testRoot, "config", "profile.yml");
+    await mkdir(join(testRoot, "config"), { recursive: true });
+    await writeFile(profilePath, ": invalid: yaml: {");
+    assert.throws(() => loadProfileData(), /Failed to load profile/);
+  } finally {
+    if (previous === undefined) delete process.env.CAREER_OPS_ROOT;
+    else process.env.CAREER_OPS_ROOT = previous;
+  }
+});
+
+test("syncKitToTracker delegates status transition to canonical set-status workflow", async () => {
+  const statusLogPath = join(root, "data", "status-log.tsv");
+  const logContent = await readFile(statusLogPath, "utf8");
+  assert.match(logContent, /Applied\tweb/);
+});
+
+test("withKitLock serializes concurrent updates", async () => {
+  const file = join(root, "data", "application-kits", "lock-test.json");
+  const executionOrder = [];
+  const p1 = withKitLock(file, async () => {
+    executionOrder.push("start-1");
+    await new Promise((r) => setTimeout(r, 50));
+    executionOrder.push("end-1");
+  });
+  const p2 = withKitLock(file, async () => {
+    executionOrder.push("start-2");
+    executionOrder.push("end-2");
+  });
+  await Promise.all([p1, p2]);
+  assert.deepEqual(executionOrder, ["start-1", "end-1", "start-2", "end-2"]);
+});
+

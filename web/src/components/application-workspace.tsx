@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Check, Copy, Download, FileText, Loader2, Sparkles } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Check, Copy, Download, FileText, Loader2, RefreshCw, Sparkles } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 type Outreach = {
@@ -79,7 +79,7 @@ const CONFIG_KEY = "career-ops:config";
 
 const LOADING_STEPS = [
   "1/4 Analysing job requirements & extracting keywords…",
-  "2/4 Evaluating fit against MSc CS & IT experience…",
+  "2/4 Evaluating fit against candidate profile and CV experience…",
   "3/4 Tailoring ATS CV & building STAR+R stories…",
   "4/4 Drafting cover letter & outreach toolkit…",
   "Finalizing application kit & checking formatting…"
@@ -90,20 +90,64 @@ export function ApplicationWorkspace() {
   const [jd, setJd] = useState("");
   const [questions, setQuestions] = useState("");
   const [kits, setKits] = useState<Kit[]>([]);
+  const [loadingKits, setLoadingKits] = useState(true);
+  const [kitsLoadError, setKitsLoadError] = useState(false);
+  const [drafts, setDrafts] = useState<Record<string, Kit>>({});
   const [kit, setKit] = useState<Kit | null>(null);
   const [busy, setBusy] = useState(false);
   const [loadingStep, setLoadingStep] = useState(0);
   const [completed, setCompleted] = useState(false);
   const [markingApplied, setMarkingApplied] = useState(false);
   const [error, setError] = useState("");
+  const [announcement, setAnnouncement] = useState("");
+
+  const announce = useCallback((msg: string) => {
+    setAnnouncement(msg);
+  }, []);
+
+  const loadKits = useCallback(async () => {
+    setLoadingKits(true);
+    setKitsLoadError(false);
+    try {
+      const res = await fetch("/api/application-kit");
+      if (!res.ok) throw new Error("Failed to load saved kits");
+      const d = await res.json();
+      setKits(prev => {
+        const incoming: Kit[] = d.kits || [];
+        const map = new Map<string, Kit>();
+        for (const k of incoming) map.set(k.id, k);
+        for (const k of prev) {
+          if (!map.has(k.id)) map.set(k.id, k);
+        }
+        return Array.from(map.values());
+      });
+    } catch {
+      setKitsLoadError(true);
+    } finally {
+      setLoadingKits(false);
+    }
+  }, []);
 
   useEffect(() => {
     setMounted(true);
-    fetch("/api/application-kit").then(r => r.json()).then(d => setKits(d.kits || [])).catch(() => {});
+    loadKits();
+  }, [loadKits]);
+
+  const updateActiveKit = useCallback((updated: Kit) => {
+    setKit(updated);
+    setDrafts(prev => ({ ...prev, [updated.id]: updated }));
   }, []);
 
   if (!mounted) {
-    return <div className="mx-auto max-w-5xl px-6 py-10"><div className="h-10 w-72 animate-pulse rounded-lg bg-surface" /><div className="mt-7 grid gap-4 lg:grid-cols-2"><div className="h-96 animate-pulse rounded-2xl bg-surface" /><div className="h-96 animate-pulse rounded-2xl bg-surface" /></div></div>;
+    return (
+      <div className="mx-auto max-w-5xl px-6 py-10">
+        <div className="h-10 w-72 motion-safe:animate-pulse rounded-lg bg-surface" />
+        <div className="mt-7 grid gap-4 lg:grid-cols-2">
+          <div className="h-96 motion-safe:animate-pulse rounded-2xl bg-surface" />
+          <div className="h-96 motion-safe:animate-pulse rounded-2xl bg-surface" />
+        </div>
+      </div>
+    );
   }
 
   async function generate() {
@@ -111,29 +155,41 @@ export function ApplicationWorkspace() {
     setCompleted(false);
     setError("");
     setLoadingStep(0);
+    announce("Generating application kit. Analysing job requirements…");
 
     let step = 0;
     const interval = setInterval(() => {
       step = Math.min(LOADING_STEPS.length - 1, step + 1);
       setLoadingStep(step);
+      announce(LOADING_STEPS[step]);
     }, 3500);
 
     let cliId = "";
     try { cliId = JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}").cliId || ""; } catch {}
 
     try {
-      const res = await fetch("/api/application-kit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobDescription: jd, formQuestions: questions, cliId }) });
+      const res = await fetch("/api/application-kit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobDescription: jd, formQuestions: questions, cliId }),
+      });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error || "Could not generate the application kit.");
+        const errText = data.error || "Could not generate the application kit.";
+        setError(errText);
+        announce(`Error: ${errText}`);
         return;
       }
       setKit(data.kit);
-      setKits(old => [data.kit, ...old]);
+      setDrafts(prev => ({ ...prev, [data.kit.id]: data.kit }));
+      setKits(old => [data.kit, ...old.filter(k => k.id !== data.kit.id)]);
       setCompleted(true);
+      announce("Application kit ready!");
       setTimeout(() => setCompleted(false), 4000);
     } catch (err: any) {
-      setError(err?.message || "Generation failed. Please try again.");
+      const errText = err?.message || "Generation failed. Please try again.";
+      setError(errText);
+      announce(`Error: ${errText}`);
     } finally {
       clearInterval(interval);
       setBusy(false);
@@ -142,8 +198,10 @@ export function ApplicationWorkspace() {
 
   async function markApplied() {
     if (!kit || markingApplied) return;
+    const submittedId = kit.id;
     setMarkingApplied(true);
     setError("");
+    announce("Marking application as applied…");
     try {
       const res = await fetch("/api/application-kit", {
         method: "PATCH",
@@ -158,13 +216,47 @@ export function ApplicationWorkspace() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.kit) {
-        setError(data.error || "Could not mark the application as applied.");
+        const errText = data.error || "Could not mark the application as applied.";
+        setError(errText);
+        announce(`Error: ${errText}`);
         return;
       }
-      setKit(data.kit);
-      setKits(old => old.map(k => k.id === data.kit.id ? data.kit : k));
+
+      setKits(old => old.map(k => k.id === data.kit.id ? { ...k, ...data.kit } : k));
+
+      setKit(current => {
+        if (current && current.id === submittedId) {
+          return {
+            ...current,
+            appliedAt: data.kit.appliedAt,
+            trackerNum: data.kit.trackerNum,
+            reportLink: data.kit.reportLink,
+          };
+        }
+        return current;
+      });
+
+      setDrafts(prev => {
+        const existing = prev[submittedId];
+        if (existing) {
+          return {
+            ...prev,
+            [submittedId]: {
+              ...existing,
+              appliedAt: data.kit.appliedAt,
+              trackerNum: data.kit.trackerNum,
+              reportLink: data.kit.reportLink,
+            },
+          };
+        }
+        return prev;
+      });
+
+      announce("Application successfully marked as applied and synchronized with tracker.");
     } catch {
-      setError("Could not mark the application as applied.");
+      const errText = "Could not mark the application as applied.";
+      setError(errText);
+      announce(`Error: ${errText}`);
     } finally {
       setMarkingApplied(false);
     }
@@ -173,11 +265,32 @@ export function ApplicationWorkspace() {
   function updateAnswer(index: number, answer: string) {
     if (!kit) return;
     const answers = Array.isArray(kit.answers) ? kit.answers : [];
-    setKit({ ...kit, answers: answers.map((a, i) => i === index ? { ...a, answer } : a) });
+    const updated = { ...kit, answers: answers.map((a, i) => i === index ? { ...a, answer } : a) };
+    updateActiveKit(updated);
+  }
+
+  function selectKit(k: Kit) {
+    if (kit) {
+      setDrafts(prev => ({ ...prev, [kit.id]: kit }));
+    }
+    const targetKit = drafts[k.id] || k;
+    setKit(targetKit);
+    setJd(targetKit.jobDescription || "");
+    setQuestions(targetKit.formQuestions || "");
+    announce(`Viewing kit for ${targetKit.company} - ${targetKit.role}`);
+    const kitEl = document.getElementById("application-kit-view");
+    if (kitEl) {
+      kitEl.scrollIntoView({ behavior: "smooth" });
+    }
   }
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10 max-sm:pb-24">
+      {/* Polite Live Region for Screen Readers */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </div>
+
       <div className="max-w-2xl">
         <p className="font-mono text-xs uppercase tracking-[0.18em] text-brand-text">one simple workflow</p>
         <h1 className="mt-2 font-display text-4xl text-landing">Prepare an application</h1>
@@ -185,8 +298,10 @@ export function ApplicationWorkspace() {
       </div>
 
       <div className="mt-7 grid gap-4 lg:grid-cols-2">
-        <label className="rounded-2xl border border-border bg-surface/50 p-4 text-sm font-medium">1. Job description
+        <label htmlFor="workspace-jd-input" className="rounded-2xl border border-border bg-surface/50 p-4 text-sm font-medium">1. Job description
           <textarea
+            id="workspace-jd-input"
+            aria-label="Job description"
             value={jd}
             onChange={e => {
               setJd(e.target.value);
@@ -195,11 +310,13 @@ export function ApplicationWorkspace() {
             }}
             rows={16}
             placeholder="Paste the complete job description…"
-            className="mt-2 w-full resize-y rounded-xl border border-border bg-background/70 p-3 text-sm font-normal outline-none focus:border-brand/50"
+            className="mt-2 w-full resize-y rounded-xl border border-border bg-background/70 p-3 text-base sm:text-sm font-normal outline-none focus:border-brand/50"
           />
         </label>
-        <label className="rounded-2xl border border-border bg-surface/50 p-4 text-sm font-medium">2. Application questions
+        <label htmlFor="workspace-questions-input" className="rounded-2xl border border-border bg-surface/50 p-4 text-sm font-medium">2. Application questions
           <textarea
+            id="workspace-questions-input"
+            aria-label="Application questions"
             value={questions}
             onChange={e => {
               setQuestions(e.target.value);
@@ -208,7 +325,7 @@ export function ApplicationWorkspace() {
             }}
             rows={16}
             placeholder="Paste the form questions and dropdown options…"
-            className="mt-2 w-full resize-y rounded-xl border border-border bg-background/70 p-3 text-sm font-normal outline-none focus:border-brand/50"
+            className="mt-2 w-full resize-y rounded-xl border border-border bg-background/70 p-3 text-base sm:text-sm font-normal outline-none focus:border-brand/50"
           />
         </label>
       </div>
@@ -225,7 +342,7 @@ export function ApplicationWorkspace() {
           )}
         >
           {busy ? (
-            <Loader2 className="size-4 animate-spin" />
+            <Loader2 className="size-4 motion-safe:animate-spin" />
           ) : completed ? (
             <Check className="size-4 text-emerald-300" />
           ) : (
@@ -235,21 +352,32 @@ export function ApplicationWorkspace() {
         </button>
 
         {busy && (
-          <span className="text-xs text-muted animate-pulse">
+          <span className="text-xs text-muted motion-safe:animate-pulse">
             Processing local AI pipeline… please wait
           </span>
         )}
       </div>
 
-      {error && <p className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-500">{error}</p>}
-
-      {kit && (
-        <div id="application-kit-view">
-          <KitView kit={kit} setKit={setKit} updateAnswer={updateAnswer} markApplied={markApplied} markingApplied={markingApplied} />
+      {error && (
+        <div role="alert" aria-live="assertive" className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-500">
+          {error}
         </div>
       )}
 
-      {kits.length > 0 && (
+      {kit && (
+        <div id="application-kit-view">
+          <KitView
+            kit={kit}
+            updateActiveKit={updateActiveKit}
+            updateAnswer={updateAnswer}
+            markApplied={markApplied}
+            markingApplied={markingApplied}
+            announce={announce}
+          />
+        </div>
+      )}
+
+      {(kits.length > 0 || loadingKits || kitsLoadError) && (
         <section className="mt-12">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold uppercase tracking-[.15em] text-muted">
@@ -261,22 +389,38 @@ export function ApplicationWorkspace() {
               </span>
             )}
           </div>
+
+          {loadingKits && (
+            <div className="mt-3 flex items-center gap-2 text-xs text-muted">
+              <Loader2 className="size-3.5 motion-safe:animate-spin" />
+              Loading saved applications…
+            </div>
+          )}
+
+          {kitsLoadError && (
+            <div className="mt-3 flex items-center justify-between rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">
+              <span>Could not load saved applications from disk.</span>
+              <button
+                type="button"
+                onClick={loadKits}
+                className="inline-flex items-center gap-1 font-semibold text-red-300 hover:text-red-200 underline"
+              >
+                <RefreshCw className="size-3" /> Retry
+              </button>
+            </div>
+          )}
+
           <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
             {kits.map(k => {
+              const activeDraft = drafts[k.id];
+              const displayKit = activeDraft || k;
               const isSelected = kit?.id === k.id;
+              const hasUnsavedEdits = Boolean(activeDraft);
               return (
                 <button
                   key={k.id}
                   type="button"
-                  onClick={() => {
-                    setKit(k);
-                    setJd(k.jobDescription || "");
-                    setQuestions(k.formQuestions || "");
-                    const kitEl = document.getElementById("application-kit-view");
-                    if (kitEl) {
-                      kitEl.scrollIntoView({ behavior: "smooth" });
-                    }
-                  }}
+                  onClick={() => selectKit(k)}
                   className={cn(
                     "relative rounded-xl p-4 text-left transition-all duration-200",
                     isSelected
@@ -286,20 +430,27 @@ export function ApplicationWorkspace() {
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className={cn("text-sm", isSelected ? "text-brand-text font-bold" : "font-medium text-foreground")}>
-                      {k.company || "Application"} · {k.role || "Role"}
+                      {displayKit.company || "Application"} · {displayKit.role || "Role"}
                     </div>
-                    {isSelected && (
-                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-brand px-2 py-0.5 text-[10px] font-bold text-brand-foreground shadow-sm">
-                        <Check className="size-3" /> Active
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {hasUnsavedEdits && (
+                        <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-400">
+                          Draft
+                        </span>
+                      )}
+                      {isSelected && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-brand px-2 py-0.5 text-[10px] font-bold text-brand-foreground shadow-sm">
+                          <Check className="size-3" /> Active
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="mt-1.5 flex items-center justify-between text-xs text-muted">
                     <span>
-                      {k.appliedAt ? `✅ Applied ${new Date(k.appliedAt).toLocaleDateString()}` : `Prepared ${new Date(k.createdAt).toLocaleDateString()}`}
+                      {displayKit.appliedAt ? `✅ Applied ${new Date(displayKit.appliedAt).toLocaleDateString()}` : `Prepared ${new Date(displayKit.createdAt).toLocaleDateString()}`}
                     </span>
                     <span className="font-mono text-[11px] text-brand-text font-medium">
-                      {k.matchScore !== null ? `${k.matchScore}/5 Match` : ""}
+                      {displayKit.matchScore !== null ? `${displayKit.matchScore}/5 Match` : ""}
                     </span>
                   </div>
                 </button>
@@ -316,7 +467,21 @@ function slugify(text: string) {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "document";
 }
 
-function KitView({ kit, setKit, updateAnswer, markApplied, markingApplied }: { kit: Kit; setKit: (k: Kit) => void; updateAnswer: (i: number, v: string) => void; markApplied: () => void; markingApplied: boolean }) {
+function KitView({
+  kit,
+  updateActiveKit,
+  updateAnswer,
+  markApplied,
+  markingApplied,
+  announce,
+}: {
+  kit: Kit;
+  updateActiveKit: (k: Kit) => void;
+  updateAnswer: (i: number, v: string) => void;
+  markApplied: () => void;
+  markingApplied: boolean;
+  announce: (msg: string) => void;
+}) {
   const companySlug = slugify(kit.company || "application");
   const roleSlug = slugify(kit.role || "role");
   const outreach = kit.outreach;
@@ -326,6 +491,8 @@ function KitView({ kit, setKit, updateAnswer, markApplied, markingApplied }: { k
   const gapsDetailed = kit.gapsDetailed || [];
   const interviewIntel = kit.interviewIntel;
   const keywords = kit.keywords || [];
+  const hasGaps = (kit.gaps && kit.gaps.length > 0) || gapsDetailed.length > 0;
+  const showMatrixPanel = cvMatches.length > 0 || hasGaps || keywords.length > 0;
 
   return (
     <section className="mt-10 space-y-6 border-t border-border pt-8">
@@ -340,7 +507,12 @@ function KitView({ kit, setKit, updateAnswer, markApplied, markingApplied }: { k
             )}
           </div>
           <h2 className="mt-1 font-display text-3xl text-landing">{kit.company} · {kit.role}</h2>
-          <p className="mt-1 text-sm text-muted">{kit.fitSummary}</p>
+          {kit.fitSummary && (
+            <div className="mt-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-faint">Model-generated fit summary · unverified</p>
+              <p className="mt-1 text-sm text-muted">{kit.fitSummary}</p>
+            </div>
+          )}
         </div>
         {kit.appliedAt ? (
           <div className="flex items-center gap-2">
@@ -455,30 +627,46 @@ function KitView({ kit, setKit, updateAnswer, markApplied, markingApplied }: { k
       )}
 
       {/* Match with CV & Gaps */}
-      {cvMatches.length > 0 && (
+      {showMatrixPanel && (
         <Panel title="Match with CV & Gaps Matrix">
           <div className="space-y-4">
-            <div>
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted mb-2">CV Evidence Match</h4>
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="border-b border-border text-muted uppercase tracking-wider font-semibold">
-                    <th className="py-2 px-2">JD Requirement</th>
-                    <th className="py-2 px-2">CV Match</th>
-                    <th className="py-2 px-2">Source</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/60">
-                  {cvMatches.map((m, idx) => (
-                    <tr key={idx} className="hover:bg-surface/30">
-                      <td className="py-2 px-2 font-medium text-foreground">{m.requirement}</td>
-                      <td className="py-2 px-2 text-muted">{m.match}</td>
-                      <td className="py-2 px-2 font-mono text-brand-text text-[11px]">{m.source}</td>
+            {cvMatches.length > 0 && (
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted mb-2">CV Evidence Match</h4>
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-border text-muted uppercase tracking-wider font-semibold">
+                      <th className="py-2 px-2">JD Requirement</th>
+                      <th className="py-2 px-2">CV Match</th>
+                      <th className="py-2 px-2">Source</th>
                     </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {cvMatches.map((m, idx) => (
+                      <tr key={idx} className="hover:bg-surface/30">
+                        <td className="py-2 px-2 font-medium text-foreground">{m.requirement}</td>
+                        <td className="py-2 px-2 text-muted">{m.match}</td>
+                        <td className="py-2 px-2 font-mono text-brand-text text-[11px]">{m.source}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Render kit.gaps independently of evidence matrix */}
+            {kit.gaps && kit.gaps.length > 0 && (
+              <div className="pt-3 border-t border-border/60">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-amber-400 mb-2">Identified Gaps ({kit.gaps.length})</h4>
+                <ul className="list-disc list-inside space-y-1 text-xs text-muted">
+                  {kit.gaps.map((gap, idx) => (
+                    <li key={idx} className="leading-relaxed">
+                      <span className="font-medium text-amber-300">{gap}</span>
+                    </li>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </ul>
+              </div>
+            )}
 
             {gapsDetailed.length > 0 && (
               <div className="pt-3 border-t border-border/60">
@@ -525,11 +713,20 @@ function KitView({ kit, setKit, updateAnswer, markApplied, markingApplied }: { k
         {kit.answers?.length ? kit.answers.map((a, i) => (
           <div key={i} className="border-b border-border/60 py-3 last:border-0">
             <div className="flex justify-between gap-2">
-              <p className="text-sm font-medium">{a.question}</p>
-              <CopyButton text={a.answer} />
+              <label htmlFor={`answer-input-${i}`} className="text-sm font-medium">
+                {a.question}
+              </label>
+              <CopyButton text={a.answer} announce={announce} label={`Answer for ${a.question}`} />
             </div>
             {a.needsConfirmation && <p className="mt-1 text-xs text-amber-500">Needs your confirmation</p>}
-            <textarea value={a.answer} onChange={e => updateAnswer(i, e.target.value)} rows={Math.min(8, Math.max(2, a.answer.split("\n").length + 1))} className="mt-2 w-full rounded-lg border border-border bg-background/60 p-3 text-sm" />
+            <textarea
+              id={`answer-input-${i}`}
+              aria-label={`Answer for question ${i + 1}: ${a.question}`}
+              value={a.answer}
+              onChange={e => updateAnswer(i, e.target.value)}
+              rows={Math.min(8, Math.max(2, a.answer.split("\n").length + 1))}
+              className="mt-2 w-full rounded-lg border border-border bg-background/60 p-3 text-base sm:text-sm"
+            />
           </div>
         )) : (
           <p className="text-xs text-muted">No specific application form questions provided.</p>
@@ -555,7 +752,7 @@ function KitView({ kit, setKit, updateAnswer, markApplied, markingApplied }: { k
               Download Master PDF
             </a>
             <DownloadButton text={kit.tailoredCvMarkdown} filename={`${companySlug}-${roleSlug}-CV.md`} label="Download CV (.md)" />
-            <CopyButton text={kit.tailoredCvMarkdown} />
+            <CopyButton text={kit.tailoredCvMarkdown} announce={announce} label="Tailored CV Markdown" />
           </div>
         </div>
         <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded-lg bg-background/60 p-3 text-xs">{kit.tailoredCvMarkdown}</pre>
@@ -574,9 +771,17 @@ function KitView({ kit, setKit, updateAnswer, markApplied, markingApplied }: { k
             Download Master PDF
           </a>
           <DownloadButton text={kit.coverLetter} filename={`${companySlug}-cover-letter.txt`} label="Download Cover Letter (.txt)" />
-          <CopyButton text={kit.coverLetter} />
+          <CopyButton text={kit.coverLetter} announce={announce} label="Cover letter" />
         </div>
-        <textarea value={kit.coverLetter} onChange={e => setKit({ ...kit, coverLetter: e.target.value })} rows={15} className="mt-2 w-full rounded-lg border border-border bg-background/60 p-3 text-sm" />
+        <label htmlFor="workspace-cover-letter-input" className="sr-only">Cover letter text</label>
+        <textarea
+          id="workspace-cover-letter-input"
+          aria-label="Cover letter"
+          value={kit.coverLetter}
+          onChange={e => updateActiveKit({ ...kit, coverLetter: e.target.value })}
+          rows={15}
+          className="mt-2 w-full rounded-lg border border-border bg-background/60 p-3 text-base sm:text-sm"
+        />
       </Panel>
 
       {outreach && (
@@ -586,19 +791,23 @@ function KitView({ kit, setKit, updateAnswer, markApplied, markingApplied }: { k
             <div>
               <div className="flex items-center justify-between">
                 <div>
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted">LinkedIn Recruiter Note (&lt; 200 chars)</h4>
+                  <label htmlFor="outreach-recruiter-note" className="text-xs font-semibold uppercase tracking-wider text-muted block">
+                    LinkedIn Recruiter Note (&lt; 200 chars)
+                  </label>
                   <p className="text-xs text-faint">Add this note when sending a connection request to recruiters or talent scouts.</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-xs text-muted">{(outreach.linkedinRecruiterNote || "").length} / 200 chars</span>
-                  <CopyButton text={outreach.linkedinRecruiterNote || ""} />
+                  <CopyButton text={outreach.linkedinRecruiterNote || ""} announce={announce} label="LinkedIn recruiter note" />
                 </div>
               </div>
               <textarea
+                id="outreach-recruiter-note"
+                aria-label="LinkedIn recruiter connection note"
                 value={outreach.linkedinRecruiterNote || ""}
-                onChange={e => setKit({ ...kit, outreach: { ...outreach, linkedinRecruiterNote: e.target.value } })}
+                onChange={e => updateActiveKit({ ...kit, outreach: { ...outreach, linkedinRecruiterNote: e.target.value } })}
                 rows={3}
-                className="mt-2 w-full rounded-lg border border-border bg-background/60 p-3 text-xs"
+                className="mt-2 w-full rounded-lg border border-border bg-background/60 p-3 text-base sm:text-xs"
               />
             </div>
 
@@ -606,16 +815,20 @@ function KitView({ kit, setKit, updateAnswer, markApplied, markingApplied }: { k
             <div className="border-t border-border/60 pt-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted">LinkedIn Hiring Manager InMail / Message</h4>
-                  <p className="text-xs text-faint">Personalized message to the engineering manager or IT team lead.</p>
+                  <label htmlFor="outreach-hiring-manager-msg" className="text-xs font-semibold uppercase tracking-wider text-muted block">
+                    LinkedIn Hiring Manager InMail / Message
+                  </label>
+                  <p className="text-xs text-faint">Personalized message to the engineering manager or team lead.</p>
                 </div>
-                <CopyButton text={outreach.linkedinHiringManagerMessage || ""} />
+                <CopyButton text={outreach.linkedinHiringManagerMessage || ""} announce={announce} label="LinkedIn hiring manager message" />
               </div>
               <textarea
+                id="outreach-hiring-manager-msg"
+                aria-label="LinkedIn hiring manager message"
                 value={outreach.linkedinHiringManagerMessage || ""}
-                onChange={e => setKit({ ...kit, outreach: { ...outreach, linkedinHiringManagerMessage: e.target.value } })}
+                onChange={e => updateActiveKit({ ...kit, outreach: { ...outreach, linkedinHiringManagerMessage: e.target.value } })}
                 rows={4}
-                className="mt-2 w-full rounded-lg border border-border bg-background/60 p-3 text-xs"
+                className="mt-2 w-full rounded-lg border border-border bg-background/60 p-3 text-base sm:text-xs"
               />
             </div>
 
@@ -623,16 +836,20 @@ function KitView({ kit, setKit, updateAnswer, markApplied, markingApplied }: { k
             <div className="border-t border-border/60 pt-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted">Peer / Alumni Referral Request</h4>
+                  <label htmlFor="outreach-referral-msg" className="text-xs font-semibold uppercase tracking-wider text-muted block">
+                    Peer / Alumni Referral Request
+                  </label>
                   <p className="text-xs text-faint">Warm message for asking employees or alumni for an internal referral.</p>
                 </div>
-                <CopyButton text={outreach.referralRequestMessage || ""} />
+                <CopyButton text={outreach.referralRequestMessage || ""} announce={announce} label="Peer referral request message" />
               </div>
               <textarea
+                id="outreach-referral-msg"
+                aria-label="Peer or alumni referral request message"
                 value={outreach.referralRequestMessage || ""}
-                onChange={e => setKit({ ...kit, outreach: { ...outreach, referralRequestMessage: e.target.value } })}
+                onChange={e => updateActiveKit({ ...kit, outreach: { ...outreach, referralRequestMessage: e.target.value } })}
                 rows={4}
-                className="mt-2 w-full rounded-lg border border-border bg-background/60 p-3 text-xs"
+                className="mt-2 w-full rounded-lg border border-border bg-background/60 p-3 text-base sm:text-xs"
               />
             </div>
 
@@ -644,22 +861,32 @@ function KitView({ kit, setKit, updateAnswer, markApplied, markingApplied }: { k
                   <p className="text-xs text-faint">Direct email pitch with subject and structured body.</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <CopyButton text={`Subject: ${outreach.hiringManagerColdEmailSubject || ""}\n\n${outreach.hiringManagerColdEmail || ""}`} />
+                  <CopyButton
+                    text={`Subject: ${outreach.hiringManagerColdEmailSubject || ""}\n\n${outreach.hiringManagerColdEmail || ""}`}
+                    announce={announce}
+                    label="Hiring manager direct email and subject"
+                  />
                 </div>
               </div>
               <div className="mt-2 space-y-2">
+                <label htmlFor="outreach-hiring-subject" className="sr-only">Hiring manager email subject</label>
                 <input
+                  id="outreach-hiring-subject"
+                  aria-label="Hiring manager email subject line"
                   type="text"
                   value={outreach.hiringManagerColdEmailSubject || ""}
-                  onChange={e => setKit({ ...kit, outreach: { ...outreach, hiringManagerColdEmailSubject: e.target.value } })}
+                  onChange={e => updateActiveKit({ ...kit, outreach: { ...outreach, hiringManagerColdEmailSubject: e.target.value } })}
                   placeholder="Subject line"
-                  className="w-full rounded-lg border border-border bg-background/60 px-3 py-2 text-xs font-medium"
+                  className="w-full rounded-lg border border-border bg-background/60 px-3 py-2 text-base sm:text-xs font-medium"
                 />
+                <label htmlFor="outreach-hiring-body" className="sr-only">Hiring manager email body</label>
                 <textarea
+                  id="outreach-hiring-body"
+                  aria-label="Hiring manager email body text"
                   value={outreach.hiringManagerColdEmail || ""}
-                  onChange={e => setKit({ ...kit, outreach: { ...outreach, hiringManagerColdEmail: e.target.value } })}
+                  onChange={e => updateActiveKit({ ...kit, outreach: { ...outreach, hiringManagerColdEmail: e.target.value } })}
                   rows={8}
-                  className="w-full rounded-lg border border-border bg-background/60 p-3 text-xs"
+                  className="w-full rounded-lg border border-border bg-background/60 p-3 text-base sm:text-xs"
                 />
               </div>
             </div>
@@ -671,21 +898,31 @@ function KitView({ kit, setKit, updateAnswer, markApplied, markingApplied }: { k
                   <h4 className="text-xs font-semibold uppercase tracking-wider text-muted">Post-Application Follow-Up Email</h4>
                   <p className="text-xs text-faint">Send 5-7 days after submitting the application.</p>
                 </div>
-                <CopyButton text={`Subject: ${outreach.postApplicationEmailSubject || ""}\n\n${outreach.postApplicationEmail || ""}`} />
+                <CopyButton
+                  text={`Subject: ${outreach.postApplicationEmailSubject || ""}\n\n${outreach.postApplicationEmail || ""}`}
+                  announce={announce}
+                  label="Post-application follow-up email and subject"
+                />
               </div>
               <div className="mt-2 space-y-2">
+                <label htmlFor="outreach-followup-subject" className="sr-only">Post-application follow-up email subject</label>
                 <input
+                  id="outreach-followup-subject"
+                  aria-label="Post-application follow-up email subject line"
                   type="text"
                   value={outreach.postApplicationEmailSubject || ""}
-                  onChange={e => setKit({ ...kit, outreach: { ...outreach, postApplicationEmailSubject: e.target.value } })}
+                  onChange={e => updateActiveKit({ ...kit, outreach: { ...outreach, postApplicationEmailSubject: e.target.value } })}
                   placeholder="Subject line"
-                  className="w-full rounded-lg border border-border bg-background/60 px-3 py-2 text-xs font-medium"
+                  className="w-full rounded-lg border border-border bg-background/60 px-3 py-2 text-base sm:text-xs font-medium"
                 />
+                <label htmlFor="outreach-followup-body" className="sr-only">Post-application follow-up email body</label>
                 <textarea
+                  id="outreach-followup-body"
+                  aria-label="Post-application follow-up email body text"
                   value={outreach.postApplicationEmail || ""}
-                  onChange={e => setKit({ ...kit, outreach: { ...outreach, postApplicationEmail: e.target.value } })}
+                  onChange={e => updateActiveKit({ ...kit, outreach: { ...outreach, postApplicationEmail: e.target.value } })}
                   rows={7}
-                  className="w-full rounded-lg border border-border bg-background/60 p-3 text-xs"
+                  className="w-full rounded-lg border border-border bg-background/60 p-3 text-base sm:text-xs"
                 />
               </div>
             </div>
@@ -705,27 +942,45 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
-function CopyButton({ text }: { text: string }) {
+function CopyButton({
+  text,
+  announce,
+  label = "content",
+}: {
+  text: string;
+  announce?: (msg: string) => void;
+  label?: string;
+}) {
   const [ok, setOk] = useState(false);
   const [failed, setFailed] = useState(false);
   return (
     <button
-      onClick={() =>
+      type="button"
+      aria-label={`Copy ${label}`}
+      onClick={() => {
+        if (!navigator?.clipboard?.writeText) {
+          setFailed(true);
+          announce?.(`Failed to copy ${label} to clipboard`);
+          setTimeout(() => setFailed(false), 1200);
+          return;
+        }
         navigator.clipboard.writeText(text || "").then(
           () => {
             setFailed(false);
             setOk(true);
+            announce?.(`Copied ${label} to clipboard`);
             setTimeout(() => setOk(false), 1200);
           },
           () => {
             setFailed(true);
+            announce?.(`Failed to copy ${label} to clipboard`);
             setTimeout(() => setFailed(false), 1200);
           }
-        )
-      }
-      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-surface/60 px-2.5 py-1 text-xs font-medium text-brand-text hover:border-brand/50 hover:bg-surface"
+        );
+      }}
+      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-surface/60 px-2.5 py-1 text-xs font-medium text-brand-text hover:border-brand/50 hover:bg-surface transition-colors"
     >
-      {ok ? <Check className="size-3" /> : <Copy className="size-3" />}
+      {ok ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
       {failed ? "Copy failed" : ok ? "Copied" : "Copy"}
     </button>
   );
@@ -747,9 +1002,11 @@ function DownloadButton({ text, filename, label = "Download" }: { text: string; 
   }
   return (
     <button
+      type="button"
       onClick={handleDownload}
-      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-surface/60 px-2.5 py-1 text-xs font-medium text-brand-text hover:border-brand/50 hover:bg-surface"
+      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-surface/60 px-2.5 py-1 text-xs font-medium text-brand-text hover:border-brand/50 hover:bg-surface transition-colors"
       title={`Download ${filename}`}
+      aria-label={`Download ${filename}`}
     >
       <Download className="size-3" />
       {label}

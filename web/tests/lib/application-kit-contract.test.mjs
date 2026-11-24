@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeMatchScore, validatePatchPayload } from "../../src/lib/application-kit-contract.mjs";
+import {
+  normalizeMatchScore,
+  validatePatchPayload,
+  validateKitContent,
+  MAX_COVER_LETTER,
+} from "../../src/lib/application-kit-contract.mjs";
 
 test("application-kit scores preserve missing values", () => {
   assert.equal(normalizeMatchScore(undefined), null);
@@ -22,6 +27,14 @@ test("application-kit PATCH validation accepts the editable kit shape", () => {
   assert.equal(result.value.answers[0].answer, "Because");
 });
 
+test("application-kit PATCH validation normalizes Windows backslashes in cvFile", () => {
+  const result = validatePatchPayload({
+    id: "kit-windows",
+    cvFile: "data\\application-kits\\kit-windows-cv.md",
+  });
+  assert.equal(result.value.cvFile, "data/application-kits/kit-windows-cv.md");
+});
+
 test("application-kit PATCH validation rejects malformed, unexpected, and oversized values", () => {
   const cases = [
     {},
@@ -33,4 +46,24 @@ test("application-kit PATCH validation rejects malformed, unexpected, and oversi
     { id: "kit-1", coverLetter: "x".repeat(40_001) },
   ];
   for (const input of cases) assert.ok(validatePatchPayload(input).error);
+});
+
+test("validateKitContent validates generated kit against shared limits", () => {
+  const valid = {
+    coverLetter: "Truthful cover letter",
+    outreach: { linkedinRecruiterNote: "Hello recruiter" },
+    answers: [{ question: "Years of experience?", answer: "5 years", needsConfirmation: false }],
+  };
+  assert.equal(validateKitContent(valid).ok, true);
+
+  const oversizedLetter = { coverLetter: "x".repeat(MAX_COVER_LETTER + 1) };
+  assert.ok(validateKitContent(oversizedLetter).error);
+
+  const invalidOutreach = { outreach: { unknownField: "bad" } };
+  assert.ok(validateKitContent(invalidOutreach).error);
+
+  const tooManyAnswers = {
+    answers: Array.from({ length: 101 }, (_, i) => ({ question: `Q${i}`, answer: `A${i}` })),
+  };
+  assert.ok(validateKitContent(tooManyAnswers).error);
 });
