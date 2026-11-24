@@ -5334,11 +5334,22 @@ async function main() {
       } catch (parserErr) {
         if (provider.id !== 'local-parser') throw parserErr;
         const fallback = resolveProvider(company, providers, { skipIds: ['local-parser'] });
-        if (!fallback || fallback.error) throw parserErr;
+        // Keep status and name so classifyFetchError still sees a network or HTTP failure.
+        const parserFailure = (prefix, cause) => {
+          const err = new Error(`${prefix}: ${cause.message}`);
+          if (cause.status != null) err.status = cause.status;
+          if (cause.name) err.name = cause.name;
+          return err;
+        };
+        if (!fallback || fallback.error) throw parserFailure('local parser failed', parserErr);
         provider = fallback.provider;
         sourceName = `${provider.id}-api`;
         ctx.idCache = idCaches.forProvider(provider.id);
-        jobs = await provider.fetch(company, ctx);
+        try {
+          jobs = await provider.fetch(company, ctx);
+        } catch (fallbackErr) {
+          throw parserFailure('local parser failed, API fallback threw', fallbackErr);
+        }
         errors.push({
           company: company.name,
           error: `local parser failed, used API fallback: ${parserErr.message}`,
