@@ -76,7 +76,7 @@ import { join, dirname, basename, relative, delimiter } from 'path';
 import { tmpdir, availableParallelism } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { pass, fail, warn, stripJsComments, run, runRejects, runAcrossUtcDay, runAcrossLocalDay, lastRunFailure, formatRunFailure, fileExists, finish, results, absorbResults, importSuiteContained, linkNodeModules, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, NODE_TEST_BUDGET_FACTOR, getBash, toBashPath, hermeticGitEnv, pinSandboxDataRoot, exitOnInterrupt, ownRootEnv } from './tests/helpers.mjs';
+import { pass, fail, failIn, failureList, warn, stripJsComments, run, runRejects, runAcrossUtcDay, runAcrossLocalDay, lastRunFailure, formatRunFailure, fileExists, finish, results, absorbResults, importSuiteContained, linkNodeModules, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, NODE_TEST_BUDGET_FACTOR, getBash, toBashPath, hermeticGitEnv, pinSandboxDataRoot, exitOnInterrupt, ownRootEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { REQUIRED_TOOL_ENV, declaresTool } from './tests/required-tools.mjs';
 import { collectMjsFiles } from './lib/mjs-files.mjs';
@@ -285,13 +285,14 @@ function reportNodeTestSuite(rel, ok, stdout, detail, how) {
     pass(`${rel} — node:test suite passed${count ? ` (${count} tests)` : ''}`);
     return;
   }
-  fail(`${rel} — node:test suite failed (${how})`);
   // Surface the runner's own summary; a bare "failed" is not actionable.
   // The trailing window alone is not actionable either: node prints the
   // error message above the frames, so a twelve-line tail kept
   // `actual: false, expected: true` and dropped the interpolated value
   // that says WHICH assertion and by how much (#4017).
-  for (const line of childFailureExcerpt(detail)) {
+  const excerpt = childFailureExcerpt(detail);
+  failIn(rel, `${rel} — node:test suite failed (${how})`, excerpt);
+  for (const line of excerpt) {
     console.log(`      ${line}`);
   }
 }
@@ -330,7 +331,7 @@ async function runDiscovered(filter = null, tools = null) {
     pinSandboxDataRoot();
     const kind = discoveredSuiteKind(readFileSync(f, 'utf-8'));
     if (SUITE_REFUSALS[kind]) {
-      fail(SUITE_REFUSALS[kind](rel));
+      failIn(rel, SUITE_REFUSALS[kind](rel));
       continue;
     }
     if (kind === 'node-test') {
@@ -452,7 +453,7 @@ async function runSuiteInChild(f, scratch, index) {
   const rel = f.slice(ROOT.length + 1);
   const kind = discoveredSuiteKind(readFileSync(f, 'utf-8'));
   if (SUITE_REFUSALS[kind]) {
-    return { ms: 0, lingered: false, report: () => fail(SUITE_REFUSALS[kind](rel)) };
+    return { ms: 0, lingered: false, report: () => failIn(rel, SUITE_REFUSALS[kind](rel)) };
   }
   if (kind === 'node-test') {
     const r = await spawnSuite(['--test', f], DEFAULT_SCRIPT_TIMEOUT_MS * NODE_TEST_BUDGET_FACTOR);
@@ -470,18 +471,18 @@ async function runSuiteInChild(f, scratch, index) {
     lingered: counts?.lingered === true,
     report: () => {
       if (r.merged) process.stdout.write(r.merged.endsWith('\n') ? r.merged : `${r.merged}\n`);
-      if (counts) absorbResults(counts);
+      if (counts) absorbResults(counts, rel);
       if (r.timedOut) {
-        fail(`${rel} — suite was killed after ${Math.round(r.ms / 1000)}s without finishing`);
+        failIn(rel, `${rel} — suite was killed after ${Math.round(r.ms / 1000)}s without finishing`);
       } else if (!counts) {
         // No result file: the process died before its exit handler ran, so
         // however many assertions printed above, none of them were counted.
-        fail(`${rel} — suite process died without reporting (exit ${r.status ?? '?'}${r.signal ? `, ${r.signal}` : ''}); its assertions above are not in the totals`);
+        failIn(rel, `${rel} — suite process died without reporting (exit ${r.status ?? '?'}${r.signal ? `, ${r.signal}` : ''}); its assertions above are not in the totals`);
       } else if (r.status !== 0) {
         // The suite reported, then the process ended badly anyway: an error
         // thrown from async work after the import resolved. In the serial loop
         // that same error takes the whole run down with it.
-        fail(`${rel} — suite process exited ${r.status ?? r.signal ?? '?'} after reporting (an error outside its awaited work)`);
+        failIn(rel, `${rel} — suite process exited ${r.status ?? r.signal ?? '?'} after reporting (an error outside its awaited work)`);
         // Nothing to excerpt: the error is already in the suite's output above.
       }
     },
@@ -862,7 +863,7 @@ let inlineRunnerFailed = false;
 if (INLINE_CHILD !== null) {
   process.on('exit', () => {
     try {
-      writeFileSync(INLINE_CHILD, JSON.stringify({ ...results(), completed: inlineSectionsCompleted, runnerFailed: inlineRunnerFailed }));
+      writeFileSync(INLINE_CHILD, JSON.stringify({ ...results(), failures: failureList(), completed: inlineSectionsCompleted, runnerFailed: inlineRunnerFailed }));
     } catch {
       // Nothing to report to: the parent reads a missing file as sections that died.
     }
