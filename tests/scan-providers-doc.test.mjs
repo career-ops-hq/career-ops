@@ -49,7 +49,8 @@ test('the scan mode does not tell the agent to ignore every other provider', () 
   assert.match(level0, /prints that line under `unreachable \(slug\?\)` and `FIX NEEDED`/);
   assert.match(level0, /takes precedence/);
   assert.match(level0, /unverified zero takes precedence/);
-  assert.match(level0, /empty fallback after HTTP requests and no successful response is an unverified zero and is not covered/);
+  assert.match(level0, /goes through Levels 1 and 2/);
+  assert.match(level0, /plus a company named under `returned zero jobs without a successful HTTP response`/);
   assert.match(scan, /If you ran Level 0 by hand, the covered set is `local_parser_ok` plus companies whose API fallback returned jobs/);
   assert.match(scan, /add those jobs to candidates/);
   assert.match(scan, /name not listed in `local_parser_ok`/);
