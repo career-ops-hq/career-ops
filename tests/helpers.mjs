@@ -262,6 +262,20 @@ const TRANSIENT_UNLINK_ERRORS = new Set(['EBUSY', 'EMFILE', 'ENFILE', 'ENOTEMPTY
  */
 export const DEFAULT_SCRIPT_TIMEOUT_MS = 30_000;
 
+/**
+ * How many times DEFAULT_SCRIPT_TIMEOUT_MS test-all.mjs gives a `node:test`
+ * suite, which spawns child processes per test and shares the machine with
+ * the rest of the pool.
+ *
+ * 4 was measured on 8 cores: a file takes about 1.7x as long at 8 jobs as
+ * alone, and the slowest is 16s alone. On the windows-latest runner (4 vCPU,
+ * 4 jobs) the same suites take about twice as long as on ubuntu-latest, and
+ * that baseline swings 1.7x between runs of the same tree, so a suite that
+ * used 40% of 120s on ubuntu overran it on a slow Windows run (#7713).
+ * Windows gets double the factor for the doubled baseline.
+ */
+export const NODE_TEST_BUDGET_FACTOR = process.platform === 'win32' ? 8 : 4;
+
 let passed = 0;
 let failed = 0;
 let warnings = 0;
