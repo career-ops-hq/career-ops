@@ -30,7 +30,7 @@ test('recordLivenessChecks writes active and closed verdicts with today, creatin
   ]);
   assert.equal(n, 2);
   const parsed = parseLivenessLog(readFileSync(log, 'utf-8'));
-  assert.deepEqual(parsed.get('https://a.example.com/j/1'), { result: 'active', day: localToday() });
+  assert.deepEqual(parsed.get('https://a.example.com/j/1'), { result: 'active', day: localToday(), at: localToday() });
   assert.equal(parsed.get('https://a.example.com/j/2').result, 'expired');
   assert.equal(parsed.has('https://a.example.com/j/3'), false);
 });
@@ -39,6 +39,14 @@ test('main() calls recordLivenessChecks inside the record gate', () => {
   const src = readFileSync(join(ROOT, 'check-liveness.mjs'), 'utf-8');
   const body = src.slice(src.indexOf('async function main('));
   assert.match(body, /await recordLivenessChecks\(verdicts\)/);
+});
+
+test('each verdict carries its local observation time, so a late commit cannot replace a newer one', async () => {
+  const { localStamp } = await import('../check-liveness.mjs');
+  assert.equal(localStamp(new Date(2026, 10, 23, 9, 5, 7)), '2026-11-23T09:05:07');
+  const src = readFileSync(join(ROOT, 'check-liveness.mjs'), 'utf-8');
+  const body = src.slice(src.indexOf('async function main('));
+  assert.match(body, /verdicts\.push\(\{ url, result, code, checkedAt: localStamp\(\) \}\)/);
 });
 
 test('tracker and pipeline sweeps pace browser visits by default; a spot check does not', () => {

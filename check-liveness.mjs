@@ -173,14 +173,20 @@ export async function recordExpiredVerdicts(verdicts) {
   });
 }
 
+/** Local wall time, YYYY-MM-DDTHH:MM:SS: when one verdict was observed. */
+export function localStamp(now = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${localToday(now)}T${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}`;
+}
+
 export const LIVENESS_LOG_PATH = process.env.CAREER_OPS_LIVENESS_LOG || join(DATA_ROOT, 'data', 'liveness-checks.tsv');
 
 /**
- * Record each conclusive verdict (open or closed) with the day it ran, so the
- * Today page can show when a posting was last checked. Uncertain and unreadable
+ * Record each conclusive verdict (open or closed) with the time it was
+ * observed, so the Today page can show when a posting was last checked. Uncertain and unreadable
  * verdicts are skipped: they say nothing about the posting.
  *
- * @param {{url: string, result: string, code?: string}[]} verdicts
+ * @param {{url: string, result: string, code?: string, checkedAt?: string}[]} verdicts
  * @returns {Promise<number>} conclusive verdicts applied
  */
 export async function recordLivenessChecks(verdicts) {
@@ -419,7 +425,7 @@ async function main() {
     if (result === 'active') active++;
     else if (result === 'expired') expired++;
     else uncertain++;
-    verdicts.push({ url, result, code });
+    verdicts.push({ url, result, code, checkedAt: localStamp() });
   }
 
   if (headed) await headed.close();

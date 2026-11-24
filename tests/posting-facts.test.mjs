@@ -49,7 +49,7 @@ test('liveness log: latest conclusive verdict per posting wins', () => {
   log = mergeLivenessLog(log, [{ url: 'https://a.example.com/j/1?utm_source=z', result: 'expired', code: 'expired_banner', reason: 'closed' }], '2026-11-22');
   const parsed = parseLivenessLog(log);
   assert.equal(parsed.size, 1);
-  assert.deepEqual(parsed.get('https://a.example.com/j/1'), { result: 'expired', day: '2026-11-22' });
+  assert.deepEqual(parsed.get('https://a.example.com/j/1'), { result: 'expired', day: '2026-11-22', at: '2026-11-22' });
 });
 
 test('liveness log: uncertain and unreadable verdicts never overwrite a conclusive one', () => {
@@ -59,7 +59,7 @@ test('liveness log: uncertain and unreadable verdicts never overwrite a conclusi
     { url: 'https://a.example.com/j/2', result: 'expired', code: 'insufficient_content' },
   ], '2026-11-22');
   const parsed = parseLivenessLog(log);
-  assert.deepEqual(parsed.get('https://a.example.com/j/1'), { result: 'active', day: '2026-11-20' });
+  assert.deepEqual(parsed.get('https://a.example.com/j/1'), { result: 'active', day: '2026-11-20', at: '2026-11-20' });
   assert.equal(parsed.has('https://a.example.com/j/2'), false);
 });
 
@@ -67,4 +67,25 @@ test('facts carry the liveness verdict joined by posting url', () => {
   const log = mergeLivenessLog('', [{ url: 'https://a.example.com/j/1', result: 'active', code: 'ok' }], '2026-11-20');
   const index = postingFactsIndex('', log);
   assert.deepEqual(postingFactsForUrl(index, 'https://a.example.com/j/1').check, { result: 'active', day: '2026-11-20' });
+});
+
+test('liveness log: a late commit of an older observation keeps the newer verdict', () => {
+  const url = 'https://a.example.com/j/1';
+  // Sweep B saw it closed at 10:00 and committed first.
+  let log = mergeLivenessLog('', [{ url, result: 'expired', code: 'expired_banner', checkedAt: '2026-11-23T10:00:00' }], '2026-11-23');
+  // Sweep A saw it open at 09:00 and committed later.
+  log = mergeLivenessLog(log, [{ url, result: 'active', code: 'ok', checkedAt: '2026-11-23T09:00:00' }], '2026-11-23');
+  const kept = parseLivenessLog(log).get(url);
+  assert.equal(kept.result, 'expired');
+  assert.equal(kept.day, '2026-11-23');
+  // A later observation still replaces it.
+  log = mergeLivenessLog(log, [{ url, result: 'active', code: 'ok', checkedAt: '2026-11-23T11:00:00' }], '2026-11-23');
+  assert.equal(parseLivenessLog(log).get(url).result, 'active');
+});
+
+test('liveness log: an older observation from an earlier day does not replace a newer day', () => {
+  const url = 'https://a.example.com/j/1';
+  let log = mergeLivenessLog('', [{ url, result: 'expired', code: 'expired_banner' }], '2026-11-23');
+  log = mergeLivenessLog(log, [{ url, result: 'active', code: 'ok', checkedAt: '2026-11-22T23:59:00' }], '2026-11-23');
+  assert.deepEqual(postingFactsForUrl(postingFactsIndex('', log), url).check, { result: 'expired', day: '2026-11-23' });
 });
