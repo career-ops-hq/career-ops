@@ -50,9 +50,10 @@ function alreadyClosed(row, today) {
  * @param {T[]} applications
  * @param {(score: string) => number} scoreOf  parser returning NaN when absent
  * @param {number} [limit]  how many cards the caller renders
+ * @param {(row: T) => boolean} [closedOf]  a closed posting stays listed but sorts after every open one
  * @returns {T[]}
  */
-export function pickAwaitingDecision(applications, scoreOf, limit = 6) {
+export function pickAwaitingDecision(applications, scoreOf, limit = 6, closedOf = () => false) {
   // -1, not -Infinity: two unscored rows would subtract to NaN, and a NaN
   // comparator leaves the sort order undefined rather than merely arbitrary.
   const rank = (s) => {
@@ -70,7 +71,7 @@ export function pickAwaitingDecision(applications, scoreOf, limit = 6) {
     .filter((a) => canonStatus(baseStatus(a.status)) === "EVALUATED")
     // An unscored row ranks -1 and an undated row compares "" (least), and both
     // comparisons are descending, so either one lands at the end.
-    .sort((a, b) => rank(b.score) - rank(a.score) || (b.date || "").localeCompare(a.date || ""))
+    .sort((a, b) => Number(closedOf(a)) - Number(closedOf(b)) || rank(b.score) - rank(a.score) || (b.date || "").localeCompare(a.date || ""))
     .slice(0, limit);
 }
 

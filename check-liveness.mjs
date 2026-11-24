@@ -31,11 +31,12 @@ import {
 import { checkLivenessViaApi } from './liveness-api.mjs';
 import { robotsAllows } from './robots-check.mjs';
 import { planExpiredHistoryRows, trackerLivenessTargets, DEFAULT_TRACKER_STATUSES, planExpiredDiscards, postingClosedNote, DEFAULT_DISCARD_STATUSES, discardableExpiredUrls } from './liveness-core.mjs';
-import { appendToScanHistory, seenJobKey, SCAN_HISTORY_PATH } from './scan.mjs';
+import { appendToScanHistory, seenJobKey, atomicWriteFile, DATA_ROOT, SCAN_HISTORY_PATH } from './scan.mjs';
+import { mergeLivenessLog, parseLivenessLog } from './lib/posting-facts.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { localToday } from './lib/local-today.mjs';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
@@ -172,6 +173,38 @@ export async function recordExpiredVerdicts(verdicts) {
   });
 }
 
+export const LIVENESS_LOG_PATH = process.env.CAREER_OPS_LIVENESS_LOG || join(DATA_ROOT, 'data', 'liveness-checks.tsv');
+
+/**
+ * Record each conclusive verdict (open or closed) with the day it ran, so the
+ * Today page can show when a posting was last checked. Uncertain and unreadable
+ * verdicts are skipped: they say nothing about the posting.
+ *
+ * @param {{url: string, result: string, code?: string}[]} verdicts
+ * @returns {Promise<number>} conclusive verdicts applied
+ */
+export async function recordLivenessChecks(verdicts) {
+  mkdirSync(dirname(LIVENESS_LOG_PATH), { recursive: true });
+  return withPipelineLock(LIVENESS_LOG_PATH, async () => {
+    const before = existsSync(LIVENESS_LOG_PATH) ? readFileSync(LIVENESS_LOG_PATH, 'utf-8') : '';
+    const day = localToday();
+    const after = mergeLivenessLog(before, verdicts, day);
+    const touched = [...parseLivenessLog(after).values()].filter((v) => v.day === day).length;
+    if (after !== before) atomicWriteFile(LIVENESS_LOG_PATH, after);
+    return touched;
+  });
+}
+
+// An unattended sweep walks every Evaluated and Pending posting, so it spaces
+// repeat browser visits to one host. A hand-run spot check stays unspaced.
+const SWEEP_THROTTLE_MS = 5000;
+
+export function sweepThrottleBaseMs(args) {
+  const given = throttleBaseMsFrom(args);
+  if (given) return given;
+  return args.includes('--tracker') || args.includes('--pipeline') ? SWEEP_THROTTLE_MS : 0;
+}
+
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 
 function runSetStatus(args, trackerPath) {
@@ -250,7 +283,7 @@ async function main() {
   // Cloudflare flags the session after ~2 rapid hits, so a bulk run needs
   // spacing. Bare --throttle uses a 5000ms base. The space form used to be
   // ignored (the number was checked as a URL) and the base stayed 5000.
-  const throttleBaseMs = throttleBaseMsFrom(args);
+  const throttleBaseMs = sweepThrottleBaseMs(args);
   const record = recordingEnabled(args);
   // `--status Rejected` as well as `--status=Rejected`. Only the `=` form was
   // read, so the space form, and any `--status` with no value, fell back to
@@ -402,6 +435,11 @@ async function main() {
   if (record) {
     const recorded = await recordExpiredVerdicts(verdicts);
     if (recorded > 0) console.log(`Recorded ${recorded} expired posting(s) in ${SCAN_HISTORY_PATH}`);
+    try {
+      await recordLivenessChecks(verdicts);
+    } catch (err) {
+      console.error(`Could not write ${LIVENESS_LOG_PATH}: ${err?.message ?? err}`);
+    }
   }
 
   if (discardExpired) {
