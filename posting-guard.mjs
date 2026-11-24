@@ -102,17 +102,73 @@ function decodeEntities(s) {
   });
 }
 
+const ZERO_NUMBER_RE = /^(?:0(?:\.0+)?|\.0+)$/;
+const ZERO_LENGTH_RE = /^(?:0(?:\.0+)?|\.0+)\s*(?:px|pt|em|rem|%)?$/;
+const CLIP_HIDDEN_RE = /^(?:inset\(\s*100|circle\(\s*0|rect\(\s*0)/;
+const OFF_CANVAS_RE = /^-\d{3,}px$/;
+const OVERFLOW_HIDDEN_RE = /^hidden(?:\s+hidden)?$/;
+
+function parseStyleDeclarations(style) {
+  const s = decodeEntities(style).toLowerCase();
+  const decls = new Map();
+  let buf = '';
+  let quote = null;
+  for (let i = 0; i <= s.length; i++) {
+    const ch = s[i];
+    if (quote) {
+      if (i === s.length) break;
+      buf += ch;
+      if (ch === '\\' && i + 1 < s.length) buf += s[++i];
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '/' && s[i + 1] === '*') {
+      const end = s.indexOf('*/', i + 2);
+      buf += ' ';
+      i = end === -1 ? s.length - 1 : end + 1;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      buf += ch;
+      continue;
+    }
+    if (ch !== ';' && i !== s.length) {
+      buf += ch;
+      continue;
+    }
+    const colon = buf.indexOf(':');
+    if (colon > 0) {
+      const prop = buf.slice(0, colon).trim();
+      const rawVal = buf.slice(colon + 1).trim();
+      if (prop && rawVal) {
+        const important = /\s*!\s*important$/.test(rawVal);
+        const val = rawVal.replace(/\s*!\s*important$/, '').trim();
+        const prev = decls.get(prop);
+        if (!prev || important || !prev.important) decls.set(prop, { val, important });
+      }
+    }
+    buf = '';
+  }
+  return decls;
+}
+
 function styleHidden(style) {
   if (!style) return null;
-  const s = decodeEntities(style).toLowerCase();
-  if (/display\s*:\s*none/.test(s)) return 'display:none';
-  if (/visibility\s*:\s*hidden/.test(s)) return 'visibility:hidden';
-  if (/(^|[^-])opacity\s*:\s*0(\.0*)?\s*(;|$)/.test(s)) return 'opacity:0';
-  if (/font-size\s*:\s*0(\.0+)?\s*(px|pt|em|rem)?\s*(;|$)/.test(s)) return 'font-size:0';
-  if (/color\s*:\s*transparent/.test(s)) return 'color:transparent';
-  if (/(clip|clip-path)\s*:\s*(inset\(100|circle\(0|rect\(0)/.test(s)) return 'clipped';
-  if (/left\s*:\s*-\d{3,}px/.test(s) || /text-indent\s*:\s*-\d{3,}px/.test(s)) return 'off-canvas';
-  if (/overflow\s*:\s*hidden/.test(s) && /(height|width|line-height)\s*:\s*0(\.0*)?(px|;|$)/.test(s)) {
+  const decls = parseStyleDeclarations(style);
+  const val = (prop) => decls.get(prop)?.val ?? '';
+  if (val('display') === 'none') return 'display:none';
+  if (val('visibility') === 'hidden') return 'visibility:hidden';
+  if (ZERO_NUMBER_RE.test(val('opacity'))) return 'opacity:0';
+  if (ZERO_LENGTH_RE.test(val('font-size'))) return 'font-size:0';
+  if (val('color') === 'transparent') return 'color:transparent';
+  if (CLIP_HIDDEN_RE.test(val('clip')) || CLIP_HIDDEN_RE.test(val('clip-path'))) return 'clipped';
+  if (OFF_CANVAS_RE.test(val('left')) || OFF_CANVAS_RE.test(val('text-indent'))) return 'off-canvas';
+  if (OVERFLOW_HIDDEN_RE.test(val('overflow')) && (
+    ZERO_LENGTH_RE.test(val('height'))
+    || ZERO_LENGTH_RE.test(val('width'))
+    || ZERO_LENGTH_RE.test(val('line-height'))
+  )) {
     return 'zero-box + overflow:hidden';
   }
   return null;
