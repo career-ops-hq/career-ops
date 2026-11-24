@@ -208,6 +208,17 @@ try {
   // Not a level: a graduate program run by someone senior, and a plain "Graduate".
   check('Recent Graduate Program Lead', 'senior');
   check('Graduate Engineer', 'mid');
+  // Leading a new-grad program is not a new-grad role: the grad spellings
+  // reach the program-bridge guard too, as "Graduate Program" always did.
+  check('New Grad Program Director', 'senior');
+  check('New College Grad Program Director', 'senior');
+  check('New Grad Program Lead', 'senior');
+  check('University Graduates Program Lead', 'senior');
+  // A leading new-grad label beats a later "Associate Professor" that names
+  // the group the role sits in, while an Associate Professor role that only
+  // mentions new grads stays senior.
+  check('New Grad Research Assistant, Associate Professor Research Group', 'entry');
+  check('Associate Professor, New Graduate Mentoring', 'senior');
 
 } catch (error) {
   fail(`classify-tier.mjs tests could not run: ${error.message}`);

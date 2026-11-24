@@ -124,7 +124,7 @@ export function classifyTier(title) {
     // deanship — the same doctrine the position loop below applies to
     // "Summer Intern, Director of Product". Without this the guard returns
     // early and inverts the very harm #3178 is about, on the same board.
-    const juniorAt = cleanTitle.search(/\b(?:intern(?:ship)?|trainee|co-op|graduate|junior|entry(?:-level)?)\b/i);
+    const juniorAt = cleanTitle.search(/\b(?:intern(?:ship)?|trainee|co-op|grad(?:uate)?s?|junior|entry(?:-level)?)\b/i);
     if (juniorAt < 0 || juniorAt > associateAt) {
       const afterAssociate = cleanTitle.slice(associateAt + 'associate'.length);
       // WHITESPACE only, and at most two words of gap. Both bounds carry
@@ -150,7 +150,7 @@ export function classifyTier(title) {
   // not itself an internship. The bridge-noun set is a closed list — a generic
   // adjacency rule breaks "Junior Staff Accountant" (staff is a senior matcher but
   // not a bridge word for this construction).
-  const programBridge = /\b(?:intern(?:ship)?|trainee|co-op|graduate|junior|entry(?:-level)?)\s+(?:program|scheme|talent|cohort)\b/i;
+  const programBridge = /\b(?:intern(?:ship)?|trainee|co-op|grad(?:uate)?s?|junior|entry(?:-level)?)\s+(?:program|scheme|talent|cohort)\b/i;
   if (programBridge.test(cleanTitle)) {
     const afterBridge = cleanTitle.replace(programBridge, ' ').trim();
     if (/\b(chief|vp|vice\s+president|director|principal|staff|lead(?![\s-]+(?:generation\b|gen\b(?![\s-]*ai\b)))|senior(?![\s-]+living\b)|sr\.?|head\s+of|partner)\b/i.test(afterBridge)) {
