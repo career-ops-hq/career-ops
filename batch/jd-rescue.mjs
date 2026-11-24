@@ -56,7 +56,7 @@ import fs from 'node:fs';
 import { isMainModule } from '../lib/is-main-module.mjs';
 import { fromLdJson, fromEmbeddedDescription, ldJsonBlocks, wordCount } from '../lib/jd-parse.mjs';
 import { pageClosureEvidence, inspectPage, sameDocument } from '../lib/jd-page-fetch.mjs';
-import { renameSyncWithRetry } from '../tracker-utils.mjs';
+import { renameSyncWithRetry } from '../lib/rename-retry.mjs';
 
 // Re-exported so existing importers of this module keep working.
 export { fromLdJson, fromEmbeddedDescription, ldJsonBlocks, wordCount };

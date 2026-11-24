@@ -16,7 +16,7 @@ import { withPipelineLock } from './pipeline-lock.mjs';
 import { validateProfile, loadValidatedProfile } from './lib/career-profile.mjs';
 import { prepareCvSelection, verifyCvSelection } from './lib/profile-cv-selection.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
-import { renameSyncWithRetry } from './tracker-utils.mjs';
+import { renameSyncWithRetry } from './lib/rename-retry.mjs';
 
 const root = getCareerOpsRoot();
 const profilePath = join(root, 'data', 'career-profile.yml');
