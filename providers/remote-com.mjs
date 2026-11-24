@@ -74,6 +74,35 @@ function toEpochMs(value) {
 }
 
 /**
+ * The posting's pay range, or undefined. `pay.rows` has one row per region; a
+ * posting with more than one row pays by the candidate's region, which the
+ * provider does not know, so only a single row is read. The range is per year.
+ * @param {any} pay
+ * @returns {Job['salary'] | undefined}
+ */
+function parsePay(pay) {
+  const rows = pay && Array.isArray(pay.rows) ? pay.rows : [];
+  if (rows.length !== 1) return undefined;
+  const row = rows[0];
+  const bound = (/** @type {unknown} */ v) => {
+    if (typeof v !== 'number' && typeof v !== 'string') return undefined;
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  };
+  const lo = bound(row?.min);
+  const hi = bound(row?.max);
+  const currency = typeof row?.currency === 'string' ? row.currency.trim().toUpperCase() : '';
+  if (!/^[A-Z]{3}$/.test(currency) || (lo === undefined && hi === undefined)) return undefined;
+  return {
+    min: Math.min(lo ?? /** @type {number} */ (hi), hi ?? /** @type {number} */ (lo)),
+    max: Math.max(lo ?? /** @type {number} */ (hi), hi ?? /** @type {number} */ (lo)),
+    currency,
+    period: 'year',
+    posted: { ...(lo !== undefined ? { min: lo } : {}), ...(hi !== undefined ? { max: hi } : {}) },
+  };
+}
+
+/**
  * Renders Remote's region codes and workplace into one readable location.
  * @param {unknown} location - e.g. "EMEA, NORAM"
  * @param {unknown} workplace - e.g. "remote"
@@ -142,6 +171,8 @@ export function parseRemoteJobs(json) {
     };
     const postedAt = toEpochMs(row.opened_at);
     if (postedAt !== undefined) job.postedAt = postedAt;
+    const salary = parsePay(row.pay);
+    if (salary) job.salary = salary;
     out.push(job);
   }
   return out;

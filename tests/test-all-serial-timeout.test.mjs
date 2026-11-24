@@ -10,9 +10,9 @@
 // The sandbox's copy of helpers.mjs gets a 500 ms budget instead of 30 s, so
 // the case takes seconds; both spellings of the budget in that file are
 // patched, and the case fails if either is missing. The in-process loop runs
-// node:test suites at FACTOR × the script default (4 ×), so patching the
-// default to 500 ms puts the kill line at 2 s exactly.
-import { pass, fail } from './helpers.mjs';
+// node:test suites at NODE_TEST_BUDGET_FACTOR × the script default, so
+// patching the default to 500 ms puts the kill line at 2 s (4 s on Windows).
+import { pass, fail, NODE_TEST_BUDGET_FACTOR } from './helpers.mjs';
 import { createRunnerSandbox } from './test-all-sandbox.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -33,6 +33,7 @@ try {
   check('the sandbox budget is shortened in both places helpers.mjs spells it', both);
   writeFileSync(helpersFile, patched);
 
+  const killedAfter = (500 * NODE_TEST_BUDGET_FACTOR) / 1000;
   suite('slow/a-slow.test.mjs', [RUNNER_IMPORT, "test('outlives the budget', async () => { await new Promise((r) => setTimeout(r, 8000)); });"]);
 
   for (const args of [['--only', 'slow/'], ['--only', 'slow/', '--jobs', '1']]) {
@@ -40,7 +41,7 @@ try {
     const line = r.verdicts.find((l) => l.includes('slow/a-slow.test.mjs')) ?? '(no line for the suite)';
     check(`${args.join(' ')}: the suite fails`, r.status === 1, `status=${r.status}\n${r.all}`);
     check(`${args.join(' ')}: the failure says it was killed after the budget`,
-      line === '❌ tests/slow/a-slow.test.mjs — node:test suite failed (killed after 2s)', line);
+      line === `❌ tests/slow/a-slow.test.mjs — node:test suite failed (killed after ${killedAfter}s)`, line);
   }
 
   // A suite that fails inside its budget keeps its exit status.

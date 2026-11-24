@@ -143,7 +143,7 @@ export function flaggedPosting(legitimacy) {
  */
 export function applyLineLabel(score, legitimacy) {
   if (score == null || score === "") return null;
-  const n = typeof score === "number" ? score : Number(String(score).match(/(\d+(?:\.\d+)?)/)?.[1]);
+  const n = typeof score === "number" ? score : Number(String(score).match(/(\d+(?:[.,]\d+)?)/)?.[1]?.replace(",", "."));
   if (!Number.isFinite(n)) return null;
   if (n < APPLY_LINE) return "Below the apply line";
   return flaggedPosting(legitimacy) ? "Check the posting first" : "Recommended";
@@ -208,6 +208,7 @@ export function firstProseParagraph(md) {
 /**
  * Score-why paragraph for the verdict card. Prefers a real Verdict block, then
  * the body intro, then the header lede (oferta.md puts the one-liner above ---).
+ * A report with no --- has no header lede. The leftover prose is the body.
  * @param {{ report?: string, intro?: string, verdictContent?: string }} opts
  * @returns {string}
  */
@@ -216,7 +217,9 @@ export function verdictReason(opts) {
   if (fromVerdict) return plainInline(fromVerdict);
   const fromIntro = firstProseParagraph(opts?.intro ?? "");
   if (fromIntro) return plainInline(fromIntro);
-  const header = String(opts?.report ?? "").split(/^---\s*$/m)[0] ?? "";
+  const report = String(opts?.report ?? "");
+  if (!/^---\s*$/m.test(report)) return "";
+  const header = report.split(/^---\s*$/m)[0] ?? "";
   const stripped = header
     .replace(/^#\s+.*$/m, "")
     .replace(/^\s*\*\*[^*]+:\*\*.*$/gm, "")

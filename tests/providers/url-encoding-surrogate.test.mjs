@@ -391,6 +391,14 @@ try {
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://acme.zohorecruit.com/jobs/Careers/101',
   );
 
+  // paycom.parsePaycom — for…of over jobPostingPreviews; jobId feeds the posting URL.
+  const { parsePaycom } = await load('paycom.mjs');
+  check(
+    'paycom.parsePaycom',
+    () => parsePaycom({ jobPostingPreviews: [{ jobId: `${LONE}bad`, jobTitle: 'Bad Id' }, { jobId: 101, jobTitle: 'Good Id' }] }, '0123456789ABCDEF0123456789ABCDEF', 'Acme'),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://www.paycomonline.net/v4/ats/web.php/portal/0123456789ABCDEF0123456789ABCDEF/jobs/101',
+  );
+
   // paylocity.parsePaylocityBoard — for…of over window.pageData.Jobs; JobId feeds the posting URL.
   const { parsePaylocityBoard } = await load('paylocity.mjs');
   check(
@@ -530,6 +538,7 @@ try {
     'manfred.mjs',
     'meituan.mjs',
     'mokahr.mjs',
+    'paycom.mjs',
     'paylocity.mjs',
     'phenom.mjs',
     'platsbanken.mjs',

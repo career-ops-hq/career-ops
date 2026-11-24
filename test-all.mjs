@@ -76,7 +76,7 @@ import { join, dirname, basename, relative, delimiter } from 'path';
 import { tmpdir, availableParallelism } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { pass, fail, warn, stripJsComments, run, runRejects, runAcrossUtcDay, runAcrossLocalDay, lastRunFailure, formatRunFailure, fileExists, finish, results, absorbResults, importSuiteContained, linkNodeModules, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv, pinSandboxDataRoot, exitOnInterrupt, ownRootEnv } from './tests/helpers.mjs';
+import { pass, fail, warn, stripJsComments, run, runRejects, runAcrossUtcDay, runAcrossLocalDay, lastRunFailure, formatRunFailure, fileExists, finish, results, absorbResults, importSuiteContained, linkNodeModules, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, NODE_TEST_BUDGET_FACTOR, getBash, toBashPath, hermeticGitEnv, pinSandboxDataRoot, exitOnInterrupt, ownRootEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { REQUIRED_TOOL_ENV, declaresTool } from './tests/required-tools.mjs';
 import { collectMjsFiles } from './lib/mjs-files.mjs';
@@ -339,12 +339,12 @@ async function runDiscovered(filter = null, tools = null) {
       // a bare 30s script budget cannot cover on slow-spawn platforms
       // (Windows). Derived from the helpers constant so sandbox runs that
       // shrink the default shrink this budget with it.
-      const out = run(NODE, ['--test', f], { timeout: DEFAULT_SCRIPT_TIMEOUT_MS * PARALLEL_NODE_TEST_BUDGET_FACTOR });
+      const out = run(NODE, ['--test', f], { timeout: DEFAULT_SCRIPT_TIMEOUT_MS * NODE_TEST_BUDGET_FACTOR });
       const failure = lastRunFailure();
       // run()'s timeout for node:test suites is the FACTOR-scaled budget above.
       // Said the way the parallel loop says it, since a killed suite has no
       // exit status to print — and the line reports the budget actually given.
-      const budgetMs = DEFAULT_SCRIPT_TIMEOUT_MS * PARALLEL_NODE_TEST_BUDGET_FACTOR;
+      const budgetMs = DEFAULT_SCRIPT_TIMEOUT_MS * NODE_TEST_BUDGET_FACTOR;
       const how = failure?.code === 'ETIMEDOUT'
         ? `killed after ${budgetMs / 1000}s`
         : `exit ${failure?.status ?? '?'}`;
@@ -376,13 +376,14 @@ async function runDiscovered(filter = null, tools = null) {
 // and one that keeps the event loop open is cut off after a grace period
 // instead of riding along until finish(). Both are reported, not hidden.
 
-// A node:test suite gets the same 30s budget run() gives it, times this, when
-// it shares the machine with N-1 others. Measured on 8 cores: a file takes
-// about 1.7x as long at 8 jobs as it does alone, and the slowest is 16s alone.
-const PARALLEL_NODE_TEST_BUDGET_FACTOR = 4;
+// A node:test suite gets DEFAULT_SCRIPT_TIMEOUT_MS × NODE_TEST_BUDGET_FACTOR
+// (tests/helpers.mjs), the same budget the in-process loop gives it.
 // The serial loop has no limit for an imported suite at all; a child that never
 // exits must not hang the whole run, so this one is only a backstop.
 const PARALLEL_SUITE_TIMEOUT_MS = 5 * 60_000;
+// Named under the total suite time, so a slow run says where it spent that
+// time before a suite reaches its budget and gets killed (#7713).
+const SLOWEST_SUITES_SHOWN = 10;
 
 /**
  * Spawn node on one suite and collect what it printed.
@@ -454,7 +455,7 @@ async function runSuiteInChild(f, scratch, index) {
     return { ms: 0, lingered: false, report: () => fail(SUITE_REFUSALS[kind](rel)) };
   }
   if (kind === 'node-test') {
-    const r = await spawnSuite(['--test', f], DEFAULT_SCRIPT_TIMEOUT_MS * PARALLEL_NODE_TEST_BUDGET_FACTOR);
+    const r = await spawnSuite(['--test', f], DEFAULT_SCRIPT_TIMEOUT_MS * NODE_TEST_BUDGET_FACTOR);
     const how = r.timedOut ? `killed after ${Math.round(r.ms / 1000)}s` : `exit ${r.status ?? '?'}`;
     return { ms: r.ms, lingered: false, report: () => reportNodeTestSuite(rel, r.status === 0, r.stdout, r, how) };
   }
@@ -632,6 +633,11 @@ async function runDiscoveredParallel(files, jobs, { withInlineSections = false }
   const wall = (Date.now() - startedAt) / 1000;
   const summed = finished.reduce((n, r) => n + (r?.ms ?? 0), 0) / 1000;
   console.log(`\n  ⏱  ${files.length} discovered suites in ${wall.toFixed(0)}s, ${pool} at a time (${summed.toFixed(0)}s of suite time; --jobs N or CAREER_OPS_TEST_JOBS to change, 1 runs them in-process)`);
+  const slowest = files
+    .map((f, i) => ({ rel: f.slice(ROOT.length + 1), ms: finished[i]?.ms ?? 0 }))
+    .sort((a, b) => b.ms - a.ms)
+    .slice(0, SLOWEST_SUITES_SHOWN);
+  console.log(`  ⏱  slowest: ${slowest.map((s) => `${s.rel} ${(s.ms / 1000).toFixed(0)}s`).join(', ')}`);
   if (withInlineSections) {
     console.log(`  ⏱  the inline sections ran at the same time, for the first ${(inlineMs / 1000).toFixed(0)}s, in one of the ${jobs} slots`);
   }
@@ -1373,9 +1379,15 @@ try {
     visibleMetric,
     '<html><body><p>Improved onboarding for 918273645 users.</p></body></html>'
   );
+  // The suite pins CAREER_OPS_ROOT at a temp dir with no cv.md. Without a
+  // source file the script exits 1 and says so, and a check that only looks
+  // at the status reports that as "script contents were visible".
+  writeFileSync(join(tmp, 'cv.md'), '# Jordan Example\n\n- Led a team of 4 engineers.\n');
+  const factEnv = { ...process.env, CAREER_OPS_ROOT: tmp, CAREER_OPS_DATA_DIR: '' };
 
   const hiddenResult = run(NODE, ['verify-cv-facts.mjs', hiddenScriptMetric], {
     stdio: ['pipe', 'pipe', 'pipe'],
+    env: factEnv,
   });
   if (hiddenResult !== null) {
     pass('verify-cv-facts strips script tags with irregular closing tags');
@@ -1385,6 +1397,7 @@ try {
 
   const visibleResult = run(NODE, ['verify-cv-facts.mjs', visibleMetric], {
     stdio: ['pipe', 'pipe', 'pipe'],
+    env: factEnv,
   });
   if (visibleResult === null) {
     pass('verify-cv-facts still flags visible unsupported metrics');
@@ -16274,9 +16287,6 @@ try {
   if (r.present.includes('Python')) pass('keyword coverage: exact match (Python)');
   else fail('keyword coverage: Python should be present');
 
-  if (!r.thin.includes('Python')) pass('keyword coverage: count>1 keyword not flagged thin (Python x2)');
-  else fail('keyword coverage: Python appears twice and must not be thin');
-
   if (r.present.includes('Kubernetes')) pass('keyword coverage: synonym match (k8s -> Kubernetes)');
   else fail('keyword coverage: Kubernetes should match via k8s synonym');
 
@@ -16295,8 +16305,8 @@ try {
   if (r.missing.includes('gRPC')) pass('keyword coverage: genuine miss reported (gRPC)');
   else fail('keyword coverage: gRPC should be missing');
 
-  if (r.thin.includes('observability')) pass('keyword coverage: count-1 keyword flagged thin (observability)');
-  else fail('keyword coverage: observability should be thin');
+  if (r.present.includes('observability')) pass('keyword coverage: one occurrence counts as present (observability)');
+  else fail('keyword coverage: one mention of observability should count as present');
 
   if (r.coveragePct === 80) pass('keyword coverage: percentage computed correctly (8/10 = 80%)');
   else fail(`keyword coverage: percentage wrong: ${r.coveragePct} (expected 80)`);
@@ -19662,25 +19672,25 @@ try {
     fail('docs/SCRIPTS.md missing the exit-code semantics for check-table-freshness');
   }
 
-  const agentsDoc = readFile('AGENTS.md');
-  // Only the table under the Main Files heading counts: the name in prose,
-  // another table or a fenced example does not list the script there.
-  const agentsLines = agentsDoc.split(/\r?\n/);
-  const mainFilesHeading = agentsLines.indexOf('### Main Files');
+  // The Main Files table moved from AGENTS.md to modes/_files.md (#6693).
+  // Only the table under its heading counts: the name in prose, another table
+  // or a fenced example does not list the script there.
+  const filesLines = readFile('modes/_files.md').split(/\r?\n/);
+  const mainFilesHeading = filesLines.indexOf('## Scripts and data files');
   const mainFilesRows = [];
-  for (const line of mainFilesHeading < 0 ? [] : agentsLines.slice(mainFilesHeading + 1)) {
+  for (const line of mainFilesHeading < 0 ? [] : filesLines.slice(mainFilesHeading + 1)) {
     if (line.startsWith('|')) mainFilesRows.push(line);
     else if (mainFilesRows.length > 0 || line.trim() !== '') break;
   }
   if (mainFilesRows.some((row) => row.startsWith('| `check-table-freshness.mjs` |'))) {
-    pass('AGENTS.md Main Files table lists check-table-freshness.mjs');
+    pass('modes/_files.md Main Files table lists check-table-freshness.mjs');
   } else {
-    fail('AGENTS.md Main Files table missing check-table-freshness.mjs');
+    fail('modes/_files.md Main Files table missing check-table-freshness.mjs');
   }
   if (mainFilesRows.some((row) => row.startsWith('| `add-entry.mjs` |'))) {
-    pass('AGENTS.md Main Files table lists add-entry.mjs');
+    pass('modes/_files.md Main Files table lists add-entry.mjs');
   } else {
-    fail('AGENTS.md Main Files table missing add-entry.mjs');
+    fail('modes/_files.md Main Files table missing add-entry.mjs');
   }
 
   // Read-only import boundary: the ONLY fs capabilities the script may hold

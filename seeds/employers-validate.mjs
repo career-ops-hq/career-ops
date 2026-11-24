@@ -56,6 +56,11 @@ import {
   ownDomainBoardUrl,
   REGIONS,
   SF_CLASSIC_COMPANY_RE,
+  CSOD_CORP_RE,
+  CSOD_RESERVED_TENANTS,
+  CSOD_SITE_RE,
+  CSOD_TENANT_RE,
+  CSOD_TENANT_TEST_RE,
   SF_CLASSIC_DOMAINS,
   SF_CLASSIC_LABEL_RE,
   SLUG_RE,
@@ -143,6 +148,8 @@ export const SOURCE_PATTERNS = Object.freeze({
   'employer-list': /^employer-list:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/,
   'prior-mit': /^prior-mit:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{7,40}$/,
   'web-index': /^web-index:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?@\d{4}-\d{2}-\d{2}$/,
+  // Boards that users of the project sent in, on the day they were taken.
+  'user-submissions': /^user-submissions@\d{4}-\d{2}-\d{2}$/,
 });
 
 export const LICENSE_ID = 'CC-BY-4.0';
@@ -226,6 +233,7 @@ export function boardProblem(ats, board) {
   if (typeof board !== 'string' || board === '') return 'board must be a non-empty string';
   if (ats === 'workday') return workdayBoardProblem(board);
   if (ats === 'successfactors-classic') return sfClassicBoardProblem(board);
+  if (ats === 'csod') return csodBoardProblem(board);
   if (ats === 'oraclecloud') return oraclecloudBoardProblem(board);
   if (OWN_DOMAIN_ATS.includes(ats)) {
     if (ownDomainBoardUrl(ats, board) === null) {
@@ -289,6 +297,18 @@ function oraclecloudBoardProblem(board) {
   const site = board.slice(cut + 1);
   if (!ORACLECLOUD_HOST_RE.test(host)) return `oraclecloud host ${show(host)} must be a tenant host on Oracle's cloud, in lowercase (<tenant>.fa.[region.][ocs.]oraclecloud[N].com)`;
   if (!ORACLECLOUD_SITE_RE.test(site)) return `oraclecloud site ${show(site)} must be 1 to 64 letters, digits, "_" or "-"`;
+  return null;
+}
+
+/** @param {string} board */
+function csodBoardProblem(board) {
+  const parts = board.split('/');
+  if (parts.length !== 3) return `csod board is "tenant/site/corp", got ${show(board)}`;
+  const [tenant, site, corp] = parts;
+  if (!CSOD_TENANT_RE.test(tenant)) return `csod tenant ${show(tenant)} must be one lowercase host label`;
+  if (CSOD_RESERVED_TENANTS.includes(tenant) || CSOD_TENANT_TEST_RE.test(tenant)) return `csod tenant ${show(tenant)} is reserved or a test tenant, not a board`;
+  if (!CSOD_SITE_RE.test(site)) return `csod site ${show(site)} must be a whole number from 1 to 999, without leading zeros`;
+  if (!CSOD_CORP_RE.test(corp)) return `csod corp ${show(corp)} must be 1 to 60 letters, digits, "_" or "-"`;
   return null;
 }
 
@@ -359,11 +379,11 @@ export function websiteProblem(website) {
 export function sourceProblem(source) {
   if (typeof source !== 'string') return 'source must be a string';
   if (FIXED_SOURCES.includes(source)) return null;
-  if (SOURCE_PATTERNS['web-index'].test(source)) {
+  if (SOURCE_PATTERNS['web-index'].test(source) || SOURCE_PATTERNS['user-submissions'].test(source)) {
     return isIsoDate(source.slice(source.lastIndexOf('@') + 1)) ? null : `source ${show(source)} does not end in a real calendar date (YYYY-MM-DD)`;
   }
   if (Object.values(SOURCE_PATTERNS).some((re) => re.test(source))) return null;
-  return `source ${show(source)} is not one of: ${FIXED_SOURCES.join(', ')}, employer-list:<org>, prior-mit:<owner>/<repo>@<commit>, web-index:<name>@<YYYY-MM-DD>`;
+  return `source ${show(source)} is not one of: ${FIXED_SOURCES.join(', ')}, employer-list:<org>, prior-mit:<owner>/<repo>@<commit>, web-index:<name>@<YYYY-MM-DD>, user-submissions@<YYYY-MM-DD>`;
 }
 
 /** @param {unknown} value */

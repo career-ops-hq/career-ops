@@ -30,6 +30,7 @@ import { fileURLToPath } from 'url';
 import { USER_PATHS } from './update-system.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { listTree } from './lib/walk-tree.mjs';
+import { isLanguageMirrorPath } from './lib/mode-sets.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 
@@ -82,8 +83,13 @@ const ALWAYS_REQUIRED = [
  * top-level mode whose directive IS enforced here; requiring a translated
  * marker in all 91 is a separate decision about localization policy, not a
  * silent consequence of switching to derivation. Flagged in #2480.
+ *
+ * The market sets (`modes/at/`, `modes/in/`, `modes/sg/`) are NOT mirrors: they
+ * are English modes with a market layer, and their pipeline and shared files
+ * fetch postings themselves. lib/mode-sets.mjs tells the two kinds apart, so
+ * the market sets stay under this check. A two-letter directory pattern used
+ * to skip them along with the translations.
  */
-const LOCALIZED_MIRROR = /^modes\/[a-z]{2}(-[A-Z]{2})?\//;
 
 /**
  * USER-layer files, derived from update-system.mjs's USER_PATHS rather than
@@ -119,7 +125,7 @@ export function deriveIngestingModes(paths, readFile) {
   for (const rel of paths) {
     if (EXCLUSIONS.has(rel)) continue;
     if (isUserLayerPath(rel)) continue; // never police the user layer (#2480 review)
-    if (LOCALIZED_MIRROR.test(rel)) continue;
+    if (isLanguageMirrorPath(rel)) continue;
     let text = '';
     try {
       text = readFile(rel);
@@ -188,6 +194,10 @@ if (isMainModule(import.meta.url)) {
       'batch/README.md': 'Node.js >= 18, Playwright chromium installed.',
       'modes/_shared.md': 'WebFetch appears in the shared preamble.',
       'modes/de/oferta.md': 'WebFetch die Stellenanzeige.',
+      'modes/zh-TW/oferta.md': 'WebFetch 職缺頁面。',
+      'modes/sg/pipeline.md': 'Extract each JD (Playwright → WebFetch → WebSearch).',
+      'modes/at/_shared.md': '| WebFetch | Fallback for extracting postings |',
+      'modes/in/apply.md': 'Reads the form already open in the session.',
     };
     const read = (rel) => fake[rel];
     const derived = deriveIngestingModes(Object.keys(fake), read);
@@ -209,6 +219,12 @@ if (isMainModule(import.meta.url)) {
     assert(!derived.includes('batch/README.md'), 'contributor docs naming Playwright as a dependency must be excluded');
     assert(!derived.includes('modes/_shared.md'), '_shared.md is checked separately, not as an ingesting mode');
     assert(!derived.includes('modes/de/oferta.md'), 'localized mirrors are out of scope for this validator');
+    assert(!derived.includes('modes/zh-TW/oferta.md'), 'a region-tagged localized mirror is out of scope too');
+    // Market sets look like language directories by name but are English
+    // modes that fetch postings, so derivation must reach them.
+    assert(derived.includes('modes/sg/pipeline.md'), 'a market-set mode naming a fetch primitive must be required');
+    assert(derived.includes('modes/at/_shared.md'), "a market set's shared file naming a fetch primitive must be required");
+    assert(!derived.includes('modes/in/apply.md'), 'a market-set mode with no fetch primitive must not be required');
 
     // USER-layer files are never policed (#2480 review). These are gitignored,
     // so a filesystem glob sees them on a real installation but never in a

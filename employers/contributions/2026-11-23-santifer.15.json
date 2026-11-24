@@ -1,0 +1,18 @@
+{
+  "id": "2026-11-23-santifer.15",
+  "contributor": "santifer",
+  "signed_by": "career-ops maintainers",
+  "rows": 1,
+  "source": "user-submissions@2026-11-23",
+  "origin": "Board addresses sent by users of the project from their own installs (the address only; the registry holds nothing about who sent them), each checked live; checked on 2026-11-23 by an automated job of the maintainers, written with AI assistance: each board answered and listed at least one posting.",
+  "no_conflicting_contract": true,
+  "personal_data": false,
+  "exclusive": false,
+  "license": "CC-BY-4.0",
+  "also_permits": [
+    "ODbL-1.0",
+    "CC0-1.0"
+  ],
+  "attribution": "Sent by users of career-ops",
+  "date": "2026-11-23"
+}

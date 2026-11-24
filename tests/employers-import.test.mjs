@@ -112,6 +112,7 @@ test('every ATS, region and Workday host form round-trips through its builder', 
     { ats: 'successfactors-classic', board: 'career8/com/acme-01' },
     { ats: 'oraclecloud', board: 'acme.fa.em2.oraclecloud.com/CX_2' },
     { ats: 'oraclecloud', board: 'acme.fa.us2.oraclecloud26.com/WMCareers' },
+    { ats: 'csod', board: 'acme/4/acme' },
     { ats: 'workday', board: 'acme/wd5/External_Careers', workday_host: 'jobs' },
     { ats: 'workday', board: 'acme/wd103/Careers', workday_host: 'site' },
   ];
@@ -184,6 +185,8 @@ const VARIANTS = [
   ['https://myjobs.adp.com/AcmeCareerSite/cx/job-details?rb=CareerSite&reqId=1', { ats: 'adp-myjobs', board: 'AcmeCareerSite' }],
   ['https://Career5.SuccessFactors.eu/career?company=ACME001&navBarLevel=JOB_SEARCH&lang=en_US', { ats: 'successfactors-classic', board: 'career5/eu/ACME001' }],
   ['https://career8.successfactors.com/career/?company=acme-01', { ats: 'successfactors-classic', board: 'career8/com/acme-01' }],
+  ['https://career-acme.csod.com/ux/ats/careersite/4/home?c=career-acme&lang=en-US', { ats: 'csod', board: 'career-acme/4/career-acme' }],
+  ['https://Acme.csod.com/ux/ats/careersite/12/home/?c=AcmeCorp', { ats: 'csod', board: 'acme/12/AcmeCorp' }],
   ['https://Acme.fa.em2.oraclecloud.com/hcmUI/CandidateExperience/no/sites/CX_2/requisitions?keyword=x', { ats: 'oraclecloud', board: 'acme.fa.em2.oraclecloud.com/CX_2' }],
   ['https://acme.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/12345', { ats: 'oraclecloud', board: 'acme.fa.us2.oraclecloud.com/CX_1001' }],
 ];
@@ -344,7 +347,7 @@ test('importList: canonical inbox lines, every default written out; duplicates a
     [3, 'the same board as line 2'],
     [5, 'name contains an email address'],
     [6, 'website "not a domain" is not a domain name'],
-    [8, 'indeed.com is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, avature, clearcompany, jobvite, eightfold, adp-myjobs, successfactors-classic, oraclecloud, phenom, successfactors, peoplesoft, workday)'],
+    [8, 'indeed.com is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, avature, clearcompany, jobvite, eightfold, adp-myjobs, successfactors-classic, oraclecloud, csod, phenom, successfactors, peoplesoft, workday)'],
   ]);
   assert.equal(r.derivedNames, 1);
   assert.equal(r.rewritten, 2);
@@ -450,7 +453,7 @@ test('CLI: the committed boards and new ones become an inbox the validator accep
     assert.equal(written.reduce((sum, n) => sum + n, 0), known.length + 2);
     assert.equal(readFileSync(`${list}.rejected.csv`, 'utf8'), 'line,input,reason\n'
       + `${known.length + 4},https://nope.example/jobs,`
-      + '"nope.example is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, avature, clearcompany, jobvite, eightfold, adp-myjobs, successfactors-classic, oraclecloud, phenom, successfactors, peoplesoft, workday)"\n');
+      + '"nope.example is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, avature, clearcompany, jobvite, eightfold, adp-myjobs, successfactors-classic, oraclecloud, csod, phenom, successfactors, peoplesoft, workday)"\n');
 
     const ownFiles = writeOwnDomainInbox(dir, ownDomain, '2026-11-10');
     const fileCount = parts + ownFiles.length + Number(ownFiles.length > 0); // includes the manifest

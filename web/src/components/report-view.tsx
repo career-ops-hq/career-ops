@@ -156,7 +156,7 @@ export function ReportView({
             const mainSections = rest.filter((s) => !isMachine(s.heading));
             const reason = verdictReason({
               report,
-              intro,
+              intro: sections.length ? intro : "",
               verdictContent: verdictSection?.content,
             });
             const verdictClass = recommended

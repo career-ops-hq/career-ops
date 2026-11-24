@@ -427,9 +427,6 @@ async function keywordWarnings(coreRoot, dataRoot, report, htmlPath) {
     if (Array.isArray(coverage.missing) && coverage.missing.length) {
       warnings.push(`Keywords missing from the tailored CV: ${coverage.missing.join(", ")}.`);
     }
-    if (Array.isArray(coverage.thin) && coverage.thin.length) {
-      warnings.push(`Keywords used only once: ${coverage.thin.join(", ")}.`);
-    }
     return warnings;
   } catch {
     return ["Keyword check did not return a coverage report."];

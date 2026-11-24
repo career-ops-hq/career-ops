@@ -116,6 +116,7 @@ const REGION_SUBDOMAIN_HOSTS = Object.freeze({
 const VENDOR_SUBDOMAINS = new Set(['www', 'app', 'api', 'help', 'support', 'status', 'blog', 'docs', 'careers', 'jobs', 'developers', 'marketplace']);
 const VENDOR_SUBDOMAINS_ATS = new Set(SUBDOMAIN_ATS.filter((ats) => !DNS_LABEL_ATS.includes(ats)));
 
+const CSOD_HOST_RE = /^([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)\.csod\.com$/;
 const SF_CLASSIC_HOST_RE = /^([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)\.successfactors\.(eu|com)$/;
 const WORKDAY_JOBS_HOST_RE = /^([a-z0-9][a-z0-9_-]*)\.(wd[0-9]{1,3})\.myworkdayjobs\.com$/;
 const WORKDAY_SITE_HOST_RE = /^(wd[0-9]{1,3})\.myworkdaysite\.com$/;
@@ -200,6 +201,14 @@ function readCoords(u) {
     const site = ce >= 0 && segs[ce + 2] === 'sites' ? segs[ce + 3] : undefined;
     if (!site) return { error: 'an Oracle Recruiting Cloud board is <host>/hcmUI/CandidateExperience/<lang>/sites/<site>' };
     return { ats: 'oraclecloud', board: `${host}/${site}` };
+  }
+  // Cornerstone OnDemand: <tenant>.csod.com/ux/ats/careersite/<site>/home?c=<corp>, the one form its provider reads.
+  const cs = CSOD_HOST_RE.exec(host);
+  if (cs) {
+    const m = /^\/ux\/ats\/careersite\/([0-9]+)\/home\/?$/i.exec(u.pathname);
+    const corp = u.searchParams.get('c');
+    if (!m || !corp) return { error: 'a Cornerstone board is <tenant>.csod.com/ux/ats/careersite/<site>/home?c=<corp>' };
+    return { ats: 'csod', board: `${cs[1]}/${m[1]}/${corp}` };
   }
   const sf = SF_CLASSIC_HOST_RE.exec(host);
   if (sf) {
@@ -336,7 +345,7 @@ export function readList(text) {
  * @param {BoardCoords} coords
  */
 export function nameFromBoard(coords) {
-  const id = coords.ats === 'workday' ? coords.board.split('/')[0] : coords.ats === 'successfactors-classic' ? coords.board.split('/')[2]
+  const id = coords.ats === 'workday' || coords.ats === 'csod' ? coords.board.split('/')[0] : coords.ats === 'successfactors-classic' ? coords.board.split('/')[2]
     : coords.ats === 'oraclecloud' ? coords.board.split('.')[0] : coords.board;
   return id.split(/[-_.]+/).filter(Boolean)
     .map((w) => (w === w.toLowerCase() ? w.charAt(0).toUpperCase() + w.slice(1) : w))

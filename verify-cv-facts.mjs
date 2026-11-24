@@ -500,8 +500,13 @@ const NOUN_SYNONYMS = new Map([
 // Currency codes are matched case-sensitively: lowercase "eur" or "gbp" in prose
 // is not a currency. A bare "pound(s)" is left out because it is also a weight.
 const MAGNITUDE_ALT = String.raw`(?:\s?(?:thousand|million|billion)\b|\s?[kKmMbB](?![\p{L}]))`;
+const PERCENT_CLAIM_PATTERNS = [
+  /\b\d+(?:[.,]\d+)?[^\S\n]?(?:%|(?:percent|per\s?cent|pct)\b)/gi,
+  /(?<![\p{L}\p{N}])%\d+(?:[.,]\d+)?(?![\p{L}\p{N}])/gu,
+];
+
 const SIMPLE_CLAIM_PATTERNS = [
-  /\b\d+(?:\.\d+)?[^\S\n]?(?:%|(?:percent|per\s?cent|pct)\b)/gi,
+  ...PERCENT_CLAIM_PATTERNS,
   new RegExp(String.raw`(?<![\w$€£])[$€£]\s?\d[\d,.]*(?:\s?(?:thousand|million|billion)\b|\s?[kKmMbB])?`, 'gu'),
   new RegExp(String.raw`(?:\b(?:USD|EUR|GBP)|\bUS\$)\s?\d[\d,.]*${MAGNITUDE_ALT}?`, 'gu'),
   new RegExp(String.raw`\b\d[\d,.]*${MAGNITUDE_ALT}?\s?-?\s?(?:(?:USD|EUR|GBP)\b|(?:[Dd]ollars?|[Ee]uros?)\b)`, 'gu'),
@@ -526,9 +531,9 @@ const CURRENCY_SYMBOLS = new Map([
  * @returns {string}
  */
 function canonicalMetric(raw) {
+  const percent = /^(?:%(\d+(?:[.,]\d+)?)|(\d+(?:[.,]\d+)?)\s*(?:%|percent|per\s?cent|pct))$/i.exec(raw.trim());
+  if (percent) return (percent[1] ?? percent[2]).replace(',', '.') + '%';
   const claim = normalizeClaim(raw);
-  const percent = /^(\d+(?:\.\d+)?) ?(?:%|percent|per ?cent|pct)$/.exec(claim);
-  if (percent) return `${percent[1]}%`;
   const multiplier = /^(\d+(?:\.\d+)?) ?(?:x|-? ?fold)$/.exec(claim);
   if (multiplier) return `${multiplier[1]}x`;
   const amount = String.raw`(\d[\d.]*)(?: ?(thousand|million|billion|[kmb]))?`;
@@ -3831,8 +3836,13 @@ function sourceFileLines(path, text) {
  * past metric into the plan set.
  */
 const PAST_TIME_CLAIM_RE = /\b(?:have|has|had|spent|worked)\s+(?:[\p{L}\p{M}-]+\s+){0,4}\d[\d,.]*\s*\+?\s*(?:months|years|weeks|days)\b/giu;
-const PAST_PERCENT_CLAIM_RE = /\b(?:grew|increased|improved|reduced|generated|achieved|delivered|managed|led)\b[^.!?;\n]{0,80}?\d[\d,.]*\s*(?:%|(?:percent|per\s?cent|pct)\b)/giu;
+const PAST_ACHIEVEMENT_VERB_RE = /\b(?:grew|increased|improved|reduced|generated|achieved|delivered|managed|led)\b/i;
+// The relative clause can omit "that", as in "the 20% I achieved".
+const RELATIVE_SUBJECT_RE = /^\s+(?:(?:that|which)\s+)?(?:I|we|you|they|he|she|it|(?:my|our|the)\s+team)\s+(?:(?:had|have|previously|already)\s+)*$/i;
 const DURATION_INTRO_RE = /^\s*(?:over|in|within|for|during|across)\b[^,;:]*?\d[\d,.]*\s*\+?\s*(?:days|weeks|months|years)\s*$/i;
+// Recognize Turkish plans only where the number directly modifies the
+// planned change. A later intention cannot license an earlier percentage.
+const TR_PERCENT_PLAN_RE = /(?<![\p{L}\p{N}])(%\d+(?:[.,]\d+)?)\s+(?:oran[ıI]nda\s+)?\p{L}+(?:(?:may[ıI]|mey[iİ])\s+(?:planl[ıI]yorum|hedefl[iİ]yorum|amaçl[ıI]yorum)|(?:acağ[ıI]m|eceğ[iİ]m))(?![\p{L}\p{M}])/giu;
 
 /**
  * Sentence bounds at `.`, `!`, `?`, or newline — used so a duration intro
@@ -3858,10 +3868,32 @@ function pastClaimMetrics(span) {
     for (const claim of metricClaims(text, { keepPlanHorizons: true })) claims.add(claim);
   };
   for (const match of span.matchAll(PAST_TIME_CLAIM_RE)) add(match[0]);
-  for (const match of span.matchAll(PAST_PERCENT_CLAIM_RE)) {
-    const markerAfterVerb = match[0].search(FORWARD_MARKER_RE) > 0;
-    if (markerAfterVerb) continue;
-    add(match[0]);
+  for (const [index, segment] of span.split(FORWARD_MARKER_RE).entries()) {
+    // After "will", "have increased" is future perfect. Skip that verb only:
+    // a later independent achievement in the same clause still needs evidence.
+    const firstVerb = PAST_ACHIEVEMENT_VERB_RE.exec(segment);
+    const futurePerfect = index > 0 && firstVerb
+      && /^\s*(?:already\s+)?have\s+(?:already\s+)?$/i.test(segment.slice(0, firstVerb.index));
+    const part = futurePerfect ? segment.slice(firstVerb.index + firstVerb[0].length) : segment;
+    for (let i = 0; i < part.length;) {
+      const { end } = clauseBounds(part, i, { extendCoordinated: false });
+      const clause = part.slice(i, end);
+      const verb = clause.search(PAST_ACHIEVEMENT_VERB_RE);
+      if (verb >= 0) {
+        const beforeVerb = clause.slice(0, verb);
+        for (const pattern of PERCENT_CLAIM_PATTERNS) {
+          for (const match of beforeVerb.matchAll(pattern)) {
+            if (RELATIVE_SUBJECT_RE.test(beforeVerb.slice(match.index + match[0].length))) {
+              claims.add(canonicalMetric(match[0]));
+            }
+          }
+        }
+        for (const claim of metricClaims(clause.slice(verb))) {
+          if (claim.endsWith('%')) claims.add(claim);
+        }
+      }
+      i = end + 1;
+    }
   }
   return claims;
 }
@@ -3901,7 +3933,14 @@ function plannedClaims(targetText, planTexts) {
     const sentence = clean.slice(s0, s1);
     const planAssertion = isPlanAssertion(span, sentence);
     const pastInSpan = pastClaimMetrics(span);
-    for (const claim of metricClaims(clean.slice(i, end))) {
+    const remaining = clean.slice(i, end);
+    // In Turkish, uppercase I pairs with dotless ı and uppercase İ with i.
+    // Remove only the recognized plan metric before checking the rest of the span.
+    const nonTurkishPlans = remaining.replace(TR_PERCENT_PLAN_RE, (match, percent) => {
+      forward.add(canonicalMetric(percent));
+      return match.slice(percent.length);
+    });
+    for (const claim of metricClaims(nonTurkishPlans)) {
       if (pastInSpan.has(claim)) past.add(claim);
       else if (planAssertion) forward.add(claim);
       else past.add(claim);
@@ -3958,14 +3997,16 @@ function parseCliArgs(args) {
   let targetArg = '';
   let configPath = DEFAULT_CONFIG;
   let json = false;
+  let help = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--source' || arg === '--config') {
-      if (!args[i + 1]) throw new Error(`${arg} requires a path`);
+      const next = args[i + 1];
+      if (!next || next.startsWith('-')) throw new Error(`${arg} requires a path`);
       if (arg === '--source') sourcePaths.push(args[++i]);
       else configPath = args[++i];
     } else if (arg === '--help' || arg === '-h') {
-      return { help: true };
+      help = true;
     } else if (arg === '--json') {
       json = true;
     } else if (arg.startsWith('--')) {
@@ -3976,7 +4017,7 @@ function parseCliArgs(args) {
       throw new Error(`unexpected extra positional argument: ${arg}`);
     }
   }
-  return { targetArg, sourcePaths, configPath, json, help: false };
+  return { targetArg, sourcePaths, configPath, json, help };
 }
 
 /** Return the command-line usage text. */
@@ -4729,6 +4770,10 @@ export function runCli(args = process.argv.slice(2)) {
   const missingSources = parsed.sourcePaths.filter((p) => !existsSync(resolveInputPath(p)));
   if (missingSources.length > 0) {
     console.error(`ERROR: --source file not found: ${missingSources.join(', ')}`);
+    return 1;
+  }
+  if (parsed.sourcePaths.length === 0 && !existsSync(DEFAULT_SOURCES[0])) {
+    console.error(`ERROR: cv.md not found: ${DEFAULT_SOURCES[0]}`);
     return 1;
   }
   try {

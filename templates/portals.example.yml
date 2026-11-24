@@ -340,13 +340,30 @@
 
 # -- Employment-type filter (optional) --
 # Keep only the employment types you want: full_time, part_time, contract,
-# temporary, internship. Applied right after the salary filter. Reads the
-# structured type a provider takes from the source's own field, never the title
-# or description. Providers that set it today: himalayas ("Full Time",
-# "Contractor", ...), weworkremotely (<type>), remotive (job_type; "freelance"
-# counts as contract), ashby (employmentType) and lever (categories.commitment,
-# free text per employer; "Permanent" says nothing about the hours and is left
-# unknown). Every other provider leaves it unknown.
+# temporary, internship. Applied right after the salary filter. It reads the
+# type a provider takes from the source's own field, never the title or
+# description. scan:full does not apply this filter yet.
+# Providers that set it, and the field each reads:
+#   ashby            employmentType
+#   himalayas        employmentType ("Full Time", "Contractor", ...)
+#   kula             employmentType
+#   lever            categories.commitment (free text per employer;
+#                    "Permanent" does not give the hours, so it stays unknown)
+#   personio         employment_type_slug and schedule_slug (careers page),
+#                    <employmentType> and <schedule> (XML feed); trainee
+#                    (an apprenticeship) stays unknown
+#   recruitee        employment_type_code (fixed term counts as temporary)
+#   remotive         job_type ("freelance" counts as contract)
+#   smartrecruiters  typeOfEmployment.label; an experienceLevel of
+#                    internship decides
+#   wellfound        jobType
+#   weworkremotely   <type>
+#   workable         employment_type (widget), the Type column (markdown
+#                    fallback), <jobtype> (scan:full's feed); an
+#                    experience level of Internship decides on the widget and
+#                    the feed, and the markdown fallback cannot see it
+#   wttj             contract_type ("freelance" counts as contract)
+# Every other provider leaves it unknown.
 #
 # Semantics:
 #   - a type in `allow` → kept; any other known type → removed
@@ -365,7 +382,8 @@
 
 # -- Workplace filter (optional) --
 # Filter scanned jobs by workplace model (remote | hybrid | onsite).
-# Set only from the provider's dedicated field (Ashby, Lever).
+# Set only from the provider's dedicated field (for example Ashby, Lever, Getro,
+# Consider, a16z speedrun).
 #
 # Semantics:
 #   - allow: list of allowed workplace types ('remote', 'hybrid', 'onsite')
@@ -1459,6 +1477,8 @@ search_queries:
 #   computrabajo    <country>.computrabajo.com/<search path>  (LatAm board; e.g. co.computrabajo.com/trabajo-de-sistemas)
 #   magneto         www.magneto365.com/co/<search path>       (Colombia board; e.g. /co/trabajos/buscar/tecnologia)
 #   bulldogjob      bulldogjob.pl/companies/jobs[/s/<filters>]  (Polish tech board; filters live in the path, e.g. /s/role,devops/city,Remote)
+#   paycom          www.paycomonline.net/v4/ats/web.php/portal/<client-key>/career-page  (or a posting link under the
+#                   same /portal/<client-key>/ path; or provider: paycom with client_key:)
 #   paylocity       recruiting.paylocity.com/Recruiting/Jobs/All/<board-guid>  (or api: field; a posting's
 #                   /Jobs/Details/<id> link carries no board id and is NOT claimed)
 #   remote-com      apply.remote.com  (Remote's own ATS, single company; any path, the board is always read whole)
@@ -1580,6 +1600,11 @@ search_queries:
 #
 # - name: Example CareerPuck Co
 #   careers_url: https://app.careerpuck.com/job-board/exampleco   # the board link off the careers page
+#   enabled: true
+#
+# - name: Example Paycom Co
+#   careers_url: https://www.paycomonline.net/v4/ats/web.php/portal/0123456789ABCDEF0123456789ABCDEF/career-page
+#                          # the career-page link off the company site; the hex segment is the client key
 #   enabled: true
 #
 # - name: Example Paylocity Co
@@ -1881,6 +1906,10 @@ search_queries:
 #   # host that proxies Avature (detect() won't auto-claim it), set
 #   # provider: avature + api: the SearchJobs URL explicitly instead.
 #   careers_url: https://exampleco.avature.net/careers/SearchJobs
+#   # A tenant with no SearchJobs lists postings per country; give that page
+#   # (provider: avature), the full URL in careers_url (or in api:, which wins over
+#   # careers_url), e.g. https://jobs.exampleco.com/en_US/careers/JobOpeningsSpain;
+#   # a bare origin in api: is requested as /careers/SearchJobs
 #   max_pages: 50          # optional page cap (only 6 jobs/page — Avature's hard
 #                          # limit — so ~300 postings by default, max 200 pages)
 #   # offset_param: offset  # optional — pins the pagination key for a tenant
@@ -2013,6 +2042,11 @@ search_queries:
 #   max_pages: 500                        # optional, 10 postings/page (default 500, max 1000); a whole list is
 #                                         # 2 requests per locale, since the API returns pages cumulatively
 #   enabled: true
+#
+# - name: Bolt                           # single-company; Next.js careers page, every position in one HTML response
+#   careers_url: https://bolt.eu/en/careers/positions/   # a branded domain: never auto-detected
+#   provider: bolt                        # required; always reads the English positions page, one request
+#   enabled: true                         # the whole worldwide board (~190 postings, one request); location is left to location_filter
 #
 # - name: Dassault Systèmes              # single-company; Exalead card_search_api
 #   careers_url: https://www.3ds.com/careers/jobs   # auto-detects on *.3ds.com
@@ -2157,8 +2191,17 @@ search_queries:
 #
 # - name: a16z speedrun talent network    # a16z speedrun + wider a16z portfolio (~200 startups)
 #   provider: a16z-speedrun-talent
-#   max_pages: 3          # optional page cap (50 jobs/page, default 3)
+#   max_pages: 6          # optional page cap (50 jobs/page, default 6)
 #   q: machine learning   # optional server-side full-text search (synonyms expand)
+#   a16z_speedrun_talent:
+#     filters:            # optional feed filters (documented parameters only)
+#       scope: everywhere # speedrun | portfolio | everywhere
+#       fn: engineering   # list values as a string or a YAML list
+#       wp: remote
+#       sen: [senior, staff, founding, _]   # _ = roles with no stated level
+#       posted: 7d        # 24h | 7d | 30d
+#     fetchDetails: false # optional: read each job's detail for its description and the employer's own apply URL
+#     detailLimit: 25     # optional: max detail requests per scan (default 25, max 100)
 #   enabled: true
 #
 # - name: Arbeitnow                       # EU/DACH-heavy board, newest-first
@@ -3358,9 +3401,8 @@ tracked_companies:
 
   - name: Bolt
     careers_url: https://bolt.eu/en/careers/positions/
-    scan_method: websearch
-    scan_query: 'site:bolt.eu/en/careers/positions'
-    notes: "Tallinn. Ride-hailing/mobility. Lists its roles on its own site, which no provider reads; the Ashby board named Bolt has no postings."
+    provider: bolt
+    notes: "Tallinn. Ride-hailing/mobility. Lists its roles on its own site, which the scanner reads directly (every position is in one page); the Ashby board named Bolt has no postings."
     enabled: true
 
   - name: Bosch
@@ -3614,6 +3656,12 @@ tracked_companies:
     scan_query: '"Maxim AI" OR "getmaxim" careers "engineer" OR "product"'
     notes: "AI evaluation and observability platform. Bangalore-based, mostly on-site."
     enabled: true
+
+  # -- US healthcare technology --
+  - name: ROMTech
+    careers_url: https://www.paycomonline.net/v4/ats/web.php/portal/74B8425BF3D1B3ACB19CC1353DC5FA0E/career-page
+    notes: "Connected rehabilitation devices. Paycom career page."
+    enabled: false
 
   # ============================================================
   # -- Türkiye / Turkey market
@@ -4226,7 +4274,9 @@ job_boards:
   # `careers_url`; the board id (not the host: Founderful's is "wingman") is
   # read from that page. Optional knobs: `consider_size` (default 500, maximum 1000,
   # the jobs one request returns), `max_pages` (default 10, hard cap 100, the
-  # requests per board), `consider_board` (the board id, only when the
+  # requests per board), `consider_posted_since` (an ISO 8601 duration such as
+  # "P7D": the board's own "Posted" filter, so only jobs posted in that window
+  # are read; off by default), `consider_board` (the board id, only when the
   # scan reports that it cannot be read from the page).
 
   - name: Founderful (portfolio)

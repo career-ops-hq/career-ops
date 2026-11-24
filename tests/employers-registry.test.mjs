@@ -77,6 +77,7 @@ import eightfold from '../providers/eightfold.mjs';
 import adpMyjobs from '../providers/adp-myjobs.mjs';
 import successfactorsClassic from '../providers/successfactors-classic.mjs';
 import oraclecloud from '../providers/oraclecloud.mjs';
+import csod from '../providers/csod.mjs';
 import phenom from '../providers/phenom.mjs';
 import successfactors from '../providers/successfactors.mjs';
 import peoplesoft from '../providers/peoplesoft.mjs';
@@ -84,7 +85,7 @@ import peoplesoft from '../providers/peoplesoft.mjs';
 const PROVIDERS = {
   greenhouse, ashby, lever, workable, smartrecruiters, rippling, join: joinProvider,
   recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio,
-  prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, 'zoho-recruit': zohoRecruit, avature, clearcompany, jobvite, eightfold, 'adp-myjobs': adpMyjobs, 'successfactors-classic': successfactorsClassic, oraclecloud, phenom, successfactors, peoplesoft, workday,
+  prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, 'zoho-recruit': zohoRecruit, avature, clearcompany, jobvite, eightfold, 'adp-myjobs': adpMyjobs, 'successfactors-classic': successfactorsClassic, oraclecloud, csod, phenom, successfactors, peoplesoft, workday,
 };
 
 const VALIDATOR = join(ROOT, 'seeds', 'employers-validate.mjs');
@@ -194,7 +195,7 @@ test('every admitted ATS has the provider that reads it, and that provider reads
   for (const ats of BOARD_ATS) {
     assert.equal(PROVIDERS[ats].id, ats);
     // A ClearCompany board is its career site's GUID, not a slug.
-    const board = ats === 'workday' ? 'acme/wd5/External' : ats === 'clearcompany' ? '0f8fad5b-d9cb-469f-a165-70867728950e' : ats === 'successfactors-classic' ? 'career5/eu/ACME001' : ats === 'oraclecloud' ? 'acme.fa.us2.oraclecloud.com/CX_1001' : ats === 'peoplesoft' ? 'recruit.acme.example/acme1' : OWN_DOMAIN_ATS.includes(ats) ? 'careers.acme.example' : 'acme';
+    const board = ats === 'workday' ? 'acme/wd5/External' : ats === 'clearcompany' ? '0f8fad5b-d9cb-469f-a165-70867728950e' : ats === 'successfactors-classic' ? 'career5/eu/ACME001' : ats === 'oraclecloud' ? 'acme.fa.us2.oraclecloud.com/CX_1001' : ats === 'csod' ? 'acme/4/acme' : ats === 'peoplesoft' ? 'recruit.acme.example/acme1' : OWN_DOMAIN_ATS.includes(ats) ? 'careers.acme.example' : 'acme';
     const regions = Object.hasOwn(REGIONAL_BOARD_URL_BUILDERS, ats) ? regionsOf(ats) : [undefined, ...regionsOf(ats)];
     for (const region of regions) {
       const url = buildBoardUrl({ ats, region, board, workday_host: ats === 'workday' ? 'jobs' : undefined });
@@ -360,7 +361,17 @@ test('sourceProblem: web-index:<name>@<date> needs a lowercase name and a real d
   ]) {
     assert.match(sourceProblem(bad) ?? '', /^source .* (is not one of|does not end in a real calendar date)/, bad);
   }
-  assert.match(sourceProblem('scraped'), /web-index:<name>@<YYYY-MM-DD>$/);
+  assert.match(sourceProblem('scraped'), /web-index:<name>@<YYYY-MM-DD>, user-submissions@<YYYY-MM-DD>$/);
+});
+
+test('sourceProblem: user-submissions@<date> needs a real date and nothing else', () => {
+  for (const ok of ['user-submissions@2026-11-23', 'user-submissions@2024-02-29']) assert.equal(sourceProblem(ok), null, ok);
+  for (const bad of [
+    'user-submissions', 'user-submissions@', 'user-submissions@2026-11', 'user-submissions@2026-02-30', 'user-submissions@2025-02-29',
+    'User-submissions@2026-11-23', 'user-submissions:acme@2026-11-23', 'user-submissions@2026-11-23 ', 'user_submissions@2026-11-23',
+  ]) {
+    assert.match(sourceProblem(bad) ?? '', /^source .* (is not one of|does not end in a real calendar date)/, bad);
+  }
 });
 
 test('schema.json: the manifest id pattern accepts and rejects what the validator does', () => {

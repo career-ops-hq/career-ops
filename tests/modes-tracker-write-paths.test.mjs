@@ -88,7 +88,7 @@ function section(text, heading) {
 ok('oferta.md "Record in tracker" goes through the TSV and merge-tracker', () => {
   const step = section(read('modes/oferta.md'), '### 2. Record in tracker');
   assert.ok(step.includes('node merge-tracker.mjs'), 'does not name merge-tracker.mjs');
-  assert.ok(step.includes('TSV Format for Tracker Additions'), 'does not point at the TSV spec');
+  assert.ok(step.includes('modes/_tracker-tsv.md'), 'does not point at the TSV spec');
   assert.ok(!/record in `data\/applications\.md`/i.test(step), 'still says to record in applications.md');
   // A confirmed agency must not be dropped by a tracker with no Via column.
   assert.ok(step.includes('--migrate-via'), 'does not say how to keep a confirmed Via');
