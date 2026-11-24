@@ -88,6 +88,18 @@ async function readCoreDefaults(): Promise<Partial<Record<ProfileCadenceKey, num
   }
 }
 
+// Matches positiveInteger in followup-cadence.mjs. A string has to be the
+// whole token ("12", "+12"). "10.5", "10 days", and "0x10" are not numbers
+// this cadence uses. parseInt accepts all three.
+function wholeCadenceNumber(value: unknown): number | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!/^\+?\d+$/.test(trimmed)) return null;
+    value = Number(trimmed);
+  }
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
 export async function GET() {
   const file = getProfilePath(careerOpsRoot());
   const overrides: Partial<Record<ProfileCadenceKey, number>> = {};
@@ -124,8 +136,8 @@ export async function GET() {
     enabled = followupsEnabledFromProfile(profile);
     const source = isObj(profile.followup_cadence) ? profile.followup_cadence : {};
     for (const key of PROFILE_CADENCE_KEYS) {
-      const n = Number.parseInt(String(source[key]), 10);
-      if (Number.isFinite(n) && n >= 0) overrides[key] = n;
+      const n = wholeCadenceNumber(source[key]);
+      if (n !== null) overrides[key] = n;
     }
   }
   const defaults = await readCoreDefaults();
@@ -142,8 +154,10 @@ export async function POST(req: Request) {
   const cadence: Record<string, number> = {};
   for (const key of PROFILE_CADENCE_KEYS) {
     if (body[key] == null) continue;
-    const n = Number.parseInt(String(body[key]), 10);
-    if (!Number.isInteger(n) || n < 0) {
+    // Same rule as positiveInteger in followup-cadence.mjs. parseInt("10.5")
+    // is 10 and parseInt("0x10") is 0, and a saved 0 marks a reply due now.
+    const n = wholeCadenceNumber(body[key]);
+    if (n === null) {
       return Response.json({ error: `${key} must be a non-negative integer` }, { status: 400 });
     }
     cadence[key] = n;
