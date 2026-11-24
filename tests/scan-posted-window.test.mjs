@@ -24,11 +24,15 @@ const dataRoot = mkdtempSync(join(tmpdir(), 'co-scan-window-'));
 after(() => rmSync(dataRoot, { recursive: true, force: true }));
 
 function scan(...args) {
+  // scan.mjs reads CAREER_OPS_PORTALS before the data root, so a value set in
+  // the caller's shell would send the run to a real portals.yml.
+  const env = { ...process.env, CAREER_OPS_ROOT: dataRoot };
+  delete env.CAREER_OPS_PORTALS;
   return spawnSync(process.execPath, [SCRIPT, ...args], {
     encoding: 'utf-8',
     timeout: 30000,
     cwd: ROOT,
-    env: { ...process.env, CAREER_OPS_ROOT: dataRoot },
+    env,
   });
 }
 
@@ -55,7 +59,10 @@ test('a --since window past --posted-before is refused, with the date it resolve
 
 test('a one-day window (both bounds the same date) is not refused', () => {
   // Both bounds are inclusive, so this window holds a day of postings. The run
-  // then stops on the empty data root, which is not what this test is about.
+  // gets past the window check and stops on the empty data root's missing
+  // portals.yml, which proves it was not refused for some other reason.
   const r = scan('--posted-after', '2026-07-01', '--posted-before', '2026-07-01');
   assert.doesNotMatch(r.stderr, WINDOW_ERROR);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /portals\.yml not found/);
 });
