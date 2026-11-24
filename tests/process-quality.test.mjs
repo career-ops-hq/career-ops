@@ -286,22 +286,35 @@ ok('default has metadata', 'metadata' in defaultJson);
 ok('default has signals array', 'signals' in defaultJson && Array.isArray(defaultJson.signals));
 eq('default minThreshold = 1', defaultJson.metadata.minThreshold, 1);
 
-// Missing-file CLI behavior, isolated via --file pointing at a path that
-// deliberately does not exist inside a fresh temp dir. This must NOT depend
-// on whether the caller's real data/active-interviews.md happens to exist —
-// a contributor running this suite with real interview data in their own
-// workspace must get the same result as CI.
+// An explicit --file that does not exist is an error: a typo must fail
+// loudly instead of reporting "no friction" on data that was never read.
 const missingFileTmpDir = mkdtempSync(join(tmpdir(), 'process-quality-missing-'));
 const missingFilePath = join(missingFileTmpDir, 'does-not-exist.md');
 try {
-  const missingOut = execFileSync('node', [scriptPath, '--file', missingFilePath], {
-    encoding: 'utf-8', timeout: 10000,
+  execFileSync('node', [scriptPath, '--file', missingFilePath], {
+    encoding: 'utf-8', timeout: 10000, stdio: 'pipe',
     cwd: dirname(scriptPath),
   });
-  ok('missing --file path: CLI does not throw', !!missingOut);
-  const missingJson = JSON.parse(missingOut);
-  eq('missing --file path: totalRows = 0', missingJson.metadata.totalRows, 0);
-  eq('missing --file path: signals = []', missingJson.signals, []);
+  ok('missing --file path: exits non-zero', false);
+} catch (e) {
+  eq('missing --file path: exit code 1', e.status, 1);
+  ok('missing --file path: stderr names the file',
+    (e.stderr || '').includes(`file not found: ${missingFilePath}`));
+  eq('missing --file path: nothing on stdout', e.stdout, '');
+}
+
+// The default path may be absent (no interviews yet): that still reports
+// zero rows at exit 0. CAREER_OPS_ROOT points at an empty temp dir so the
+// result does not depend on the caller's real workspace.
+try {
+  const emptyRootOut = execFileSync('node', [scriptPath], {
+    encoding: 'utf-8', timeout: 10000,
+    cwd: dirname(scriptPath),
+    env: { ...process.env, CAREER_OPS_ROOT: missingFileTmpDir },
+  });
+  const emptyRootJson = JSON.parse(emptyRootOut);
+  eq('missing default path: totalRows = 0', emptyRootJson.metadata.totalRows, 0);
+  eq('missing default path: signals = []', emptyRootJson.signals, []);
 } finally {
   rmSync(missingFileTmpDir, { recursive: true, force: true });
 }
