@@ -1267,179 +1267,44 @@ process_offer() {
   jd_file="$(mktemp "$jd_tmp_dir/batch-jd-${id}.XXXXXX")"
   # The worker is a native process. Under Git Bash / MSYS the path above is a
   # POSIX one (/tmp/... or /c/...) that a Windows binary cannot open, so every
-  # worker read "JD source unavailable" even when curl had filled the file.
+  # worker read "JD source unavailable" even when the JD file had been filled.
   # cygpath -m yields C:/... which both bash and the worker resolve.
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) command -v cygpath >/dev/null 2>&1 && jd_file="$(cygpath -m "$jd_file")" ;;
   esac
 
-  # Pre-populate $jd_file with a static curl fetch so the worker reads HTML
-  # directly instead of always falling through to WebFetch (#2492). WebFetch is
-  # unreliable on JS-rendered boards (Phenom, Workday, iCIMS) because it hits
-  # the rendered JS shell rather than the actual JD text. curl returns the raw
-  # HTML in a single round-trip; for static boards that is exactly the JD.
-  # For JS-rendered boards the file will be thin (JS shell only), which the
-  # sufficiency check below detects — the file is then truncated to 0 bytes so
-  # the worker's Step-1 WebFetch fallback fires exactly as designed.
-  # If curl is absent or fails, $jd_file stays empty and WebFetch fires too.
-  # Minimum visible word count to treat a fetched page as a real JD rather than
-  # a JS shell. A JS app shell (Workday, Phenom, iCIMS) has near-zero visible
-  # words after HTML stripping; a real JD has hundreds. 80 is a conservative
-  # lower bound — any genuine posting has at least a title, summary, and a few
-  # requirements, which together exceed 80 stripped words.
+  # Pre-populate $jd_file with the JD so the worker does not fall through to
+  # WebFetch (#2492), which is unreliable on JS-rendered boards (Phenom, Workday,
+  # iCIMS): it hits the rendered JS shell rather than the actual JD text.
+  # fetch-jd.mjs is the one reader for every source: the ATS's own public API, then
+  # the page itself (a closure it states, structured data, then visible text). It
+  # fails open: a miss leaves the JD file empty and the checks below decide.
+  # The call lives here and not in the worker prompt on purpose: the offer URL is
+  # untrusted, and here it travels as one argv element ("$url"), never as text
+  # inside a shell command the worker composes. fetch-jd.mjs refuses private and
+  # loopback destinations on every redirect hop, so such a URL is a miss, not a request.
+  # Minimum word count to treat fetched text as a real JD rather than a JS shell:
+  # 80 is a conservative lower bound, since any genuine posting has at least a
+  # title, summary, and a few requirements.
   local prefetch_min_words=80
   local jd_prefetch_words=0
-  local jd_rescue_closed_note=""
-  local jd_raw_file=""
-  local curl_status=0
-  if command -v curl >/dev/null 2>&1; then
-    # Reject loopback, link-local, private-network and cloud-metadata
-    # destinations before curl connects, on every redirect hop.
-    # --proto/--proto-redir restrict schemes, not destination addresses.
-    # lib/egress-pin.mjs checks the literal host and, for a name, every address
-    # it resolves to (providers/_ip-guard.mjs isBlockedAddress). It prints the
-    # addresses it checked, and curl is pinned to them with --resolve, so a name
-    # that answers public to the check and private to curl (DNS rebinding) never
-    # reaches a private address. A missing checker, a name that does not
-    # resolve, or any private answer skips the prefetch: the worker falls back
-    # to WebFetch.
-    local _egress_pin
-    local current_url="$url"
-    local redirect_count=0
-    local redirect_headers
-    local redirect_location
-    while :; do
-      if ! _egress_pin=$(node "$PROJECT_DIR/lib/egress-pin.mjs" "$current_url" 2>/dev/null); then
-        echo "    ℹ️  JD prefetch: blocked — private/loopback destination ($current_url)"
-        : > "$jd_file"
-        break
-      else
-        # Headers are read by curl/bash only — never by the worker — so this one
-        # stays on ${TMPDIR:-/tmp} and the expression stays self-contained (the
-        # prefetch block is extracted and run in isolation by
-        # tests/batch-runner-jd-prefetch.test.mjs, where $jd_tmp_dir is not set).
-        redirect_headers="$(mktemp "${TMPDIR:-/tmp}/batch-jd-headers.XXXXXX")"
-        curl_status=0
-        curl --silent --show-error --location --max-redirs 0 \
-          --max-time 20 --connect-timeout 5 \
-          --fail --compressed \
-          --proto '=http,https' --proto-redir 'https,http' --max-filesize 5000000 \
-          --user-agent "Mozilla/5.0 (compatible; career-ops/batch)" \
-          --header "Accept: text/html,application/xhtml+xml,*/*;q=0.8" \
-          --dump-header "$redirect_headers" \
-          --output "$jd_file" \
-          ${_egress_pin:+--resolve "$_egress_pin"} \
-          -- "$current_url" 2>/dev/null || curl_status=$?
-        redirect_location=""
-        if [[ "$curl_status" -eq 47 ]]; then
-          redirect_location="$(awk 'tolower($0) ~ /^location:[[:space:]]*/ { value=$0; sub(/^[^:]*:[[:space:]]*/, "", value) } END { print value }' "$redirect_headers")"
-        fi
-        rm -f "$redirect_headers"
-        if [[ "$curl_status" -eq 47 && -n "$redirect_location" ]]; then
-          if [[ "$redirect_count" -ge 10 ]]; then
-            : > "$jd_file"
-            echo "    ℹ️  JD prefetch: too many redirects — worker will WebFetch"
-            break
-          fi
-          current_url="$(node -e "
-            try { process.stdout.write(new URL(process.argv[2], process.argv[1]).href); }
-            catch (e) { process.stdout.write(''); }
-          " "$current_url" "$redirect_location" 2>/dev/null)"
-          if [[ -z "$current_url" ]]; then
-            : > "$jd_file"
-            break
-          fi
-          redirect_count=$((redirect_count + 1))
-          continue
-        fi
-        if [[ "$curl_status" -ne 0 ]]; then
-          : > "$jd_file"
-        fi
-        break
-      fi
-    done
-      # Keep the bytes curl downloaded: the strip below discards <script> blocks,
-      # which is where a JS-rendered board keeps its JD (schema.org JobPosting,
-      # hydration payload), so jd-rescue.mjs reads this copy, not the stripped text.
-      jd_raw_file="${jd_file}.raw"
-      cp "$jd_file" "$jd_raw_file" 2>/dev/null || true
-      # Strip HTML tags and count visible words to distinguish a real JD (hundreds
-      # of words) from a JS shell (near zero visible text).
-      jd_prefetch_words=$(node -e "
-        const fs = require('fs');
-        try {
-          const text = fs.readFileSync(process.argv[1], 'utf-8')
-            .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-            .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-            .replace(/<[^>]+>/g, ' ')
-            .replace(/&(nbsp|#160|#xa0);/gi, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-          fs.writeFileSync(process.argv[1], text);
-          process.stdout.write(String(text.split(' ').filter(Boolean).length));
-        } catch (e) { process.stdout.write('0'); }
-      " "$jd_file" 2>/dev/null) || jd_prefetch_words=0
-      # Ensure jd_prefetch_words is always a non-negative integer. A non-integer
-      # (e.g. empty string, "NaN") would cause bash arithmetic to fail or
-      # miscompare. Strip everything that is not a digit and default to 0.
-      jd_prefetch_words="${jd_prefetch_words//[^0-9]/}"
-      jd_prefetch_words="${jd_prefetch_words:-0}"
-      # Zero-token JD rescue: read the JD out of the structured data the board
-      # already shipped in the bytes above. It only replaces the text when the page
-      # is thin or the rescued JD is longer, and it fails open (any failure leaves
-      # the stripped text as is, and the checks below decide as before).
-      if [[ -f "$BATCH_DIR/jd-rescue.mjs" && -s "$jd_raw_file" ]]; then
-        _rs_rc=0
-        _rs_line=$(node "$BATCH_DIR/jd-rescue.mjs" "$url" "$jd_raw_file" "$jd_file" "$jd_prefetch_words" "${current_url:-$url}" 2>/dev/null) || _rs_rc=$?
-        if [[ "$_rs_rc" -eq 3 ]]; then
-          # The ATS says the posting is closed: terminal, even though the page text may look like a JD.
-          jd_rescue_closed_note="posting closed (jd-rescue): $(printf '%s' "${_rs_line#*$'\t'}" | tr -c '[:print:]' ' ' | sed 's/^closed://; s/  */ /g')"
-          : > "$jd_file"
-          jd_prefetch_words=0
-        elif [[ "$_rs_rc" -eq 4 ]]; then
-          # The download landed on a different page than the offer URL: its text is not this posting's.
-          : > "$jd_file"
-          jd_prefetch_words=0
-        elif [[ "$_rs_rc" -eq 0 ]]; then
-          IFS=$'\t' read -r _rs_words _rs_method <<< "$_rs_line"
-          _rs_words="${_rs_words//[^0-9]/}"
-          _rs_words="${_rs_words:-0}"
-          if [[ "$_rs_words" -ge "$prefetch_min_words" ]]; then
-            echo "    ℹ️  JD rescue: recovered ${_rs_words} words via ${_rs_method} (visible text had ${jd_prefetch_words})"
-            jd_prefetch_words="$_rs_words"
-          fi
-        fi
-      fi
-      rm -f "$jd_raw_file"
-      if [[ "$jd_prefetch_words" -lt "$prefetch_min_words" ]]; then
-        : > "$jd_file"
-        echo "    ℹ️  JD prefetch: thin content (${jd_prefetch_words} words) — worker will WebFetch"
-      else
-        echo "    ℹ️  JD prefetch: ${jd_prefetch_words} words written to JD file"
-      fi
-  fi
-
-  # ATS API fallback (#4246). When the static fetch above left $jd_file empty
-  # (thin JS shell, curl failure, curl absent), ask the ATS's own public API
-  # through fetch-jd.mjs before the worker falls back to WebFetch, which hits
-  # the same unrendered shell on Ashby and embedded Greenhouse boards.
-  # The call lives here and not in the worker prompt on purpose: the offer URL
-  # is untrusted, and here it travels as one argv element ("$url"), never as
-  # text inside a shell command the worker composes. fetch-jd.mjs only talks to
-  # the known ATS API hosts it resolves from the URL, so a private or unknown
-  # host is a miss (exit 1), not a request.
-  local jd_closed_note="$jd_rescue_closed_note"
+  local jd_closed_note=""
   local jd_api_words=0
-  if [[ ! -s "$jd_file" && -z "$jd_closed_note" && -f "$PROJECT_DIR/fetch-jd.mjs" ]]; then
+  local jd_transport_failed=0
+  if [[ -f "$PROJECT_DIR/fetch-jd.mjs" ]]; then
     local jd_api_tmp jd_api_rc=0
     jd_api_tmp="$(mktemp "${TMPDIR:-/tmp}/batch-jd-api.XXXXXX")"
-    node "$PROJECT_DIR/fetch-jd.mjs" "$url" > "$jd_api_tmp" 2>/dev/null || jd_api_rc=$?
+    node "$PROJECT_DIR/fetch-jd.mjs" "$url" --visible-text > "$jd_api_tmp" 2>/dev/null || jd_api_rc=$?
     if [[ "$jd_api_rc" -eq 3 ]]; then
       # Exit 3: the posting's own data says it is closed (validThrough in the past,
-      # closure text on the page, an ATS delisting flag). Do not fall back to
-      # WebFetch, which could read the JD from the page and score a closed role.
+      # closure text on the page, an ATS delisting flag, HTTP 404/410). Do not fall
+      # back to WebFetch, which could read the JD from the page and score a closed role.
       # The evidence is page text, so keep it to one short printable line.
       jd_closed_note="posting closed (fetch-jd): $(head -c 160 "$jd_api_tmp" | tr -c '[:print:]' ' ' | sed 's/^CLOSED_POSTING //; s/  */ /g')"
+    elif [[ "$jd_api_rc" -eq 2 ]]; then
+      # Exit 2: no HTTP response at all (DNS, refused, timeout, TLS), a transport
+      # problem that is worth another run.
+      jd_transport_failed=1
     elif [[ "$jd_api_rc" -eq 0 ]]; then
       jd_api_words=$(wc -w < "$jd_api_tmp" 2>/dev/null) || jd_api_words=0
       jd_api_words="${jd_api_words//[^0-9]/}"
@@ -1451,10 +1316,14 @@ process_offer() {
         echo "    ℹ️  JD prefetch: fetch-jd.mjs returned a truncated JD — not used as the full posting"
       elif [[ "$jd_api_words" -ge "$prefetch_min_words" ]]; then
         cat "$jd_api_tmp" > "$jd_file"
-        echo "    ℹ️  JD prefetch: ${jd_api_words} words from the ATS API (fetch-jd.mjs)"
+        jd_prefetch_words="$jd_api_words"
+        echo "    ℹ️  JD prefetch: ${jd_api_words} words written to JD file (fetch-jd.mjs)"
       fi
     fi
     rm -f "$jd_api_tmp"
+  fi
+  if [[ ! -s "$jd_file" && -z "$jd_closed_note" ]]; then
+    echo "    ℹ️  JD prefetch: no usable JD text — worker will WebFetch"
   fi
 
   # --thin-action: no usable JD text after the static fetch and the ATS API
@@ -1518,15 +1387,13 @@ process_offer() {
     fi
     if [[ ! -s "$jd_file" ]]; then
       jd_thin_skip=1
-      # curl never got an HTTP response (DNS, refused, timeout, TLS): a transport
+      # fetch-jd got no HTTP response (DNS, refused, timeout, TLS): a transport
       # problem, not a page that cannot be read. 'skipped' is terminal and
       # --retry-failed would never pick it up again, so it stays retryable.
-      case "$curl_status" in
-        6|7|28|35|52|55|56)
-          jd_thin_retryable=1
-          [[ -n "$jd_thin_note" ]] || jd_thin_note="JD prefetch failed to connect (curl exit $curl_status) — retryable"
-          ;;
-      esac
+      if [[ "$jd_transport_failed" == "1" ]]; then
+        jd_thin_retryable=1
+        [[ -n "$jd_thin_note" ]] || jd_thin_note="JD prefetch failed to connect (fetch-jd exit 2) — retryable"
+      fi
       [[ -n "$jd_thin_note" ]] || jd_thin_note="no usable JD text (--thin-action $THIN_ACTION) — needs-playwright"
     fi
   fi

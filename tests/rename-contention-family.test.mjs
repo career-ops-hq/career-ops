@@ -10,7 +10,7 @@
 // This test used to pin five hand-picked files. Ten more write-tmp-then-rename
 // sites (scan.mjs atomicWriteFile, capture-jd.mjs, dead-boards.mjs,
 // career-profile.mjs, learn.mjs, sponsor-check.mjs, plugins.mjs, and the .part
-// renames in backup.mjs, install-latex-engine.mjs and batch/jd-rescue.mjs) kept
+// renames in backup.mjs, and install-latex-engine.mjs) kept
 // calling bare renameSync because nothing listed them. The set is now DERIVED from the files git ships, the way tests/lock-rm-contention.test.mjs
 // derives its lock-body scan: every shipped core module is forbidden a direct
 // renameSync call, except the files in EXEMPT below, each with its reason.

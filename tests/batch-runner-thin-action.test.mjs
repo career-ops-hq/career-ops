@@ -76,7 +76,7 @@ if (!bash || !detect || !act) {
         `jd_file=${JSON.stringify(jd)}`,
         `PROJECT_DIR=${JSON.stringify(withStub ? projectDir : join(work, 'nope'))}`,
         `THIN_ACTION=${JSON.stringify(action)}`,
-        `curl_status=${curl}`,
+        `jd_transport_failed=${curl && curl !== 22 ? 1 : 0}`,
         'url="https://jobs.example.com/acme/1"',
         'jd_prefetch_words=0',
         'check() {',
@@ -101,10 +101,10 @@ if (!bash || !detect || !act) {
     else fail(`skip: ${skip.out}`);
 
     const retry = run({ action: 'skip', curl: 28 });
-    if (/^skip=1 retryable=1 .*retryable/.test(retry.out)) pass('skip with no HTTP response (curl exit 28) stays retryable');
+    if (/^skip=1 retryable=1 .*retryable/.test(retry.out)) pass('skip with no HTTP response (fetch-jd exit 2) stays retryable');
     else fail(`skip + curl timeout: ${retry.out}`);
     const http = run({ action: 'skip', curl: 22 });
-    if (/^skip=1 retryable=0/.test(http.out)) pass('skip after an HTTP error (curl exit 22) is terminal');
+    if (/^skip=1 retryable=0/.test(http.out)) pass('skip after an HTTP error is terminal');
     else fail(`skip + HTTP error: ${http.out}`);
 
     const ok = run({ action: 'browser-extract' });

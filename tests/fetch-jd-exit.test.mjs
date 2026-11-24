@@ -42,6 +42,13 @@ test('a miss exits 1, silently, without calling process.exit', () => {
   assert.equal(result.stderr, '');
 });
 
+test('no HTTP response at all exits 2, silently, so a caller can tell it from a miss', () => {
+  const result = runFetchJd(`globalThis.fetch = async () => { throw new TypeError('fetch failed'); };`);
+  assert.equal(result.status, 2, describeSpawn(result));
+  assert.equal(result.stdout, '');
+  assert.equal(result.stderr, '');
+});
+
 test('a posting page answering 404 exits 3 as closed, without calling process.exit', () => {
   const result = runFetchJd(`globalThis.fetch = async () => new Response('', { status: 404 });`);
   assert.equal(result.status, 3, describeSpawn(result));

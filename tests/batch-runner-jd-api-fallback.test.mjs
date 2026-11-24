@@ -29,7 +29,7 @@ const PROMPT = readFileSync(join(ROOT, 'batch/batch-prompt.md'), 'utf-8');
 console.log('\nbatch-runner.sh — ATS API fallback for the JD file (#4246)');
 
 const apiBlock = (() => {
-  const m = SRC.match(/  local jd_api_words=0\n  if \[\[ ! -s "\$jd_file"[\s\S]*?\n  fi\n/);
+  const m = SRC.match(/  local jd_closed_note=""\n  local jd_api_words=0\n  local jd_transport_failed=0\n  if \[\[ -f "\$PROJECT_DIR\/fetch-jd\.mjs" \]\]; then[\s\S]*?\n  fi\n/);
   return m ? m[0] : null;
 })();
 
@@ -56,11 +56,11 @@ else fail('ATS API fallback block is missing from batch-runner.sh');
 
 // ── static checks ───────────────────────────────────────────────────────────
 
-// The fallback has to run after the curl prefetch, or it would be overwritten.
-const curlAt = SRC.indexOf('if command -v curl >/dev/null 2>&1; then');
-const apiAt = SRC.indexOf('local jd_api_words=0');
-if (curlAt !== -1 && apiAt > curlAt) pass('the API fallback runs after the curl prefetch');
-else fail('the API fallback must come after the curl prefetch block');
+// The JD read runs before the --thin-action decision, which acts on an empty JD file.
+const readAt = SRC.indexOf('local jd_api_words=0');
+const thinAt = SRC.indexOf('local jd_thin_skip=0');
+if (readAt !== -1 && readAt < thinAt) pass('the JD read runs before the --thin-action decision');
+else fail('the JD read must come before the --thin-action decision');
 
 // The URL reaches fetch-jd.mjs as one quoted argv element.
 if (apiBlock && /node "\$PROJECT_DIR\/fetch-jd\.mjs" "\$url"/.test(apiBlock)) {
@@ -68,10 +68,6 @@ if (apiBlock && /node "\$PROJECT_DIR\/fetch-jd\.mjs" "\$url"/.test(apiBlock)) {
 } else {
   fail('fetch-jd.mjs must be called as: node "$PROJECT_DIR/fetch-jd.mjs" "$url"');
 }
-
-// It only fires when the JD file is still empty.
-if (apiBlock && /\[\[ ! -s "\$jd_file"/.test(apiBlock)) pass('the fallback only fires when the JD file is empty');
-else fail('the fallback must be guarded by [[ ! -s "$jd_file" ]]');
 
 // The worker prompt must not put the offer URL inside a shell command.
 if (!/fetch-jd\.mjs[^\n]*\{\{URL\}\}/.test(PROMPT) && !/node [^\n]*\{\{URL\}\}/.test(PROMPT)) {
@@ -118,13 +114,12 @@ if (!bash || !apiBlock) {
         `jd_file=${JSON.stringify(jd)}`,
         `PROJECT_DIR=${JSON.stringify(withStub ? projectDir : join(work, 'no-such-project'))}`,
         'prefetch_min_words=80',
-        'jd_closed_note=""',
         'url="$OFFER_URL"',
         'runFallback() {',
         apiBlock,
+        '  echo "closed=$jd_closed_note"',
         '}',
         'runFallback',
-        'echo "closed=$jd_closed_note"',
       ].join('\n'));
       const out = execFileSync(bash, [script], {
         encoding: 'utf-8', timeout: 30000, cwd: work,
@@ -134,7 +129,7 @@ if (!bash || !apiBlock) {
     };
 
     const hit = run({ mode: 'hit', url: 'https://jobs.ashbyhq.com/acme/123' });
-    if (hit.jd === long && /words from the ATS API/.test(hit.out)) pass('empty JD file + API hit: the API text becomes the JD file');
+    if (hit.jd === long && /words written to JD file/.test(hit.out)) pass('empty JD file + API hit: the API text becomes the JD file');
     else fail(`empty JD file + API hit: JD file not filled (len=${hit.jd.length})`);
 
     const closedRun = run({ mode: 'closed', url: 'https://careers.example.com/job/1' });
@@ -172,10 +167,6 @@ if (!bash || !apiBlock) {
     if (thin.jd === '') pass('API text under the word threshold is not used as a JD');
     else fail('API text under the word threshold was written to the JD file');
 
-    const kept = run({ mode: 'hit', url: 'https://boards.greenhouse.io/acme/jobs/1', seed: 'the curl prefetch already wrote a real JD' });
-    if (kept.jd === 'the curl prefetch already wrote a real JD' && kept.trace === '') pass('non-empty JD file: fetch-jd.mjs is not called');
-    else fail('non-empty JD file: the fallback ran anyway');
-
     const absent = run({ mode: 'hit', url: 'https://jobs.ashbyhq.com/acme/123', withStub: false });
     if (absent.jd === '') pass('fetch-jd.mjs absent: the fallback is skipped without error');
     else fail('fetch-jd.mjs absent: the JD file changed');
@@ -186,7 +177,7 @@ if (!bash || !apiBlock) {
     const evil = run({ mode: 'miss', url: hostile });
     let argv = null;
     try { argv = JSON.parse(evil.trace.trim().split('\n')[0]); } catch {}
-    if (!existsSync(marker) && Array.isArray(argv) && argv.length === 1 && argv[0] === hostile) {
+    if (!existsSync(marker) && Array.isArray(argv) && argv.length === 2 && argv[0] === hostile && argv[1] === '--visible-text') {
       pass('hostile URL: passed as a single argument, no command substitution runs');
     } else {
       fail(`hostile URL: marker=${existsSync(marker)} argv=${JSON.stringify(argv)}`);

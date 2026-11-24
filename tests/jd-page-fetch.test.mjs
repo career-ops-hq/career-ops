@@ -145,17 +145,31 @@ test('fetchJdFromPage gives up on a redirect loop', async () => {
   } finally { net.restore(); }
 });
 
-test('fetchJdFromPage misses quietly on a non-HTML answer, an error status, and a thrown fetch', async () => {
+test('fetchJdFromPage misses quietly on a non-HTML answer and an error status', async () => {
   for (const handler of [
     () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }),
     () => new Response('nope', { status: 500, headers: { 'content-type': 'text/html' } }),
     () => new Response('blocked', { status: 403, headers: { 'content-type': 'text/html' } }),
-    () => { throw new Error('network down'); },
   ]) {
     const net = stubNetwork(handler);
     try { assert.equal(await fetchJdFromPage('https://careers.example.com/job/1'), null); }
     finally { net.restore(); }
   }
+});
+
+test('fetchJdFromPage says the page was unreachable when no HTTP response came back', async () => {
+  const net = stubNetwork(() => { throw new Error('network down'); });
+  try {
+    const out = await fetchJdFromPage('https://careers.example.com/job/1');
+    assert.equal(out.unreachable, true);
+    assert.equal(out.text, '');
+  } finally { net.restore(); }
+});
+
+test('an address-guard refusal is a plain miss, not an unreachable page', async () => {
+  const net = stubNetwork(() => { throw Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('blocked'), { code: 'ECAREEROPS_BLOCKED_ADDRESS' }) }); });
+  try { assert.equal(await fetchJdFromPage('https://careers.example.com/job/1'), null); }
+  finally { net.restore(); }
 });
 
 test('fetchJdFromPage reports a page answering 404 or 410 as closed, with no JD text', async () => {

@@ -17,7 +17,8 @@
  * Exit 3 with `CLOSED_POSTING <evidence>` on stdout when the page itself says the
  * posting is closed: a JobPosting past its validThrough date, closure text
  * in the visible page, or a page that answers HTTP 404 or 410.
- * Exit 1 with empty stdout and no stderr noise otherwise — a miss is the
+ * Exit 2 with empty stdout when the page could not be reached at all (a transport
+ * failure worth retrying). Exit 1 with empty stdout and no stderr noise otherwise — a miss is the
  * expected "fall back to the browser path" case, not an error condition, and
  * a visible miss is the whole point: never a fabricated JD.
  *
@@ -36,6 +37,7 @@
 import { fetchJdViaKnownApi } from './browser-extract.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { fetchJdFromPage, markCappedAtsText } from './lib/jd-page-fetch.mjs';
+import { hasFlag } from './lib/cli-flags.mjs';
 
 const TEXT_CAP = 20_000; // a batch report reads the whole JD; no token-budget reason to cap tighter
 const TIMEOUT_MS = 15_000;
@@ -44,11 +46,14 @@ async function main() {
   const args = process.argv.slice(2);
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`Usage:
-  node fetch-jd.mjs <url>
+  node fetch-jd.mjs <url> [--visible-text]
   node fetch-jd.mjs --help
 
 Options:
-  --help, -h  Print this usage block and exit`);
+  --visible-text  When the page has no structured JD, use its visible text (at least
+                  80 words). Off by default: such text cannot prove it belongs to
+                  one posting
+  --help, -h      Print this usage block and exit`);
     process.exit(0);
   }
 
@@ -62,8 +67,9 @@ Options:
   // Tier 1: the ATS's public API. Tier 2: the page's own JSON-LD JobPosting, for
   // template-driven boards no API covers (Phenom, bespoke sites) whose visible
   // HTML carries no JD at all.
+  const visibleText = hasFlag(args, '--visible-text');
   const result = (await fetchJdViaKnownApi(url, TEXT_CAP, TIMEOUT_MS))
-    ?? (await fetchJdFromPage(url, TEXT_CAP, TIMEOUT_MS));
+    ?? (await fetchJdFromPage(url, TEXT_CAP, TIMEOUT_MS, { visibleText }));
   // No stderr, by design: the caller's browser/WebFetch fallback is the
   // intended next step, and warning on every non-covered host would make the
   // normal path look broken.
@@ -75,6 +81,13 @@ Options:
   // process exit 1 once the event loop drains, right after the answer.
   if (!result) {
     process.exitCode = 1;
+    return;
+  }
+
+  // No HTTP response at all (DNS, refused, timeout, TLS): a transport problem, not
+  // a page that cannot be read, so a caller may retry it. Exit 2, empty stdout.
+  if (result.unreachable) {
+    process.exitCode = 2;
     return;
   }
 
