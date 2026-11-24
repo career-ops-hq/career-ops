@@ -180,17 +180,17 @@ function escapeRegExp(s) {
 }
 
 // Boundary-aware match: a numeric variant like "8 hours" must NOT match
-// inside "18 hours", and "60%" must NOT match inside "160%". Plain substring
-// matching (`includes`) is unbounded and lets a candidate's story-bank claim
-// "verify" against an unrelated, larger number in cv.md — the exact
-// fabrication-into-negotiation gap this gate exists to close. A negative
-// lookbehind/lookahead for an adjacent digit (or decimal point) rules that
-// out while still matching the variant anywhere else in the text.
+// inside "18 hours", "1,200 hours", or "8 high-availability", and "60%" must
+// NOT match inside "160%" or "0.60%", while still matching sentence-ending
+// forms such as "60%." and "2h.". Plain substring matching (`includes`) is
+// unbounded and lets a candidate's story-bank claim "verify" against an
+// unrelated figure or word in cv.md — the exact fabrication-into-negotiation
+// gap this gate exists to close.
 function anyVariantInText(variants, text) {
   const hay = text.toLowerCase();
   return variants.some((v) => {
     const escaped = escapeRegExp(v.toLowerCase());
-    const re = new RegExp(`(?<![\\d.])${escaped}(?![\\d.])`, 'i');
+    const re = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}_.])(?<!\\d,)${escaped}(?![\\p{L}\\p{M}\\p{N}_])`, 'iu');
     return re.test(hay);
   });
 }
