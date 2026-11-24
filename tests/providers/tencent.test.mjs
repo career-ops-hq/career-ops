@@ -151,6 +151,11 @@ try {
     },
   }));
   const pagedJobs = await tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL, keywords: ['AI'] }, paged.ctx);
+  if (JSON.stringify(pagedJobs.queryScope) === JSON.stringify({ config: 'keywords', queries: ['AI'] })) {
+    pass('tencent.fetch() reports a board read through keywords only (1 keyword) as keyword-scoped (#7315)');
+  } else {
+    fail(`tencent.fetch() keywords ['AI']: queryScope = ${JSON.stringify(pagedJobs.queryScope)}`);
+  }
   if (pagedJobs.length === 150 && paged.calls.length === 2) {
     pass('tencent.fetch() paginates until Data.Count is exhausted (150 posts → 2 requests)');
   } else {
@@ -168,6 +173,11 @@ try {
     Data: { Count: 1, Posts: [mkPost(42, '重复岗位')] },
   }));
   const overlapJobs = await tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL, keywords: ['AI', '大模型'] }, overlap.ctx);
+  if (JSON.stringify(overlapJobs.queryScope) === JSON.stringify({ config: 'keywords', queries: ['AI', '大模型'] })) {
+    pass('tencent.fetch() reports a board read through keywords only (2 keywords) as keyword-scoped (#7315)');
+  } else {
+    fail(`tencent.fetch() keywords ['AI', '大模型']: queryScope = ${JSON.stringify(overlapJobs.queryScope)}`);
+  }
   if (overlapJobs.length === 1 && overlap.calls.length === 2) {
     pass('tencent.fetch() dedupes the same job URL across keywords');
   } else {

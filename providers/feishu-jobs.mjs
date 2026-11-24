@@ -44,7 +44,7 @@
 
 import { MACOS_BROWSER_LIKE_USER_AGENT, sleep } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
-import { markTruncated } from '../lib/board-truncation.mjs';
+import { markKeywordScope, markTruncated } from '../lib/board-truncation.mjs';
 
 const PAGE_SIZE = 100;
 const DEFAULT_KEYWORDS = [''];  // empty keyword = the whole board, no topical bias
@@ -204,7 +204,7 @@ export default {
             console.error(`  ⚠ feishu-jobs: keyword "${keyword}" page ${batch[i]} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
             // The rest of the board was never read: the result says so, so scan.mjs
             // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
-            return markTruncated([...seen.values()], partialReason ?? 'fetch-error', { fetched: seen.size });
+            return markKeywordScope(markTruncated([...seen.values()], partialReason ?? 'fetch-error', { fetched: seen.size }), 'keywords', keywords);
           }
           const json = result.value;
           const sourcePage = Array.isArray(json?.data?.job_post_list) ? json.data.job_post_list : [];
@@ -239,6 +239,6 @@ export default {
     // A keyword max_pages cut is a page-cap stop: the warning above says so, and
     // the result does too, so scan.mjs logs the board partial (lib/board-truncation.mjs).
     if (partialReason) markTruncated(result, partialReason, { fetched: result.length });
-    return result;
+    return markKeywordScope(result, 'keywords', keywords);
   },
 };

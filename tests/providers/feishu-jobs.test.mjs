@@ -170,6 +170,11 @@ try {
     },
   }));
   const pagedJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI'] }, paged.ctx);
+  if (JSON.stringify(pagedJobs.queryScope) === JSON.stringify({ config: 'keywords', queries: ['AI'] })) {
+    pass('feishu-jobs.fetch() reports a board read through keywords only (1 keyword) as keyword-scoped (#7315)');
+  } else {
+    fail(`feishu-jobs.fetch() keywords ['AI']: queryScope = ${JSON.stringify(pagedJobs.queryScope)}`);
+  }
   if (pagedJobs.length === 150 && paged.calls.length === 2) {
     pass('feishu-jobs.fetch() paginates via offset until count is exhausted (150 posts → 2 requests)');
   } else {
@@ -200,6 +205,11 @@ try {
     },
   }));
   const deepInventoryJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL }, deepInventory.ctx);
+  if (deepInventoryJobs.queryScope === undefined) {
+    pass('feishu-jobs.fetch() leaves a whole-board read (no keywords) unscoped');
+  } else {
+    fail(`feishu-jobs.fetch() no keywords: queryScope = ${JSON.stringify(deepInventoryJobs.queryScope)}`);
+  }
   if (deepInventoryJobs.length === inventoryCount && deepInventory.calls.length === 22) {
     pass('feishu-jobs.fetch() default budget covers inventories larger than the old 20-page ceiling');
   } else {
@@ -224,6 +234,11 @@ try {
     data: { count: 1, job_post_list: [mkJob('42', '重复岗位')] },
   }));
   const overlapJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI', '大模型'] }, overlap.ctx);
+  if (JSON.stringify(overlapJobs.queryScope) === JSON.stringify({ config: 'keywords', queries: ['AI', '大模型'] })) {
+    pass('feishu-jobs.fetch() reports a board read through keywords only (2 keywords) as keyword-scoped (#7315)');
+  } else {
+    fail(`feishu-jobs.fetch() keywords ['AI', '大模型']: queryScope = ${JSON.stringify(overlapJobs.queryScope)}`);
+  }
   if (overlapJobs.length === 1 && overlap.calls.length === 2 && overlap.sleeps.length === 1) {
     pass('feishu-jobs.fetch() dedupes across keywords and paces the keyword switch');
   } else {

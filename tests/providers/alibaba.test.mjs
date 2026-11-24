@@ -147,6 +147,11 @@ try {
     },
   }));
   const pagedJobs = await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI'] }, paged.ctx);
+  if (JSON.stringify(pagedJobs.queryScope) === JSON.stringify({ config: 'keywords', queries: ['AI'] })) {
+    pass('alibaba.fetch() reports a board read through keywords only (1 keyword) as keyword-scoped (#7315)');
+  } else {
+    fail(`alibaba.fetch() keywords ['AI']: queryScope = ${JSON.stringify(pagedJobs.queryScope)}`);
+  }
   if (pagedJobs.length === 150 && paged.calls.length === 2) {
     pass('alibaba.fetch() paginates until totalCount is exhausted (150 posts → 2 requests)');
   } else {
@@ -172,6 +177,11 @@ try {
     content: { totalCount: 1, datas: [mkJob(42, '重复岗位')] },
   }));
   const overlapJobs = await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI', '大模型'] }, overlap.ctx);
+  if (JSON.stringify(overlapJobs.queryScope) === JSON.stringify({ config: 'keywords', queries: ['AI', '大模型'] })) {
+    pass('alibaba.fetch() reports a board read through keywords only (2 keywords) as keyword-scoped (#7315)');
+  } else {
+    fail(`alibaba.fetch() keywords ['AI', '大模型']: queryScope = ${JSON.stringify(overlapJobs.queryScope)}`);
+  }
   if (overlapJobs.length === 1 && overlap.calls.length === 2 && overlap.sleeps.length === 1) {
     pass('alibaba.fetch() dedupes across keywords and paces the keyword switch');
   } else {

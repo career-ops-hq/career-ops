@@ -279,6 +279,11 @@ try {
     },
   }));
   const pagedJobs = await mokahr.fetch({ name: 'Example Labs', careers_url: MOKA_URL, keywords: ['AI'] }, paged.ctx);
+  if (JSON.stringify(pagedJobs.queryScope) === JSON.stringify({ config: 'keywords', queries: ['AI'] })) {
+    pass('mokahr.fetch() reports a board read through keywords only (1 keyword) as keyword-scoped (#7315)');
+  } else {
+    fail(`mokahr.fetch() keywords ['AI']: queryScope = ${JSON.stringify(pagedJobs.queryScope)}`);
+  }
   if (pagedJobs.length === 70 && paged.calls.length === 2) {
     pass('mokahr.fetch() paginates via offset until a page returns fewer than 50 jobs (70 posts → 2 requests)');
   } else {
@@ -361,6 +366,11 @@ try {
 
   const overlap = mkCtx(() => ({ success: true, data: { jobStats: { total: 0 }, jobs: [mkJob('dup', '重复岗位')] } }));
   const overlapJobs = await mokahr.fetch({ name: 'Example Labs', careers_url: MOKA_URL, keywords: ['AI', '大模型'] }, overlap.ctx);
+  if (JSON.stringify(overlapJobs.queryScope) === JSON.stringify({ config: 'keywords', queries: ['AI', '大模型'] })) {
+    pass('mokahr.fetch() reports a board read through keywords only (2 keywords) as keyword-scoped (#7315)');
+  } else {
+    fail(`mokahr.fetch() keywords ['AI', '大模型']: queryScope = ${JSON.stringify(overlapJobs.queryScope)}`);
+  }
   if (overlapJobs.length === 1 && overlap.calls.length === 2 && overlap.sleeps.length === 1) {
     pass('mokahr.fetch() dedupes across keywords and paces the keyword switch');
   } else {
