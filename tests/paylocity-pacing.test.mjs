@@ -64,3 +64,21 @@ test('fetch on the real HTTP transport waits its turn; a stub context is not pac
   await provider.fetch({ name: 'A', careers_url: `https://recruiting.paylocity.com/Recruiting/Jobs/All/${GUID}` }, stub);
   assert.deepEqual(stubSlept, []);
 });
+
+test('a zero interval turns pacing off on the real HTTP transport', async () => {
+  const prev = process.env.CAREER_OPS_PAYLOCITY_MIN_INTERVAL_MS;
+  process.env.CAREER_OPS_PAYLOCITY_MIN_INTERVAL_MS = '0';
+  // A query string loads a separate module instance that reads the interval afresh.
+  let off;
+  try {
+    ({ default: off } = await import('../providers/paylocity.mjs?interval=0'));
+  } finally {
+    if (prev === undefined) delete process.env.CAREER_OPS_PAYLOCITY_MIN_INTERVAL_MS;
+    else process.env.CAREER_OPS_PAYLOCITY_MIN_INTERVAL_MS = prev;
+  }
+  const slept = [];
+  const http = { transport: 'http', sleep: async (ms) => { slept.push(ms); }, fetchText: async () => PAGE };
+  await off.fetch({ name: 'A', careers_url: `https://recruiting.paylocity.com/Recruiting/Jobs/All/${GUID}` }, http);
+  await off.fetch({ name: 'A', careers_url: `https://recruiting.paylocity.com/Recruiting/Jobs/All/${GUID}` }, http);
+  assert.deepEqual(slept, []);
+});
