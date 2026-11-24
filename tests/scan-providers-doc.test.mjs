@@ -27,6 +27,9 @@ test('the scan mode does not tell the agent to ignore every other provider', () 
   const level0 = scan.split('\n').find((line) => line.includes('Recommended Level 0'));
   assert.ok(level0, 'Recommended Level 0 sentence missing');
   assert.match(level0, /does not name them/);
-  assert.match(level0, /Level 1 \(Playwright\) or Level 3 \(WebSearch\)/);
+  assert.match(level0, /local parser failed/);
+  assert.match(level0, /Level 1 \(Playwright\)/);
+  assert.match(level0, /Level 3 general queries stay on/);
+  assert.doesNotMatch(level0, /Level 1 \(Playwright\) or Level 3 \(WebSearch\)/);
   assert.doesNotMatch(level0, /local-parser` successfully/);
 });
