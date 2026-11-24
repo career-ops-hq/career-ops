@@ -8,8 +8,10 @@
  * Need Action / Rejected / Offer / Auto-confirmation / Noise / Unknown), matches
  * them to tracker rows, and prompts before touching data/applications.md — but
  * its only input is data/reply-candidates.json, and the only planned way to
- * populate that file is a Gmail scanner (#1583, unbuilt, requires OAuth
- * inbox-read access). This script is the alternative for anyone who doesn't
+ * populate that file is a Gmail reply scanner (#1583, unbuilt, requires OAuth
+ * inbox-read access). The bundled plugins/gmail reads job leads from a label
+ * into the pipeline; it does not write reply candidates. This script is the
+ * alternative for anyone who doesn't
  * want to grant any tool mailbox access but is willing to paste an email's
  * text themselves.
  *
@@ -45,7 +47,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
-import { pathToFileURL } from 'node:url';
 import { writeFileAtomic } from './tracker-utils.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
