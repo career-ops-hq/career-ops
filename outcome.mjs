@@ -651,9 +651,12 @@ try {
   // then guard the complete refreshed row under set-status's own tracker lock.
   const currentLines = readFileSync(appsFile, 'utf-8').split('\n');
   const currentColumns = resolveColumns(currentLines);
-  const currentMatches = currentLines
+  let currentMatches = currentLines
     .map(line => parseTrackerRow(line, currentColumns))
     .filter(row => row?.num === matchedRow.num);
+  if (currentMatches.length > 1 && flags.role) {
+    currentMatches = currentMatches.filter(row => roleFuzzyMatch(row.role, flags.role));
+  }
   const [currentRow] = currentMatches;
   const previousNotes = matchedRow.notes;
   const notesMatch = currentRow && (currentRow.notes === previousNotes
