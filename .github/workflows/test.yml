@@ -73,20 +73,32 @@ jobs:
     # Without a limit a hung job holds its runner for GitHub's default of six
     # hours. test-all.mjs kills a discovered suite that runs past its budget,
     # but its inline sections and the install steps have no limit of their
-    # own. The slowest leg (macOS) takes about 11 minutes.
+    # own. The slowest leg (Windows) takes about 18 minutes.
     timeout-minutes: 30
-    # A docs-only change runs the suite on Ubuntu only (#6402, #5723). The other
-    # two legs stay in the matrix and skip their steps, because these three check
-    # names are required, and a job-level `if` cannot read `matrix` to skip just
-    # them.
+    # The macOS and Windows legs run in the merge queue, before anything reaches
+    # main, and skip their steps on a pull request. Measured over 25 days of
+    # Nov-2026 runs: a PR waited a median 19 minutes for all three legs, and
+    # most of that was these two (Ubuntu 8, macOS 12, Windows 17). Of the 137
+    # PR runs red on Windows alone, a sample of 28 had the same few failures
+    # recurring across unrelated PRs (tests broken or flaky on Windows on main),
+    # not something the PR changed: the leg was mostly noise on the PR and a
+    # wait for everyone. The queue still runs all three, so nothing lands
+    # without them.
+    # A docs-only change skips them in the queue too (#6402, #5723).
+    # The legs stay in the matrix and skip their steps, because these three
+    # check names are required, and a job-level `if` cannot read `matrix` to
+    # skip just them.
     # Ubuntu keeps the whole suite: about 45 test files read docs-type files, and
     # the inline sections of test-all.mjs scan every tracked file.
     env:
-      SKIP_LEG: ${{ needs.changes.outputs.docs_only == 'true' && matrix.os != 'ubuntu-latest' }}
+      SKIP_LEG: ${{ matrix.os != 'ubuntu-latest' && (github.event_name == 'pull_request' || needs.changes.outputs.docs_only == 'true') }}
     steps:
-      - name: Skip this leg (docs-only change)
+      - name: Skip this leg (runs in the merge queue)
         if: env.SKIP_LEG == 'true'
-        run: echo "Docs-only change. The suite runs on the Ubuntu leg, so this leg has nothing to add."
+        shell: bash
+        env:
+          WHY: ${{ github.event_name == 'pull_request' && 'Pull request. This leg runs in the merge queue, before the change reaches main; the Ubuntu leg runs the suite here.' || 'Docs-only change. The suite runs on the Ubuntu leg, so this leg has nothing to add.' }}
+        run: echo "$WHY"
       # The repo is committed with LF; Windows runners default to autocrlf,
       # which would rewrite every text file on checkout and make regexes that
       # rely on `.` (no \r) fail in ways the other platforms never see.
@@ -98,6 +110,27 @@ jobs:
         with:
           # Test code (fork code, in a merge_group) must not find a token in .git/config.
           persist-credentials: false
+      - if: env.SKIP_LEG != 'true'
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: '1.27'
+          # The module lives in dashboard/, so without this setup-go looks for
+          # go.sum at the root, warns, and caches nothing.
+          cache-dependency-path: dashboard/go.sum
+      # The Go dashboard tests need only Go and take 40-60 s, most of it the
+      # cross-compile in cross_compile_test.go. Started here, in the background,
+      # they run while Node is set up and the dependencies install, instead of
+      # after the suite. "Go dashboard tests" below waits for them and ends with
+      # their exit code, so a failing Go test still turns this check red. They
+      # write only to their own temp dirs, so the suite never sees them.
+      - name: Start the Go dashboard tests in the background
+        id: go_start
+        if: env.SKIP_LEG != 'true'
+        shell: bash
+        working-directory: dashboard
+        run: |
+          out="$(cd "$RUNNER_TEMP" && pwd)"
+          nohup bash -c 'go test ./... > "$1/go-test.log" 2>&1; echo "$?" > "$1/go-test.exit"' _ "$out" > /dev/null 2>&1 &
       # The declared floor (lib/node-floor.mjs, package.json engines). Exact on
       # purpose: a bare '22' resolves to the newest 22.x and tests nothing.
       # Renovate is told to leave node-version in this file alone (renovate.json);
@@ -114,13 +147,6 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-      - if: env.SKIP_LEG != 'true'
-        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
-        with:
-          go-version: '1.27'
-          # The module lives in dashboard/, so without this setup-go looks for
-          # go.sum at the root, warns, and caches nothing.
-          cache-dependency-path: dashboard/go.sum
       # Skip the postinstall (npx playwright install chromium): the ~170 MB
       # download on three OSes would buy only the few suites that launch a
       # browser, and those skip here and run in the tool-suites job instead.
@@ -128,10 +154,23 @@ jobs:
         run: npm install --ignore-scripts
       - if: env.SKIP_LEG != 'true'
         run: node test-all.mjs --quick
+      # Waits for the run started above and reports it as its own step. Runs
+      # after a red suite too (!cancelled()), so one failure does not hide the
+      # other; not when the start step did not run, which would wait for
+      # nothing.
       - name: Go dashboard tests
-        if: env.SKIP_LEG != 'true'
-        run: go test ./...
-        working-directory: dashboard
+        if: ${{ !cancelled() && env.SKIP_LEG != 'true' && steps.go_start.outcome == 'success' }}
+        shell: bash
+        run: |
+          out="$(cd "$RUNNER_TEMP" && pwd)"
+          # 10 minutes: far past the 40-60 s these take, inside the job's limit.
+          for _ in $(seq 600); do [ -s "$out/go-test.exit" ] && break; sleep 1; done
+          cat "$out/go-test.log" 2>/dev/null || true
+          if [ ! -s "$out/go-test.exit" ]; then
+            echo "::error::The Go dashboard tests started in the background did not finish within 10 minutes."
+            exit 1
+          fi
+          exit "$(cat "$out/go-test.exit")"
 
   cv-visual:
     # Not a required check, so the merge queue never waits on it: a red queue

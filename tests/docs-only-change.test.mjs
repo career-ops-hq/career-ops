@@ -268,8 +268,42 @@ test('a failed or skipped classifier cannot stop the required legs', () => {
   assert.doesNotMatch(jobs.test.if, /docs_only/, 'the job must run so its check reports; only its steps skip');
 });
 
-test('only a docs-only answer skips a leg, and never the Ubuntu one', () => {
-  assert.equal(jobs.test.env.SKIP_LEG, "${{ needs.changes.outputs.docs_only == 'true' && matrix.os != 'ubuntu-latest' }}");
+test('a leg skips on a pull request or a docs-only answer, and never the Ubuntu one', () => {
+  // macOS and Windows run in the merge queue, before anything reaches main;
+  // on a PR only Ubuntu runs the suite. A docs-only change skips them in the
+  // queue too.
+  assert.equal(jobs.test.env.SKIP_LEG, "${{ matrix.os != 'ubuntu-latest' && (github.event_name == 'pull_request' || needs.changes.outputs.docs_only == 'true') }}");
+});
+
+test('in the merge queue, a code change runs every leg', () => {
+  // The rule above, evaluated the way Actions would for each case. A merge_group
+  // run that is not docs-only must skip nothing: that is what keeps the PR-only
+  // skip from letting a macOS or Windows failure reach main.
+  const skip = ({ os, event, docsOnly }) => os !== 'ubuntu-latest' && (event === 'pull_request' || docsOnly === 'true');
+  for (const os of ['ubuntu-latest', 'macos-latest', 'windows-latest']) {
+    assert.equal(skip({ os, event: 'merge_group', docsOnly: 'false' }), false, os);
+    assert.equal(skip({ os, event: 'merge_group', docsOnly: '' }), false, `${os}, classifier failed`);
+  }
+  assert.equal(skip({ os: 'ubuntu-latest', event: 'pull_request', docsOnly: 'true' }), false);
+  assert.equal(skip({ os: 'windows-latest', event: 'pull_request', docsOnly: 'false' }), true);
+  // The expression is the one modelled here, token for token.
+  assert.match(jobs.test.env.SKIP_LEG, /matrix\.os != 'ubuntu-latest' && \(github\.event_name == 'pull_request' \|\| needs\.changes\.outputs\.docs_only == 'true'\)/);
+});
+
+test('the workflow still runs in the merge queue', () => {
+  const on = load(readFileSync(join(ROOT, '.github', 'workflows', 'test.yml'), 'utf8')).on;
+  assert.ok(Object.hasOwn(on, 'merge_group'), 'without merge_group the queue would never run the macOS and Windows legs');
+});
+
+test('the Go dashboard tests start early and still decide the leg', () => {
+  const steps = jobs.test.steps;
+  const start = steps.findIndex((step) => step.id === 'go_start');
+  const wait = steps.findIndex((step) => step.name === 'Go dashboard tests');
+  const suite = steps.findIndex((step) => step.run === 'node test-all.mjs --quick');
+  assert.ok(start > 0 && start < suite && suite < wait, `start ${start}, suite ${suite}, wait ${wait}`);
+  assert.match(steps[start].run, /go test \.\/\.\.\./);
+  assert.match(steps[wait].if, /steps\.go_start\.outcome == 'success'/, 'never wait for a run that did not start');
+  assert.match(steps[wait].run, /exit "\$\(cat "\$out\/go-test\.exit"\)"/, 'the leg ends with the Go exit code');
 });
 
 test('every step of a skipped leg is skipped, apart from the one saying why', () => {
