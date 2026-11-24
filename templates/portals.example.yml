@@ -2382,6 +2382,10 @@ search_queries:
 #   provider: landingjobs
 #   enabled: true
 #
+# - name: ITJobs                          # Portuguese IT jobs (public RSS feed)
+#   provider: itjobs                      # whole board in one request
+#   enabled: true
+#
 # - name: RemoteOK
 #   provider: remoteok
 #   enabled: true
@@ -2464,6 +2468,11 @@ search_queries:
 #
 # - name: GermanTechJobs                  # German IT jobs, salary on every posting (public RSS feed)
 #   provider: germantechjobs              # whole board in one request; rows carry no location
+#   enabled: true
+#
+# - name: SwissDevJobs                    # Swiss IT jobs, same family and feed shape as GermanTechJobs
+#   provider: germantechjobs
+#   feed_url: https://swissdevjobs.ch/rss # or https://devitjobs.uk/rss, https://devitjobs.nl/rss
 #   enabled: true
 #
 # - name: Python.org Jobs                 # Python Software Foundation jobs (public RSS feed)
