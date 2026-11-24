@@ -128,7 +128,7 @@ try {
   }
 
   // country: the flag in <country> gives the ISO code. Flags for more than one
-  // country, no flag, an unassigned code or an empty tag give none.
+  // country, no flag, an unassigned code (or an aggregate such as EU) or an empty tag give none.
   const countries = parseWwrFeed(`<rss><channel>${[
     '🇺🇸 United States of America', '<![CDATA[🇬🇧 United Kingdom of Great Britain and Northern Ireland]]>',
     '🇨🇦 Canada, 🇵🇱 Poland, and 🇬🇧 United Kingdom of Great Britain and Northern Ireland', 'Germany', '', undefined,
@@ -139,7 +139,7 @@ try {
   } else {
     fail(`parseWwrFeed country codes = ${JSON.stringify(countries.slice(0, 2).map((j) => j.country))}`);
   }
-  if (countries.length === 8 && countries.slice(2).every((j) => !('country' in j))) {
+  if (countries.length === 9 && countries.slice(2).every((j) => !('country' in j))) {
     pass('parseWwrFeed sets no country for flags of several countries (a subdivision flag counts as its country), no flag, an unassigned code, an empty or an absent <country>');
   } else {
     fail(`parseWwrFeed country presence = ${JSON.stringify(countries.map((j) => j.country))}`);
