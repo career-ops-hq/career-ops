@@ -20,7 +20,7 @@ test('a capital X checkbox is the same posting scan already has', async () => {
       [{ url: URL, company: 'Acme', title: 'Engineer' }],
       { pipelinePath: pipeline, scanHistoryPath: join(dir, 'missing-history.tsv') },
     );
-    const lines = readFileSync(pipeline, 'utf8').split('\n').filter((line) => line.includes(URL));
+    const lines = readFileSync(pipeline, 'utf8').split('\n').filter((line) => line.startsWith('- ['));
     assert.deepEqual(lines, [`- [X] ${URL} | Acme | Engineer`]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
