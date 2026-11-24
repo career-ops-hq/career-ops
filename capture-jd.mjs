@@ -54,7 +54,7 @@ import { withPipelineLock } from './pipeline-lock.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
 import { captureIdentity, captureSlug, findCaptureForUrl, isSupportedCaptureExtension, validateCaptureUrl } from './jd-capture.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { renameSyncWithRetry } from './tracker-utils.mjs';
+import { renameSyncWithRetry } from './lib/rename-retry.mjs';
 import { postingUrlRelation } from './url-key.mjs';
 
 const PIPELINE_SKELETON = '# Pipeline\n\n## Pending\n\n## Processed\n';

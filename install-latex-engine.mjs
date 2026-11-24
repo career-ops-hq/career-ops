@@ -38,7 +38,7 @@ import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { resolveLatexEngine, localTectonicPath } from './generate-latex.mjs';
-import { renameSyncWithRetry } from './tracker-utils.mjs';
+import { renameSyncWithRetry } from './lib/rename-retry.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 

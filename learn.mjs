@@ -22,7 +22,7 @@ import { acquireDirLock, releaseOrWarn } from './lib/dir-lock.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { scanHeadings, SECTIONS } from './lib/personalization.mjs';
-import { renameSyncWithRetry } from './tracker-utils.mjs';
+import { renameSyncWithRetry } from './lib/rename-retry.mjs';
 
 const CUSTOM = 'modes/_custom.md';
 const PROFILE = 'modes/_profile.md';

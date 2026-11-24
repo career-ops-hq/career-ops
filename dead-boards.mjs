@@ -4,7 +4,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { renameSyncWithRetry } from './tracker-utils.mjs';
+import { renameSyncWithRetry } from './lib/rename-retry.mjs';
 
 export const DEAD_BOARD_HEADER = 'ats\tboard\tmisses\tlast_checked';
 export const DEAD_BOARD_MISSES = 3;

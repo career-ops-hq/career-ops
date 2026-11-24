@@ -55,7 +55,7 @@ import {
   isGeneratedTemplateArtifact,
   isUserConfiguredTemplateVariant,
 } from './update-system.mjs';
-import { renameSyncWithRetry } from './tracker-utils.mjs';
+import { renameSyncWithRetry } from './lib/rename-retry.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 

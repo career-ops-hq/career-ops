@@ -78,7 +78,8 @@
 
 import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { normalizeCompany, renameSyncWithRetry } from './tracker-utils.mjs';
+import { normalizeCompany } from './tracker-utils.mjs';
+import { renameSyncWithRetry } from './lib/rename-retry.mjs';
 import { companyTokens, matchCompany, parseCsv } from './linkedin-join.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { flagValue, hasFlag, safeIntFlag, validateFlags } from './lib/cli-flags.mjs';
