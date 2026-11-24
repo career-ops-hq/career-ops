@@ -1,10 +1,3 @@
-// The settings form rejects "10.5" and "0x10". The route still used
-// parseInt, which turns those into 10 and 0 and then writes them. The CLI
-// ignores the same text and keeps the default, so a save made follow-ups
-// due on a number the person never chose. 0 marks a reply due immediately.
-//
-// Run: node --test tests/lib/cadence-whole-number.test.mjs
-
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
