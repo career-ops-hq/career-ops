@@ -63,7 +63,6 @@ const EXCLUDES = [
   '.envrc',
   '.release-please-manifest.json',
   'release-please-config.json',
-  'renovate.json',
   'flake.lock',
   'flake.nix',
   'batch/logs/.gitkeep',

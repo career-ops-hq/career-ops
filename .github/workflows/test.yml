@@ -100,7 +100,8 @@ jobs:
           persist-credentials: false
       # The declared floor (lib/node-floor.mjs, package.json engines). Exact on
       # purpose: a bare '22' resolves to the newest 22.x and tests nothing.
-      # Renovate is told to leave node-version in this file alone (renovate.json);
+      # Dependabot bumps the `uses:` refs here, never `node-version:`, so nothing
+      # moves the floor but a person;
       # tests/node-floor.test.mjs fails if this drifts from NODE_MIN.
       - name: Set up the Node floor (22.13) for syntax compatibility
         if: env.SKIP_LEG != 'true'
