@@ -93,3 +93,43 @@ test('CLI: reads the data root and rejects a bad --days', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('selectFirms: the user chooses countries, sectors and levels; own firms always stay', async () => {
+  const { selectFirms } = await import('../recruiter-signal.mjs');
+  const dir = [
+    { name: 'Globalia Search', countries: ['global'], sectors: ['generalist'], levels: ['executive'] },
+    { name: 'Nordtech Hunters', countries: ['SE', 'NO'], sectors: ['technology'], levels: ['management'] },
+    { name: 'Lisbon Finance', countries: ['PT'], sectors: ['finance'], levels: ['executive'] },
+  ];
+  const names = (prefs) => selectFirms(dir, prefs).map((f) => f.name);
+  assert.deepEqual(names({}), ['Globalia Search', 'Nordtech Hunters', 'Lisbon Finance'], 'no choice = no limit');
+  assert.deepEqual(names({ countries: ['se'] }), ['Globalia Search', 'Nordtech Hunters'], 'global firms match every country, codes fold case');
+  assert.deepEqual(names({ countries: ['PT'], sectors: ['technology'] }), ['Globalia Search'], 'generalist matches every sector');
+  assert.deepEqual(names({ levels: ['executive'], firms: ['Mine & Co'] }), ['Mine & Co', 'Globalia Search', 'Lisbon Finance']);
+});
+
+test('buildSignal: directory firms match by alias, appear only once they post unless --directory', async () => {
+  const { selectFirms } = await import('../recruiter-signal.mjs');
+  const selected = selectFirms([
+    { name: 'Globalia', aliases: ['Globalia International (Spain)'], countries: ['global'], sectors: ['generalist'], levels: ['executive'] },
+    { name: 'Quiet Partners', countries: ['global'], sectors: ['generalist'], levels: ['executive'] },
+  ], {});
+  const history = [h('Globalia International (Spain)', 'CIO')];
+  const ranked = buildSignal({ today: TODAY, titleFilter, selected, history });
+  assert.deepEqual(ranked.firms.map((f) => [f.firm, f.onTarget, f.sources[0]]), [['Globalia', 1, 'directory']]);
+  const all = buildSignal({ today: TODAY, titleFilter, selected, history, directory: true });
+  assert.deepEqual(all.firms.map((f) => f.firm), ['Globalia', 'Quiet Partners']);
+});
+
+test('buildSignal: name detection works across languages', () => {
+  const { firms } = buildSignal({ today: TODAY, titleFilter, history: ['Cabinet de recrutement Dupont', 'Müller Personalberatung', 'Selección de Personal Ruiz', 'Plain Bakery'].map((c) => h(c, 'CIO')) });
+  assert.equal(firms.length, 3);
+});
+
+test('buildSignal: a branch or country after the firm name still matches, a longer word does not', async () => {
+  const { selectFirms } = await import('../recruiter-signal.mjs');
+  const selected = selectFirms([{ name: 'Hays', countries: ['global'], sectors: ['generalist'], levels: ['professional'] }], {});
+  const { firms } = buildSignal({ today: TODAY, titleFilter, selected, history: [h('Hays Belgium', 'CIO'), h('HAYS (Belgium)', 'CIO'), h('Haystack Labs', 'CIO')] });
+  assert.equal(firms.length, 1);
+  assert.equal(firms[0].postings, 2);
+});

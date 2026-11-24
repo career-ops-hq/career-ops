@@ -1,0 +1,41 @@
+# recruiter-firms.yml — shared directory of recruiters and search firms (#7694)
+#
+# Read by recruiter-signal.mjs. Your own selection lives in config/profile.yml
+# → recruiters (countries, sectors, levels, your own firms); this file is the
+# shared starting point and is replaced on update, so never put your data here.
+#
+# Fields:
+#   name      display name, as firms usually appear in postings
+#   aliases   other spellings seen in postings (optional)
+#   countries ISO 3166-1 alpha-2 codes, or [global] for a firm with offices in
+#             most markets
+#   sectors   [generalist] or any of: technology, finance, industrial,
+#             healthcare, consumer, energy, public, legal, board
+#   levels    executive (retained C-level and board search), management,
+#             professional (contingency and staffing)
+#
+# Contributing: add a firm by pull request with the countries it actually
+# recruits in. Names and public facts only: never copy a commercial directory's
+# listing, ranking or text, and never add a person's name. Public directories
+# are a good place to discover firms; add them to your own config/profile.yml
+# list instead.
+
+firms:
+  - { name: Egon Zehnder, countries: [global], sectors: [generalist, board], levels: [executive] }
+  - { name: Heidrick & Struggles, countries: [global], sectors: [generalist, board], levels: [executive] }
+  - { name: Spencer Stuart, countries: [global], sectors: [generalist, board], levels: [executive] }
+  - { name: Russell Reynolds Associates, aliases: [Russell Reynolds], countries: [global], sectors: [generalist, board], levels: [executive] }
+  - { name: Korn Ferry, countries: [global], sectors: [generalist], levels: [executive, management] }
+  - { name: Boyden, countries: [global], sectors: [generalist], levels: [executive] }
+  - { name: Stanton Chase, countries: [global], sectors: [generalist], levels: [executive] }
+  - { name: Amrop, countries: [global], sectors: [generalist, board], levels: [executive] }
+  - { name: Odgers Berndtson, countries: [global], sectors: [generalist, board], levels: [executive] }
+  - { name: Page Executive, countries: [global], sectors: [generalist], levels: [executive] }
+  - { name: Michael Page, aliases: [Michael Page International, PageGroup], countries: [global], sectors: [generalist], levels: [management, professional] }
+  - { name: Hays, countries: [global], sectors: [generalist], levels: [management, professional] }
+  - { name: Robert Walters, countries: [global], sectors: [generalist], levels: [management, professional] }
+  - { name: Robert Half, countries: [global], sectors: [finance, technology], levels: [management, professional] }
+  - { name: Harvey Nash, countries: [global], sectors: [technology], levels: [executive, management, professional] }
+  - { name: Experis, countries: [global], sectors: [technology], levels: [management, professional] }
+  - { name: Randstad, countries: [global], sectors: [generalist], levels: [professional] }
+  - { name: Adecco, countries: [global], sectors: [generalist], levels: [professional] }
