@@ -96,6 +96,23 @@ function countryCodeFromFlags(value) {
   return isAssignedCountryCode(code) ? code : undefined;
 }
 
+/**
+ * The places in `<country>`, one per flag, as written after it
+ * ("🇺🇸 United States, 🇪🇺 Europe" → ["United States", "Europe"]). The joining
+ * comma and "and" are dropped; a repeated place is kept once. A value with no
+ * flag is one place ("Germany"). Empty gives none.
+ * @param {string} value
+ * @returns {string[]}
+ */
+function placesFromFlags(value) {
+  const flag = /[\u{1F1E6}-\u{1F1FF}]{2}|\u{1F3F4}[\u{E0061}-\u{E007A}]+\u{E007F}/u;
+  const parts = value.split(new RegExp(flag.source, 'gu')).slice(flag.test(value) ? 1 : 0);
+  const places = parts
+    .map((p) => p.trim().replace(/^(?:,\s*)?(?:and\s+)?/, '').replace(/(?:\s*,)?(?:\s+and)?\s*$/, '').trim())
+    .filter(Boolean);
+  return [...new Set(places)];
+}
+
 function cleanUrl(value) {
   if (!value) return '';
   const trimmed = value.trim();
@@ -134,7 +151,7 @@ function splitTitle(rawTitle, defaultCompany) {
  *
  * @param {string} xml - raw RSS feed body
  * @param {string} [defaultCompany] - fallback company for unsplittable titles
- * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number, employmentType?: string, country?: string}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number, employmentType?: string, country?: string, locations?: string[]}>}
  */
 export function parseWwrFeed(xml, defaultCompany = 'We Work Remotely') {
   if (typeof xml !== 'string') return [];
@@ -169,8 +186,11 @@ export function parseWwrFeed(xml, defaultCompany = 'We Work Remotely') {
     const employmentType = normalizeEmploymentType(tagText(item, 'type'));
     if (employmentType) job.employmentType = employmentType;
     // <country> is the posting's country, with its flag first. Empty on most items.
-    const country = countryCodeFromFlags(tagText(item, 'country'));
+    const countryText = tagText(item, 'country');
+    const country = countryCodeFromFlags(countryText);
     if (country) job.country = country;
+    const places = placesFromFlags(countryText);
+    if (places.length > 0) job.locations = places;
     jobs.push(job);
   }
 

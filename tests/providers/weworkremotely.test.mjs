@@ -154,6 +154,19 @@ try {
     fail(`parseWwrFeed same-country flags = ${JSON.stringify(same.map((j) => j.country))}`);
   }
 
+  // locations: each place in <country>, one per flag, joining words dropped.
+  const placed = parseWwrFeed(`<rss><channel>${[
+    '🇺🇸 United States, 🇪🇺 Europe',
+    '🇨🇦 Canada, 🇵🇱 Poland, and 🇬🇧 United Kingdom of Great Britain and Northern Ireland',
+    '🇬🇧 UK and 🇬🇧 UK', `${SCOTLAND} Scotland`, 'Germany', '',
+  ].map((country, i) => item(`l${i}`, `<country>${country}</country>`)).join('')}</channel></rss>`);
+  const want = [['United States', 'Europe'], ['Canada', 'Poland', 'United Kingdom of Great Britain and Northern Ireland'], ['UK'], ['Scotland'], ['Germany'], undefined];
+  if (JSON.stringify(placed.map((j) => j.locations)) === JSON.stringify(want)) {
+    pass('parseWwrFeed lists each place in <country> as locations, once each, none for an empty tag');
+  } else {
+    fail(`parseWwrFeed locations = ${JSON.stringify(placed.map((j) => j.locations))}`);
+  }
+
   if (parseWwrFeed('', 'X').length === 0 && parseWwrFeed(null, 'X').length === 0) {
     pass('parseWwrFeed empty / non-string feed -> empty result (no crash)');
   } else {
