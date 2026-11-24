@@ -40,6 +40,8 @@ test('the scan mode does not tell the agent to ignore every other provider', () 
   assert.match(level0, /unreachable \(slug\?\)/);
   assert.match(level0, /FIX NEEDED/);
   assert.match(level0, /returned zero jobs without a successful HTTP response/);
+  assert.match(level0, /only PARTLY read/);
+  assert.match(level0, /returned without some job descriptions/);
   assert.match(scan, /run Level 0 by hand/);
   assert.doesNotMatch(level0, /Level 1 \(Playwright\) or Level 3 \(WebSearch\)/);
   assert.doesNotMatch(level0, /local-parser` successfully/);
