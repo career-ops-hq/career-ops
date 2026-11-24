@@ -201,14 +201,15 @@ export async function recordLivenessChecks(verdicts) {
   });
 }
 
-// An unattended sweep walks every Evaluated and Pending posting, so it spaces
-// repeat browser visits to one host. A hand-run spot check stays unspaced.
+// A --tracker sweep walks every Evaluated and Pending posting, so it spaces
+// repeat browser visits to one host. --file and URL arguments keep the old
+// default; the pipeline sweep adds --throttle for large batches.
 const SWEEP_THROTTLE_MS = 5000;
 
 export function sweepThrottleBaseMs(args) {
   const given = throttleBaseMsFrom(args);
   if (given) return given;
-  return args.includes('--tracker') || args.includes('--pipeline') ? SWEEP_THROTTLE_MS : 0;
+  return args.includes('--tracker') ? SWEEP_THROTTLE_MS : 0;
 }
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));

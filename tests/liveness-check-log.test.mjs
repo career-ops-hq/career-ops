@@ -1,6 +1,6 @@
 // check-liveness records every conclusive verdict (open or closed) with the day
 // it ran in data/liveness-checks.tsv, so the Today page can say "open, checked
-// 2 days ago". Unattended sweeps (--tracker, --pipeline) pace browser visits.
+// 2 days ago". A --tracker sweep paces browser visits.
 //
 // Run:  node --test tests/liveness-check-log.test.mjs
 
@@ -49,9 +49,11 @@ test('each verdict carries its local observation time, so a late commit cannot r
   assert.match(body, /verdicts\.push\(\{ url, result, code, checkedAt: localStamp\(\) \}\)/);
 });
 
-test('tracker and pipeline sweeps pace browser visits by default; a spot check does not', () => {
-  assert.equal(sweepThrottleBaseMs(['--tracker', '--pipeline', '--discard-expired', '--apply']), 5000);
-  assert.equal(sweepThrottleBaseMs(['--pipeline']), 5000);
+test('a tracker sweep paces browser visits by default; --file and a spot check keep the old default', () => {
+  assert.equal(sweepThrottleBaseMs(['--tracker', '--discard-expired', '--apply']), 5000);
+  assert.equal(sweepThrottleBaseMs(['--pipeline']), 0, '--pipeline is not a check-liveness flag');
+  assert.equal(sweepThrottleBaseMs(['--file', 'urls.txt']), 0);
+  assert.equal(sweepThrottleBaseMs(['--file', 'urls.txt', '--throttle']), 5000);
   assert.equal(sweepThrottleBaseMs(['--tracker', '--throttle=1000']), 1000);
   assert.equal(sweepThrottleBaseMs(['https://a.example.com/j/1']), 0);
 });
