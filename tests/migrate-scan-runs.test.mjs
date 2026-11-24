@@ -279,6 +279,26 @@ console.log('\n🧪 Testing migrate-scan-runs (#4423)...');
     } else {
       fail(`landed write reported code=${okCode} applied=${ok.applied}`);
     }
+
+    // A write that throws (here the pipeline lock times out) still prints the
+    // summary, with applied: false and a non-zero code. Before, the throw
+    // escaped runMigration and --json printed nothing.
+    const { acquirePipelineLock } = await load('pipeline-lock.mjs');
+    lines.length = 0;
+    writeFileSync(file, snapshot, 'utf-8');
+    const held = await acquirePipelineLock(file, { timeoutMs: 2_000 });
+    let thrownCode;
+    try {
+      thrownCode = await runMigration(file, snapshot, { ...quiet, lockOptions: { timeoutMs: 150 } });
+    } finally {
+      await held.release();
+    }
+    const thrown = lines.length ? JSON.parse(lines.join('\n')) : null;
+    if (thrownCode === 1 && thrown?.applied === false && readFileSync(file, 'utf-8') === snapshot) {
+      pass('--apply --json reports applied: false and exits 1 when the write throws');
+    } else {
+      fail(`thrown write reported code=${thrownCode} summary=${JSON.stringify(thrown)}`);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

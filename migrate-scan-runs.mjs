@@ -176,12 +176,13 @@ export async function writeMigrated(target, snapshot, text, lockOptions = {}) {
 
 /**
  * Migrate the text read from `target`, print the summary, and with `apply`
- * write the result. Returns the process exit code: 0, or 2 when the write was
- * refused because the file changed after it was read.
+ * write the result. Returns the process exit code: 0; 2 when the write was
+ * refused because the file changed after it was read; 1 when the write threw
+ * (the pipeline lock timed out, or the filesystem failed).
  *
  * The --json summary prints after the write, so `applied` reports what
- * happened rather than what was attempted. A refused write used to print
- * `applied: true` and then exit 2.
+ * happened rather than what was attempted, and it prints when the write
+ * throws too. A refused write used to print `applied: true` and then exit 2.
  *
  * @param {string} target - Path to scan-runs.tsv.
  * @param {string} before - Text the migration is computed from.
@@ -211,11 +212,17 @@ export async function runMigration(target, before, {
   let applied = false;
   let code = 0;
   if (apply && result.changed) {
-    const { written, reason } = await writeMigrated(target, before, result.text, lockOptions);
-    if (written) {
+    let outcome;
+    try {
+      outcome = await writeMigrated(target, before, result.text, lockOptions);
+    } catch (err) {
+      error(`Could not write ${target}: ${err.message}`);
+      code = 1;
+    }
+    if (outcome?.written) {
       applied = true;
-    } else {
-      error(`Refused to write ${target}: ${reason}. A scan most likely appended a run `
+    } else if (outcome) {
+      error(`Refused to write ${target}: ${outcome.reason}. A scan most likely appended a run `
         + 'while this was migrating. Nothing was changed — re-run the command.');
       code = 2;
     }
