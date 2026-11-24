@@ -81,7 +81,7 @@ test('CLI: reads the data root and rejects a bad --days', () => {
     writeFileSync(join(root, 'portals.yml'), 'title_filter:\n  positive: ["CIO"]\n');
     writeFileSync(join(root, 'data/scan-history.tsv'), `url\tfirst_seen\tportal\ttitle\tcompany\tstatus\nhttps://x.example/1\t${new Date().toISOString().slice(0, 10)}\tvdab-api\tCIO\tNorthbeam Recruitment\tadded\n`);
     writeFileSync(join(root, 'data/mandates.tsv'), 'bad line\n');
-    const env = { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: join(root, 'data/applications.md') };
+    const env = { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: join(root, 'data/applications.md'), CAREER_OPS_PROFILE: join(root, 'config/profile.yml') };
     const ok = spawnSync(process.execPath, [SCRIPT], { env, encoding: 'utf-8' });
     assert.equal(ok.status, 0, ok.stderr);
     const out = JSON.parse(ok.stdout);
@@ -143,7 +143,7 @@ test('CLI: --firm-file reads the firm name as plain text, shell syntax included'
     writeFileSync(join(root, 'data/scan-history.tsv'), `url\tfirst_seen\tportal\ttitle\tcompany\tstatus\nhttps://x.example/1\t${today}\tvdab-api\tCIO\t${name}\tadded\n`);
     const firmFile = join(root, 'firm.txt');
     writeFileSync(firmFile, `${name}\nignored second line\n`);
-    const env = { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: join(root, 'data/applications.md') };
+    const env = { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: join(root, 'data/applications.md'), CAREER_OPS_PROFILE: join(root, 'config/profile.yml') };
     const r = spawnSync(process.execPath, [SCRIPT, '--firm-file', firmFile], { env, encoding: 'utf-8', cwd: root });
     assert.equal(r.status, 0, r.stderr);
     const out = JSON.parse(r.stdout);

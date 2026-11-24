@@ -55,7 +55,7 @@ import { loadTrackerRows } from './company-history.mjs';
 import { normalizeCompany, companiesMatchIgnoringCorporateForm } from './tracker-utils.mjs';
 import { validateFlags, flagValue } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 
 const DATA_ROOT = getCareerOpsRoot();
 const PATHS = {
@@ -63,7 +63,7 @@ const PATHS = {
   contacts: join(DATA_ROOT, 'data/contacts.tsv'),
   mandates: join(DATA_ROOT, 'data/mandates.tsv'),
   portals: join(DATA_ROOT, 'portals.yml'),
-  profile: join(DATA_ROOT, 'config/profile.yml'),
+  profile: getProfilePath(),
   directory: join(dirname(fileURLToPath(import.meta.url)), 'templates/recruiter-firms.yml'),
 };
 
@@ -238,7 +238,7 @@ function readIf(path) {
 
 function main() {
   const args = process.argv.slice(2);
-  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: ['--firm', '--firm-file', '--days', '--top'] });
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: ['--firm', '--firm-file', '--days', '--top'], requireOperand: true });
   const days = Number(flagValue(args, '--days') ?? DEFAULT_DAYS);
   const top = flagValue(args, '--top') == null ? Infinity : Number(flagValue(args, '--top'));
   if (!Number.isInteger(days) || days < 1 || !(top === Infinity || (Number.isInteger(top) && top > 0))) {
