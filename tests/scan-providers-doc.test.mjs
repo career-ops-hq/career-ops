@@ -36,6 +36,10 @@ test('the scan mode does not tell the agent to ignore every other provider', () 
   assert.match(level0, /without a working fallback/);
   assert.match(level0, /No provider matched these entries/);
   assert.match(level0, /used API fallback/);
+  assert.match(level0, /Network errors/);
+  assert.match(level0, /unreachable \(slug\?\)/);
+  assert.match(level0, /FIX NEEDED/);
+  assert.match(level0, /returned zero jobs without a successful HTTP response/);
   assert.match(scan, /run Level 0 by hand/);
   assert.doesNotMatch(level0, /Level 1 \(Playwright\) or Level 3 \(WebSearch\)/);
   assert.doesNotMatch(level0, /local-parser` successfully/);
