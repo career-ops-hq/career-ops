@@ -22,7 +22,7 @@
 // node:test suites do not come through here; the parent runs those with
 // `node --test`, as the serial path does.
 import { writeFileSync } from 'fs';
-import { importSuiteContained, results, ROOT } from './helpers.mjs';
+import { failureList, importSuiteContained, results, ROOT } from './helpers.mjs';
 
 // How long a suite may keep the process alive after its import has resolved.
 // In a serial run a suite that leaves a handle open (a server it never closed,
@@ -40,7 +40,7 @@ if (!suite || !resultFile) {
   let lingered = false;
   process.on('exit', () => {
     try {
-      writeFileSync(resultFile, JSON.stringify({ ...results(), lingered }));
+      writeFileSync(resultFile, JSON.stringify({ ...results(), failures: failureList(), lingered }));
     } catch {
       // Nothing to report to: the parent reads a missing file as a dead suite.
     }
