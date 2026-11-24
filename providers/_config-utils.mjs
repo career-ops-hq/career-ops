@@ -18,6 +18,9 @@ export function intInRange(val, def, min, max) {
   return Math.min(max, Math.max(min, Math.trunc(n)));
 }
 
+/** @param {string} text */
+export const hasControlChar = (text) => [...text].some((c) => c < ' ' || c === '\u007f');
+
 /**
  * Read a user override that must be a positive integer, capped at `cap`, so a
  * portals.yml typo cannot turn one board into an unbounded or ban-prone crawl.
