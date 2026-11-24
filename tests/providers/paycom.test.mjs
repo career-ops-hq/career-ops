@@ -129,7 +129,7 @@ else fail(`paycom.id is ${JSON.stringify(paycom.id)}`);
   const [str] = await paycom.fetch(entry, makeCtx({ jobPostingPreviews: [row('104', 'String id')] }));
   if (str?.listingIdentity?.posting_id === '104' && str.listingIdentity.board_slug === KEY) pass('a string jobId keeps its listingIdentity, uncoerced');
   else fail(`string-id row: ${JSON.stringify(str)}`);
-  for (const bad of [' 104', '104 ', 'a\nb', 1.5, 0, -3, true]) {
+  for (const bad of [' 104', '104 ', 'a\nb', 1.5, 0, -3]) {
     const [r] = parsePaycom({ jobPostingPreviews: [row(bad, 'Odd id')] }, KEY, 'Acme');
     if (r && !('listingIdentity' in r)) pass(`jobId ${JSON.stringify(bad)} leaves listingIdentity off`);
     else fail(`jobId ${JSON.stringify(bad)}: ${JSON.stringify(r)}`);
@@ -151,6 +151,18 @@ else fail(`paycom.id is ${JSON.stringify(paycom.id)}`);
   } finally {
     console.warn = origWarn;
   }
+}
+
+// parsePaycom(): one malformed row never aborts the board
+{
+  const jobs = parsePaycom({ jobPostingPreviews: [
+    row({ toString: null }, 'Object id'),
+    row([7], 'Array id'),
+    row(true, 'Boolean id'),
+    row(201, 'Good'),
+  ] }, KEY, 'Acme');
+  if (jobs.length === 1 && jobs[0].title === 'Good') pass('rows with a non-string, non-number jobId are skipped, the rest kept');
+  else fail(`malformed ids: ${JSON.stringify(jobs)}`);
 }
 
 // fetch(): guards that run before the search request

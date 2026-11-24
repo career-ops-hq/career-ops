@@ -156,7 +156,8 @@ export function parsePaycom(payload, clientKey, companyName) {
     const title = typeof p?.jobTitle === 'string' ? p.jobTitle.trim() : '';
     if (!title) continue;
     const jobId = p?.jobId;
-    if (jobId == null || jobId === '') continue;
+    if (typeof jobId !== 'string' && typeof jobId !== 'number') continue;
+    if (jobId === '') continue;
     const seg = safeEncodeURIComponent(String(jobId));
     if (seg === null) continue;
     const url = `${PAYCOM_ORIGIN}/v4/ats/web.php/portal/${clientKey}/jobs/${seg}`;
