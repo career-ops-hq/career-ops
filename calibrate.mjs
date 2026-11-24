@@ -18,8 +18,8 @@
  *   node calibrate.mjs --self-test
  *
  * Honesty rules, in order of importance:
- *   - An application still in flight (Applied/Responded with no recorded
- *     outcome) is NOT a data point. Counting it as a failure would punish
+ *   - An application still in flight (Applied/Responded/Assessment with no
+ *     recorded outcome) is NOT a data point. Counting it as a failure would punish
  *     recent applications; counting it as a success would flatter everything.
  *     It is excluded from every rate and reported separately as in-flight.
  *   - No percentage is printed on a band below the sample floor. "2 of 3
@@ -78,8 +78,8 @@ export const JOURNAL_OUTCOMES = {
 
 // Tracker statuses that resolve an application even without a journal.
 // `interview`/`offer`/`hired` prove tier reach; `rejected` is terminal
-// negative. Everything else (applied, responded, evaluated…) is in-flight
-// or pre-application and carries no outcome evidence.
+// negative. Everything else (applied, responded, assessment, evaluated…) is
+// in-flight or pre-application and carries no outcome evidence.
 const TRACKER_TERMINAL = {
   hired: { reachedInterview: true, reachedOffer: true },
   offer: { reachedInterview: true, reachedOffer: true },
@@ -168,7 +168,9 @@ export function computeCalibration(rows, journals, opts = {}) {
       const s = String(row.status || '').replace(/\*\*/g, '').trim().toLowerCase().replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '');
       if (closedNoResponse.get(row.num) === s) verdict = { source: 'ledger', type: 'no_response', ...JOURNAL_OUTCOMES.no_response };
       else if (TRACKER_TERMINAL[s]) verdict = { source: 'tracker', type: s, ...TRACKER_TERMINAL[s] };
-      else if (['applied', 'responded'].includes(s)) { inFlight.push(row.num); continue; }
+      // Assessment (#4317) sits between Applied and Interview, so a row there is
+      // in flight like the two before it, not outside the population.
+      else if (['applied', 'responded', 'assessment'].includes(s)) { inFlight.push(row.num); continue; }
       else continue; // evaluated / discarded / skip with no stage history — outside calibration's population
     }
     if (!Number.isFinite(row.score) || row.score <= 0) { unscored.push(row.num); continue; }
