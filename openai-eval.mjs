@@ -41,7 +41,7 @@ import {
 } from './reserve-report-num.mjs';
 import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
 import { buildBudgetedPrompt } from './lib/context-budget.mjs';
-import { endpointHeaders } from './lib/endpoint-headers.mjs';
+import { endpointHeaders, buildTokenLimit } from './lib/endpoint-headers.mjs';
 import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
 import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
 import {
@@ -373,13 +373,6 @@ export function buildSystemMessage(prompt, host) {
 // the reasoning a thinking model spends before it (up to ~26K seen), so the cap
 // bounds the reservation without cutting a normal evaluation short.
 const DEFAULT_MAX_TOKENS = 32768;
-
-// Same host gate as buildSystemMessage: api.openai.com's reasoning models
-// reject `max_tokens` and take `max_completion_tokens`, which its other chat
-// models accept as well; gateways and local servers read `max_tokens`.
-function buildTokenLimit(limit, host) {
-  return host === 'api.openai.com' ? { max_completion_tokens: limit } : { max_tokens: limit };
-}
 
 // ---------------------------------------------------------------------------
 // Ending a run after a request

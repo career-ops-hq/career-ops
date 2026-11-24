@@ -27,7 +27,7 @@ import { readLockedSections } from './theme-style.mjs';
 import { redactIfEnabled, restoreIfEnabled } from './utils/privacy-filter.mjs';
 import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
 import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
-import { endpointHeaders } from './lib/endpoint-headers.mjs';
+import { endpointHeaders, buildTokenLimit } from './lib/endpoint-headers.mjs';
 
 // Ambient guard over global fetch (idempotent); the explicit gate below is the
 // primary layer.
@@ -277,13 +277,6 @@ export function buildSystemMessage(prompt, host) {
 // the tailored CV costs cents. The variable and its default are openai-eval's,
 // so one setting covers both steps of the budget workflow.
 const DEFAULT_MAX_TOKENS = 32768;
-
-// Same host gate as buildSystemMessage: api.openai.com's reasoning models
-// reject `max_tokens` and take `max_completion_tokens`, which its other chat
-// models accept as well; gateways and local servers read `max_tokens`.
-function buildTokenLimit(limit, host) {
-  return host === 'api.openai.com' ? { max_completion_tokens: limit } : { max_tokens: limit };
-}
 
 // ---------------------------------------------------------------------------
 // Ending a run after a request
