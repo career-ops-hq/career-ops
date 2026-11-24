@@ -67,6 +67,15 @@ test('a 429 pauses the next request for its Retry-After', async () => {
   assert.equal(pacing.blockedUntil, 0);
 });
 
+test('a 429 with an HTTP-date Retry-After pauses until that date', () => {
+  reset();
+  const t = 5_000;
+  const retryAfter = new Date(Date.now() + 90_000).toUTCString();
+  noteRateLimit(Object.assign(new Error('x'), { status: 429, retryAfter }), () => t);
+  const blockMs = pacing.blockedUntil - t;
+  assert.ok(blockMs > 85_000 && blockMs <= 90_000, `block ${blockMs} ms`);
+});
+
 test('a 429 that lands while a caller sleeps extends that caller\'s wait', async () => {
   reset();
   let t = 1_000;

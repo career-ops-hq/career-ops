@@ -1,7 +1,7 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
-import { fetchTextWithRetry, sleep } from './_http.mjs';
+import { fetchTextWithRetry, parseRetryAfterMs, sleep } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
 
 // Paylocity provider — single-company ATS adapter for `tracked_companies:`.
@@ -94,8 +94,8 @@ export async function waitForSlot(ctx, { now = Date.now, minIntervalMs = MIN_INT
 export function noteRateLimit(err, now = Date.now) {
   const status = /** @type {any} */ (err)?.status;
   if (status !== 429) return;
-  const seconds = Number(/** @type {any} */ (err)?.retryAfter);
-  const ms = Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds * 1000, 120_000) : DEFAULT_BLOCK_MS;
+  const retryMs = parseRetryAfterMs(/** @type {any} */ (err)?.retryAfter);
+  const ms = retryMs > 0 ? Math.min(retryMs, 120_000) : DEFAULT_BLOCK_MS;
   pacing.blockedUntil = Math.max(pacing.blockedUntil, now() + ms);
 }
 
