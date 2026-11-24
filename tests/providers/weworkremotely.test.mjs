@@ -132,7 +132,7 @@ try {
   const countries = parseWwrFeed(`<rss><channel>${[
     '🇺🇸 United States of America', '<![CDATA[🇬🇧 United Kingdom of Great Britain and Northern Ireland]]>',
     '🇨🇦 Canada, 🇵🇱 Poland, and 🇬🇧 United Kingdom of Great Britain and Northern Ireland', 'Germany', '', undefined,
-    '🇽🇽 Nowhere', `🇺🇸 United States, ${ENGLAND} England`,
+    '🇽🇽 Nowhere', '🇪🇺 Europe', `🇺🇸 United States, ${ENGLAND} England`,
   ].map((country, i) => item(`c${i}`, country === undefined ? '' : `<country>${country}</country>`)).join('')}</channel></rss>`);
   if (countries[0]?.country === 'US' && countries[1]?.country === 'GB') {
     pass('parseWwrFeed reads the country code from the flag in <country>');

@@ -2,7 +2,7 @@
 import { decodeEntities } from './_html-entities.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 import { normalizeEmploymentType } from './_employment-type.mjs';
-import { countryName } from './_country.mjs';
+import { isAssignedCountryCode } from './_country.mjs';
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // We Work Remotely provider - board-wide RSS feed
@@ -76,7 +76,7 @@ function tagText(block, tag) {
  * ("🇺🇸 United States of America" → "US"). A flag is two regional-indicator
  * letters; a subdivision flag (England, Scotland, Wales) is a black flag plus
  * tag letters, whose first two give the country ("gbeng" → "GB"). A code
- * counts only when `countryName` knows it, so "🇽🇽" gives none. Repeated flags
+ * counts only when it is an assigned country code, so "🇽🇽" and "🇪🇺" give none. Repeated flags
  * of one country give that country. A posting open to flags for more than one
  * country ("🇨🇦 Canada, 🇵🇱 Poland, and 🇬🇧 United Kingdom ...") gets none, as
  * one code would misstate it, and so does a value with no flag.
@@ -93,7 +93,7 @@ function countryCodeFromFlags(value) {
   ]);
   if (codes.size !== 1) return undefined;
   const [code] = codes;
-  return countryName(code) ? code : undefined;
+  return isAssignedCountryCode(code) ? code : undefined;
 }
 
 function cleanUrl(value) {
