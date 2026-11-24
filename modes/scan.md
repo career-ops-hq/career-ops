@@ -2,7 +2,7 @@
 
 Scans configured job portals, filters by title relevance, and adds new offers to the pipeline for subsequent evaluation.
 
-> **Note (v1.6+):** The default scanner (`scan.mjs` / `npm run scan`) is **zero-token** and uses structured sources: local parsers configured per company and public Greenhouse, Ashby, and Lever APIs. The levels with Playwright/WebSearch described below represent the **agent** workflow (executed by the AI agent), not what `scan.mjs` does. If a company does not have a local parser or a Greenhouse/Ashby/Lever API, `scan.mjs` will ignore it; in those cases, the agent must manually complete Level 1 (Playwright) or Level 3 (WebSearch).
+> **Note (v1.6+):** `scan.mjs` (`npm run scan`) spends no LLM tokens. It loads every provider module in `providers/` whose filename does not start with `_`, then runs the provider the `portals.yml` entry names, or the first provider whose `detect()` matches that entry. A configured local parser is tried before the other detectors. Playwright and WebSearch, in the levels below, are work the agent does. `scan.mjs` does not run them. When no provider matches an entry, scan skips it and counts it under `skipped — no provider matched` in the summary. Do Level 1 (Playwright) or Level 3 (WebSearch) only for those skipped companies.
 >
 > **Rule (v1.8+):** If a company's local parser completes successfully in Level 0, the agent **must not** repeat that company in Playwright (Level 1) or API (Level 2). In Level 3, general queries remain active, but results from companies already covered by a parser are discarded. See [Rule: Successful Local Parser](#rule-successful-local-parser--no-expensive-scraping-repetition).
 
@@ -123,7 +123,7 @@ During the agent's scan, keep the **`local_parser_ok`** set in memory. This set 
 - Level 3: do not deactivate cross-cutting queries (`site:jobs.ashbyhq.com`, `site:boards.greenhouse.io`, etc.) — these are used to discover **new** companies. Only filter out results for companies already in `tracked_companies` with a successful parser.
 - Do not create dedicated `search_queries` for a company with an active local parser (e.g. `site:jobs.ashbyhq.com/cohere "AI Engineer"`); use the parser or, if it fails, Playwright/API.
 
-**Recommended Level 0:** run `node scan.mjs` (or `npm run scan`) at the start of the agent's workflow. This covers local parsers + APIs in a single zero-token step and returns which companies used the `local-parser` successfully.
+**Recommended Level 0:** run `node scan.mjs` (or `npm run scan`) at the start of the agent's workflow. This covers local parsers and every provider in `providers/` in one zero-token step. The summary counts how many companies used a local parser. It does not name them. Companies no provider claimed are the ones for Level 1 (Playwright) or Level 3 (WebSearch).
 
 ### Level 1 — Direct Playwright (PRIMARY)
 

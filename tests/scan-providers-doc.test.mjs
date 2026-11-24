@@ -1,0 +1,32 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { loadProviders, resolveProvider } from '../providers/_registry.mjs';
+
+const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+
+test('a Workable careers URL resolves to the workable provider', async () => {
+  const providers = await loadProviders(join(ROOT, 'providers'));
+  const match = resolveProvider(
+    { name: 'Acme', careers_url: 'https://apply.workable.com/acme' },
+    providers,
+  );
+  assert.equal(match?.provider?.id, 'workable');
+});
+
+test('the scan mode does not tell the agent to ignore every other provider', () => {
+  const scan = readFileSync(join(ROOT, 'modes/scan.md'), 'utf8');
+  const opening = scan.slice(0, scan.indexOf('## Recommended Execution'));
+  assert.match(opening, /providers\//);
+  assert.match(opening, /no provider matched/);
+  assert.doesNotMatch(opening, /Greenhouse, Ashby, and Lever APIs/);
+  assert.doesNotMatch(opening, /will ignore it/);
+
+  const level0 = scan.split('\n').find((line) => line.includes('Recommended Level 0'));
+  assert.ok(level0, 'Recommended Level 0 sentence missing');
+  assert.match(level0, /does not name them/);
+  assert.match(level0, /Level 1 \(Playwright\) or Level 3 \(WebSearch\)/);
+  assert.doesNotMatch(level0, /local-parser` successfully/);
+});
