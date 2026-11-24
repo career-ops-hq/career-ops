@@ -118,3 +118,47 @@ contribution does not edit this file: maintainers regenerate it on main with
 - 2026-11-23 `2026-11-23-santifer.24` (3 boards, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
 - 2026-11-23 `2026-11-23-santifer.25` (1 board, source `web-index:openai-web-search@2026-11-17`): Found with an assistant's web search
 - 2026-11-23 `2026-11-23-santifer.26` (1 board, source `web-index:commoncrawl@2026-11-22`): Sites from the Common Crawl URL index, CC-MAIN-2026-34, -39 and -43 (Common Crawl terms of use)
+- 2026-11-23 `2026-11-23-santifer.27` (1 board, source `web-index:wayback@2026-11-12`): Found by the project's discoverer in a public web index
+- 2026-11-23 `2026-11-23-santifer.28` (1 board, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
+- 2026-11-23 `2026-11-23-santifer.29` (5 boards, source `web-index:commoncrawl@2026-11-22`): Sites from the Common Crawl URL index, CC-MAIN-2026-34, -39 and -43 (Common Crawl terms of use)
+- 2026-11-23 `2026-11-23-santifer.30` (120 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
+- 2026-11-23 `2026-11-23-santifer.31` (261 boards, source `web-index:commoncrawl@2026-11-21`): Hosts from the Common Crawl web graph, cc-main-2026-aug-sep-oct (Common Crawl terms of use)
+- 2026-11-23 `2026-11-23-santifer.32` (14 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
+- 2026-11-23 `2026-11-23-santifer.33` (9 boards, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
+- 2026-11-23 `2026-11-23-santifer.34` (1 board, source `web-index:wayback@2026-11-12`): Found by the project's discoverer in a public web index
+- 2026-11-23 `2026-11-23-santifer.35` (7 boards, source `ats-directory`): open-jobs, repository elliottdehn/open-jobs, CC0-1.0: https://github.com/elliottdehn/open-jobs
+- 2026-11-23 `2026-11-23-santifer.36` (1 board, source `ats-directory`): ATS Company Directory by LastRound AI, CC BY 4.0: https://lastroundai.com/blog/salary-transparency-study-2026
+- 2026-11-23 `2026-11-23-santifer.37` (1 board, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
+- 2026-11-23 `2026-11-23-santifer.38` (1 board, source `web-index:commoncrawl@2026-11-22`): Sites from the Common Crawl URL index, CC-MAIN-2026-34, -39 and -43 (Common Crawl terms of use)
+- 2026-11-23 `2026-11-23-santifer.39` (1 board, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
+- 2026-11-23 `2026-11-23-santifer.40` (162 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
+- 2026-11-23 `2026-11-23-santifer.41` (266 boards, source `web-index:commoncrawl@2026-11-21`): Hosts from the Common Crawl web graph, cc-main-2026-aug-sep-oct (Common Crawl terms of use)
+- 2026-11-23 `2026-11-23-santifer.42` (20 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
+- 2026-11-23 `2026-11-23-santifer.43` (1 board, source `web-index:wayback@2026-11-12`): Found by the project's discoverer in a public web index
+- 2026-11-23 `2026-11-23-santifer.44` (9 boards, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
+- 2026-11-23 `2026-11-23-santifer.45` (5 boards, source `ats-directory`): open-jobs, repository elliottdehn/open-jobs, CC0-1.0: https://github.com/elliottdehn/open-jobs
+- 2026-11-23 `2026-11-23-santifer.46` (1 board, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
+- 2026-11-23 `2026-11-23-santifer.47` (1 board, source `web-index:commoncrawl@2026-11-22`): Sites from the Common Crawl URL index, CC-MAIN-2026-34, -39 and -43 (Common Crawl terms of use)
+- 2026-11-23 `2026-11-23-santifer.48` (1 board, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
+- 2026-11-24 `2026-11-24-santifer.49` (156 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
+- 2026-11-24 `2026-11-24-santifer.50` (282 boards, source `web-index:commoncrawl@2026-11-21`): Hosts from the Common Crawl web graph, cc-main-2026-aug-sep-oct (Common Crawl terms of use)
+- 2026-11-24 `2026-11-24-santifer.51` (31 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
+- 2026-11-24 `2026-11-24-santifer.52` (7 boards, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
+- 2026-11-24 `2026-11-24-santifer.53` (7 boards, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
+- 2026-11-24 `2026-11-24-santifer.54` (8 boards, source `ats-directory`): open-jobs, repository elliottdehn/open-jobs, CC0-1.0: https://github.com/elliottdehn/open-jobs
+- 2026-11-24 `2026-11-24-santifer.55` (1 board, source `web-index:commoncrawl@2026-11-22`): Sites from the Common Crawl URL index, CC-MAIN-2026-34, -39 and -43 (Common Crawl terms of use)
+- 2026-11-24 `2026-11-24-santifer.56` (1 board, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
+- 2026-11-24 `2026-11-24-santifer.57` (1 board, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
+- 2026-11-24 `2026-11-24-santifer.58` (719 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
+- 2026-11-24 `2026-11-24-santifer.59` (361 boards, source `web-index:commoncrawl@2026-11-21`): Hosts from the Common Crawl web graph, cc-main-2026-aug-sep-oct (Common Crawl terms of use)
+- 2026-11-24 `2026-11-24-santifer.60` (38 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
+- 2026-11-24 `2026-11-24-santifer.61` (11 boards, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
+- 2026-11-24 `2026-11-24-santifer.62` (4 boards, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
+- 2026-11-24 `2026-11-24-santifer.63` (4 boards, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
+- 2026-11-24 `2026-11-24-santifer.64` (2 boards, source `ats-directory`): open-jobs, repository elliottdehn/open-jobs, CC0-1.0: https://github.com/elliottdehn/open-jobs
+- 2026-11-24 `2026-11-24-santifer.65` (1 board, source `web-index:commoncrawl@2026-11-22`): Sites from the Common Crawl URL index, CC-MAIN-2026-34, -39 and -43 (Common Crawl terms of use)
+- 2026-11-24 `2026-11-24-santifer.66` (680 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
+- 2026-11-24 `2026-11-24-santifer.67` (9 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
+- 2026-11-24 `2026-11-24-santifer.68` (2 boards, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
+- 2026-11-24 `2026-11-24-santifer.69` (1 board, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
+- 2026-11-24 `2026-11-24-santifer.70` (1 board, source `web-index:commoncrawl@2026-11-22`): Sites from the Common Crawl URL index, CC-MAIN-2026-34, -39 and -43 (Common Crawl terms of use)
