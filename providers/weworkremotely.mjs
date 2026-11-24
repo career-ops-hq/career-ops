@@ -2,6 +2,7 @@
 import { decodeEntities } from './_html-entities.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 import { normalizeEmploymentType } from './_employment-type.mjs';
+import { countryName } from './_country.mjs';
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // We Work Remotely provider - board-wide RSS feed
@@ -73,18 +74,26 @@ function tagText(block, tag) {
 /**
  * The ISO 3166-1 alpha-2 code behind the flag emoji in `<country>`
  * ("🇺🇸 United States of America" → "US"). A flag is two regional-indicator
- * letters, so no name lookup is needed. A posting open to several countries
- * ("🇨🇦 Canada, 🇵🇱 Poland, and 🇬🇧 United Kingdom ...") has several flags, and
- * one code would misstate it, so it gets none, as does a value with no flag.
+ * letters; a subdivision flag (England, Scotland, Wales) is a black flag plus
+ * tag letters, whose first two give the country ("gbeng" → "GB"). A code
+ * counts only when `countryName` knows it, so "🇽🇽" gives none. Repeated flags
+ * of one country give that country. A posting open to flags for more than one
+ * country ("🇨🇦 Canada, 🇵🇱 Poland, and 🇬🇧 United Kingdom ...") gets none, as
+ * one code would misstate it, and so does a value with no flag.
  * @param {string} value
  * @returns {string | undefined}
  */
 function countryCodeFromFlags(value) {
-  const codes = new Set(
-    [...value.matchAll(/([\u{1F1E6}-\u{1F1FF}])([\u{1F1E6}-\u{1F1FF}])/gu)]
-      .map((m) => m.slice(1).map((c) => String.fromCharCode(c.codePointAt(0) - 0x1F1E6 + 65)).join('')),
-  );
-  return codes.size === 1 ? [...codes][0] : undefined;
+  const letter = (c) => String.fromCharCode(c.codePointAt(0) - 0x1F1E6 + 65);
+  const codes = new Set([
+    ...[...value.matchAll(/([\u{1F1E6}-\u{1F1FF}])([\u{1F1E6}-\u{1F1FF}])/gu)]
+      .map((m) => letter(m[1]) + letter(m[2])),
+    ...[...value.matchAll(/\u{1F3F4}([\u{E0061}-\u{E007A}]{2})[\u{E0061}-\u{E007A}]*\u{E007F}/gu)]
+      .map((m) => [...m[1]].map((c) => String.fromCharCode(c.codePointAt(0) - 0xE0061 + 65)).join('')),
+  ]);
+  if (codes.size !== 1) return undefined;
+  const [code] = codes;
+  return countryName(code) ? code : undefined;
 }
 
 function cleanUrl(value) {

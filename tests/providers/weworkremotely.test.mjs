@@ -6,6 +6,11 @@ import { pathToFileURL } from 'url';
 console.log('\nProvider — weworkremotely');
 
 
+// Subdivision flags: a black flag, tag letters ("gbeng"), a cancel tag.
+const tagFlag = (tags) => '\u{1F3F4}' + [...tags].map((c) => String.fromCodePoint(c.charCodeAt(0) - 97 + 0xE0061)).join('') + '\u{E007F}';
+const ENGLAND = tagFlag('gbeng');
+const SCOTLAND = tagFlag('gbsct');
+
 try {
   const wwrModule = await import(pathToFileURL(join(ROOT, 'providers/weworkremotely.mjs')).href);
   const weworkremotely = wwrModule.default;
@@ -122,21 +127,31 @@ try {
     fail(`parseWwrFeed description presence = ${JSON.stringify(described.map((j) => j.description))}`);
   }
 
-  // country: the flag in <country> gives the ISO code. Several flags, no flag
-  // or an empty tag give none.
+  // country: the flag in <country> gives the ISO code. Flags for more than one
+  // country, no flag, an unassigned code or an empty tag give none.
   const countries = parseWwrFeed(`<rss><channel>${[
     '🇺🇸 United States of America', '<![CDATA[🇬🇧 United Kingdom of Great Britain and Northern Ireland]]>',
     '🇨🇦 Canada, 🇵🇱 Poland, and 🇬🇧 United Kingdom of Great Britain and Northern Ireland', 'Germany', '', undefined,
+    '🇽🇽 Nowhere', `🇺🇸 United States, ${ENGLAND} England`,
   ].map((country, i) => item(`c${i}`, country === undefined ? '' : `<country>${country}</country>`)).join('')}</channel></rss>`);
   if (countries[0]?.country === 'US' && countries[1]?.country === 'GB') {
     pass('parseWwrFeed reads the country code from the flag in <country>');
   } else {
     fail(`parseWwrFeed country codes = ${JSON.stringify(countries.slice(0, 2).map((j) => j.country))}`);
   }
-  if (countries.length === 6 && countries.slice(2).every((j) => !('country' in j))) {
-    pass('parseWwrFeed sets no country for several flags, no flag, an empty or an absent <country>');
+  if (countries.length === 8 && countries.slice(2).every((j) => !('country' in j))) {
+    pass('parseWwrFeed sets no country for flags of several countries (a subdivision flag counts as its country), no flag, an unassigned code, an empty or an absent <country>');
   } else {
     fail(`parseWwrFeed country presence = ${JSON.stringify(countries.map((j) => j.country))}`);
+  }
+
+  const same = parseWwrFeed(`<rss><channel>${[
+    '🇬🇧 UK and 🇬🇧 UK', `${SCOTLAND} Scotland`,
+  ].map((country, i) => item(`s${i}`, `<country>${country}</country>`)).join('')}</channel></rss>`);
+  if (same[0]?.country === 'GB' && same[1]?.country === 'GB') {
+    pass('parseWwrFeed gives repeated flags of one country, and a subdivision flag, that country');
+  } else {
+    fail(`parseWwrFeed same-country flags = ${JSON.stringify(same.map((j) => j.country))}`);
   }
 
   if (parseWwrFeed('', 'X').length === 0 && parseWwrFeed(null, 'X').length === 0) {
