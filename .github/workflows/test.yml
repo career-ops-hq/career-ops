@@ -58,25 +58,23 @@ jobs:
         env:
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
 
-  test:
+  suite-ubuntu:
+    name: suite (ubuntu-latest, ${{ matrix.shard }}/2)
+    # Ubuntu runs the whole suite on every pull request and in the merge
+    # queue, docs-only changes included (about 45 test files read docs-type
+    # files, and the inline sections scan every tracked file), split in two so
+    # a pull request's result comes in about half the time. !cancelled() and
+    # not the implicit success(): a failed or skipped `changes` must still run
+    # it.
     needs: changes
-    # !cancelled() and not the implicit success(): a failed or skipped `changes`
-    # must still run this job, or the required checks would never pass.
     if: ${{ !cancelled() }}
     strategy:
+      # One shard failing must not cancel the other's evidence.
+      fail-fast: false
       matrix:
-        # One leg here; macOS and Windows are the shard and gate jobs below.
-        # A matrix of one keeps the required check name "test (ubuntu-latest)".
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
-    # Without a limit a hung job holds its runner for GitHub's default of six
-    # hours. test-all.mjs kills a discovered suite that runs past its budget,
-    # but its inline sections and the install steps have no limit of their
-    # own. This leg takes about 9 minutes.
-    timeout-minutes: 30
-    # Ubuntu runs the whole suite on every pull request and in the merge queue,
-    # docs-only changes included: about 45 test files read docs-type files, and
-    # the inline sections of test-all.mjs scan every tracked file.
+        shard: [1, 2]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       # The repo is committed with LF; Windows runners default to autocrlf,
       # which would rewrite every text file on checkout and make regexes that
@@ -106,6 +104,7 @@ jobs:
       # browser, and those skip here and run in the tool-suites job instead.
       - run: npm install --ignore-scripts
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        if: ${{ matrix.shard == 1 }}
         with:
           go-version: '1.27'
           # The module lives in dashboard/, so without this setup-go looks for
@@ -117,15 +116,16 @@ jobs:
       # run the repo's Node scripts (set-status.mjs), which need Node 24 and the
       # installed dependencies. "Go dashboard tests" below waits for them and ends with
       # their exit code, so a failing Go test still turns this check red. They
-      # write only to their own temp dirs, so the suite never sees them.
+      # write only to their own temp dirs, so the suite never sees them. Shard 1 only.
       - name: Start the Go dashboard tests in the background
         id: go_start
+        if: ${{ matrix.shard == 1 }}
         shell: bash
         working-directory: dashboard
         run: |
           out="$(cd "$RUNNER_TEMP" && pwd)"
           nohup bash -c 'go test ./... > "$1/go-test.log" 2>&1; echo "$?" > "$1/go-test.exit"' _ "$out" > /dev/null 2>&1 &
-      - run: node test-all.mjs --quick
+      - run: node test-all.mjs --quick --shard "${{ matrix.shard }}/2"
       # Waits for the run started above and reports it as its own step. Runs
       # after a red suite too (!cancelled()), so one failure does not hide the
       # other; not when the start step did not run, which would wait for
@@ -144,16 +144,33 @@ jobs:
           fi
           exit "$(cat "$out/go-test.exit")"
 
-  # ── macOS and Windows: in the merge queue, split across machines ──────────
-  #
-  # Measured over the last 150 runs before this change: a pull request waited a
-  # median 19 minutes, set by Windows (17) and macOS (12); Ubuntu took 8. Of 137
-  # PR runs red on Windows alone, a sample of 28 had the same few failures
-  # recurring across unrelated PRs (tests broken or flaky on Windows on main),
-  # so on a pull request these legs were mostly a wait. They run in the merge
-  # queue, before anything reaches main, split so the queue does not wait 17
-  # minutes for one machine. Each OS keeps its required check, now a gate job
-  # that passes only when all of that OS's shards did.
+
+
+  test:
+    # The required check "test (ubuntu-latest)" (a matrix of one keeps that
+    # name). It runs no tests itself: it passes only when both Ubuntu shards
+    # passed. Unlike the macOS and Windows gates it never accepts a skip: the
+    # Ubuntu shards run for every change.
+    needs: [changes, suite-ubuntu]
+    if: ${{ !cancelled() }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - name: Every Ubuntu shard passed
+        shell: bash
+        env:
+          RESULT: ${{ needs.suite-ubuntu.result }}
+        run: |
+          if [ "$RESULT" = success ]; then
+            echo "Both Ubuntu shards of the suite passed."
+          else
+            echo "::error::The Ubuntu shards ended '$RESULT'. Open the failing 'suite (ubuntu-latest, n/2)' job for the failure."
+            exit 1
+          fi
+
   suite-macos:
     name: suite (macos-latest, ${{ matrix.shard }}/2)
     # macOS in the merge queue, split 2 ways (test-all.mjs --shard,
