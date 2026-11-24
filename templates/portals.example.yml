@@ -1477,6 +1477,8 @@ search_queries:
 #   computrabajo    <country>.computrabajo.com/<search path>  (LatAm board; e.g. co.computrabajo.com/trabajo-de-sistemas)
 #   magneto         www.magneto365.com/co/<search path>       (Colombia board; e.g. /co/trabajos/buscar/tecnologia)
 #   bulldogjob      bulldogjob.pl/companies/jobs[/s/<filters>]  (Polish tech board; filters live in the path, e.g. /s/role,devops/city,Remote)
+#   paycom          www.paycomonline.net/v4/ats/web.php/portal/<client-key>/career-page  (or a posting link under the
+#                   same /portal/<client-key>/ path; or provider: paycom with client_key:)
 #   paylocity       recruiting.paylocity.com/Recruiting/Jobs/All/<board-guid>  (or api: field; a posting's
 #                   /Jobs/Details/<id> link carries no board id and is NOT claimed)
 #   remote-com      apply.remote.com  (Remote's own ATS, single company; any path, the board is always read whole)
@@ -1598,6 +1600,11 @@ search_queries:
 #
 # - name: Example CareerPuck Co
 #   careers_url: https://app.careerpuck.com/job-board/exampleco   # the board link off the careers page
+#   enabled: true
+#
+# - name: Example Paycom Co
+#   careers_url: https://www.paycomonline.net/v4/ats/web.php/portal/0123456789ABCDEF0123456789ABCDEF/career-page
+#                          # the career-page link off the company site; the hex segment is the client key
 #   enabled: true
 #
 # - name: Example Paylocity Co
@@ -3640,6 +3647,12 @@ tracked_companies:
     scan_query: '"Maxim AI" OR "getmaxim" careers "engineer" OR "product"'
     notes: "AI evaluation and observability platform. Bangalore-based, mostly on-site."
     enabled: true
+
+  # -- US healthcare technology --
+  - name: ROMTech
+    careers_url: https://www.paycomonline.net/v4/ats/web.php/portal/74B8425BF3D1B3ACB19CC1353DC5FA0E/career-page
+    notes: "Connected rehabilitation devices. Paycom career page."
+    enabled: false
 
   # ============================================================
   # -- Türkiye / Turkey market
