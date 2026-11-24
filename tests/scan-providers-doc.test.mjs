@@ -44,6 +44,7 @@ test('the scan mode does not tell the agent to ignore every other provider', () 
   assert.match(level0, /returned without some job descriptions/);
   assert.match(level0, /descriptions omitted/);
   assert.match(level0, /parser\.command/);
+  assert.match(level0, /no `provider:` that names a provider other than `local-parser`/);
   assert.match(level0, /takes precedence/);
   assert.match(scan, /add those jobs to candidates/);
   assert.match(scan, /name not listed in `local_parser_ok`/);
