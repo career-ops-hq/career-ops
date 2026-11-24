@@ -121,8 +121,8 @@ try {
     const [r1, r2] = rows;
     if (r1.location === 'Lisboa, Remote' && JSON.stringify(r1.locations) === '["Lisboa"]') pass('parse: a remote row keeps its city and adds "Remote" to location only');
     else fail(`parse: remote marker ${JSON.stringify(r1)}`);
-    if (r2.location === 'Porto, Remoto') pass('parse: a place already saying Remoto is not marked twice');
-    else fail(`parse: remote twice ${JSON.stringify(r2)}`);
+    if (r2.location === 'Porto, Remoto, Remote' && JSON.stringify(r2.locations) === '["Porto","Remoto"]') pass('parse: a remote row whose place reads "Remoto" still gets the English "Remote" in location');
+    else fail(`parse: Remoto row ${JSON.stringify(r2)}`);
     if (a.location === 'Lisboa, Porto' && c.location === 'Aveiro') pass('parse: hybrid and onsite rows get no "Remote" marker');
     else fail(`parse: non-remote marked ${a.location} / ${c.location}`);
   }
@@ -141,6 +141,17 @@ try {
     } catch (err) {
       if (/malformed or cut short/.test(err.message)) pass(`parse: ${label} throws instead of reading as fewer rows`);
       else fail(`parse: ${label} → ${err.message}`);
+    }
+  }
+  // A title or comment that mentions <item> is text, not structure.
+  {
+    const xmlTitle = item({ title: 'XML <item> </item> Developer', link: 'https://www.itjobs.pt/oferta/130/xml', fields: FULL });
+    try {
+      const out = parseItjobsFeed(feed([xmlTitle, '    <!-- <item> -->\n']));
+      if (out.rawCount === 1 && out.jobs.length === 1 && out.jobs[0].title === 'XML <item> </item> Developer') pass('parse: <item> inside CDATA or a comment is not counted as an item tag');
+      else fail(`parse: CDATA item text ${JSON.stringify(out)}`);
+    } catch (err) {
+      fail(`parse: <item> inside CDATA or a comment threw: ${err.message}`);
     }
   }
   for (const [label, body] of [['an HTML error page', '<html><body>404</body></html>'], ['an empty body', ''], ['a non-string', null]]) {

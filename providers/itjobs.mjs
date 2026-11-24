@@ -61,6 +61,11 @@ function extractText(inner) {
   return decodeEntities(inner).trim();
 }
 
+// Same-length filler keeps positions aligned with the original string.
+function maskCdataAndComments(str) {
+  return str.replace(/<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->/g, (m) => '#'.repeat(m.length));
+}
+
 function tagText(block, tag) {
   const m = block.match(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`, 'i'));
   return m ? extractText(m[1]) : '';
@@ -120,10 +125,14 @@ export function parseItjobsFeed(xml) {
     const got = typeof xml === 'string' ? `${xml.length}-char body` : typeof xml;
     throw new Error(`itjobs: unexpected feed response — expected an <rss><channel> envelope, got: ${got}`);
   }
-  const items = body.match(/<item\b[^>]*>[\s\S]*?<\/item>/gi) || [];
+  // Item tags are found in a copy with CDATA and comments masked (as in
+  // germantechjobs), so a title like "XML <item> Developer" is not structure;
+  // each block is then sliced from the real body to keep its CDATA text.
+  const masked = maskCdataAndComments(body);
+  const items = [...masked.matchAll(/<item\b[^>]*>[\s\S]*?<\/item>/gi)].map((m) => body.slice(m.index, m.index + m[0].length));
   // An <item> that never closes would otherwise drop out silently (or turn a
   // whole board into an empty one), so the item tags must pair up.
-  const opened = (body.match(/<item\b/gi) || []).length;
+  const opened = (masked.match(/<item\b/gi) || []).length;
   if (opened !== items.length) {
     throw new Error(`itjobs: ${opened} <item> tag(s) but ${items.length} complete item(s) — the feed is malformed or cut short`);
   }
@@ -138,10 +147,11 @@ export function parseItjobsFeed(xml) {
     if (!company) continue; // no identifiable employer
     const places = (fields.get('localidade') || '').split(',').map((s) => s.trim()).filter(Boolean);
     const workplaceType = WORK_MODELS[(fields.get('modelo de trabalho') || '').toLowerCase()];
-    // scan.mjs's location_filter reads only `location`, so a remote row says so
-    // there too (as Ashby does); `locations` keeps the places as listed.
+    // scan.mjs's location_filter reads only `location` and matches the English
+    // word, so a remote row says "Remote" there too (as Ashby does), even when a
+    // place already reads "Remoto"; `locations` keeps the places as listed.
     const shown = [...places];
-    if (workplaceType === 'remote' && !shown.some((p) => /\bremot[eo]\b/i.test(p))) shown.push('Remote');
+    if (workplaceType === 'remote' && !shown.some((p) => /remote/i.test(p))) shown.push('Remote');
     const job = {
       title,
       company,
