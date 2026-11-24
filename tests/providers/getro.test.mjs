@@ -217,6 +217,22 @@ try {
   if (getroLocations[0]?.location === 'Zurich, Bern, Remote') pass('getro.fetch() joins multiple locations and appends a Remote tag from work_mode');
   else fail(`getro.fetch() location = ${JSON.stringify(getroLocations[0]?.location)}`);
 
+  // workplaceType comes from work_mode ("remote" | "on_site"); anything else leaves it unset.
+  const getroModes = await getro.fetch(okEntry, {
+    fetchJson: async () => ({
+      results: {
+        count: 4,
+        jobs: ['remote', 'on_site', 'flexible', null].map((work_mode, i) => ({ title: `Eng ${i}`, url: `https://jobs.examplevc.example/wm${i}`, organization: { name: 'Acme' }, locations: ['Zurich'], work_mode })),
+      },
+    }),
+  });
+  if (getroModes[0]?.workplaceType === 'remote')
+    pass('getro.fetch() sets workplaceType remote from work_mode "remote"');
+  else fail(`getro.fetch() workplaceType = ${JSON.stringify(getroModes.map((j) => j.workplaceType))}`);
+  if (getroModes.length === 4 && getroModes.slice(1).every((j) => j && !('workplaceType' in j)))
+    pass('getro.fetch() leaves workplaceType unset for on_site, an unknown or a null work_mode');
+  else fail(`getro.fetch() other work_mode = ${JSON.stringify(getroModes.slice(1).map((j) => j.workplaceType))}`);
+
   // Salary is extracted from the cents fields when the compensation_period is annual.
   const getroSalary = await getro.fetch(okEntry, {
     fetchJson: async () => ({

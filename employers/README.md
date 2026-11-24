@@ -26,16 +26,16 @@ One JSON object per line in `boards/<ats>/<initial>.ndjson`:
 
 | Field | Required | Rule |
 |---|---|---|
-| `ats` | yes | One of `greenhouse`, `ashby`, `lever`, `workable`, `smartrecruiters`, `rippling`, `join`, `recruitee`, `breezy`, `bamboohr`, `pinpoint`, `applicantpro`, `hibob`, `hirehive`, `homerun`, `jazzhr`, `keka`, `personio`, `prevueaps`, `schoolspring`, `taleez`, `teamtailor`, `trakstar`, `turbohire`, `zoho-recruit`, `avature`, `clearcompany`, `jobvite`, `eightfold`, `adp-myjobs`, `successfactors-classic`, `oraclecloud`, `phenom`, `successfactors`, `peoplesoft`, `workday`. |
+| `ats` | yes | One of `greenhouse`, `ashby`, `lever`, `workable`, `smartrecruiters`, `rippling`, `join`, `recruitee`, `breezy`, `bamboohr`, `pinpoint`, `applicantpro`, `hibob`, `hirehive`, `homerun`, `jazzhr`, `keka`, `personio`, `prevueaps`, `schoolspring`, `taleez`, `teamtailor`, `trakstar`, `turbohire`, `zoho-recruit`, `avature`, `clearcompany`, `jobvite`, `eightfold`, `adp-myjobs`, `successfactors-classic`, `oraclecloud`, `csod`, `phenom`, `successfactors`, `peoplesoft`, `workday`. |
 | `region` | greenhouse and lever; personio and zoho-recruit off their default host | Greenhouse and Lever: `us` or `eu`, always. An EU board (`job-boards.eu.greenhouse.io`, `jobs.eu.lever.co`) is a different board from a US one with the same id. Personio: absent for a board on `<id>.jobs.personio.de`, `com` for one on `<id>.jobs.personio.com`; the two are different boards. Zoho Recruit: absent for a board on `zohorecruit.com`, otherwise its data-centre domain: `au` (`zohorecruit.com.au`), `ca`, `cn` (`zohorecruit.com.cn`), `eu`, `in`, `jp` or `sa`. Absent on every other ATS. |
-| `board` | yes | The board id, as it appears in the board's URL. Ashby ids keep their case (`AlephAlpha`, `DeepL`). Where the board is the company's subdomain on the ATS's host, the id is that one label, lowercase: `recruitee`, `breezy`, `bamboohr`, `pinpoint`, `applicantpro`, `hibob` (`<id>.careers.hibob.com`), `hirehive`, `homerun`, `jazzhr` (`<id>.applytojob.com`), `keka`, `personio` (`<id>.jobs.personio.de` or `.com`, see `region`), `prevueaps`, `schoolspring`, `taleez`, `teamtailor`, `trakstar` (`<id>.hire.trakstar.com`), `turbohire`, `zoho-recruit` (`<id>.zohorecruit.com`) `avature` (`<id>.avature.net`) and `eightfold` (`<id>.eightfold.ai`); all but the first four (`recruitee`, `breezy`, `bamboohr`, `pinpoint`) are one DNS label of at most 63 characters; those four are not limited yet. The subdomains an ATS keeps for itself, as its provider in `providers/` lists them (`www`, `api` and the like), are not board ids. Jobvite: the company's path on `jobs.jobvite.com`. ADP (`adp-myjobs`): the career site's path on `myjobs.adp.com`, in its case. ClearCompany: the career site's id, a lowercase GUID, as in `careers-api.clearcompany.com/v1/<id>`. SuccessFactors classic (`successfactors-classic`): `label/eu|com/company` for a career page at `<label>.successfactors.<eu|com>/career?company=<company>`, for example `career5/eu/ACME001`; the company id keeps its case. Oracle Recruiting Cloud (`oraclecloud`): `host/siteNumber`, with the tenant host on Oracle's cloud, for example `acme.fa.us2.oraclecloud.com/CX_1001`, for `https://<host>/hcmUI/CandidateExperience/en/sites/<siteNumber>/jobs`; a careers site on the company's own domain is not admitted. Phenom (`phenom`), SuccessFactors (`successfactors`) and PeopleSoft (`peoplesoft`) can serve a company's careers site on the company's own domain. For these three, the board is that site's host, in lowercase, followed by the SuccessFactors brand path when there is one, or, for PeopleSoft, by its site (`recruit.example.edu/site1`). Such a row carries `own_domain_mark`: the ATS's mark that was seen on the site, and the date it was checked. A host is on at most one row, and these rows are added only by the project's own contributions, listed in `OWN_DOMAIN_CONTRIBUTORS`. Workday: `tenant/wdN/site`, with the site in the case of the careers page's canonical link (`<link rel="canonical">`), for example `nvidia/wd5/NVIDIAExternalCareerSite`. Numeric-only ids, placeholders and characters outside `A-Z a-z 0-9 . _ -` are rejected. |
+| `board` | yes | The board id, as it appears in the board's URL. Ashby ids keep their case (`AlephAlpha`, `DeepL`). Where the board is the company's subdomain on the ATS's host, the id is that one label, lowercase: `recruitee`, `breezy`, `bamboohr`, `pinpoint`, `applicantpro`, `hibob` (`<id>.careers.hibob.com`), `hirehive`, `homerun`, `jazzhr` (`<id>.applytojob.com`), `keka`, `personio` (`<id>.jobs.personio.de` or `.com`, see `region`), `prevueaps`, `schoolspring`, `taleez`, `teamtailor`, `trakstar` (`<id>.hire.trakstar.com`), `turbohire`, `zoho-recruit` (`<id>.zohorecruit.com`) `avature` (`<id>.avature.net`) and `eightfold` (`<id>.eightfold.ai`); all but the first four (`recruitee`, `breezy`, `bamboohr`, `pinpoint`) are one DNS label of at most 63 characters; those four are not limited yet. The subdomains an ATS keeps for itself, as its provider in `providers/` lists them (`www`, `api` and the like), are not board ids. Jobvite: the company's path on `jobs.jobvite.com`. ADP (`adp-myjobs`): the career site's path on `myjobs.adp.com`, in its case. ClearCompany: the career site's id, a lowercase GUID, as in `careers-api.clearcompany.com/v1/<id>`. SuccessFactors classic (`successfactors-classic`): `label/eu|com/company` for a career page at `<label>.successfactors.<eu|com>/career?company=<company>`, for example `career5/eu/ACME001`; the company id keeps its case. Oracle Recruiting Cloud (`oraclecloud`): `host/siteNumber`, with the tenant host on Oracle's cloud, for example `acme.fa.us2.oraclecloud.com/CX_1001`, for `https://<host>/hcmUI/CandidateExperience/en/sites/<siteNumber>/jobs`; a careers site on the company's own domain is not admitted. Cornerstone OnDemand (`csod`): `tenant/site/corp` for a career site at `https://<tenant>.csod.com/ux/ats/careersite/<site>/home?c=<corp>`, for example `acme/4/acme`; the tenant is one lowercase DNS label (reserved and test tenants are not boards), the site a whole number from 1 to 999, and the corp name keeps its case. Phenom (`phenom`), SuccessFactors (`successfactors`) and PeopleSoft (`peoplesoft`) can serve a company's careers site on the company's own domain. For these three, the board is that site's host, in lowercase, followed by the SuccessFactors brand path when there is one, or, for PeopleSoft, by its site (`recruit.example.edu/site1`). Such a row carries `own_domain_mark`: the ATS's mark that was seen on the site, and the date it was checked. A host is on at most one row, and these rows are added only by the project's own contributions, listed in `OWN_DOMAIN_CONTRIBUTORS`. Workday: `tenant/wdN/site`, with the site in the case of the careers page's canonical link (`<link rel="canonical">`), for example `nvidia/wd5/NVIDIAExternalCareerSite`. Numeric-only ids, placeholders and characters outside `A-Z a-z 0-9 . _ -` are rejected. |
 | `workday_host` | workday only | `jobs` for `https://<tenant>.<wdN>.myworkdayjobs.com/<site>`, `site` for `https://<wdN>.myworkdaysite.com/recruiting/<tenant>/<site>`. |
 | `careers_url` | yes | The canonical board URL. It must be exactly the URL built from `ats`, `region`, `board` and `workday_host` (`buildBoardUrl` in `lib/ats-board-url.mjs`, the same function the ATS discovery uses). It is the registry's unique key. |
 | `name` | yes | The employer's name, up to 80 characters. No URL, email address, phone number or @handle. |
 | `website` | no | The employer's registrable domain (`example.com`), without scheme, `www` or path. |
 | `countries` | no | ISO 3166-1 alpha-2 codes. Stored; the scanner does not filter on them yet. |
 | `tags` | no | Reserved. No tag is accepted until the vocabulary is defined. |
-| `source` | yes | Where the pointer came from: `community`, `ats-directory`, `vc-portfolio`, `employer-list:<org>`, `prior-mit:<owner>/<repo>@<commit>` or `web-index:<name>@<YYYY-MM-DD>` (pointers found in a public web index: the index's name and the date it was queried, for example `web-index:wayback@2026-11-12`). It must match the manifest's `source`. |
+| `source` | yes | Where the pointer came from: `community`, `ats-directory`, `vc-portfolio`, `employer-list:<org>`, `prior-mit:<owner>/<repo>@<commit>`, `web-index:<name>@<YYYY-MM-DD>` (pointers found in a public web index: the index's name and the date it was queried, for example `web-index:wayback@2026-11-12`) or `user-submissions@<YYYY-MM-DD>` (boards that users of the project sent in, with the date they were taken; the registry holds nothing about who sent them). It must match the manifest's `source`. |
 | `contribution` | yes | The id of the manifest that added the row. |
 | `added` | yes | The date the row was added (`YYYY-MM-DD`). |
 | `retired`, `retired_reason` | maintainers only | `retired: true` with a reason: `gone`, `owner_request`, `moved`, `duplicate` or `policy`. |
@@ -63,9 +63,41 @@ employers/
 └── inbox/                  contributions waiting to be folded in (only while there are some)
 ```
 
-The registry lives in this repository only: a fresh clone has it, but the
-career-ops updater does not copy it to existing installs. CI warns when
-`boards/` passes 25 MB, so a maintainer can look at how the data is stored.
+Every release carries the registry to existing installs: the updater copies
+`boards/`, `contributions/` (the manifests, with the attribution some sources
+require), `LICENSE` and `THIRD_PARTY_NOTICES.md`. `inbox/` stays in this
+repository. An install uses its copy only to compare (see
+[Boards your install knows](#boards-your-install-knows)); the scanner does not
+read boards from it. CI warns when `boards/` passes 25 MB, so a maintainer can
+look at how the data is stored; past that size the release could carry only the
+sorted `careers_url` keys, or a compressed copy.
+
+## Boards your install knows
+
+```
+node employers-gap.mjs --list
+```
+
+lists the job boards in your own files that the registry does not have yet:
+`portals.yml`, `data/pipeline.md` and `data/scan-history.tsv`, and with
+`--include-applied` also `data/applications.md` and `reports/`. It uses no AI.
+Each URL is read back to its board with the same reader as the import
+(`parseBoardUrl`), so a posting link counts as its board, and a board is new
+only when no row has it, retired rows included: a board taken out is never
+proposed again.
+
+Before it lists a board as new it asks the board, through the provider the
+scanner already uses for that system, whether it lists jobs now (one page per
+board), so a board a company left when it moved to another system, or one with
+no jobs, is not listed. `--offline` skips that and sets aside a board whose
+company the registry already has on another system. Referral, internal and
+LinkedIn-copy boards, the examples in `templates/portals.example.yml`, and
+Greenhouse boards whose own name marks a channel copy or a sourcing board are
+set aside with their reason.
+
+What it would share is the board address only (`careers_url`), never a
+posting, a title, your tracker or which file it came from. `--out <file>`
+writes that list, one URL per line; the script itself sends nothing.
 
 ## Contributing boards
 

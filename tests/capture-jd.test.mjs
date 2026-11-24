@@ -700,6 +700,22 @@ test('startEvaluation off win32 spawns without a shell and passes the URL unquot
   assert.ok(!/\n/.test(calls[0].args[1]));
 });
 
+// The suite traps CAREER_OPS_CLI at the top of this file (`forbidden-evaluation`),
+// so a broken guard would launch it for real. doctor.mjs only *warns* about an
+// unrecognized value, so the spawn site re-checks the same allow-list.
+test('startEvaluation refuses a CLI outside the known agent list, from an explicit cli or the environment', () => {
+  const root = scratch();
+  const calls = [];
+  const spawnSpy = (...a) => { calls.push(a); return { on() { return this; }, unref() {} }; };
+  const explicit = startEvaluation({ url: 'https://acme.test/jobs/1', dataRoot: root, cli: path.join(sandbox, 'forbidden-evaluation'), platform: 'linux', spawnFn: spawnSpy });
+  assert.equal(explicit.started, false, JSON.stringify(explicit));
+  assert.match(explicit.reason, /recognized CLI/i);
+  const fromEnv = startEvaluation({ url: 'https://acme.test/jobs/1', dataRoot: root, platform: 'linux', spawnFn: spawnSpy });
+  assert.equal(fromEnv.started, false, JSON.stringify(fromEnv));
+  assert.match(fromEnv.reason, /recognized CLI/i);
+  assert.equal(calls.length, 0, 'neither call may spawn');
+});
+
 // --- R3 maintainer follow-ups ----------------------------------------------
 
 function initRepoWithRemote() {

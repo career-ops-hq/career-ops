@@ -382,7 +382,8 @@
 
 # -- Workplace filter (optional) --
 # Filter scanned jobs by workplace model (remote | hybrid | onsite).
-# Set only from the provider's dedicated field (Ashby, Lever).
+# Set only from the provider's dedicated field (for example Ashby, Lever, Getro,
+# Consider, a16z speedrun).
 #
 # Semantics:
 #   - allow: list of allowed workplace types ('remote', 'hybrid', 'onsite')
@@ -1476,6 +1477,8 @@ search_queries:
 #   computrabajo    <country>.computrabajo.com/<search path>  (LatAm board; e.g. co.computrabajo.com/trabajo-de-sistemas)
 #   magneto         www.magneto365.com/co/<search path>       (Colombia board; e.g. /co/trabajos/buscar/tecnologia)
 #   bulldogjob      bulldogjob.pl/companies/jobs[/s/<filters>]  (Polish tech board; filters live in the path, e.g. /s/role,devops/city,Remote)
+#   paycom          www.paycomonline.net/v4/ats/web.php/portal/<client-key>/career-page  (or a posting link under the
+#                   same /portal/<client-key>/ path; or provider: paycom with client_key:)
 #   paylocity       recruiting.paylocity.com/Recruiting/Jobs/All/<board-guid>  (or api: field; a posting's
 #                   /Jobs/Details/<id> link carries no board id and is NOT claimed)
 #   remote-com      apply.remote.com  (Remote's own ATS, single company; any path, the board is always read whole)
@@ -1597,6 +1600,11 @@ search_queries:
 #
 # - name: Example CareerPuck Co
 #   careers_url: https://app.careerpuck.com/job-board/exampleco   # the board link off the careers page
+#   enabled: true
+#
+# - name: Example Paycom Co
+#   careers_url: https://www.paycomonline.net/v4/ats/web.php/portal/0123456789ABCDEF0123456789ABCDEF/career-page
+#                          # the career-page link off the company site; the hex segment is the client key
 #   enabled: true
 #
 # - name: Example Paylocity Co
@@ -2183,8 +2191,17 @@ search_queries:
 #
 # - name: a16z speedrun talent network    # a16z speedrun + wider a16z portfolio (~200 startups)
 #   provider: a16z-speedrun-talent
-#   max_pages: 3          # optional page cap (50 jobs/page, default 3)
+#   max_pages: 6          # optional page cap (50 jobs/page, default 6)
 #   q: machine learning   # optional server-side full-text search (synonyms expand)
+#   a16z_speedrun_talent:
+#     filters:            # optional feed filters (documented parameters only)
+#       scope: everywhere # speedrun | portfolio | everywhere
+#       fn: engineering   # list values as a string or a YAML list
+#       wp: remote
+#       sen: [senior, staff, founding, _]   # _ = roles with no stated level
+#       posted: 7d        # 24h | 7d | 30d
+#     fetchDetails: false # optional: read each job's detail for its description and the employer's own apply URL
+#     detailLimit: 25     # optional: max detail requests per scan (default 25, max 100)
 #   enabled: true
 #
 # - name: Arbeitnow                       # EU/DACH-heavy board, newest-first
@@ -2365,6 +2382,10 @@ search_queries:
 #   provider: landingjobs
 #   enabled: true
 #
+# - name: ITJobs                          # Portuguese IT jobs (public RSS feed)
+#   provider: itjobs                      # whole board in one request
+#   enabled: true
+#
 # - name: RemoteOK
 #   provider: remoteok
 #   enabled: true
@@ -2447,6 +2468,11 @@ search_queries:
 #
 # - name: GermanTechJobs                  # German IT jobs, salary on every posting (public RSS feed)
 #   provider: germantechjobs              # whole board in one request; rows carry no location
+#   enabled: true
+#
+# - name: SwissDevJobs                    # Swiss IT jobs, same family and feed shape as GermanTechJobs
+#   provider: germantechjobs
+#   feed_url: https://swissdevjobs.ch/rss # or https://devitjobs.uk/rss, https://devitjobs.nl/rss
 #   enabled: true
 #
 # - name: Python.org Jobs                 # Python Software Foundation jobs (public RSS feed)
@@ -3640,6 +3666,12 @@ tracked_companies:
     notes: "AI evaluation and observability platform. Bangalore-based, mostly on-site."
     enabled: true
 
+  # -- US healthcare technology --
+  - name: ROMTech
+    careers_url: https://www.paycomonline.net/v4/ats/web.php/portal/74B8425BF3D1B3ACB19CC1353DC5FA0E/career-page
+    notes: "Connected rehabilitation devices. Paycom career page."
+    enabled: false
+
   # ============================================================
   # -- Türkiye / Turkey market
   # ============================================================
@@ -4251,7 +4283,9 @@ job_boards:
   # `careers_url`; the board id (not the host: Founderful's is "wingman") is
   # read from that page. Optional knobs: `consider_size` (default 500, maximum 1000,
   # the jobs one request returns), `max_pages` (default 10, hard cap 100, the
-  # requests per board), `consider_board` (the board id, only when the
+  # requests per board), `consider_posted_since` (an ISO 8601 duration such as
+  # "P7D": the board's own "Posted" filter, so only jobs posted in that window
+  # are read; off by default), `consider_board` (the board id, only when the
   # scan reports that it cannot be read from the page).
 
   - name: Founderful (portfolio)

@@ -23,6 +23,7 @@
 // the measured page (only page 1 was fetched). The walk also stops as soon as
 // a page brings no new ids.
 
+import { boundedPositiveInt } from './_config-utils.mjs';
 import { decodeEntities } from './_html-entities.mjs';
 import { fetchTextWithRetry, sleep } from './_http.mjs';
 import { markTruncated } from '../lib/board-truncation.mjs';
@@ -44,12 +45,6 @@ const POSTING_HREF_RE = /href="(?:https:\/\/(?:www\.)?magneto365\.com)?\/[a-z]{2
 /** @param {unknown} s */
 function clean(s) {
   return decodeEntities(String(s ?? '').replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
-}
-
-/** Keep user overrides bounded so a typo cannot turn one board into an unbounded crawl. */
-function boundedPositiveInt(value, fallback, cap) {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, cap) : fallback;
 }
 
 /**

@@ -22,6 +22,44 @@ import { randomUUID } from "node:crypto";
 // the event loop for every other request. Adopting it here wants an async
 // atomicWrite rather than a copy of the sync one.
 
+function realWriteDirectory(directory: string): string {
+  try {
+    return fs.realpathSync.native(directory);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    // A new file can need new directories. Preserve that suffix after the
+    // existing directory has been resolved by the filesystem.
+    const parent = path.dirname(directory);
+    const name = path.basename(directory);
+    if (parent === directory || name === "..") throw error;
+    return path.join(/* turbopackIgnore: true */ realWriteDirectory(parent), name);
+  }
+}
+
+/** Resolve a user-selected CV or profile before replacing it. The core's
+ *  userFileWriteTarget comes from the separately installed CLI and can
+ *  normalize paths lexically. Web writes resolve each parent on disk here. */
+export function resolveUserFileWriteTarget(file: string): string {
+  let target = file;
+  for (let hops = 0; hops < 40; hops++) {
+    const parent = realWriteDirectory(path.dirname(target));
+    target = path.join(/* turbopackIgnore: true */ parent, path.basename(target));
+    let stat;
+    try {
+      stat = fs.lstatSync(target);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return target;
+    }
+    if (!stat.isSymbolicLink()) return target;
+    const link = fs.readlinkSync(target);
+    // The filesystem must see the link's directory components in their
+    // original order before we join the canonical parent and filename.
+    target = path.isAbsolute(link) ? link : `${parent}${path.sep}${link}`;
+  }
+  throw new Error(`${file}: too many levels of symbolic links`);
+}
+
 export function atomicWrite(file: string, content: string): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   // Same shape as the core's writeFileAtomic (tracker-utils.mjs): dot-prefixed,

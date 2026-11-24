@@ -48,7 +48,6 @@ import {
   openSync,
   readFileSync,
   realpathSync,
-  renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -72,6 +71,7 @@ import { computeListingFingerprint } from './listing-fingerprint.mjs';
 import { resolveColumns, parseTrackerRow, normalizeTextKey, extractReqNumber, REQ_NUMBER_RE } from './tracker-parse.mjs';
 import { workdayDedupKey, stripWorkdayRepostSuffix, isWorkdayJobUrl } from './providers/workday.mjs';
 import { normalizeCompany, appendLedgerRows, companiesMatchIgnoringCorporateForm, LEGAL_SUFFIXES } from './tracker-utils.mjs';
+import { renameSyncWithRetry } from './lib/rename-retry.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter, foldTitle, foldContentText, compileContentTraits } from './title-keywords.mjs';
@@ -243,7 +243,7 @@ export function atomicWriteFile(filePath, text) {
     fsyncSync(fd);
     closeSync(fd);
     fd = null;
-    renameSync(tempPath, targetPath);
+    renameSyncWithRetry(tempPath, targetPath);
     try {
       directoryFd = openSync(path.dirname(targetPath), 'r');
       fsyncSync(directoryFd);

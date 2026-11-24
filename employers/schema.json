@@ -10,7 +10,7 @@
       "properties": {
         "ats": {
           "description": "The ATS that hosts the board.",
-          "enum": ["greenhouse", "ashby", "lever", "workable", "smartrecruiters", "rippling", "join", "recruitee", "breezy", "bamboohr", "pinpoint", "applicantpro", "hibob", "hirehive", "homerun", "jazzhr", "keka", "personio", "prevueaps", "schoolspring", "taleez", "teamtailor", "trakstar", "turbohire", "zoho-recruit", "avature", "clearcompany", "jobvite", "eightfold", "adp-myjobs", "successfactors-classic", "oraclecloud", "phenom", "successfactors", "peoplesoft", "workday"]
+          "enum": ["greenhouse", "ashby", "lever", "workable", "smartrecruiters", "rippling", "join", "recruitee", "breezy", "bamboohr", "pinpoint", "applicantpro", "hibob", "hirehive", "homerun", "jazzhr", "keka", "personio", "prevueaps", "schoolspring", "taleez", "teamtailor", "trakstar", "turbohire", "zoho-recruit", "avature", "clearcompany", "jobvite", "eightfold", "adp-myjobs", "successfactors-classic", "oraclecloud", "csod", "phenom", "successfactors", "peoplesoft", "workday"]
         },
         "region": {
           "description": "The region or host the board is on. Greenhouse and Lever: us or eu, always. Personio: com for <id>.jobs.personio.com, absent for <id>.jobs.personio.de. Zoho Recruit: the data-centre domain when it is not zohorecruit.com (au: .com.au, ca, cn: .com.cn, eu, in, jp, sa).",
@@ -113,9 +113,13 @@
               "if": { "properties": { "ats": { "const": "oraclecloud" } }, "required": ["ats"] },
               "then": { "properties": { "board": { "pattern": "^[a-z0-9-]+\\.fa\\.(?:[a-z0-9-]+\\.)?(?:ocs\\.)?oraclecloud(?:[1-9][0-9]?)?\\.com/[A-Za-z0-9_-]{1,64}$" } } },
               "else": {
+                "if": { "properties": { "ats": { "const": "csod" } }, "required": ["ats"] },
+                "then": { "properties": { "board": { "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?/[1-9][0-9]{0,2}/[A-Za-z0-9_-]{1,60}$" } } },
+                "else": {
                 "if": { "properties": { "ats": { "enum": ["phenom", "successfactors", "peoplesoft"] } }, "required": ["ats"] },
                 "then": { "properties": { "board": { "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?(?:/[A-Za-z0-9_-]{1,64})?$" } } },
                 "else": { "properties": { "board": { "pattern": "^[A-Za-z0-9._-]+$" } } }
+                }
               }
             }
           }
@@ -211,12 +215,13 @@
       }
     },
     "source": {
-      "description": "Where a pointer came from: community, ats-directory, vc-portfolio, employer-list:<org>, prior-mit:<owner>/<repo>@<commit>, or web-index:<name>@<YYYY-MM-DD>.",
+      "description": "Where a pointer came from: community, ats-directory, vc-portfolio, employer-list:<org>, prior-mit:<owner>/<repo>@<commit>, web-index:<name>@<YYYY-MM-DD>, or user-submissions@<YYYY-MM-DD>.",
       "anyOf": [
         { "enum": ["community", "ats-directory", "vc-portfolio"] },
         { "type": "string", "pattern": "^employer-list:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$" },
         { "type": "string", "pattern": "^prior-mit:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{7,40}$" },
-        { "type": "string", "pattern": "^web-index:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?@\\d{4}-\\d{2}-\\d{2}$" }
+        { "type": "string", "pattern": "^web-index:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?@\\d{4}-\\d{2}-\\d{2}$" },
+        { "type": "string", "pattern": "^user-submissions@\\d{4}-\\d{2}-\\d{2}$" }
       ]
     }
   }

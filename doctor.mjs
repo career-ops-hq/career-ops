@@ -16,7 +16,6 @@ import { discoverPlugins, pluginRoots, pluginStatus, resolveSuccessorIds } from 
 import { canonicalizeTrackerPath, getCareerOpsRoot, getProfilePath, hasProfileOverride, isPluginInstallCopy, resolveTrackerPath } from './path-resolver.mjs';
 import { parseConfigByExtension } from './jsonc-parse.mjs';
 import { validateFlags, flagValue } from './lib/cli-flags.mjs';
-import { geminiNodeFloor } from './lib/gemini-node-floor.mjs';
 import { SKILL_ENTRYPOINTS } from './scaffolder/bin/skill-entrypoints.mjs';
 import { nodeFloor } from './lib/node-floor.mjs';
 import { classifyChromiumLaunchError } from './lib/chromium-launch-error.mjs';
@@ -1684,9 +1683,6 @@ async function main() {
 
   const checks = [
     checkNodeVersion(),
-    // Devuelve null salvo que el CLI activo sea Gemini: el filter(Boolean) de
-    // abajo lo descarta, así que ningún otro usuario ve un check que no le toca.
-    geminiNodeFloor(activeCli, process.versions.node),
     checkBillingSource(),
     checkDependencies(),
     pluginInstall,
@@ -2082,7 +2078,7 @@ export async function checkDataRoot(root, { ignoreTrackerOverride = false } = {}
   const [
     { resolveColumns, parseTrackerRow, isHeaderRow, isSeparatorRow, parseMarkdownLinks },
     { fixReportLinks },
-    { checkJdArchive },
+    { checkJdArchive, findUnarchivedApplications },
     { trackerLinkDirsFor, findDeadReportLink },
   ] = await Promise.all([
     import('./tracker-parse.mjs'),
@@ -2107,7 +2103,7 @@ export async function checkDataRoot(root, { ignoreTrackerOverride = false } = {}
     dataRoot,
     tracker: { path: trackerPath, exists: existsSync(trackerPath), readable: true, rows: 0, hasHeader: false, hasReportColumn: false, malformedRows: [] },
     reportLinks: { dead: [], ambiguous: [], inspectionErrors: [] },
-    jdArchive: { reportsScanned: 0, missing: [], reviewDue: [], warnings: [], error: null },
+    jdArchive: { reportsScanned: 0, missing: [], reviewDue: [], unarchivedApplications: [], warnings: [], error: null },
   };
   if (!result.tracker.exists) {
     result.ok = false;
@@ -2238,6 +2234,13 @@ export async function checkDataRoot(root, { ignoreTrackerOverride = false } = {}
     else if (finding.type === 'jd-archive-review-due') result.jdArchive.reviewDue.push(item);
   }
   result.jdArchive.warnings = archive.warnings;
+  // A sent application with no report file is invisible to checkJdArchive,
+  // which walks reports/. check-jd-archive.mjs lists those rows separately;
+  // they are the records a moved root is most likely to have lost (a capture
+  // linked from the tracker that did not come along). Soft, as there: listed,
+  // never a non-zero exit.
+  result.jdArchive.unarchivedApplications = findUnarchivedApplications(trackerPath, reportsDir, jdsDir)
+    .map(({ row, company, role, status }) => ({ row, company, role, status }));
 
   result.ok = result.reportLinks.dead.length === 0
     && result.reportLinks.inspectionErrors.length === 0
@@ -2289,6 +2292,9 @@ function printDataCheck(result) {
   }
   for (const item of archive.reviewDue) {
     console.log(yellow(`⚠ JD archive: ${item.file} is missing its JD but the tracker row is still live`));
+  }
+  for (const item of archive.unarchivedApplications || []) {
+    console.log(yellow(`⚠ JD archive: #${item.row} ${item.company} — ${item.role} (${item.status}) was sent, but no report or jds/ capture records the posting`));
   }
   for (const warning of archive.warnings) {
     console.log(yellow(`⚠ ${warning.file}: ${warning.detail}`));

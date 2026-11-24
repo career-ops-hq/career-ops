@@ -5,7 +5,7 @@ import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
-import { atomicWriteWithBackup } from "@/lib/core/safe-write";
+import { atomicWriteWithBackup, resolveUserFileWriteTarget } from "@/lib/core/safe-write";
 import { getProfilePath, coreProfileEnv } from "@/lib/core/profile-path.mjs";
 import { isMapping } from "@/lib/portals-config.mjs";
 import { firstProfileText, patchProfileText } from "@/lib/profile-yaml-edit.mjs";
@@ -216,7 +216,7 @@ export async function POST(req: Request) {
     // included, stays as the user wrote it (#5662). A shape the line edit
     // cannot place falls back to yaml.dump; the backup holds the prior bytes.
     text = patchProfileText(source, patch, merged) ?? yaml.dump(merged, { lineWidth: 100, noRefs: true });
-    atomicWriteWithBackup(file, text);
+    atomicWriteWithBackup(resolveUserFileWriteTarget(file), text);
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : "write failed" }, { status: 500 });
   }

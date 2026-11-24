@@ -15,13 +15,14 @@
  */
 
 import { createHash, randomBytes } from 'node:crypto';
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { acquireDirLock, releaseOrWarn } from './lib/dir-lock.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { scanHeadings, SECTIONS } from './lib/personalization.mjs';
+import { renameSyncWithRetry } from './lib/rename-retry.mjs';
 
 const CUSTOM = 'modes/_custom.md';
 const PROFILE = 'modes/_profile.md';
@@ -368,7 +369,7 @@ async function apply(root, pendingPath, args) {
       const tmp = join(root, 'data/learning', `${file.replace(/\W/g, '_')}.tmp`);
       copyFileSync(abs, `${abs}.bak`);
       writeFileSync(tmp, next[file]);
-      renameSync(tmp, abs);
+      renameSyncWithRetry(tmp, abs);
       written.push(file);
     }
     const at = new Date().toISOString();

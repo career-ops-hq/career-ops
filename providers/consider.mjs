@@ -3,6 +3,7 @@
 
 import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, fetchResponseWithRetry, sleep } from './_http.mjs';
 import { markTruncated } from '../lib/board-truncation.mjs';
+import { workplaceField } from './_workplace-type.mjs';
 
 // Consider provider — multi-employer board adapter for `job_boards:`.
 // VC "talent network" portfolio boards built on Consider (consider.com) and
@@ -37,7 +38,16 @@ import { markTruncated } from '../lib/board-truncation.mjs';
 // A full page carries `meta.sequence`, a cursor sent back in the next request's
 // `meta`, so the walk reads the whole board up to `max_pages` (default 10, hard
 // cap 100). The API orders jobs by its own score, so the newest jobs come first
-// only roughly, and the walk has no age cutoff.
+// only roughly, and the walk has no age cutoff of its own.
+//
+// `consider_posted_since` (optional, off by default) is the board's own
+// "Posted" filter: an ISO 8601 duration such as "P7D", sent as
+// `query.postedSince`. The board then returns only jobs posted in that window,
+// so a large board (Lightspeed lists about 17,700 jobs) is read for the window,
+// and cut at `max_pages` only if the window holds more jobs than that. An entry without it reads the whole board, as
+// before.
+//
+// `salary` is read from the job's `salary` object when its period is a year.
 //
 // All requests are retried on a transient failure, through the shared helpers
 // in _http.mjs. A verify-portals probe (ctx.maxPages set) gets no retries, so it
@@ -66,6 +76,9 @@ const MAX_SIZE = 1000;
 // of the default size is 5,000 postings.
 const DEFAULT_MAX_PAGES = 10;
 const MAX_PAGES_CAP = 100;
+// An ISO 8601 duration: P, then years, months, weeks and days, then T and
+// hours, minutes and seconds. At least one number, and a number after each T.
+const ISO_DURATION = /^P(?=\d|T\d)(?:\d+Y)?(?:\d+M)?(?:\d+W)?(?:\d+D)?(?:T(?=\d)(?:\d+H)?(?:\d+M)?(?:\d+S)?)?$/;
 const INTER_PAGE_DELAY_MS = 250;
 // Budget for the anonymous GET that seeds the session cookie and csrfToken.
 // Shorter than the POST budget so a slow board page can't eat the full timeout.
@@ -232,6 +245,43 @@ function locationString(job) {
   return job.remote ? 'Remote' : '';
 }
 
+/**
+ * The workplace type from the board's own `remote` and `hybrid` flags. A role
+ * with both flags can be done either way, and a role with neither can be
+ * onsite or an unflagged hybrid, so neither case sets a type.
+ * @param {any} job
+ */
+function workplaceOf(job) {
+  if (job.remote === true && job.hybrid !== true) return workplaceField('remote');
+  if (job.hybrid === true && job.remote !== true) return workplaceField('hybrid');
+  return {};
+}
+
+/**
+ * The salary from the board's `salary` object, or null. Only a yearly figure
+ * counts, as in getro.mjs: an hourly or monthly one is not annual, and this
+ * provider does not convert it. A one-sided range fills the other bound.
+ * @param {any} job
+ */
+function salaryOf(job) {
+  const s = job.salary;
+  if (!s || typeof s !== 'object') return null;
+  if (s.period?.value !== 'year') return null;
+  const currency = typeof s.currency?.value === 'string' ? s.currency.value.trim().toUpperCase() : '';
+  if (!/^[A-Z]{3}$/.test(currency)) return null;
+  const bound = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined);
+  const lo = bound(s.minValue);
+  const hi = bound(s.maxValue);
+  if (lo === undefined && hi === undefined) return null;
+  return {
+    min: Math.min(lo ?? hi, hi ?? lo),
+    max: Math.max(lo ?? hi, hi ?? lo),
+    currency,
+    period: 'year',
+    posted: { ...(lo !== undefined ? { min: lo } : {}), ...(hi !== undefined ? { max: hi } : {}) },
+  };
+}
+
 /** A job row from the search response, or null when it has no usable URL. */
 function toRow(job, origin, entry) {
   const rawUrl = job.url || job.applyUrl || '';
@@ -245,18 +295,37 @@ function toRow(job, origin, entry) {
   } catch {
     return null;
   }
+  const salary = salaryOf(job);
   return {
     title: job.title || '',
     url,
     company: job.companyName || entry.name,
     location: locationString(job),
     postedAt: toEpochMs(job.timeStamp),
+    ...workplaceOf(job),
+    ...(salary ? { salary } : {}),
   };
 }
 
 function resolveMaxPages(entry) {
   const value = entry?.max_pages;
   return Number.isInteger(value) && value > 0 ? Math.min(value, MAX_PAGES_CAP) : DEFAULT_MAX_PAGES;
+}
+
+/**
+ * The entry's `consider_posted_since`, or null when it has none. A value that
+ * is not an ISO 8601 duration throws, because sending it would make the board
+ * answer an error or ignore it, and the scan would read the whole board.
+ * @param {any} entry
+ * @returns {string | null}
+ */
+function resolvePostedSince(entry) {
+  const value = entry?.consider_posted_since;
+  if (value == null || value === '') return null;
+  if (typeof value !== 'string' || !ISO_DURATION.test(value.trim())) {
+    throw new Error(`consider: ${entry.name} — consider_posted_since must be an ISO 8601 duration such as "P7D"`);
+  }
+  return value.trim();
 }
 
 /** @type {Provider} */
@@ -276,6 +345,7 @@ export default {
     if (!origin) throw new Error(`consider: ${entry.name} needs an https careers_url on a public host`);
     const size = Number.isInteger(entry.consider_size) && entry.consider_size > 0
       ? Math.min(entry.consider_size, MAX_SIZE) : DEFAULT_SIZE;
+    const postedSince = resolvePostedSince(entry);
 
     // Perform the CSRF handshake before the POST. ctx._acquireHandshake is a
     // test seam: set it to a stub in unit tests so no real network call is made.
@@ -323,7 +393,7 @@ export default {
           body: JSON.stringify({
             meta: sequence ? { size, sequence } : { size },
             board: { id: board.id, isParent: board.isParent },
-            query: { promoteFeatured: true },
+            query: postedSince ? { promoteFeatured: true, postedSince } : { promoteFeatured: true },
           }),
         }, retryPolicy(ctx));
       } catch (err) {

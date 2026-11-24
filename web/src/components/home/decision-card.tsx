@@ -10,7 +10,8 @@ import { scoreNum, scoreTone } from "@/lib/format";
 import { companyPresentation } from "@/lib/company-presentation.mjs";
 import { statusWriteError } from "@/lib/home/status-result.mjs";
 import { appliedWriteAllowed } from "@/lib/applied-confirm.mjs";
-import type { Application } from "@/lib/career-ops";
+import type { Application, AwaitingAge } from "@/lib/career-ops";
+import { ageLabels } from "@/lib/home/awaiting-age.mjs";
 import type { CardReason } from "@/lib/machine-summary.mjs";
 
 const DECISION_TONE: Record<string, string> = {
@@ -23,7 +24,7 @@ const DECISION_TONE: Record<string, string> = {
 // Awaiting-decision row: a scored role with no terminal status. Primary action
 // opens the report (PDF + Apply live there). Skip writes immediately. Applied
 // asks before it writes. onDecided lets the parent offer an undo once the card is gone.
-export function DecisionCard({ app, reason, onDecided }: { app: Application; reason?: CardReason; onDecided?: (status: "Applied" | "Discarded") => void }) {
+export function DecisionCard({ app, reason, age, onDecided }: { app: Application; reason?: CardReason; age?: AwaitingAge; onDecided?: (status: "Applied" | "Discarded") => void }) {
   const router = useRouter();
   const [busy, setBusy] = useState<"" | "Applied" | "Discarded">("");
   const [done, setDone] = useState<string | null>(null);
@@ -39,6 +40,8 @@ export function DecisionCard({ app, reason, onDecided }: { app: Application; rea
   const score = scoreNum(app.score);
   const tone = scoreTone(app.score);
   const company = companyPresentation(app);
+  const labels = age ? ageLabels(age) : null;
+  const closed = age?.open.state === "closed";
 
   const setStatus = async (status: "Applied" | "Discarded") => {
     if (submitting.current) return;
@@ -70,7 +73,7 @@ export function DecisionCard({ app, reason, onDecided }: { app: Application; rea
   if (done) return null;
 
   return (
-    <div className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-border bg-surface/40 p-3.5 transition hover:border-brand/30">
+    <div className={cn("flex min-w-0 flex-col gap-2.5 rounded-xl border border-border bg-surface/40 p-3.5 transition hover:border-brand/30", closed && "opacity-70")}>
       <div className="flex items-start gap-2.5">
         <CompanyLogo name={company.logoName} size={24} />
         <div className="min-w-0 flex-1">
@@ -88,6 +91,15 @@ export function DecisionCard({ app, reason, onDecided }: { app: Application; rea
           </span>
         )}
       </div>
+      {labels && (
+        <p data-testid="card-age" className="flex flex-wrap gap-x-2 text-xs tabular-nums text-muted">
+          <span>{labels.found}</span>
+          <span>·</span>
+          <span>{labels.posted}</span>
+          <span>·</span>
+          <span className={cn("font-medium", closed ? "text-red-700 dark:text-red-400" : age?.open.state === "open" ? "text-emerald-800 dark:text-emerald-400" : "text-faint")}>{labels.open}</span>
+        </p>
+      )}
       {reason && (
         <div data-testid="card-reason" className="space-y-0.5 text-xs leading-snug">
           {reason.decision && <p className={cn("font-medium", DECISION_TONE[reason.decision] ?? "text-muted")}>{reason.decision}</p>}

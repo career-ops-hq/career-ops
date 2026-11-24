@@ -794,7 +794,10 @@ async function checkPortalsCoverage() {
           : `All ${enabled} enabled portals.yml entries resolve to a provider`);
       }
     } catch (err) {
-      warn(`Portal coverage check could not run: ${err.message}`,
+      // A check that could not run is a failed check, as for the sync check
+      // below: warn() leaves the exit code at 0, so a portals.yml that no longer
+      // parses read as a pass, and its unknown-provider errors went unreported.
+      error(`Portal coverage check could not run — portals.yml was NOT checked: ${err.message}`,
            "check portals.yml parses as YAML and run node audit-portals.mjs for the underlying error");
     }
   }

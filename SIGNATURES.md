@@ -227,3 +227,4 @@ public commit with a stated reason.
 - @clintam123 | Tam Do | 2026-11-12 | "I want hiring to become an evaluation of capability and future impact, rather than a checklist of historical titles." | id:64732827 | src:https://github.com/career-ops-hq/career-ops/discussions/6945 | n:179
 - @hribcek | Bostjan Hribar | 2026-11-20 | "I want hiring to become more humanised again" | id:5717813 | src:https://github.com/career-ops-hq/career-ops/discussions/7462 | n:180
 - @plamer777 | Aleksey Mavrin | 2026-11-23 | "I want hiring to become as it was 10-15 years ago" | id:98215057 | src:https://github.com/career-ops-hq/career-ops/discussions/7642 | n:181
+- @luismslopes | Luis Lopes | 2026-11-23 | id:817483 | src:https://github.com/career-ops-hq/career-ops/discussions/7693 | n:182
