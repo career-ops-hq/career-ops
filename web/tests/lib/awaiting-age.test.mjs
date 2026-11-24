@@ -43,7 +43,10 @@ test("labels read plainly", () => {
   assert.deepEqual(l, { found: "Found 1 day ago", posted: "Posted 13 days ago", open: "Open, checked today" });
   const u = ageLabels(awaitingAge({}, TODAY));
   assert.deepEqual(u, { found: "Found: unknown", posted: "Posted: unknown", open: "Not checked" });
-  assert.equal(ageLabels(awaitingAge({ postedAt: TODAY, check: { result: "expired", day: TODAY } }, TODAY)).open, "Closed");
+  assert.equal(ageLabels(awaitingAge({ postedAt: TODAY, check: { result: "expired", day: TODAY } }, TODAY)).open, "Closed, checked today");
+  assert.equal(ageLabels(awaitingAge({ check: { result: "expired", day: "2026-11-21" } }, TODAY)).open, "Closed, checked 2 days ago");
+  assert.equal(ageLabels(awaitingAge({ check: { result: "active", day: "2026-11-21" } }, TODAY, "2026-11-22")).open, "Closed", "a close date has no check day");
+  assert.equal(ageLabels(awaitingAge({}, TODAY, "2026-11-22")).open, "Closed");
   assert.equal(ageLabels(awaitingAge({ postedAt: TODAY }, TODAY)).posted, "Posted today");
 });
 

@@ -27,11 +27,15 @@ export function wholeDaysSince(from, today) {
  */
 export function awaitingAge(facts, today, closesAt = "") {
   const check = facts?.check ?? null;
-  const checkedDays = check ? wholeDaysSince(check.day, today) : null;
+  let checkedDays = check ? wholeDaysSince(check.day, today) : null;
   const pastClose = isoDay.test(closesAt) && closesAt < today;
   let state = "unchecked";
-  if (check?.result === "expired" || pastClose) state = "closed";
-  else if (check?.result === "active") state = "open";
+  if (check?.result === "expired") state = "closed";
+  else if (pastClose) {
+    // The close date decided it, so an earlier open check's age does not apply.
+    state = "closed";
+    checkedDays = null;
+  } else if (check?.result === "active") state = "open";
   return {
     foundDays: wholeDaysSince(facts?.firstSeen, today),
     postedDays: wholeDaysSince(facts?.postedAt, today),
@@ -47,7 +51,7 @@ export function ageLabels(age) {
     found: foundDays === null ? "Found: unknown" : `Found ${ago(foundDays)}`,
     posted: postedDays === null ? "Posted: unknown" : `Posted ${ago(postedDays)}`,
     open:
-      open.state === "closed" ? "Closed"
+      open.state === "closed" ? (open.checkedDays === null ? "Closed" : `Closed, checked ${ago(open.checkedDays)}`)
       : open.state === "open" ? `Open, checked ${open.checkedDays === null ? "earlier" : ago(open.checkedDays)}`
       : "Not checked",
   };
