@@ -2122,7 +2122,7 @@ async function main() {
             saved = true;
           }
           const fate = saved ? 'saved to pipeline'
-            : (opts.liveness && !opts.dryRun ? 'held in the checkpoint for the --resume liveness pass' : 'not saved');
+            : (opts.liveness && checkpointed ? 'held in the checkpoint for the --resume liveness pass' : 'not saved');
           console.error(`\n⛔ ${signal}: sweep stopped — ${newOffers.length} matches so far, ${fate}, ${checkpointed ? 'checkpoint written (continue with --resume)' : 'no checkpoint written'}.`);
         } catch (err) {
           console.error(`\n⛔ ${signal}: sweep stopped; saving failed (${err.message}).`);
