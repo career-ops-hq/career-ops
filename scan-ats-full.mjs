@@ -2026,10 +2026,6 @@ async function main() {
           }).offers;
           // --liveness verifies before any write. This stop cannot run that check.
           if (!opts.dryRun && !opts.liveness && kept.length) {
-            if (!existsSync(PIPELINE_PATH)) {
-              mkdirSync(path.dirname(PIPELINE_PATH), { recursive: true });
-              writeFileSync(PIPELINE_PATH, '# Pipeline\n\n## Pendientes\n', 'utf-8');
-            }
             await appendToPipeline(kept);
             saved = true;
           }
@@ -2121,10 +2117,6 @@ async function main() {
           // --liveness verifies before any write; an unverified match stays in
           // the checkpoint's offers for the resumed run to verify.
           if (!opts.dryRun && !opts.liveness && kept.length) {
-            if (!existsSync(PIPELINE_PATH)) {
-              mkdirSync(path.dirname(PIPELINE_PATH), { recursive: true });
-              writeFileSync(PIPELINE_PATH, '# Pipeline\n\n## Pendientes\n', 'utf-8');
-            }
             await appendToPipeline(kept);
             await appendToScanHistory(kept, date);
             saved = true;
