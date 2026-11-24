@@ -76,10 +76,14 @@ export const pacing = { nextSlot: 0, blockedUntil: 0 };
  * @param {{ now?: () => number, minIntervalMs?: number }} [opts]
  */
 export async function waitForSlot(ctx, { now = Date.now, minIntervalMs = MIN_INTERVAL_MS } = {}) {
-  const at = Math.max(now(), pacing.nextSlot, pacing.blockedUntil);
-  pacing.nextSlot = at + minIntervalMs;
-  const wait = at - now();
-  if (wait > 0) await sleep(wait, ctx);
+  // A 429 can land while this caller sleeps; re-reserve until no block remains.
+  for (;;) {
+    const at = Math.max(now(), pacing.nextSlot, pacing.blockedUntil);
+    pacing.nextSlot = at + minIntervalMs;
+    const wait = at - now();
+    if (wait > 0) await sleep(wait, ctx);
+    if (pacing.blockedUntil <= at) return;
+  }
 }
 
 /** @param {unknown} err @param {() => number} [now] */

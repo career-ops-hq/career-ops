@@ -31,6 +31,23 @@ test('a 429 pauses the next request for its Retry-After', async () => {
   assert.equal(pacing.blockedUntil, 0);
 });
 
+test('a 429 that lands while a caller sleeps extends that caller\'s wait', async () => {
+  reset();
+  let t = 1_000;
+  const slept = [];
+  let first = true;
+  const ctx = {
+    sleep: async (ms) => {
+      slept.push(ms);
+      t += ms;
+      if (first) { first = false; noteRateLimit(Object.assign(new Error('x'), { status: 429, retryAfter: '30' }), () => t); }
+    },
+  };
+  pacing.nextSlot = t + 400;
+  await waitForSlot(ctx, { now: () => t, minIntervalMs: 400 });
+  assert.deepEqual(slept, [400, 30_000]);
+});
+
 test('fetch on the real HTTP transport waits its turn; a stub context is not paced', async () => {
   reset();
   const slept = [];
