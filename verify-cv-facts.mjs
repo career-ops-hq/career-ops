@@ -1741,8 +1741,23 @@ export function structuredAssociationClaims(targetText, sourceTexts, config = {}
     const exact = experience.filter(entry => norm(entry.company) === employer);
     const matches = exact.length ? exact
       : experience.filter(entry => sourceContainsFact(norm(entry.company), employer));
+    if (!matches.length) {
+      // No job block to compare against (#7577): the employer is named in the
+      // source only outside a job entry (a bold line, a #### heading, an
+      // unrecognized section, or a client or tool in a bullet). Say the
+      // comparison did not run rather than pass quietly, but only when it would
+      // have run: a metric the source carries that is not waived, and an
+      // employer the source does name.
+      const comparable = [...metricClaims(statement)].some(metric => !explicitlyAllowed.has(metric)
+        && allSourceLines.some(entry => entry.metrics.has(metric)));
+      if (comparable && !allowedFacts.has(employer)
+        && sourceTexts.some(text => sourceContainsFact(norm(text), employer))) {
+        gaps.add('Metric context could not be checked for an employer with no job entry in the source (job entries are read from ### headings under an Experience section).');
+      }
+      continue;
+    }
     // A shortened name must identify one employer, not pool different jobs.
-    if (!matches.length || new Set(matches.map(entry => norm(entry.company))).size !== 1) continue;
+    if (new Set(matches.map(entry => norm(entry.company))).size !== 1) continue;
     metricContexts.push({ lines: [statement], sources: matches.flatMap(entry => sourceStatementsOf(entry.body)) });
   }
   for (const context of metricContexts) {
@@ -3943,14 +3958,16 @@ function parseCliArgs(args) {
   let targetArg = '';
   let configPath = DEFAULT_CONFIG;
   let json = false;
+  let help = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--source' || arg === '--config') {
-      if (!args[i + 1]) throw new Error(`${arg} requires a path`);
+      const next = args[i + 1];
+      if (!next || next.startsWith('-')) throw new Error(`${arg} requires a path`);
       if (arg === '--source') sourcePaths.push(args[++i]);
       else configPath = args[++i];
     } else if (arg === '--help' || arg === '-h') {
-      return { help: true };
+      help = true;
     } else if (arg === '--json') {
       json = true;
     } else if (arg.startsWith('--')) {
@@ -3961,7 +3978,7 @@ function parseCliArgs(args) {
       throw new Error(`unexpected extra positional argument: ${arg}`);
     }
   }
-  return { targetArg, sourcePaths, configPath, json, help: false };
+  return { targetArg, sourcePaths, configPath, json, help };
 }
 
 /** Return the command-line usage text. */
@@ -4714,6 +4731,10 @@ export function runCli(args = process.argv.slice(2)) {
   const missingSources = parsed.sourcePaths.filter((p) => !existsSync(resolveInputPath(p)));
   if (missingSources.length > 0) {
     console.error(`ERROR: --source file not found: ${missingSources.join(', ')}`);
+    return 1;
+  }
+  if (parsed.sourcePaths.length === 0 && !existsSync(DEFAULT_SOURCES[0])) {
+    console.error(`ERROR: cv.md not found: ${DEFAULT_SOURCES[0]}`);
     return 1;
   }
   try {

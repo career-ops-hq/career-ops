@@ -25,7 +25,10 @@ try {
   writeConfig();
 
   // Holds the metric in the reproduction, so an employer is all that can block it.
-  const acmeCv = '### Acme Corp\n\n- Cut duplicate records 92%.';
+  // Under an Experience heading, so Acme Corp is a job entry and a letter's
+  // "At Acme, I cut ... 92%." is compared with it rather than reported as not
+  // checked (#7577).
+  const acmeCv = '## Experience\n\n### Acme Corp\n\n- Cut duplicate records 92%.';
   const check = (cv, target) => {
     writeFileSync(source, `${cv}\n`);
     return verifyFacts(target, { sourcePaths: [source], configPath: config });

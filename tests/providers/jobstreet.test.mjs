@@ -302,6 +302,37 @@ try {
   if (hkReached && hkJobs.length === 0) pass('jobstreet.fetch() accepts hk.jobsdb.com (HK-Main)');
   else fail('jobstreet.fetch() should accept hk.jobsdb.com and query it directly');
 
+  // parseJobstreetItem — PH links use /job/<id>, no /id/ prefix
+  const phParsed = parseJobstreetItem({ id: '95991620', title: 'AI Engineer' }, 'https://ph.jobstreet.com', 'Co');
+  if (phParsed && phParsed.url === 'https://ph.jobstreet.com/job/95991620') pass('parseJobstreetItem builds /job/<id> url for ph.jobstreet.com');
+  else fail(`parseJobstreetItem PH url wrong: ${JSON.stringify(phParsed)}`);
+
+  // fetch() — accepts JobStreet Philippines (PH-Main)
+  let phUrl = '';
+  const phJobs = await jobstreet.fetch(
+    {
+      name: 'JobStreet PH',
+      provider: 'jobstreet',
+      api: 'https://ph.jobstreet.com/api/jobsearch/v5/search',
+      siteKey: 'PH-Main',
+      searchKeywords: 'AI engineer',
+    },
+    {
+      transport: 'http',
+      fetchJson: async (url) => {
+        phUrl = String(url);
+        return { data: [{ id: '95991620', title: 'AI Engineer', companyName: 'Co' }], totalCount: 1 };
+      },
+      fetchText: async () => { throw new Error('should not be called'); },
+    },
+  );
+  if (phUrl.startsWith('https://ph.jobstreet.com/') && phUrl.includes('siteKey=PH-Main')
+    && phJobs.length === 1 && phJobs[0].url === 'https://ph.jobstreet.com/job/95991620') {
+    pass('jobstreet.fetch() accepts ph.jobstreet.com (PH-Main) with /job/ links');
+  } else {
+    fail(`jobstreet.fetch() PH gave url=${phUrl} jobs=${JSON.stringify(phJobs)}`);
+  }
+
   // fetch() — handles non-array data field
   const badDataCtx = {
     transport: 'http',

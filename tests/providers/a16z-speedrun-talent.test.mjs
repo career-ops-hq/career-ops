@@ -29,6 +29,23 @@ try {
     fail(`normalizeSpeedrunJob full row = ${JSON.stringify(full)}`);
   }
 
+  // workplaceType comes from workplace_type (any case).
+  const speedrunUrl = 'https://speedrun-talent-network.com/jobs/w';
+  const wtJob = (extra) => normalizeSpeedrunJob({ title: 'W', url: speedrunUrl, ...extra });
+  const wt = (extra) => wtJob(extra)?.workplaceType;
+  if (wt({ workplace_type: 'Remote', remote: true }) === 'remote' && wt({ workplace_type: 'Hybrid', remote: false }) === 'hybrid'
+      && wt({ workplace_type: 'OnSite' }) === 'onsite' && wt({ workplace_type: 'Onsite' }) === 'onsite') {
+    pass('normalizeSpeedrunJob sets workplaceType from workplace_type');
+  } else {
+    fail(`normalizeSpeedrunJob workplace_type = ${JSON.stringify(['Remote', 'Hybrid', 'OnSite', 'Onsite'].map((v) => wt({ workplace_type: v })))}`);
+  }
+  const unset = [{ workplace_type: null, remote: true }, { remote: true }, { workplace_type: 'Unspecified' }].map(wtJob);
+  if (unset.every((j) => j && !('workplaceType' in j))) {
+    pass('normalizeSpeedrunJob leaves workplaceType unset for a null, absent or unknown workplace_type');
+  } else {
+    fail('normalizeSpeedrunJob should read workplaceType only from workplace_type');
+  }
+
   // "Remote" appended when remote is true; location may be null.
   const remoteLoc = normalizeSpeedrunJob({ title: 'R', url: 'https://speedrun-talent-network.com/jobs/r', location: 'SF Bay Area', remote: true });
   const remoteOnly = normalizeSpeedrunJob({ title: 'R', url: 'https://speedrun-talent-network.com/jobs/r2', location: null, remote: true });

@@ -18,6 +18,7 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `ofertas.md` | `ofertas` | Multi-job comparison |
 | `auto-pipeline.md` | (paste a JD/URL) | Full automatic pipeline (evaluate + PDF + tracker) on a pasted JD/URL |
 | `pipeline.md` | `pipeline` | Process the URL inbox (`data/pipeline.md`) |
+| `capture.md` | `capture` | Record a posting in the inbox without evaluating it |
 | `scan.md` | `scan` | Portal scanner (job discovery) |
 | `discover.md` | `discover` | Resolve company names to scannable ATS boards for `portals.yml` |
 | `triage.md` | `triage` | Fast first-pass quick score before full evaluation |
@@ -65,6 +66,14 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `_custom.template.md` | Seed for your `modes/_custom.md` (house rules, procedural preferences) |
 | `_brief.template.md` | Seed for your `modes/_brief.md` (compact context for `triage`) |
 | `_writing.md` | Shared writing guidance (Voice DNA, writing style, ATS rules) loaded by modes that write candidate-facing prose |
+| `_community-asks.md` | The one-time star and manifesto asks, and the Hired Wall offer at a hire |
+| `_files.md` | The main scripts and data files with what each does, and the `jds/` capture filenames |
+| `_headless.md` | Headless command per CLI, headless worker permissions, report-number reservation for fan-outs |
+| `_markets.md` | The market mode sets and how a `language.modes_dir` list works |
+| `_onboarding.md` | First-run setup steps, read when `doctor.mjs --json` reports `onboardingNeeded` and no `dataRootError` (AGENTS.md → First Run) |
+| `_tracker-tsv.md` | Tracker-addition TSV format, read before writing a TSV to `batch/tracker-additions/` |
+
+AGENTS.md is loaded into every session and stays under 40,000 characters, so reference only one workflow needs lives in these `_`-prefixed files and AGENTS.md points to them.
 
 Your copies (`_profile.md`, `_custom.md`, `_brief.md`) are user-layer files: gitignored
 and never touched by `update-system.mjs` (see

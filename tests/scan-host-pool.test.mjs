@@ -11,6 +11,7 @@ const SCAN_URL = pathToFileURL(join(ROOT, 'scan.mjs')).href;
 const {
   parallelFetch,
   companyFetchHost,
+  companyFetchPoolOptions,
   resolveConcurrency,
   DEFAULT_CONCURRENCY,
   VERIFY_CONCURRENCY,
@@ -83,6 +84,33 @@ test('an empty host is not forced into one shared bucket', async () => {
   });
   await parallelFetch(tasks, 4, () => {}, { hostOf: () => '', hostLimit: 1 });
   assert.equal(peak, 4);
+});
+
+test('Eightfold tenants share one slot while other providers keep their host slots', async () => {
+  const { default: eightfold } = await import('../providers/eightfold.mjs');
+  const targets = [
+    { _provider: eightfold, careers_url: 'https://alpha.eightfold.ai/careers' },
+    { _provider: eightfold, careers_url: 'https://beta.eightfold.ai/careers' },
+    { _provider: eightfold, careers_url: 'https://careers.example/careers', eightfold_host: 'careers.example' },
+    { careers_url: 'https://careers.example/jobs/1' },
+    { careers_url: 'https://careers.example/jobs/2' },
+  ];
+  const active = { eightfold: 0, other: 0 };
+  const peak = { eightfold: 0, other: 0 };
+  let overlapped = false;
+  const tasks = targets.map((target, index) => async () => {
+    const group = target._provider ? 'eightfold' : 'other';
+    active[group]++;
+    peak[group] = Math.max(peak[group], active[group]);
+    overlapped ||= active.eightfold > 0 && active.other > 0;
+    await new Promise(resolve => setImmediate(resolve));
+    active[group]--;
+    return index;
+  });
+  const results = await parallelFetch(tasks, 4, undefined, companyFetchPoolOptions(targets, 2));
+  assert.deepEqual(peak, { eightfold: 1, other: 2 });
+  assert.equal(overlapped, true);
+  assert.deepEqual(results, [0, 1, 2, 3, 4]);
 });
 
 test('a thrown task releases its slot and the rest still run', async () => {

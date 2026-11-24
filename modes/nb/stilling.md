@@ -471,7 +471,7 @@ Feltnavnene i headeren (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`
 (liste med 15-20 nøkkelord fra annonsen for ATS-optimalisering)
 
 ## Keyword Coverage
-(genereres av `keyword-match.mjs` (1b) -- dekning i %, present, thin, missing)
+(genereres av `keyword-match.mjs` (1b) -- dekning i %, present, missing)
 
 ## Job Description (archived verbatim)
 (annonsens fulle tekst, limt inn ordrett -- se kravet nedenfor)
