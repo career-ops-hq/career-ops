@@ -38,7 +38,9 @@
  * Run: node recruiter-signal.mjs                      (JSON)
  *      node recruiter-signal.mjs --summary            (ranked table)
  *      node recruiter-signal.mjs --directory --summary (every firm you selected)
- *      node recruiter-signal.mjs --firm "Acme Search" (one firm, for the skip offer)
+ *      node recruiter-signal.mjs --firm "Acme Search" (one firm)
+ *      node recruiter-signal.mjs --firm-file firm.txt  (same, name read from a file:
+ *                                                   the agent's path for posting text)
  *      node recruiter-signal.mjs --days 180 --top 10
  */
 
@@ -73,12 +75,13 @@ const DEFAULT_DAYS = 90;
 // are in your profile list, a Via, a recruiter contact or mandates.tsv.
 const FIRM_NAME_RE = /\b(executive search|search partners?|head ?hunt\w*|recruit(?:ment|ing|ers?)|staffing|interim management|recrutement|cabinet de recrutement|chasseurs? de t[eê]tes|werving|selectie|personalberatung|personalvermittlung|reclutamiento|selecci[oó]n de personal|recrutamento|reclutamento|selezione del personale|rekrytering|rekruttering|rekrutacja)\b/i;
 
-const KNOWN_FLAGS = ['--summary', '--firm', '--days', '--top', '--directory', '--help', '-h'];
+const KNOWN_FLAGS = ['--summary', '--firm', '--firm-file', '--days', '--top', '--directory', '--help', '-h'];
 const USAGE = `Usage:
   node recruiter-signal.mjs                      # JSON: firms ranked by on-target postings
   node recruiter-signal.mjs --summary            # human-readable table
   node recruiter-signal.mjs --directory          # every firm you selected, posting or not
   node recruiter-signal.mjs --firm "<name>"      # one firm only
+  node recruiter-signal.mjs --firm-file <path>   # same, name read from a file (posting text never reaches a shell)
   node recruiter-signal.mjs --days <n>           # look-back window (default ${DEFAULT_DAYS})
   node recruiter-signal.mjs --top <n>            # keep the first n firms
   node recruiter-signal.mjs --help
@@ -235,13 +238,22 @@ function readIf(path) {
 
 function main() {
   const args = process.argv.slice(2);
-  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: ['--firm', '--days', '--top'] });
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: ['--firm', '--firm-file', '--days', '--top'] });
   const days = Number(flagValue(args, '--days') ?? DEFAULT_DAYS);
   const top = flagValue(args, '--top') == null ? Infinity : Number(flagValue(args, '--top'));
   if (!Number.isInteger(days) || days < 1 || !(top === Infinity || (Number.isInteger(top) && top > 0))) {
     console.error('--days and --top take a positive whole number.');
     process.exit(1);
   }
+
+  // A firm name taken from a posting is untrusted text: the agent writes it to a
+  // file and passes the path, so no shell ever parses it.
+  const firmFile = flagValue(args, '--firm-file');
+  if (firmFile && !existsSync(firmFile)) {
+    console.error(`--firm-file: ${firmFile} not found.`);
+    process.exit(1);
+  }
+  const firmQuery = firmFile ? readFileSync(firmFile, 'utf-8').split(/\r?\n/)[0].trim() : flagValue(args, '--firm');
 
   const history = readIf(PATHS.history).split(/\r?\n/)
     .filter((l) => l.trim() && !l.startsWith('url\t'))
@@ -257,7 +269,7 @@ function main() {
     history, trackerRows, contacts, mandates, selected,
     titleFilter: portals.title_filter,
     today: new Date().toISOString().slice(0, 10),
-    days, firm: flagValue(args, '--firm'), directory: args.includes('--directory'),
+    days, firm: firmQuery || null, directory: args.includes('--directory'),
   });
   result.firms = result.firms.slice(0, top);
   result.choice = { countries: list(prefs.countries), sectors: list(prefs.sectors), levels: list(prefs.levels), ownFirms: selected.filter((s) => s.source === 'profile').length, directoryFirms: selected.filter((s) => s.source === 'directory').length };

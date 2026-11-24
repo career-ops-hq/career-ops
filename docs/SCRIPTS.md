@@ -694,6 +694,7 @@ node recruiter-signal.mjs                       # JSON: firms, window, mandates.
 node recruiter-signal.mjs --summary             # ranked table
 node recruiter-signal.mjs --directory --summary # every firm you follow, posting or not
 node recruiter-signal.mjs --firm "Acme Search"  # one firm, counted even if nothing else knows it yet
+node recruiter-signal.mjs --firm-file firm.txt  # same, first line of the file: how the agent passes a name taken from a posting
 node recruiter-signal.mjs --days 180 --top 10   # wider window, first ten firms
 ```
 

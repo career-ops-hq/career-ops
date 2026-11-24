@@ -133,3 +133,26 @@ test('buildSignal: a branch or country after the firm name still matches, a long
   assert.equal(firms.length, 1);
   assert.equal(firms[0].postings, 2);
 });
+
+test('CLI: --firm-file reads the firm name as plain text, shell syntax included', () => {
+  const root = mkdtempSync(join(tmpdir(), 'recruiter-signal-'));
+  try {
+    mkdirSync(join(root, 'data'));
+    const today = new Date().toISOString().slice(0, 10);
+    const name = 'Evil $(touch pwned) Search';
+    writeFileSync(join(root, 'data/scan-history.tsv'), `url\tfirst_seen\tportal\ttitle\tcompany\tstatus\nhttps://x.example/1\t${today}\tvdab-api\tCIO\t${name}\tadded\n`);
+    const firmFile = join(root, 'firm.txt');
+    writeFileSync(firmFile, `${name}\nignored second line\n`);
+    const env = { ...process.env, CAREER_OPS_ROOT: root };
+    const r = spawnSync(process.execPath, [SCRIPT, '--firm-file', firmFile], { env, encoding: 'utf-8', cwd: root });
+    assert.equal(r.status, 0, r.stderr);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.firms.length, 1);
+    assert.equal(out.firms[0].firm, name);
+    assert.equal(out.firms[0].postings, 1);
+    const missing = spawnSync(process.execPath, [SCRIPT, '--firm-file', join(root, 'nope.txt')], { env, encoding: 'utf-8' });
+    assert.equal(missing.status, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
