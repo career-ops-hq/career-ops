@@ -11,7 +11,7 @@ Two layers (full list in `DATA_CONTRACT.md`):
 
 **Read `modes/_custom.md` (if it exists) after `modes/_profile.md` and honor its house rules in every mode, every language and every batch item.** It can override workflow, style and procedural defaults, but it never introduces factual claims about the candidate.
 
-**Data root:** the User Layer lives under the data root, which `node doctor.mjs --json` reports as `data_root`. `DATA_CONTRACT.md` → "Custom Data Directory" has how it resolves (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR`, the `.career-ops-data` marker, the plugin-install default) and where the tracker lives (`{DATA_ROOT}/data/applications.md`, or `CAREER_OPS_TRACKER`). A write goes to the tracker a read finds; only when none exists does first-run creation target `{DATA_ROOT}/data/applications.md` or the override. A new script resolves both through `path-resolver.mjs`, never `__dirname`: see `modes/_files.md` → "Data root in scripts".
+**Data root:** the User Layer lives under the data root, which `node doctor.mjs --json` reports as `data_root`. `DATA_CONTRACT.md` → "Custom Data Directory" has how it resolves (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR`, the `.career-ops-data` marker, the plugin-install default) and where the tracker is read and written (`{DATA_ROOT}/data/applications.md`, or `CAREER_OPS_TRACKER`). A new script resolves both through `path-resolver.mjs`, never `__dirname`: see `modes/_files.md` → "Data root in scripts".
 
 ## Source-of-Truth Boundary (CRITICAL)
 

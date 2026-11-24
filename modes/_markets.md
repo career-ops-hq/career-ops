@@ -37,7 +37,7 @@ Default modes are in `modes/` (English). Market-specific mode sets (each include
 A set is used when the user targets postings in that language or market, lives in that market, or asks for it. Any of these selects it:
 
 1. The user says "use {market} modes" → layer that dir on the English `modes/` canon: read each mode-loaded English file first, then that dir's version when it provides one, and English workflow rules win conflicts.
-2. The user sets `language.modes_dir: modes/de` (or their market's dir) in `config/profile.yml` → always use that dir.
+2. The user sets `language.modes_dir: modes/de` (or their market's dir) in `config/profile.yml` → use that dir, unless the user asks for another market's modes in this conversation: that request wins for the conversation.
 3. You detect a JD written in that language → *suggest* switching, naming the set's directory from the table above.
 
 **When not to switch:** for English-language roles, even at companies from those markets, use the default English modes, unless the user asked for another market's modes in this conversation or `language.modes_dir` is set in `config/profile.yml`. The user's explicit choice always wins over JD-language detection.
