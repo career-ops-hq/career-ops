@@ -10,6 +10,7 @@ import { readTrackerFile, resolveTrackerPath, trackerLinkDirs } from "@/lib/core
 import { cachedFileValue } from "@/lib/stat-file-cache.mjs";
 import { resolveCodeRoot, resolveRootScript } from "@/lib/core/code-root.mjs";
 import { classifyTracker, parseApplications } from "@/lib/tracker-table.mjs";
+import { awaitingAge } from "@/lib/home/awaiting-age.mjs";
 import { parseStatusLog } from "@/lib/pipeline-sankey.mjs";
 // Pipeline rows are parsed in a plain .mjs for the same reason as
 // tracker-table.mjs: so `node --test` can exercise the real parser.
@@ -203,6 +204,53 @@ export async function withCloseDates(applications: Application[]): Promise<Appli
     const day = mod.closeDateForUrl(index, href);
     return day ? { ...app, closesAt: day } : app;
   });
+}
+
+type PostingFactsModule = {
+  postingFactsIndex: (scanHistory: string, livenessLog: string) => Map<string, unknown>;
+  postingFactsForUrl: (index: Map<string, unknown>, url: string) => unknown;
+};
+
+let postingFactsModule: PostingFactsModule | null = null;
+
+async function loadPostingFactsModule(): Promise<PostingFactsModule | null> {
+  if (postingFactsModule) return postingFactsModule;
+  const file = path.join(
+    /* turbopackIgnore: true */ resolveCodeRoot(process.cwd(), process.env),
+    "lib",
+    "posting-facts.mjs",
+  );
+  try {
+    const mod = (await import(/* webpackIgnore: true */ pathToFileURL(file).href)) as Partial<PostingFactsModule>;
+    if (typeof mod.postingFactsIndex !== "function" || typeof mod.postingFactsForUrl !== "function") return null;
+    postingFactsModule = mod as PostingFactsModule;
+    return postingFactsModule;
+  } catch {
+    return null;
+  }
+}
+
+export type AwaitingAge = ReturnType<typeof awaitingAge>;
+
+/** Per tracker row: days since the scan first saw the posting, days since the
+ *  board's posting date, and the last conclusive still-open check, keyed by row
+ *  number. `fallbackUrl` supplies the posting URL when the tracker cell has none.
+ *  Reads scan-history.tsv and liveness-checks.tsv only; never fetches. A
+ *  missing file or module leaves every fact unknown ("unchecked"), never guessed. */
+export async function readAwaitingAges(
+  applications: Application[],
+  today: string,
+  fallbackUrl: (app: Application) => string = () => "",
+): Promise<Record<string, AwaitingAge>> {
+  const mod = await loadPostingFactsModule();
+  const index = mod ? mod.postingFactsIndex(read("data/scan-history.tsv") ?? "", read("data/liveness-checks.tsv") ?? "") : null;
+  const ages: Record<string, AwaitingAge> = {};
+  for (const app of applications) {
+    const href = postingHref(app.url) || fallbackUrl(app);
+    const facts = mod && index && href ? mod.postingFactsForUrl(index, href) : null;
+    ages[app.n] = awaitingAge(facts as Parameters<typeof awaitingAge>[0], today, app.closesAt ?? "");
+  }
+  return ages;
 }
 
 export type Application = {
