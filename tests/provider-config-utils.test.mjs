@@ -22,7 +22,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const { intInRange } = await import(pathToFileURL(join(ROOT, 'providers', '_config-utils.mjs')).href);
+const { intInRange, hasControlChar } = await import(pathToFileURL(join(ROOT, 'providers', '_config-utils.mjs')).href);
 
 test('a value inside the range is returned unchanged', () => {
   assert.equal(intInRange(50, 100, 1, 100), 50);
@@ -93,4 +93,11 @@ test('the real caller bounds hold', () => {
   assert.equal(intInRange(0, 30, 1, 1000), 1, 'vdab days');
   assert.equal(intInRange(5000, 100, 1, 100), 100, 'vdab size');
   assert.equal(intInRange('none', 25, 1, 100), 25, 'smartrecruiters detailLimit');
+});
+
+test('hasControlChar: plain text is false; a newline, a tab and DEL are true', () => {
+  assert.equal(hasControlChar('python'), false);
+  assert.equal(hasControlChar('a\nb'), true, 'newline');
+  assert.equal(hasControlChar('a\tb'), true, 'tab');
+  assert.equal(hasControlChar('a\u007fb'), true, 'DEL');
 });

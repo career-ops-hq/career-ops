@@ -17,3 +17,6 @@ export function intInRange(val, def, min, max) {
   if (!Number.isFinite(n)) return def;
   return Math.min(max, Math.max(min, Math.trunc(n)));
 }
+
+/** @param {string} text */
+export const hasControlChar = (text) => [...text].some((c) => c < ' ' || c === '\u007f');
