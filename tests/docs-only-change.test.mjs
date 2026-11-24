@@ -340,7 +340,10 @@ test('the Go dashboard tests start early and still decide the leg (shard 1 only 
     const start = steps.findIndex((step) => step.id === 'go_start');
     const wait = steps.findIndex((step) => step.name === 'Go dashboard tests');
     const suite = steps.findIndex((step) => String(step.run).startsWith('node test-all.mjs'));
-    assert.ok(start > 0 && start < suite && suite < wait, `${id}: start ${start}, suite ${suite}, wait ${wait}`);
+    const install = steps.findIndex((step) => step.run === 'npm install --ignore-scripts');
+    // After the install: the Go tests run the repo's Node scripts, which need
+    // the dependencies (the first run of #7778 failed on js-yaml).
+    assert.ok(install > 0 && install < start && start < suite && suite < wait, `${id}: install ${install}, start ${start}, suite ${suite}, wait ${wait}`);
     assert.match(steps[start].run, /go test \.\/\.\.\./);
     assert.match(steps[wait].if, /steps\.go_start\.outcome == 'success'/, 'never wait for a run that did not start');
     assert.match(steps[wait].run, /exit "\$\(cat "\$out\/go-test\.exit"\)"/, 'the leg ends with the Go exit code');
