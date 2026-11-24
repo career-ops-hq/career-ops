@@ -110,27 +110,6 @@ jobs:
         with:
           # Test code (fork code, in a merge_group) must not find a token in .git/config.
           persist-credentials: false
-      - if: env.SKIP_LEG != 'true'
-        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
-        with:
-          go-version: '1.27'
-          # The module lives in dashboard/, so without this setup-go looks for
-          # go.sum at the root, warns, and caches nothing.
-          cache-dependency-path: dashboard/go.sum
-      # The Go dashboard tests need only Go and take 40-60 s, most of it the
-      # cross-compile in cross_compile_test.go. Started here, in the background,
-      # they run while Node is set up and the dependencies install, instead of
-      # after the suite. "Go dashboard tests" below waits for them and ends with
-      # their exit code, so a failing Go test still turns this check red. They
-      # write only to their own temp dirs, so the suite never sees them.
-      - name: Start the Go dashboard tests in the background
-        id: go_start
-        if: env.SKIP_LEG != 'true'
-        shell: bash
-        working-directory: dashboard
-        run: |
-          out="$(cd "$RUNNER_TEMP" && pwd)"
-          nohup bash -c 'go test ./... > "$1/go-test.log" 2>&1; echo "$?" > "$1/go-test.exit"' _ "$out" > /dev/null 2>&1 &
       # The declared floor (lib/node-floor.mjs, package.json engines). Exact on
       # purpose: a bare '22' resolves to the newest 22.x and tests nothing.
       # Renovate is told to leave node-version in this file alone (renovate.json);
@@ -152,6 +131,29 @@ jobs:
       # browser, and those skip here and run in the tool-suites job instead.
       - if: env.SKIP_LEG != 'true'
         run: npm install --ignore-scripts
+      - if: env.SKIP_LEG != 'true'
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: '1.27'
+          # The module lives in dashboard/, so without this setup-go looks for
+          # go.sum at the root, warns, and caches nothing.
+          cache-dependency-path: dashboard/go.sum
+      # The Go dashboard tests take 40-60 s, most of it the cross-compile in
+      # cross_compile_test.go. Started here, in the background, they run at the
+      # same time as the suite instead of after it. Not earlier: some of them
+      # run the repo's Node scripts (set-status.mjs), which need Node 24 and the
+      # installed dependencies. "Go dashboard tests" below waits for them and
+      # ends with their exit code, so a failing Go test still turns this check
+      # red. They write only to their own temp dirs, so the suite never sees
+      # them.
+      - name: Start the Go dashboard tests in the background
+        id: go_start
+        if: env.SKIP_LEG != 'true'
+        shell: bash
+        working-directory: dashboard
+        run: |
+          out="$(cd "$RUNNER_TEMP" && pwd)"
+          nohup bash -c 'go test ./... > "$1/go-test.log" 2>&1; echo "$?" > "$1/go-test.exit"' _ "$out" > /dev/null 2>&1 &
       - if: env.SKIP_LEG != 'true'
         run: node test-all.mjs --quick
       # Waits for the run started above and reports it as its own step. Runs
