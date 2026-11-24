@@ -15,12 +15,13 @@ import { describeSpawn } from './helpers/describe-spawn.mjs';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SCAN = join(ROOT, 'scan.mjs');
 
-function run(script) {
+function run(script, { threshold } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'co-scan-transient-'));
   mkdirSync(join(dir, 'data'), { recursive: true });
   mkdirSync(join(dir, 'config'), { recursive: true });
   writeFileSync(join(dir, 'config', 'profile.yml'), '{}\n');
   writeFileSync(join(dir, 'portals.yml'), [
+    ...(threshold ? [`portal_health_threshold: ${threshold}`] : []),
     'title_filter:', '  positive:', '    - "Engineer"',
     'tracked_companies:',
     '  - name: Flaky Co',
@@ -54,11 +55,27 @@ test('a board that failed on a transient error is retried once, alone, and its j
   }
 });
 
+test('a parser failure classified as a missing board still prints the parser-failure line', () => {
+  const once = run('tests/fixtures/slug-parser.mjs');
+  const persistent = run('tests/fixtures/slug-parser.mjs', { threshold: 1 });
+  try {
+    assert.match(once.result.stdout, /unreachable \(slug\?\)/);
+    assert.match(once.result.stdout, /local parser failed/);
+    assert.match(persistent.result.stdout, /FIX NEEDED/);
+    assert.match(persistent.result.stdout, /local parser failed/);
+  } finally {
+    rmSync(once.dir, { recursive: true, force: true });
+    rmSync(persistent.dir, { recursive: true, force: true });
+  }
+});
+
 test('a permanent failure is not retried', () => {
   const { dir, result, runs } = run('tests/fixtures/failing-parser.mjs');
   try {
     assert.equal(runs, 1, describeSpawn(result));
     assert.doesNotMatch(result.stderr, /retrying/);
+    assert.match(result.stdout, /local parser failed/);
+    assert.doesNotMatch(result.stdout, /used API fallback/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
