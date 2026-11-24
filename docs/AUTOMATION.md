@@ -44,6 +44,10 @@ The scan exits 2 when every target it tried failed (no network, for example), an
 when at least one board was read, so a scheduler that alerts on a non-zero exit
 reports an outage without flagging every run that hit one dead board.
 
+The standalone scanners (`scan-topdev.mjs`, `scan-interamt.mjs`, `scan-dayforce.mjs`,
+`scan-seek.mjs`) follow the same rule: exit 2 when every search or board they tried
+failed, 0 when at least one was read.
+
 Replace `/path/to/career-ops` with your checkout path, and make sure `node` is on
 the `PATH` the scheduler uses (schedulers often run with a minimal environment — use
 an absolute path to `node` if in doubt, e.g. `which node`).

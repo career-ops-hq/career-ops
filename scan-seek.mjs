@@ -43,6 +43,7 @@ import { appendToPipeline, appendToScanHistory, PORTALS_PATH } from './scan.mjs'
 import { localToday } from './lib/local-today.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
+import { exitIfEveryTargetFailed } from './lib/scan-exit.mjs';
 import { validateFlags, flagValue } from './lib/cli-flags.mjs';
 import { makeHttpCtx, fetchTextWithRetry } from './providers/_http.mjs';
 import {
@@ -75,7 +76,9 @@ Flags:
   --pages N         max pages per search (default 5, cap 50; alias --max-pages)
   --delay-ms N      pause between requests (default 2000)
   --dry-run         do not touch pipeline, scan history or scan-runs
-  --help, -h        show this help and exit`;
+  --help, -h        show this help and exit
+
+Exit status: 0 when the scan ran, 1 on a configuration or fatal error, 2 when every search failed.`;
 
 export const DEFAULT_MAX_PAGES = 5;
 export const MAX_PAGES_CAP = 50;
@@ -486,6 +489,7 @@ async function main(args) {
   const gate = createLocalGate({ config: portals });
   const added = [];
   let found = 0;
+  let searchesRead = 0;
   let errors = 0;
 
   for (let i = 0; i < searches.length; i++) {
@@ -498,6 +502,7 @@ async function main(args) {
         maxPages,
         delayMs,
       });
+      searchesRead++;
       found += offers.length;
       for (const offer of offers) {
         if (gate.check(offer)) continue;
@@ -535,7 +540,9 @@ async function main(args) {
   const skipped = formatLocalSkips(gate.counts);
   if (skipped) console.log(`Skipped:            ${skipped}`);
   if (errors) console.log(`Errors:             ${errors} of ${searches.length} queries`);
-  if (errors === searches.length) process.exitCode = 1;
+  // Exit 2, not 1, when no search could be read: 1 stays a config or fatal
+  // error, the same split scan.mjs uses (#5720).
+  exitIfEveryTargetFailed({ attempted: searches.length, read: searchesRead, unit: 'SEEK search', thing: 'search' });
 }
 
 if (isMainModule(import.meta.url)) {
