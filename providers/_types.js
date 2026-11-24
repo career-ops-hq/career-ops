@@ -23,8 +23,10 @@
  * @property {string} location May be empty.
  * @property {'remote' | 'hybrid' | 'onsite'} [workplaceType]
  *                               Workplace model, populated ONLY when the source
- *                               exposes a dedicated field (`ashby.mjs` and
- *                               `lever.mjs` are producers; most providers omit it).
+ *                               exposes a dedicated field (`ashby.mjs`, `lever.mjs`,
+ *                               `getro.mjs`, `a16z-speedrun-talent.mjs` and
+ *                               `consider.mjs`, from its `remote` and `hybrid`
+ *                               flags, are producers; most providers omit it).
  *                               Normalized to lowercase: 'remote' | 'hybrid' | 'onsite'.
  *                               Never inferred from location text, title, or
  *                               `isRemote`. Omitted when unknown or unspecified.

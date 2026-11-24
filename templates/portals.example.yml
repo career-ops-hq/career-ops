@@ -382,7 +382,8 @@
 
 # -- Workplace filter (optional) --
 # Filter scanned jobs by workplace model (remote | hybrid | onsite).
-# Set only from the provider's dedicated field (Ashby, Lever).
+# Set only from the provider's dedicated field (for example Ashby, Lever, Getro,
+# Consider, a16z speedrun).
 #
 # Semantics:
 #   - allow: list of allowed workplace types ('remote', 'hybrid', 'onsite')

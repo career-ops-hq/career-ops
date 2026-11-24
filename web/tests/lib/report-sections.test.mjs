@@ -231,6 +231,17 @@ test("verdictReason reads the header lede above ---", () => {
   );
 });
 
+test("a report with no section break does not reuse its body as the verdict reason", () => {
+  const report = [
+    "# Fixture States Co — Engineer",
+    "",
+    "**URL:** https://jobs.fixture-states.example/engineer",
+    "",
+    "Fictional browser test report.",
+  ].join("\n");
+  assert.equal(verdictReason({ report, intro: "" }), "");
+});
+
 test("verdictReason drops inline Markdown markers", () => {
   assert.equal(
     verdictReason({

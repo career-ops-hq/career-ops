@@ -3,6 +3,7 @@
 
 import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, fetchResponseWithRetry, sleep } from './_http.mjs';
 import { markTruncated } from '../lib/board-truncation.mjs';
+import { workplaceField } from './_workplace-type.mjs';
 
 // Consider provider — multi-employer board adapter for `job_boards:`.
 // VC "talent network" portfolio boards built on Consider (consider.com) and
@@ -232,6 +233,18 @@ function locationString(job) {
   return job.remote ? 'Remote' : '';
 }
 
+/**
+ * The workplace type from the board's own `remote` and `hybrid` flags. A role
+ * with both flags can be done either way, and a role with neither can be
+ * onsite or an unflagged hybrid, so neither case sets a type.
+ * @param {any} job
+ */
+function workplaceOf(job) {
+  if (job.remote === true && job.hybrid !== true) return workplaceField('remote');
+  if (job.hybrid === true && job.remote !== true) return workplaceField('hybrid');
+  return {};
+}
+
 /** A job row from the search response, or null when it has no usable URL. */
 function toRow(job, origin, entry) {
   const rawUrl = job.url || job.applyUrl || '';
@@ -251,6 +264,7 @@ function toRow(job, origin, entry) {
     company: job.companyName || entry.name,
     location: locationString(job),
     postedAt: toEpochMs(job.timeStamp),
+    ...workplaceOf(job),
   };
 }
 

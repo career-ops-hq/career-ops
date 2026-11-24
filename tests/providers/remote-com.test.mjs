@@ -149,6 +149,48 @@ try {
     fail(`parseRemoteJobs filtering = ${JSON.stringify(jobs.map((j) => j.title))}`);
   }
 
+  // ── pay → salary ──
+  const pay = (...rows) => ({ rows: rows.map((r) => ({ code: null, ...r })) });
+  const paid = parseRemoteJobs({
+    jobs: [
+      row({ public_id: 'p1', pay: pay({ min: 90000, max: 120000, currency: 'eur' }) }),
+      row({ public_id: 'p2', pay: pay({ min: 90000, max: 120000, currency: 'EUR' }, { min: 70000, max: 80000, currency: 'EUR' }) }),
+      row({ public_id: 'p3', pay: pay({ min: 0, max: 0, currency: 'EUR' }) }),
+      row({ public_id: 'p4', pay: pay({ min: 90000, max: 120000 }) }),
+      row({ public_id: 'p5', pay: pay({ min: 100000, max: null, currency: 'USD' }) }),
+      row({ public_id: 'p6', pay: null }),
+    ],
+  });
+  if (JSON.stringify(paid[0].salary) === JSON.stringify({ min: 90000, max: 120000, currency: 'EUR', period: 'year', posted: { min: 90000, max: 120000 } })) {
+    pass('parseRemoteJobs sets salary from a single pay row (per year, currency upper-cased)');
+  } else {
+    fail(`parseRemoteJobs salary = ${JSON.stringify(paid[0].salary)}`);
+  }
+  if (!('salary' in paid[1]) && !('salary' in paid[2]) && !('salary' in paid[3]) && !('salary' in paid[5])) {
+    pass('parseRemoteJobs sets no salary for several pay rows, zero bounds, no currency or no pay');
+  } else {
+    fail(`parseRemoteJobs unpaid = ${JSON.stringify(paid.map((j) => j.salary))}`);
+  }
+  if (paid[4].salary?.min === 100000 && paid[4].salary.max === 100000 && !('max' in paid[4].salary.posted)) {
+    pass('parseRemoteJobs fills a one-sided range from the other bound');
+  } else {
+    fail(`parseRemoteJobs one-sided salary = ${JSON.stringify(paid[4].salary)}`);
+  }
+
+  const odd = parseRemoteJobs({
+    jobs: [
+      row({ public_id: 'm1', pay: pay({ min: true, max: false, currency: 'EUR' }) }),
+      row({ public_id: 'm2', pay: pay({ min: [5], max: {}, currency: 'EUR' }) }),
+      row({ public_id: 'm3', pay: pay({ min: { valueOf() { throw new Error('boom'); } }, max: Symbol('x'), currency: 'EUR' }) }),
+      row({ public_id: 'm4', pay: pay({ min: '90000', max: '120000', currency: 'EUR' }) }),
+    ],
+  });
+  if (odd.length === 4 && [0, 1, 2].every((i) => !('salary' in odd[i])) && odd[3].salary?.min === 90000 && odd[3].salary.max === 120000) {
+    pass('parseRemoteJobs reads no salary from boolean, array or object bounds, never throws, and reads numeric strings');
+  } else {
+    fail(`parseRemoteJobs malformed pay = ${JSON.stringify(odd.map((j) => j.salary))}`);
+  }
+
   // Empty vs broken envelope.
   const empty = parseRemoteJobs({ jobs: [] });
   if (Array.isArray(empty) && empty.length === 0) pass('parseRemoteJobs({jobs: []}) → []');

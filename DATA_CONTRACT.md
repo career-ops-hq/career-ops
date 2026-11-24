@@ -201,7 +201,8 @@ Tracked in the repository, but `update-system.mjs` never writes, updates or dele
 
 | File | Purpose |
 |------|---------|
-| `employers/` | The employer registry: community-maintained pointers from an employer to its ATS board, CC BY 4.0 (see `employers/README.md`). A fresh clone has the copy of that day; the updater does not refresh it. |
+| `employers/` | The employer registry: community-maintained pointers from an employer to its ATS board, CC BY 4.0 (see `employers/README.md`). Each release refreshes `boards/`, `contributions/` (the manifests, which carry the attribution), `LICENSE` and `THIRD_PARTY_NOTICES.md`; `inbox/` stays in the repository. |
+| `employers-gap.mjs` | Lists the job boards in your own files (portals, pipeline, scan history; tracker and reports with `--include-applied`) that the registry does not have, after asking each one, through the scanner's provider, whether it lists jobs. Reads only; shares nothing |
 
 ## The Rule
 
