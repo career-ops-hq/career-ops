@@ -16,7 +16,6 @@ import { discoverPlugins, pluginRoots, pluginStatus, resolveSuccessorIds } from 
 import { canonicalizeTrackerPath, getCareerOpsRoot, getProfilePath, hasProfileOverride, isPluginInstallCopy, resolveTrackerPath } from './path-resolver.mjs';
 import { parseConfigByExtension } from './jsonc-parse.mjs';
 import { validateFlags, flagValue } from './lib/cli-flags.mjs';
-import { geminiNodeFloor } from './lib/gemini-node-floor.mjs';
 import { SKILL_ENTRYPOINTS } from './scaffolder/bin/skill-entrypoints.mjs';
 import { nodeFloor } from './lib/node-floor.mjs';
 import { classifyChromiumLaunchError } from './lib/chromium-launch-error.mjs';
@@ -1684,9 +1683,6 @@ async function main() {
 
   const checks = [
     checkNodeVersion(),
-    // Devuelve null salvo que el CLI activo sea Gemini: el filter(Boolean) de
-    // abajo lo descarta, así que ningún otro usuario ve un check que no le toca.
-    geminiNodeFloor(activeCli, process.versions.node),
     checkBillingSource(),
     checkDependencies(),
     pluginInstall,
