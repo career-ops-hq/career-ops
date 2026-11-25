@@ -60,12 +60,12 @@ test('non-salary metadata cannot dilute coverage or change bare-line boundaries'
   }
 });
 
-test('currency-like skill names and mixed skill/allowance lines stay requirements', () => {
+test('currency-like skills remain requirements while allowance clauses are ignored by scoring', () => {
   const jd = '## Requirements\n- CAD experience\n- Working with AMD GPUs\n- Python experience; training budget EUR 15000\n';
   assert.deepEqual(extractJdSkillsByClass(jd).required, ['CAD', 'AMD', 'GPUs', 'Python', 'EUR']);
   const result = scoreRequirements(jd, 'Python');
   assert.equal(result.unknown, false);
-  assert.match(result.evidence, /1 of 5 must-have/);
+  assert.match(result.evidence, /1 of 4 must-have/);
 });
 
 test('inline bonus skills remain preferred', () => {

@@ -341,7 +341,7 @@ const UNREAD_HAN_MIN = 4;
 const HAN_RE = /\p{Script=Han}/gu;
 
 const PREFERRED_HEADER_RE = new RegExp(
-  '^#{0,6}\\s*\u3010?\\s*(?:(?:' + [...PREFERRED_HEADER_TERMS, 'bonus', 'plus(?:es)?'].join('|') + ')s?\\b|(?:'
+  '^#{0,6}\\s*\u3010?\\s*(?:(?:' + [...PREFERRED_HEADER_TERMS, 'bonus(?:\\s+points)?(?=\\s*(?:[:：]|$))', 'plus(?:es)?'].join('|') + ')s?\\b|(?:'
   + PREFERRED_HEADER_TERMS_CJK.join('|') + ')).*$',
   'im'
 );
@@ -358,9 +358,13 @@ function isPreferredHeader(text) {
 // to one line; a following bullet still inherits its own section's class.
 function requirementLineClass(text, blockClass) {
   const line = stripBoldMarkers(text).trim();
-  const optionalSuffix = /\b(?:a plus|preferred|nice[- ]to[- ]have)[.!]?$/i.test(line)
-    && !/\b(?:not|never|required|mandatory|must)\b/i.test(line);
-  return isPreferredHeader(line) || optionalSuffix ? 'preferred' : blockClass;
+  // A negated requirement is optional; "required, not just a plus" is not.
+  const explicitlyOptional = /\bpreferred\s+but\s+not\s+required[.!]?$/i.test(line);
+  const optionalWording = /\b(?:a plus|preferred|nice[- ]to[- ]have)[.!]?$/i.test(line)
+    || /^bonus\s+points\s+if\b/i.test(line);
+  const optionalLine = explicitlyOptional || (optionalWording
+    && !/\b(?:not|never|required|mandatory|must)\b/i.test(line));
+  return isPreferredHeader(line) || optionalLine ? 'preferred' : blockClass;
 }
 
 // The Set scanJd() collects skills into, plus the requirement lines it could

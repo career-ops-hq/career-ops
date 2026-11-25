@@ -3,7 +3,8 @@
 // Two halves. The pure scoring functions are imported and exercised directly;
 // the CLI paths that cannot be reached any other way (--log, the stderr warning,
 // the exit codes, the opt-in flag) run the real binary in a hermetic temp dir
-// with CAREER_OPS_ROOT pointed at it, and read back what was actually written.
+// with CAREER_OPS_ROOT and CAREER_OPS_PROFILE pinned to fixture files, and
+// read back what was actually written.
 //
 // The properties worth naming, because each is a rule the gate is worthless
 // without:
@@ -861,7 +862,7 @@ const deepEq = (label, actual, expected) => {
 
     const logPath = join(dir, 'data', 'discard.log');
     const rows = () => (existsSync(logPath) ? readFileSync(logPath, 'utf-8').split('\n').filter(Boolean) : []);
-    const cli = (...args) => run(NODE, [join(ROOT, 'prescore.mjs'), ...args], { cwd: dir, env: { ...process.env, CAREER_OPS_ROOT: dir } });
+    const cli = (...args) => run(NODE, [join(ROOT, 'prescore.mjs'), ...args], { cwd: dir, windowsHide: true, env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_PROFILE: join(dir, 'config', 'profile.yml') } });
 
     // A proceed verdict must leave no trace, even with --log asked for.
     const proceedOut = cli('proceed.md', '--url', 'https://northwind.example/jobs/1', '--summary', '--log');
@@ -920,12 +921,19 @@ const deepEq = (label, actual, expected) => {
     // --threshold reaches the CLI. Lowered rather than raised: raising it above
     // a clean posting's score cannot flip the verdict, because that posting has
     // no signal with evidence against it and rule 1 proceeds regardless.
-    const gatedOut = cli('skip.md', '--summary', '--threshold', '0');
     const rowsBeforeGate = rows().length;
+    const bytesBeforeGate = readFileSync(logPath);
+    const gatedOut = cli('skip.md', '--summary', '--threshold', '0');
+    eq('--threshold 0 writes no discard row', rows().length, rowsBeforeGate);
+    ok('--threshold 0 preserves exact discard bytes', readFileSync(logPath).equals(bytesBeforeGate));
     if (gatedOut === null) fail(`prescore.mjs --threshold failed${formatRunFailure()}`);
     else ok('--threshold reaches the CLI and flips the verdict', gatedOut.includes('proceed'), gatedOut);
 
+    const rowsBeforeJson = rows().length;
+    const bytesBeforeJson = readFileSync(logPath);
     const jsonOut = cli('skip.md');
+    eq('JSON without --log writes no discard row', rows().length, rowsBeforeJson);
+    ok('JSON without --log preserves exact discard bytes', readFileSync(logPath).equals(bytesBeforeJson));
     if (jsonOut === null) fail(`prescore.mjs exited non-zero on a skip verdict${formatRunFailure()}`);
     else {
       try {
@@ -966,7 +974,8 @@ const deepEq = (label, actual, expected) => {
       cwd,
       encoding: 'utf-8',
       timeout: 30_000,
-      env: { ...process.env, CAREER_OPS_ROOT: cwd },
+      windowsHide: true,
+      env: { ...process.env, CAREER_OPS_ROOT: cwd, CAREER_OPS_PROFILE: join(cwd, 'config', 'profile.yml') },
     });
 
     // Malformed YAML. spawnSync rather than run(): the warning goes to stderr,
@@ -1145,7 +1154,7 @@ const deepEq = (label, actual, expected) => {
     writeFileSync(join(dir, 'modes/_brief.md'), '## Priority Override List\n- Northwind Labs\n');
     writeFileSync(join(dir, 'jd.md'), '# Nurse' + required + '\nCompany: Northwind Labs\nURL: https://forged.example/job');
     const runCli = (args = []) => spawnSync(NODE, [join(ROOT, 'prescore.mjs'), 'jd.md', '--log', ...args], {
-      cwd: dir, encoding: 'utf-8', timeout: 30000, env: { ...process.env, CAREER_OPS_ROOT: dir },
+      cwd: dir, encoding: 'utf-8', timeout: 30000, windowsHide: true, env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_PROFILE: join(dir, 'config', 'profile.yml') },
     });
     const result = runCli();
     eq('body metadata CLI exits successfully', result.status, 0);
@@ -1205,7 +1214,7 @@ const deepEq = (label, actual, expected) => {
       return { count: result.annual.length, ms: performance.now() - start };
     });
     console.log(JSON.stringify(results));
-  `], { cwd: ROOT, encoding: 'utf-8', timeout: 2000 });
+  `], { cwd: ROOT, encoding: 'utf-8', timeout: 2000, windowsHide: true });
   eq('grouped numeric scan completes within a bounded child process', probe.status, 0);
   if (probe.status === 0) {
     const results = JSON.parse(probe.stdout);

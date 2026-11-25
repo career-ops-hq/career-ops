@@ -479,7 +479,8 @@ function detectTitleWithConfidence(jdText, explicit = null, company = null) {
     if (heading && heading[1].trim()) {
       const title = heading[1].trim();
       headings.push(title);
-      if (SECTION_HEADING_RE.test(title) && !PREAMBLE_WRAPPER_RE.test(title)) beforeBody = false;
+      if ((SECTION_HEADING_RE.test(title) && !PREAMBLE_WRAPPER_RE.test(title))
+        || /^(?:related|similar|other|recommended|more)\s+(?:jobs|roles|opportunities|positions)\b/i.test(title)) beforeBody = false;
       if (beforeBody && headings.length <= 2) openingHeadings.add(title);
     } else if (line.trim()) {
       if (!TITLE_LABEL_RE.test(line)) plainLines.push(line.trim());
@@ -642,9 +643,10 @@ export function scoreTitle(title, targets) {
 // The shared extractor also reads bare lines. A standalone allowance amount
 // is metadata, not a must-have skill named "EUR" or "Stipend". Keep its line
 // nonempty (and keep any bullet marker) so paragraph boundaries do not change.
-// Mixed requirement/allowance lines are deliberately left alone.
+// Independently delimited allowance clauses can also share a requirement line.
+// Preserve both the skill clause and the original line/semicolon boundaries.
 function requirementsWithoutAllowances(jdText) {
-  return String(jdText ?? '').split('\n').map((line) => {
+  return String(jdText ?? '').split('\n').map((line) => line.split(';').map((line) => {
     if (!/bonus|budget|stipend/i.test(line)) return line;
     const figures = extractJdComp(line).annual;
     if (!figures.length || figures.some((figure) => !figure.nonSalary)) return line;
@@ -652,7 +654,7 @@ function requirementsWithoutAllowances(jdText) {
     for (const figure of figures) label = label.replace(figure.raw, '');
     if (!/^\s*(?:[-*•]\s*)?(?:(?:relocation|signing|sign[- ]on)\s+bonus|training\s+budget|stipend)\s*:?\s*[.;]?\s*$/i.test(label)) return line;
     return line.match(/^\s*(?:[-*•]\s*)?/)[0] + '[non-salary]';
-  }).join('\n');
+  }).join(';')).join('\n');
 }
 
 /**
@@ -832,9 +834,24 @@ const COMP_TRAIL_RE = new RegExp(
 // Any cadence that is not "per year". A comp figure sitting next to one of
 // these is not an annual band and is treated as no evidence, never compared
 // against an annual floor.
-const NON_ANNUAL_RE = /(?:\b(?:per\s+hour|an\s+hour|hourly|per\s+day|daily|per\s+diem|per\s+week|weekly|per\s+month|monthly)|\/\s*(?:hr|hour|d|day|wk|week|mo|month))\b/i;
+const NON_ANNUAL_RE = /(?:\b(?:per\s+hour|an\s+hour|hourly|per\s+day|daily|per\s+diem|per\s+week|weekly|per\s+month|monthly|(?:al|por)\s+(?:hora|día|dia|semana|mes)|mensual(?:es)?|semanal(?:es)?|diari[oa]|par\s+(?:heure|jour|semaine|mois)|mensuel(?:le)?|hebdomadaire|journalier|(?:pro|je)\s+(?:Stunde|Tag|Woche|Monat)|stündlich|täglich|wöchentlich|monatlich)|\/\s*(?:hr|hour|d|day|wk|week|mo|month|hora|día|dia|semana|mes|heure|jour|semaine|mois|Stunde|Tag|Woche|Monat))\b/i;
 
 const CONTEXT_CHARS = 40;
+
+// Bound both sides before splitting: a long line with many amounts must not
+// rescan every remaining suffix once per amount. Never borrow a marker from
+// another line (e.g. a following CAD requirement or a '+' bullet).
+function figureContext(text, index, length) {
+  return {
+    before: text.slice(Math.max(0, index - CONTEXT_CHARS), index).split(/\r?\n/).at(-1),
+    after: text.slice(index + length, index + length + CONTEXT_CHARS).split(/\r?\n/, 1)[0],
+  };
+}
+
+function isOpenLowerBound(before, after, hi) {
+  return /^\s*\+/.test(after)
+    || (!hi && /\b(?:from|starting\s+at|starts?\s+at|at\s+least)\s*$/i.test(before.trimEnd()));
+}
 
 // An explicit bonus, stipend or budget is not an annual pay band, even when
 // it exceeds the magnitude heuristic below. Choose the nearest label within
@@ -939,18 +956,18 @@ export function extractJdComp(jdText) {
   let nonAnnual = null;
 
   const consider = (match, currencyToken, lo, hi) => {
+    // A currency or second bound on another line may belong to a requirement.
+    if (/[\r\n]/.test(match[0].trim())) return;
     const parsed = parseCapturedRange(lo, hi);
     if (!parsed) return;
-    const start = Math.max(0, match.index - CONTEXT_CHARS);
-    const context = text.slice(start, match.index + match[0].length + CONTEXT_CHARS);
+    const { before, after } = figureContext(text, match.index, match[0].trimEnd().length);
+    const context = before + match[0] + after;
     if (NON_ANNUAL_RE.test(context)) {
       nonAnnual ??= { raw: match[0].trim() };
       return;
     }
     // "$100k+": a lower bound with no top. Kept apart so a floor above it is
     // read as "no top to compare", never as "top of band below floor".
-    const before = text.slice(start, match.index).split(/\r?\n/).at(-1);
-    const after = text.slice(match.index + match[0].trimEnd().length).split(/\r?\n/, 1)[0];
     const currencyPrefix = new RegExp('\\b(' + ISO_CODES.join('|') + ')\\s*$', 'i').exec(before)?.[1] ?? '';
     const currencySuffix = new RegExp('^\\s*(' + ISO_CODES.join('|') + ')\\b', 'i').exec(after)?.[1] ?? '';
     // Explicit currency text wins over an ambiguous dollar symbol. Keep the
@@ -958,7 +975,7 @@ export function extractJdComp(jdText) {
     const currencyText = currencyPrefix.toUpperCase() + ' ' + match[0] + ' ' + currencySuffix.toUpperCase();
     const currency = compensationCurrency(currencyText) ?? toCurrencyCode(currencyToken);
     const lowerBoundPrefix = before.replace(new RegExp('(?:' + CUR + ')\\s*$', 'i'), '').trimEnd();
-    const open = /^\s*\+/.test(after) || (!hi && /\b(?:from|starting\s+at|starts?\s+at|at\s+least)\s*$/i.test(lowerBoundPrefix));
+    const open = isOpenLowerBound(lowerBoundPrefix, after, hi);
     annual.push({
       index: match.index,
       min: parsed.min,
@@ -976,13 +993,14 @@ export function extractJdComp(jdText) {
     const lo = Number(m[1]);
     const hi = m[2] !== undefined ? Number(m[2]) : lo;
     if (!Number.isFinite(lo) || !Number.isFinite(hi)) continue;
+    const { before, after } = figureContext(text, m.index, m[0].trimEnd().length);
     annual.push({
       index: m.index,
       min: Math.min(lo, hi) * LPA_MULTIPLIER,
       max: Math.max(lo, hi) * LPA_MULTIPLIER,
-      open: false,
+      open: isOpenLowerBound(before, after, m[2]),
       currency: 'INR',
-      raw: m[0].trim(),
+      raw: m[0].trim() + (/^\s*\+/.test(after) ? '+' : ''),
       nonSalary: isNonSalaryFigure(text, m.index, m[0].length),
     });
   }
@@ -1093,6 +1111,17 @@ export function scoreComp(comp, floor) {
   }
 
   const band = plausible.reduce((best, f) => (f.max > best.max ? f : best));
+  // One closed regional band cannot close an alternative with no comparable
+  // maximum. A known option that clears the floor remains positive evidence.
+  if (!band.open && band.max < floor.value && (comp?.nonAnnual
+    || annual.some((f) => f.currency !== floor.currency)
+    || comparable.some((f) => f.open))) {
+    return {
+      score: UNKNOWN_SCORE,
+      evidence: 'the posting includes an alternative with no comparable annual maximum',
+      unknown: true,
+    };
+  }
   if (band.open) {
     if (band.min >= floor.value) {
       return { score: 5, evidence: `stated band ("${band.raw}") starts at or above the ${floor.value} ${floor.currency} floor`, unknown: false };
@@ -1244,7 +1273,7 @@ export function configuredThreshold(profile) {
  * @returns {number}
  */
 export function resolveThreshold(profile, override = null) {
-  if (typeof override === 'number' && Number.isFinite(override)) return override;
+  if (typeof override === 'number' && configuredThreshold({ pipeline: { prescore: { gate_threshold: override } } }).valid) return override;
   return configuredThreshold(profile).value ?? DEFAULT_THRESHOLD;
 }
 
@@ -1268,7 +1297,7 @@ function safeSignal(name, fn, warnings) {
   } catch (err) {
     const detail = err?.message ?? String(err);
     warnings.push(`the ${name} signal could not be computed (${detail}), scored as unknown`);
-    return { score: UNKNOWN_SCORE, evidence: `signal failed: ${detail}`, unknown: true };
+    return { score: UNKNOWN_SCORE, evidence: `signal failed: ${detail}`, unknown: true, failed: true };
   }
 }
 
@@ -1309,9 +1338,11 @@ export function prescore({
   // posting is for".
   let detected = null;
   let confidentTitle = false;
+  let titleFailed = false;
   try {
     ({ title: detected, confident: confidentTitle } = detectTitleWithConfidence(jd, title, knownCompany));
   } catch (err) {
+    titleFailed = true;
     notes.push(`the posting title could not be detected (${err?.message ?? err}), so title and domain scored as unknown`);
   }
 
@@ -1343,6 +1374,10 @@ export function prescore({
   let gate = DEFAULT_THRESHOLD;
   try {
     gate = resolveThreshold(profile, threshold);
+    if (threshold !== null && threshold !== undefined
+      && (typeof threshold !== 'number' || !configuredThreshold({ pipeline: { prescore: { gate_threshold: threshold } } }).valid)) {
+      notes.push('the threshold override is not a score between 0 and 5; using the configured or default threshold');
+    }
   } catch (err) {
     notes.push(`the configured gate threshold could not be read (${err?.message ?? err}), using ${DEFAULT_THRESHOLD}`);
   }
@@ -1399,6 +1434,10 @@ export function prescore({
     verdict = 'proceed';
     override = 'priority-list';
     overrideReason = `priority list: ${sanitizeField(priorityHit)}`;
+  } else if (titleFailed || Object.values(signals).some((signal) => signal.failed)) {
+    verdict = 'proceed';
+    override = 'signal-failed';
+    overrideReason = 'a signal could not be computed';
   } else if (score >= gate) {
     verdict = 'proceed';
   } else if (dominantNegative === null) {
@@ -1486,7 +1525,8 @@ export function discardReason(result) {
  * @returns {string} The row, newline included.
  */
 export function discardLogLine(timestamp, url, reason) {
-  return `${sanitizeField(timestamp)}\t${sanitizeField(url) || '-'}\t${sanitizeField(reason)}\n`;
+  const safeUrl = String(url ?? '').replace(/[\t\r\n]+/g, ' ').trim();
+  return `${sanitizeField(timestamp)}\t${safeUrl || '-'}\t${sanitizeField(reason)}\n`;
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────
@@ -1662,7 +1702,8 @@ function main() {
   // sanitizeField, because a parser's own message is often multi-line (js-yaml
   // prints the offending snippet with a caret).
   if (result.warnings.length > 0) {
-    console.error(sanitizeField(`Warning: ${result.warnings.join('; ')}. Proceeding.`));
+    const outcome = result.verdict === 'proceed' ? 'Proceeding.' : 'Continuing with the resolved threshold.';
+    console.error(sanitizeField(`Warning: ${result.warnings.join('; ')}. ${outcome}`));
   }
 
   let logFailure = null;

@@ -42,7 +42,9 @@ for (const bullet of ['Rust is a plus', 'Rust preferred', 'Rust would be nice to
 
 test('negated optionality and explicit must-haves are not downgraded', () => {
   for (const line of ['Rust is not preferred', 'Rust is required, not just a plus', 'Rust is mandatory']) {
-    assert.deepEqual(extractJdSkillsByClass('## Requirements\n- ' + line).preferred, []);
+    const split = extractJdSkillsByClass('## Requirements\n- ' + line);
+    assert.deepEqual(split.required, ['Rust']);
+    assert.deepEqual(split.preferred, []);
   }
 });
 
