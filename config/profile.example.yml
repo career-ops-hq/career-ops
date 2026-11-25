@@ -462,6 +462,9 @@ cover_letter:
 # pipeline:
 #   triage_threshold: 3.5
 #   triage_min_urls: 5
+#   prescore:
+#     enabled: false
+#     gate_threshold: 3.0
 
 # ── Heuristic pre-score gate (opt-in, zero-token) ───────────────────────────
 #
@@ -497,15 +500,8 @@ cover_letter:
 #                     does not need positive evidence to clear the gate:
 #                     four unknown signals score exactly 4.0 and still proceed.
 #
-# `pipeline:` is one mapping. If you enabled the triage gate above, add
-# `prescore:` beside `triage_threshold` rather than as a second `pipeline:` key.
-#
-# pipeline:
-#   triage_threshold: 3.5
-#   triage_min_urls: 5
-#   prescore:
-#     enabled: false
-#     gate_threshold: 3.0
+# The single `pipeline:` example above includes both gates; enable prescore
+# there rather than adding a second `pipeline:` mapping.
 
 # ── Re-apply Cooldown Windows ──────────────────────────────────────────────
 #

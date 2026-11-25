@@ -80,8 +80,8 @@
 
 import { readFileSync, existsSync, appendFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
-import * as yaml from 'js-yaml';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { loadYaml } from './lib/yaml-document.mjs';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { extractJdSkillsByClass, classifySkillGaps } from './jd-skill-gap.mjs';
 import { parseAmount } from './providers/_salary-text.mjs';
 import { ROLE_STOPWORDS, BASELINE_TOKENS, normalizeTitle } from './role-matcher.mjs';
@@ -1547,7 +1547,7 @@ function parseThresholdFlag(raw) {
 function readYaml(path, label) {
   if (!existsSync(path)) return { value: null, warning: null };
   try {
-    const loaded = yaml.load(readFileSync(path, 'utf-8'));
+    const loaded = loadYaml(readFileSync(path, 'utf-8'));
     // YAML that parses to a LIST (`[]`, or a file that is one long bullet list)
     // satisfies `typeof === 'object'`; without the Array check the caller would
     // treat it as a configured profile and let title/domain/requirements
@@ -1597,7 +1597,7 @@ function main() {
 
   const dataRoot = getCareerOpsRoot();
   const warnings = [];
-  const profileRead = readYaml(join(dataRoot, 'config/profile.yml'), 'config/profile.yml');
+  const profileRead = readYaml(getProfilePath(), 'config/profile.yml');
   if (profileRead.warning) warnings.push(profileRead.warning);
   const cvRead = readTextOrEmpty(join(dataRoot, 'cv.md'), 'cv.md');
   if (cvRead.warning) warnings.push(cvRead.warning);

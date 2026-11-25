@@ -1,4 +1,9 @@
 import test from 'node:test';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import * as skillGap from '../jd-skill-gap.mjs';
 const { extractJdSkills, extractJdSkillsByClass, diagnoseCoverage } = skillGap;
@@ -67,4 +72,32 @@ test('inline bonus skills remain preferred', () => {
   const split = extractJdSkillsByClass('## Requirements\n- Python\nBonus points: Rust, Scala\n');
   assert.deepEqual(split.required, ['Python']);
   assert.deepEqual(split.preferred, ['Rust', 'Scala']);
+});
+
+
+test('CLI honors CAREER_OPS_PROFILE and fails open on comment-only YAML', () => {
+  const root = mkdtempSync(join(tmpdir(), 'prescore-profile-'));
+  try {
+    mkdirSync(join(root, 'config'));
+    writeFileSync(join(root, 'config/profile.yml'), 'pipeline: {prescore: {enabled: false}}\n');
+    writeFileSync(join(root, 'cv.md'), 'Python\n');
+    writeFileSync(join(root, 'jd.md'), 'Title: Registered Nurse\n## Requirements\n- Nursing\n');
+    const profile = join(root, 'selected.yml');
+    const cli = () => spawnSync(process.execPath, [fileURLToPath(new URL('../prescore.mjs', import.meta.url)), join(root, 'jd.md')], {
+      windowsHide: true, encoding: 'utf8', timeout: 10000,
+      env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PROFILE: profile },
+    });
+    writeFileSync(profile, 'target_roles: {primary: [Software Engineer]}\npipeline: {prescore: {enabled: true}}\n');
+    const enabled = cli();
+    assert.equal(enabled.status, 0, enabled.stderr);
+    assert.equal(JSON.parse(enabled.stdout).verdict, 'skip');
+    writeFileSync(profile, '# No targeting configured yet\n');
+    const empty = cli();
+    assert.equal(empty.status, 0, empty.stderr);
+    assert.equal(JSON.parse(empty.stdout).verdict, 'proceed');
+    assert.equal(JSON.parse(empty.stdout).override, 'not-configured');
+    assert.doesNotMatch(empty.stderr, /expected a document/);
+  } finally {
+    rmSync(root, { recursive: true, force: true, maxRetries: 5 });
+  }
 });
