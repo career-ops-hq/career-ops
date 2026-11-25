@@ -425,7 +425,26 @@ try {
     calls.length === 2 && jobs.length === PAGE_SIZE - 1 + 2
       ? pass('a full page with one unparsable posting link is not read as short')
       : fail(`mixed full page: ${calls.length} calls, ${jobs.length} jobs`);
-    const { countPostingLinks } = mod;
+    // Page 2 repeats 19 postings from page 1 and adds one new posting whose
+    // card does not parse: that is new content, so the walk goes on to page 3.
+    const repeatPlusOdd = `<!doctype html>${fullPageIds(2000).slice(0, PAGE_SIZE - 1).map((id) => link(id)).join('\n')}
+<a href='jobs/results/2500-odd'>x</a>`;
+    const { ctx: rpCtx, calls: rpCalls } = recordingCtx(({ n }) => (n === 0 ? linkPage(fullPageIds(2000))
+      : n === 1 ? repeatPlusOdd : linkPage(['4000', '4001'])));
+    const rp = await provider.fetch({ name: 'Google', google: { full_board: true } }, rpCtx);
+    rpCalls.length === 3 && rp.length === PAGE_SIZE + 2 && rp.truncated === undefined
+      ? pass('a repeated page with one new unparsable posting does not end the walk')
+      : fail(`repeat + odd: ${rpCalls.length} calls, ${rp.length} jobs, truncated=${JSON.stringify(rp.truncated)}`);
+    // A page that only repeats earlier postings still ends the walk.
+    const { ctx: reCtx, calls: reCalls } = recordingCtx(() => linkPage(fullPageIds(2000)));
+    await provider.fetch({ name: 'Google', google: { full_board: true } }, reCtx);
+    reCalls.length === 2
+      ? pass('a page that only repeats earlier postings still ends the walk')
+      : fail(`re-served page: ${reCalls.length} calls`);
+    const { countPostingLinks, postingLinkIds } = mod;
+    [...postingLinkIds(`${link('77')}<a href='jobs/results/77-other'>y</a><a href="jobs/results/abc">z</a>`)].join(',') === '77,abc'
+      ? pass('postingLinkIds keys a posting by its numeric ID')
+      : fail('postingLinkIds keyed wrongly');
     countPostingLinks(mixed(2000)) === PAGE_SIZE
       && countPostingLinks('<a href="jobs/results/?q=x">a</a><a href="https://www.google.com/about/careers/applications/jobs/results/">b</a>') === 0
       && countPostingLinks(`${link('5')}${link('5')}`) === 1

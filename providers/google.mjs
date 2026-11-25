@@ -150,15 +150,27 @@ export function parseResultsPage(html) {
 }
 
 /**
+ * The distinct postings a results page links to, before card parsing drops
+ * any. Keyed by the numeric ID when the path starts with one, the same key
+ * the parsed cards use, so the two can be compared.
+ *
+ * @param {string} html
+ * @returns {Set<string>}
+ */
+export function postingLinkIds(html) {
+  const ids = new Set();
+  for (const m of String(html).matchAll(POSTING_LINK_RE)) ids.add(/^\d+/.exec(m[1])?.[0] ?? m[1]);
+  return ids;
+}
+
+/**
  * Count the distinct postings a results page links to, before card parsing.
  *
  * @param {string} html
  * @returns {number}
  */
 export function countPostingLinks(html) {
-  const seen = new Set();
-  for (const m of String(html).matchAll(POSTING_LINK_RE)) seen.add(m[1]);
-  return seen.size;
+  return postingLinkIds(html).size;
 }
 
 /** @type {Provider} */
@@ -228,7 +240,8 @@ export default {
         requestsMade += 1;
         if (!String(q).trim()) unrestrictedPageReturned = true;
         const cards = parseResultsPage(html);
-        const postingLinks = countPostingLinks(html);
+        const linkIds = postingLinkIds(html);
+        const postingLinks = linkIds.size;
         // Page 1 links to postings but no card parsed: the markup changed under
         // the parser. Returning [] would read as an empty board, so fail loudly
         // (ADDING_A_PROVIDER.md). A page with no posting links is a real empty.
@@ -242,9 +255,14 @@ export default {
           console.error(`⚠️  google: ${entry.name} stopped ${q === '' ? 'the full board' : `"${q}"`} at page ${page}: it links to ${postingLinks} posting(s) but no card could be parsed (${byId.size} jobs so far)`);
           break;
         }
+        // Novelty is read from every posting the page links to, not only the
+        // parsed cards, so a page whose one new posting failed to parse is not
+        // mistaken for Google re-serving an earlier page.
         let newThisQuery = 0;
-        for (const { id, slug, title, employer, locations } of cards) {
+        for (const id of linkIds) {
           if (!seenThisQuery.has(id)) { seenThisQuery.add(id); newThisQuery += 1; }
+        }
+        for (const { id, slug, title, employer, locations } of cards) {
           if (byId.has(id)) continue;
           byId.set(id, {
             title,
@@ -255,8 +273,8 @@ export default {
             ...(coerceId(id) ? { externalId: /** @type {string} */ (coerceId(id)) } : {}),
           });
         }
-        // Stop at this query's last page: empty, re-served (no new ids), or
-        // short. "Short" counts every posting link on the page, not the parsed
+        // Stop at this query's last page: empty, re-served (no new posting
+        // links), or short. "Short" counts every posting link on the page, not the parsed
         // cards, so one unparsable card on a full page does not end the walk.
         if (cards.length === 0 || newThisQuery === 0 || postingLinks < PAGE_SIZE) break;
         if (page === maxPages && !probing) truncated = true;
