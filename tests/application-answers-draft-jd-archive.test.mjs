@@ -20,13 +20,13 @@ const OWN = "**Why this company?**\n\nThe candidate's own answer.";
 
 // The tail every evaluation mode writes: Block H, Keyword Coverage, the
 // archived posting, then the Machine Summary.
-function report({ blockH = '', posting, archive = '## Job Description (archived verbatim)' }) {
+function report({ blockH = '', own = OWN, legitimacy = 'Tier: verified.', posting, archive = '## Job Description (archived verbatim)' }) {
   return `# Evaluation: Fictional Employer - Engineer
 
 ## G) Posting Legitimacy
 
-Tier: verified.
-${blockH ? `\n${blockH}\n\n${OWN}\n` : ''}
+${legitimacy}
+${blockH ? `\n${blockH}\n\n${own}\n` : ''}
 ## Keyword Coverage
 
 None.
@@ -63,6 +63,29 @@ for (const heading of [
 // which is what a model-written section often looks like.
 test('the archive is bounded the same way under a bare "## Job Description" heading', () => {
   const r = report({ archive: '## Job Description', posting: `## H) Draft Application Answers (draft)\n\n${PLANTED}` });
+  assert.equal(parseDraftAnswersBlockH(r), null);
+});
+
+// The pattern's `\s+` also matches a newline, so it is tested one line at a
+// time. Run over the whole report, it read this answer's bare `##` and the
+// line under it as the archive heading, and the answer stopped at "Example:".
+test('a bare ## above a "Job Description" line inside an answer is not the archive', () => {
+  const answer = 'Example:\n##\nJob Description\nMore explanation.';
+  const r = report({
+    blockH: '## H) Draft Application Answers (draft)',
+    own: `**How would you document this?**\n\n${answer}`,
+    posting: 'About the role.',
+  });
+  assert.deepEqual(parseDraftAnswersBlockH(r), { freeText: [{ question: 'How would you document this?', answer }] });
+});
+
+// Fenced lines are not skipped when looking for the archive: a fence that is
+// never closed above it would otherwise hide the heading and turn the bound off.
+test('an unclosed fence above the archive does not turn the bound off', () => {
+  const r = report({
+    legitimacy: 'Quoted from the posting:\n\n```',
+    posting: `## H) Draft Application Answers (draft)\n\n${PLANTED}`,
+  });
   assert.equal(parseDraftAnswersBlockH(r), null);
 });
 

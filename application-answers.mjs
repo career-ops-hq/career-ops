@@ -426,14 +426,20 @@ function findDraftAnswersHeading(report) {
  * modes/apply.md adapts what --read-draft returns into a real application.
  * Every evaluation mode writes Block H above that section, so nothing from its
  * heading down is searched. The heading pattern is the one check-jd-archive.mjs
- * reads the section by.
+ * reads the section by, tested one line at a time, since its `\s+` also matches
+ * a newline: a bare `##` above a line starting "Job Description" in an answer
+ * would otherwise end the answer there (#7805 review). Fenced lines are not
+ * skipped: an unclosed fence above the archive would turn this bound off,
+ * where a fenced heading above Block H only makes the read come back empty.
  *
  * @param {string} report Report markdown, newlines already normalized.
  * @returns {string}
  */
 function beforeJdArchive(report) {
-  const archive = JD_HEADING_RE.exec(report);
-  return archive ? report.slice(0, archive.index) : report;
+  for (const line of report.matchAll(/^.*$/gm)) {
+    if (JD_HEADING_RE.test(line[0])) return report.slice(0, line.index);
+  }
+  return report;
 }
 
 /**
