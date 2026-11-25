@@ -3,7 +3,7 @@
  * openai-eval.mjs — OpenAI-compatible Job Offer Evaluator for career-ops
  *
  * Evaluate job offers with ANY OpenAI-compatible chat endpoint instead of Claude.
- * Works with OpenAI, OpenRouter, Requesty, Cheaper Inference, API Route, Runcrate, CloudGPU, cheapaimodel, UberLLM, Standard Compute, Together, Groq, DeepSeek, Zhipu GLM,
+ * Works with OpenAI, OpenRouter, Requesty, Cheaper Inference, API Route, Runcrate, CloudGPU, cheapaimodel, UberLLM, Standard Compute, onomeo, Together, Groq, DeepSeek, Zhipu GLM,
  * MiniMax, Fireworks, and local servers that speak the OpenAI API (LM Studio, llama.cpp,
  * vLLM, Ollama's /v1). Point it at a base URL + model + key and go.
  *
@@ -41,7 +41,7 @@ import {
 } from './reserve-report-num.mjs';
 import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
 import { buildBudgetedPrompt } from './lib/context-budget.mjs';
-import { endpointHeaders } from './lib/endpoint-headers.mjs';
+import { endpointHeaders, buildTokenLimit } from './lib/endpoint-headers.mjs';
 import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
 import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
 import {
@@ -134,6 +134,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     cheapaimodel: --url https://api.cheapaimodel.ai/v1  --model deepseek-v4-1-flash
     UberLLM:     --url https://api.uberllm.dev/v1  --model deepseek/deepseek-v4-flash
     Standard Compute: --url https://api.stdcmpt.com/v1  --model StandardCompute
+    onomeo:      --url https://onomeo.com/v1  --model deepseek-v4.1-flash
     Together:    --url https://api.together.xyz/v1     --model meta-llama/Llama-3.3-70B-Instruct-Turbo
     Groq:        --url https://api.groq.com/openai/v1  --model llama-3.3-70b-versatile
     DeepSeek:    --url https://api.deepseek.com/v1     --model deepseek-chat
@@ -373,13 +374,6 @@ export function buildSystemMessage(prompt, host) {
 // bounds the reservation without cutting a normal evaluation short.
 const DEFAULT_MAX_TOKENS = 32768;
 
-// Same host gate as buildSystemMessage: api.openai.com's reasoning models
-// reject `max_tokens` and take `max_completion_tokens`, which its other chat
-// models accept as well; gateways and local servers read `max_tokens`.
-function buildTokenLimit(limit, host) {
-  return host === 'api.openai.com' ? { max_completion_tokens: limit } : { max_tokens: limit };
-}
-
 // ---------------------------------------------------------------------------
 // Ending a run after a request
 // ---------------------------------------------------------------------------
@@ -477,7 +471,11 @@ try {
 
   if (!res.ok) {
     console.error(`❌  API error: HTTP ${res.status}`);
-    console.error(`    ${body.slice(0, 300)}`);
+    // The body is the gateway's own text, and the one place this request's key
+    // can come back out. gemini-eval.mjs redacts its key from error text the
+    // same way; redact before truncating so a long key cannot survive in pieces.
+    const shown = apiKey ? body.split(apiKey).join('[REDACTED]') : body;
+    console.error(`    ${shown.slice(0, 300)}`);
     if (res.status === 401 || res.status === 403) {
       console.error(`    → Check your API key for ${endpointHost}.`);
     } else if (res.status === 402) {

@@ -16,6 +16,7 @@ import assert from 'node:assert/strict';
 import {
   BOARD_ATS,
   BOARD_URL_BUILDERS,
+  OWN_DOMAIN_ATS,
   OPTIONAL_REGION_BOARD_URL_BUILDERS,
   REGIONAL_BOARD_URL_BUILDERS,
   REGIONS,
@@ -58,11 +59,22 @@ import teamtailor from '../providers/teamtailor.mjs';
 import trakstar from '../providers/trakstar.mjs';
 import turbohire from '../providers/turbohire.mjs';
 import zohoRecruit from '../providers/zoho-recruit.mjs';
+import avature from '../providers/avature.mjs';
+import clearcompany from '../providers/clearcompany.mjs';
+import jobvite from '../providers/jobvite.mjs';
+import eightfold from '../providers/eightfold.mjs';
+import adpMyjobs from '../providers/adp-myjobs.mjs';
+import successfactorsClassic from '../providers/successfactors-classic.mjs';
+import csod from '../providers/csod.mjs';
+import oraclecloud from '../providers/oraclecloud.mjs';
+import phenom from '../providers/phenom.mjs';
+import successfactors from '../providers/successfactors.mjs';
+import peoplesoft from '../providers/peoplesoft.mjs';
 
 const PROVIDERS = {
   greenhouse, ashby, lever, workable, smartrecruiters, rippling, join: joinProvider,
   recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio,
-  prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, 'zoho-recruit': zohoRecruit, workday,
+  prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, 'zoho-recruit': zohoRecruit, avature, clearcompany, jobvite, eightfold, 'adp-myjobs': adpMyjobs, 'successfactors-classic': successfactorsClassic, oraclecloud, csod, phenom, successfactors, peoplesoft, workday,
 };
 
 // The slug vendors discover-ats.mjs probes. The registry admits more: a board
@@ -110,6 +122,20 @@ const FORMS = [
   [{ ats: 'zoho-recruit', region: 'in', board: 'acme' }, 'https://acme.zohorecruit.in/jobs/Careers'],
   [{ ats: 'zoho-recruit', region: 'jp', board: 'acme' }, 'https://acme.zohorecruit.jp/jobs/Careers'],
   [{ ats: 'zoho-recruit', region: 'sa', board: 'acme' }, 'https://acme.zohorecruit.sa/jobs/Careers'],
+  [{ ats: 'avature', board: 'acme' }, 'https://acme.avature.net/careers/SearchJobs'],
+  [{ ats: 'clearcompany', board: '0f8fad5b-d9cb-469f-a165-70867728950e' }, 'https://careers-api.clearcompany.com/v1/0f8fad5b-d9cb-469f-a165-70867728950e'],
+  [{ ats: 'jobvite', board: 'acme' }, 'https://jobs.jobvite.com/acme'],
+  [{ ats: 'eightfold', board: 'acme' }, 'https://acme.eightfold.ai/careers'],
+  [{ ats: 'adp-myjobs', board: 'AcmeCareerSite' }, 'https://myjobs.adp.com/AcmeCareerSite/cx/job-listing'],
+  [{ ats: 'successfactors-classic', board: 'career5/eu/ACME001' }, 'https://career5.successfactors.eu/career?company=ACME001'],
+  [{ ats: 'successfactors-classic', board: 'career8/com/acmecorpP' }, 'https://career8.successfactors.com/career?company=acmecorpP'],
+  [{ ats: 'csod', board: 'career-acme/4/career-acme' }, 'https://career-acme.csod.com/ux/ats/careersite/4/home?c=career-acme'],
+  [{ ats: 'oraclecloud', board: 'acme.fa.us2.oraclecloud.com/CX_1001' }, 'https://acme.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs'],
+  [{ ats: 'oraclecloud', board: 'fa-acme-saasfaprod1.fa.ocs.oraclecloud.com/CX_1' }, 'https://fa-acme-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs'],
+  [{ ats: 'phenom', board: 'careers.acme.example' }, 'https://careers.acme.example'],
+  [{ ats: 'successfactors', board: 'jobs.acme.example' }, 'https://jobs.acme.example'],
+  [{ ats: 'successfactors', board: 'jobs.acme.example/Brand' }, 'https://jobs.acme.example/Brand'],
+  [{ ats: 'peoplesoft', board: 'recruit.acme.example/acme1' }, 'https://recruit.acme.example/psc/acme1/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL'],
   [{ ats: 'workday', workday_host: 'jobs', board: 'acme/wd5/External_Careers' }, 'https://acme.wd5.myworkdayjobs.com/External_Careers'],
   [{ ats: 'workday', workday_host: 'site', board: 'acme/wd1/AcmeCareers' }, 'https://wd1.myworkdaysite.com/recruiting/acme/AcmeCareers'],
 ];
@@ -118,7 +144,8 @@ test('the closed ATS list, each with the provider that reads its boards', () => 
   assert.deepEqual([...BOARD_ATS], [
     'greenhouse', 'ashby', 'lever', 'workable', 'smartrecruiters', 'rippling', 'join',
     'recruitee', 'breezy', 'bamboohr', 'pinpoint', 'applicantpro', 'hibob', 'hirehive', 'homerun', 'jazzhr', 'keka',
-    'personio', 'prevueaps', 'schoolspring', 'taleez', 'teamtailor', 'trakstar', 'turbohire', 'zoho-recruit', 'workday',
+    'personio', 'prevueaps', 'schoolspring', 'taleez', 'teamtailor', 'trakstar', 'turbohire', 'zoho-recruit',
+    'avature', 'clearcompany', 'jobvite', 'eightfold', 'adp-myjobs', 'successfactors-classic', 'oraclecloud', 'csod', 'phenom', 'successfactors', 'peoplesoft', 'workday',
   ]);
   assert.deepEqual(Object.keys(PROVIDERS).sort(), [...BOARD_ATS].sort());
   for (const [ats, provider] of Object.entries(PROVIDERS)) assert.equal(provider.id, ats);
@@ -141,6 +168,9 @@ for (const [form, expected] of FORMS) {
   test(`${label}: builds ${expected}, and the ${form.ats} provider's detect() accepts it`, () => {
     const url = buildBoardUrl(form);
     assert.equal(url, expected);
+    // A careers site on a company's own domain is read with `provider:` set (Phenom has no detect(), SuccessFactors'
+    // claims only its own hosts): no URL names the system, which is why these rows carry own_domain_mark.
+    if (OWN_DOMAIN_ATS.includes(form.ats)) return;
     const detected = PROVIDERS[form.ats].detect({ name: 'Acme', careers_url: url });
     assert.ok(detected && typeof detected.url === 'string', `${form.ats}.detect() rejected ${url}`);
   });
@@ -173,6 +203,22 @@ test('subdomain vendors lowercase the board; Ashby keeps its case', () => {
   }
   assert.equal(new URL(buildBoardUrl({ ats: 'zoho-recruit', region: 'eu', board: 'AcmeCo' })).hostname, 'acmeco.zohorecruit.eu');
   assert.equal(buildBoardUrl({ ats: 'ashby', board: 'DeepL' }), 'https://jobs.ashbyhq.com/DeepL');
+});
+
+test('a csod board is tenant/site/corp; reserved and test tenants, a bad site or corp build nothing', () => {
+  assert.equal(buildBoardUrl({ ats: 'csod', board: 'acme/1/acme' }), 'https://acme.csod.com/ux/ats/careersite/1/home?c=acme');
+  for (const board of ['www/1/acme', 'acme-test/1/acme', 'uat-acme/1/acme', 'acme/0/acme', 'acme/01/acme', 'acme/1000/acme', 'acme/1/a b', 'acme/1', 'Acme/1/acme', 'acme/1/acme/x']) {
+    assert.equal(buildBoardUrl({ ats: 'csod', board }), null, board);
+  }
+});
+
+test('a csod test token is a whole hyphen-separated part, never a substring', () => {
+  for (const board of ['devon/1/devon', 'trainline/2/trainline', 'contest/1/contest', 'transdev/3/transdev', 'cuatrecasas/1/cuatrecasas']) {
+    assert.match(buildBoardUrl({ ats: 'csod', board }), /^https:\/\//, board);
+  }
+  for (const board of ['acme-pilot/1/acme', 'acme-stg/1/acme', 'dev-acme/1/acme', 'acme-training/1/acme', 'test/1/acme']) {
+    assert.equal(buildBoardUrl({ ats: 'csod', board }), null, board);
+  }
 });
 
 test('anything that does not fit returns null, never a guessed URL', () => {

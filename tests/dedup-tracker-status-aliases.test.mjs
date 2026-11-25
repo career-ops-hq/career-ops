@@ -166,7 +166,7 @@ ok(`all ${spellings.length} labels and aliases in states.yml are ranked as the s
 const SANDBOX_FILES = [
   'dedup-tracker.mjs', 'path-resolver.mjs', 'role-matcher.mjs', 'url-key.mjs',
   'tracker-utils.mjs', 'tracker-parse.mjs', 'tracker-aliases.json', 'pipeline-lock.mjs',
-  'lib/cli-flags.mjs', 'lib/linkedin-url.mjs', 'lib/dir-lock.mjs', 'lib/yaml-document.mjs',
+  'lib/cli-flags.mjs', 'lib/linkedin-url.mjs', 'lib/dir-lock.mjs', 'lib/rename-retry.mjs', 'lib/lock-path.mjs', 'lib/yaml-document.mjs',
   // url-key.mjs reads Himalayas posting ids through the liveness resolver.
   'himalayas-posting.mjs', 'lib/is-main-module.mjs',
   // himalayas-posting.mjs strips markup with lib/jd-parse.mjs.

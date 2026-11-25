@@ -208,6 +208,15 @@ try {
       : fail(`google decoded markup: ${JSON.stringify(j && [j.title, j.company, j.location])}`);
   }
 
+  for (const queries of [[''], ['   '], ['', 'business strategy'], ['alpha', 'beta']]) {
+    const { ctx } = recordingCtx(() => linkPage([]));
+    const jobs = await provider.fetch({ name: 'Google', google: { queries } }, ctx);
+    const expected = queries.every(q => q.trim()) ? { config: 'google.queries', queries } : undefined;
+    JSON.stringify(jobs.queryScope) === JSON.stringify(expected)
+      ? pass('Google query scope agrees with ' + JSON.stringify(queries))
+      : fail('Unexpected query scope for ' + JSON.stringify(queries));
+  }
+
   // ── probe: ctx.maxPages walks one query, one page, one request ──
   {
     const { ctx, calls } = recordingCtx(() => linkPage(fullPageIds(100))); // a full page
@@ -215,6 +224,19 @@ try {
     calls.length === 1 && pageOf(calls[0].url) === null
       ? pass('google.fetch() spends exactly one request under ctx.maxPages, even with a full page and two queries')
       : fail(`google probe made ${calls.length} requests: ${calls.map((c) => c.url)}`);
+  }
+
+  // A failed unrestricted request leaves a keyword-only, truncated result.
+  {
+    const { ctx } = recordingCtx(({ url }) => {
+      if (!qOf(url)) throw Object.assign(new Error('Not Found'), { status: 404 });
+      return linkPage(['5000']);
+    });
+    let jobs;
+    await captureErrors(async () => { jobs = await provider.fetch({ name: 'Google', google: { queries: ['', 'engineer'] } }, ctx); });
+    jobs.length === 1 && jobs.truncated?.reason === 'fetch-error' && JSON.stringify(jobs.queryScope?.queries) === '["engineer"]'
+      ? pass('google.fetch() reports keyword scope when the unrestricted request fails')
+      : fail('google.fetch() lost keyword scope or truncation after the unrestricted request failed');
   }
 
   // ── error handling ──

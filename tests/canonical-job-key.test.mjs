@@ -132,6 +132,14 @@ const SAME = [
     ],
     'https://acme.wd5.myworkdayjobs.com/external/job/remote-usa/data-engineer_r123',
   ],
+  [
+    'myworkdaysite posting with and without a locale before /recruiting',
+    [
+      'https://wd5.myworkdaysite.com/recruiting/guidewire/external/job/India---Bangalore/Eng_JR_15441',
+      'https://wd5.myworkdaysite.com/en-US/recruiting/Guidewire/external/job/India---Bangalore/Eng_JR_15441/',
+    ],
+    'https://wd5.myworkdaysite.com/recruiting/guidewire/external/job/india---bangalore/eng_jr_15441',
+  ],
 ];
 
 const DIFFERENT = [
@@ -159,6 +167,7 @@ const DIFFERENT = [
   ['https://acme.wd5.myworkdayjobs.com/en-US/External/job/Remote-USA/Data-Engineer_R123', 'https://acme.wd5.myworkdayjobs.com/External/job/Remote-USA/Data-Engineer_R124'],
   ['https://acme.wd5.myworkdayjobs.com/hr-ca/job/Remote/Analyst_R1', 'https://acme.wd5.myworkdayjobs.com/job/Remote/Analyst_R1'],
   ['https://careers.example.com/en-US/External/job/Remote/Analyst_R1', 'https://careers.example.com/External/job/Remote/Analyst_R1'],
+  ['https://wd5.myworkdaysite.com/en-US/recruiting/guidewire/external/job/Remote/Eng_R1', 'https://wd5.myworkdaysite.com/recruiting/guidewire/external/job/Remote/Eng_R2'],
 ];
 
 test('variants of one posting share one key, on the CLI and the web copy', () => {

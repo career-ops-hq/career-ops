@@ -185,6 +185,7 @@ try {
             query: params.get('query'),
             hitsPerPage: params.get('hitsPerPage'),
             filters: params.get('filters'),
+            attributes: params.get('attributesToRetrieve'),
           };
           jsonCalls.push(call);
           return hitsFor(call);
@@ -240,6 +241,13 @@ try {
     pass('wttj.fetch() defaults to 100 hits per query and passes each search term through');
   } else {
     fail(`wttj.fetch() hitsPerPage=${q1.hitsPerPage}, queries=${happy.jsonCalls.map((c) => c.query).join(',')}`);
+  }
+
+  // Algolia returns only the attributes asked for: without contract_type every hit loses its employment type
+  if ((q1.attributes ?? '').split(',').includes('contract_type')) {
+    pass('wttj.fetch() retrieves contract_type, so each hit keeps its employment type');
+  } else {
+    fail(`wttj.fetch() attributesToRetrieve = ${q1.attributes}`);
   }
 
   const capped = mkCtx(ENV_OK, () => ({ hits: [] }));

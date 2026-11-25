@@ -25,9 +25,15 @@ New-Item -ItemType Directory -Force local, data/gojobs
 Copy-Item docs/recipes/gojobs/parse-gojobs-html.mjs local/gojobs.mjs
 ```
 
+These commands assume the checkout is also your data root, which is the
+default. If `CAREER_OPS_ROOT`, `CAREER_OPS_DATA_DIR` or a `.career-ops-data`
+marker names another folder, create `data/gojobs/` there instead. A Claude Code
+plugin install can't keep the copied parser across updates; see "Where the
+script lives" in the [local parser cookbook](../../local-parser-cookbook.md).
+
 In your normal browser, open the GO Jobs search page, complete any challenge
 yourself, run the search, and save each rendered results page as HTML under
-`data/gojobs/`. Save every page you want scanned. Duplicate canonical job URLs
+`data/gojobs/` in your data root. Save every page you want scanned. Duplicate canonical job URLs
 are collapsed across captures.
 
 Test the copied parser directly:
@@ -57,9 +63,11 @@ tracked_companies:
 ```
 
 Run `node scan.mjs` as usual. The local-parser provider starts the copied script
-from the career-ops checkout, and the parser resolves capture paths through
-`CAREER_OPS_ROOT`, `CAREER_OPS_DATA_DIR`, or `.career-ops-data` using the same
-precedence as the rest of career-ops. Normal scan filters, deduplication, and
+from the career-ops checkout. The parser reads capture paths from the data root,
+found in the same order as the rest of career-ops: `CAREER_OPS_ROOT` or
+`CAREER_OPS_DATA_DIR`, then a `.career-ops-data` marker, then
+`~/career-ops-data` when the checkout is a Claude Code plugin install copy, and
+otherwise the checkout itself. Normal scan filters, deduplication, and
 pipeline writes still apply. Refreshing coverage requires another manual save;
 this is not real-time or unattended scanning.
 

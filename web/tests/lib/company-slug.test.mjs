@@ -17,18 +17,22 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { companySlug } from "../../src/lib/company-slug.mjs";
 
+// companySlug also returns `legacy` and `keys`; these assertions pin the two
+// fields the original contract promised.
+const slugAndFirst = (key) => (key ? { slug: key.slug, first: key.first } : key);
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 test("companySlug: derives the slug and its first token", () => {
-  assert.deepEqual(companySlug("Acme"), { slug: "acme", first: "acme" });
-  assert.deepEqual(companySlug("Acme Corp"), { slug: "acme-corp", first: "acme" });
+  assert.deepEqual(slugAndFirst(companySlug("Acme")), { slug: "acme", first: "acme" });
+  assert.deepEqual(slugAndFirst(companySlug("Acme Corp")), { slug: "acme-corp", first: "acme" });
 });
 
 test("companySlug: normalizes punctuation and case the way the pdf mode names files", () => {
   // Given generate-pdf slugifies on runs of non-alphanumerics, the lookup key
   // has to collapse the same way or it will never match its own output
-  assert.deepEqual(companySlug("  Jane & Co.  "), { slug: "jane-co", first: "jane" });
-  assert.deepEqual(companySlug("1-800-FLOWERS"), { slug: "1-800-flowers", first: "1" });
+  assert.deepEqual(slugAndFirst(companySlug("  Jane & Co.  ")), { slug: "jane-co", first: "jane" });
+  assert.deepEqual(slugAndFirst(companySlug("1-800-FLOWERS")), { slug: "1-800-flowers", first: "1" });
 });
 
 test("companySlug: returns null for a company with no usable key", () => {
@@ -59,8 +63,8 @@ test("companySlug: returns null for a company written in a non-Latin script", ()
 
 test("companySlug: keeps a mixed-script name that still has ASCII to match on", () => {
   // Given a partial key is still a real key. Only a fully empty one is unusable.
-  assert.deepEqual(companySlug("Ωmega"), { slug: "mega", first: "mega" });
-  assert.deepEqual(companySlug("楽天 Rakuten"), { slug: "rakuten", first: "rakuten" });
+  assert.deepEqual(slugAndFirst(companySlug("Ωmega")), { slug: "mega", first: "mega" });
+  assert.deepEqual(slugAndFirst(companySlug("楽天 Rakuten")), { slug: "rakuten", first: "rakuten" });
 });
 
 test("companySlug: tolerates a missing company", () => {

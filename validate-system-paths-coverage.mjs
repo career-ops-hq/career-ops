@@ -111,11 +111,11 @@ const REPO_ONLY = ['SIGNATURES.md'];
 // shipped by update-system.mjs, never in the npm package. Excluding it here is
 // part of that isolation contract, not a coverage gap.
 //
-// employers/ is the employer registry: community data, CC BY 4.0, that grows
-// with every contribution. It stays out of SYSTEM_PATHS on purpose, so the
-// updater does not push each new batch of rows to every install; a fresh clone
-// has it, and its validator (seeds/employers-validate.mjs) ships as system code.
-const EXCLUDE_PREFIXES = ['web/', 'employers/'];
+// employers/inbox/ is where a contribution waits for its PR to be folded into
+// employers/boards/. The registry itself ships with each release (SYSTEM_PATHS),
+// with its manifests and licence; the inbox is a PR's staging area and stays in
+// the repo.
+const EXCLUDE_PREFIXES = ['web/', 'employers/inbox/'];
 
 function covered(file) {
   // If explicitly excluded, it is covered
@@ -185,10 +185,13 @@ if (process.argv.includes('--self-test')) {
   assert(covered('providers-sibling/justjoin.mjs') === false, 'providers-sibling/justjoin.mjs must NOT be covered');
   assert(covered('web/package.json') === true, 'web/ tree must be covered (isolation-contract prefix exclude)');
   assert(covered('web-dashboard/index.html') === false, 'web-dashboard/ must NOT ride the web/ prefix exclude');
-  // Through the mechanism too: the registry must stay repo-only, never shipped by the updater.
-  assert(covered('employers/boards/greenhouse/a.ndjson') === true, 'employers/ must be covered (repo-only prefix exclude)');
-  assert(!SYSTEM_PATHS.some((p) => p === 'employers/' || p.startsWith('employers/')), 'employers/ must NOT enter SYSTEM_PATHS: the updater does not ship the registry');
-  assert(covered('employers-sibling/a.ndjson') === false, 'employers-sibling/ must NOT ride the employers/ prefix exclude');
+  // The registry ships with each release, with the manifests that carry its
+  // attribution; the inbox stays repo-only.
+  assert(SYSTEM_PATHS.includes('employers/boards/'), 'employers/boards/ must be in SYSTEM_PATHS: the registry ships with each release');
+  assert(SYSTEM_PATHS.includes('employers/contributions/') && SYSTEM_PATHS.includes('employers/LICENSE') && SYSTEM_PATHS.includes('employers/THIRD_PARTY_NOTICES.md'), 'the registry ships with its manifests, LICENSE and THIRD_PARTY_NOTICES.md (attribution travels with the data)');
+  assert(!SYSTEM_PATHS.some((p) => p.startsWith('employers/inbox')), 'employers/inbox/ must NOT enter SYSTEM_PATHS: it is a PR staging area');
+  assert(covered('employers/inbox/2026-11-20-octocat.ndjson') === true, 'employers/inbox/ must be covered (repo-only prefix exclude)');
+  assert(covered('employers-sibling/a.ndjson') === false, 'employers-sibling/ must NOT ride an employers/ path');
   // Asserted through the MECHANISM as well as covered(): if SIGNATURES.md ever
   // went back into SYSTEM_PATHS, covered() would still answer true while the
   // #4062 false-positive drift came back on every install.

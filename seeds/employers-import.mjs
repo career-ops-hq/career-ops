@@ -36,7 +36,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { BOARD_ATS, DNS_LABEL_ATS, REGIONAL_BOARD_URL_BUILDERS, SUBDOMAIN_ATS, buildBoardUrl } from '../lib/ats-board-url.mjs';
+import { BOARD_ATS, DNS_LABEL_ATS, ORACLECLOUD_HOST_RE, REGIONAL_BOARD_URL_BUILDERS, SUBDOMAIN_ATS, buildBoardUrl } from '../lib/ats-board-url.mjs';
 import { isMainModule } from '../lib/is-main-module.mjs';
 import { INBOX_DIR, INBOX_MAX_LINES, parseInboxName } from './employers-inbox.mjs';
 import {
@@ -67,6 +67,8 @@ const PATH_HOSTS = Object.freeze({
   'careers.smartrecruiters.com': 'smartrecruiters',
   'jobs.smartrecruiters.com': 'smartrecruiters',
   'ats.rippling.com': 'rippling',
+  'jobs.jobvite.com': 'jobvite',
+  'myjobs.adp.com': 'adp-myjobs',
 });
 /** ATS whose board is the company's subdomain. */
 const SUBDOMAIN_HOSTS = Object.freeze({
@@ -88,6 +90,8 @@ const SUBDOMAIN_HOSTS = Object.freeze({
   'hire.trakstar.com': 'trakstar',
   'recruiterbox.com': 'trakstar',
   'turbohire.co': 'turbohire',
+  'avature.net': 'avature',
+  'eightfold.ai': 'eightfold',
 });
 /**
  * ATS whose board is the company's subdomain on one of several hosts: the ATS,
@@ -112,6 +116,8 @@ const REGION_SUBDOMAIN_HOSTS = Object.freeze({
 const VENDOR_SUBDOMAINS = new Set(['www', 'app', 'api', 'help', 'support', 'status', 'blog', 'docs', 'careers', 'jobs', 'developers', 'marketplace']);
 const VENDOR_SUBDOMAINS_ATS = new Set(SUBDOMAIN_ATS.filter((ats) => !DNS_LABEL_ATS.includes(ats)));
 
+const CSOD_HOST_RE = /^([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)\.csod\.com$/;
+const SF_CLASSIC_HOST_RE = /^([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)\.successfactors\.(eu|com)$/;
 const WORKDAY_JOBS_HOST_RE = /^([a-z0-9][a-z0-9_-]*)\.(wd[0-9]{1,3})\.myworkdayjobs\.com$/;
 const WORKDAY_SITE_HOST_RE = /^(wd[0-9]{1,3})\.myworkdaysite\.com$/;
 // A locale prefix in a Workday path: en-US, fr-FR.
@@ -161,6 +167,16 @@ function readCoords(u) {
     if (!m) return { error: 'an ApplicantPro openings URL is www.applicantpro.com/openings/<company>/…' };
     return { ats: 'applicantpro', board: m[1].toLowerCase() };
   }
+  // ClearCompany: the career site's id, in the API path or in the career-site script's siteId parameter.
+  if (host === 'careers-api.clearcompany.com') {
+    if (segs[0] !== 'v1' || !segs[1]) return { error: 'a ClearCompany board is careers-api.clearcompany.com/v1/<siteId>' };
+    return { ats: 'clearcompany', board: segs[1].toLowerCase() };
+  }
+  if (host === 'careers-content.clearcompany.com') {
+    const id = [...u.searchParams].find(([k]) => k.toLowerCase() === 'siteid')?.[1];
+    if (!id) return { error: 'a ClearCompany career-site URL names its site in ?siteId=' };
+    return { ats: 'clearcompany', board: id.toLowerCase() };
+  }
   if ((host === 'taleez.com' || host === 'www.taleez.com') && segs[0] === 'apply') {
     return { error: 'a Taleez job link (taleez.com/apply/<job>) does not name the company; use <company>.taleez.com' };
   }
@@ -176,6 +192,30 @@ function readCoords(u) {
     const label = host.slice(0, -(suffix.length + 1));
     if (label.includes('.')) return { error: `${host} is not a ${ats} board: the board is <company>.${suffix}` };
     return region ? { ats, region, board: label } : { ats, board: label };
+  }
+  // SuccessFactors' classic career page: <label>.successfactors.<eu|com>/career?company=<id>, the one form its
+  // provider reads. The company id keeps its case; any other parameter is not part of the board.
+  // Oracle Recruiting Cloud: <tenant>.fa.[region.][ocs.]oraclecloud[N].com/hcmUI/CandidateExperience/<lang>/sites/<site>/…
+  if (ORACLECLOUD_HOST_RE.test(host)) {
+    const ce = segs.indexOf('CandidateExperience');
+    const site = ce >= 0 && segs[ce + 2] === 'sites' ? segs[ce + 3] : undefined;
+    if (!site) return { error: 'an Oracle Recruiting Cloud board is <host>/hcmUI/CandidateExperience/<lang>/sites/<site>' };
+    return { ats: 'oraclecloud', board: `${host}/${site}` };
+  }
+  // Cornerstone OnDemand: <tenant>.csod.com/ux/ats/careersite/<site>/home?c=<corp>, the one form its provider reads.
+  const cs = CSOD_HOST_RE.exec(host);
+  if (cs) {
+    const m = /^\/ux\/ats\/careersite\/([0-9]+)\/home\/?$/i.exec(u.pathname);
+    const corp = u.searchParams.get('c');
+    if (!m || !corp) return { error: 'a Cornerstone board is <tenant>.csod.com/ux/ats/careersite/<site>/home?c=<corp>' };
+    return { ats: 'csod', board: `${cs[1]}/${m[1]}/${corp}` };
+  }
+  const sf = SF_CLASSIC_HOST_RE.exec(host);
+  if (sf) {
+    if (!/^\/career\/?$/.test(u.pathname)) return { error: 'a SuccessFactors classic board is <label>.successfactors.<eu|com>/career?company=<id>' };
+    const company = u.searchParams.get('company');
+    if (!company) return { error: 'a SuccessFactors classic board names its company in ?company=' };
+    return { ats: 'successfactors-classic', board: `${sf[1]}/${sf[2]}/${company}` };
   }
   const jobs = WORKDAY_JOBS_HOST_RE.exec(host);
   if (jobs) {
@@ -305,7 +345,8 @@ export function readList(text) {
  * @param {BoardCoords} coords
  */
 export function nameFromBoard(coords) {
-  const id = coords.ats === 'workday' ? coords.board.split('/')[0] : coords.board;
+  const id = coords.ats === 'workday' || coords.ats === 'csod' ? coords.board.split('/')[0] : coords.ats === 'successfactors-classic' ? coords.board.split('/')[2]
+    : coords.ats === 'oraclecloud' ? coords.board.split('.')[0] : coords.board;
   return id.split(/[-_.]+/).filter(Boolean)
     .map((w) => (w === w.toLowerCase() ? w.charAt(0).toUpperCase() + w.slice(1) : w))
     .join(' ');

@@ -18,7 +18,7 @@
  *   node scan-interamt.mjs --debug          # save a screenshot and the page HTML to output/
  */
 
-import { chromium } from 'playwright';
+import { chromium } from './lib/hardened-chromium.mjs';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { loadYaml } from './lib/yaml-document.mjs';

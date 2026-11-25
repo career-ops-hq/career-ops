@@ -164,22 +164,19 @@ export const ATS = {
   },
 };
 
-// Recognize an ATS + slug from a careers_url OR an `api:` URL. The careers_url
-// patterns mirror the provider `resolveApiUrl` regexes; the api-URL patterns
-// cover entries that pin the resolved endpoint directly. First match wins.
+const GREENHOUSE_BOARD_HOSTS = new Set([
+  'job-boards.greenhouse.io',
+  'job-boards.eu.greenhouse.io',
+  'boards.greenhouse.io',
+  'boards.eu.greenhouse.io',
+]);
+
+// Recognize an ATS + slug from a careers_url OR an `api:` URL. Every entry pins
+// its exact host via new URL(), matching the providers' resolveApiUrl guards.
 const ATS_URL_PATTERNS = [
-  {
-    ats: 'greenhouse',
-    re: /boards-api\.greenhouse\.io\/v1\/boards\/([^/?#]+)/,
-  },
-  { ats: 'greenhouse', re: /job-boards(?:\.eu)?\.greenhouse\.io\/([^/?#]+)/ },
-  { ats: 'greenhouse', re: /boards\.greenhouse\.io\/([^/?#]+)/ },
-  { ats: 'ashby', re: /api\.ashbyhq\.com\/posting-api\/job-board\/([^/?#]+)/ },
-  { ats: 'ashby', re: /jobs\.ashbyhq\.com\/([^/?#]+)/ },
-  // Lever entries pin an exact `host` (checked via new URL(), like
-  // providers/lever.mjs's resolveApiUrl) instead of matching the hostname as a
-  // loose substring anywhere in the URL — otherwise a crafted
-  // https://evil.com/jobs.lever.co/x careers_url would falsely resolve as Lever.
+  { ats: 'greenhouse', host: 'boards-api.greenhouse.io', re: /^\/v1\/boards\/([^/?#]+)/ },
+  { ats: 'ashby', host: 'api.ashbyhq.com', re: /^\/posting-api\/job-board\/([^/?#]+)/ },
+  { ats: 'ashby', host: 'jobs.ashbyhq.com', re: /^\/([^/?#]+)/ },
   { ats: 'lever', host: 'api.eu.lever.co', re: /^\/v0\/postings\/([^/?#]+)/, eu: true },
   { ats: 'lever', host: 'jobs.eu.lever.co', re: /^\/([^/?#]+)/, eu: true },
   { ats: 'lever', host: 'api.lever.co', re: /^\/v0\/postings\/([^/?#]+)/ },
@@ -195,22 +192,23 @@ const ATS_URL_PATTERNS = [
  *   tool skips. `eu` is set for Lever's EU data-residency instance.
  */
 export function parseAtsSlug(url) {
-  const text = String(url || '');
-  let hostname = null;
-  let pathname = null;
+  let parsed;
   try {
-    ({ hostname, pathname } = new URL(text));
+    parsed = new URL(String(url || ''));
   } catch {
-    // Not a parseable absolute URL — host-scoped patterns below simply won't match.
+    return null;
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+  const { hostname, pathname, searchParams } = parsed;
+  if (GREENHOUSE_BOARD_HOSTS.has(hostname)) {
+    let slug = pathname.match(/^\/([^/?#]+)/)?.[1] ?? '';
+    if (!slug || slug === 'embed') slug = (searchParams.get('for') || '').trim();
+    if (!slug || slug === 'embed' || /[/?#\\\s]/.test(slug) || slug.includes('..')) return null;
+    return { ats: 'greenhouse', slug };
   }
   for (const { ats, re, eu, host } of ATS_URL_PATTERNS) {
-    if (host) {
-      if (hostname !== host) continue;
-      const m = pathname.match(re);
-      if (m && m[1]) return eu ? { ats, slug: m[1], eu: true } : { ats, slug: m[1] };
-      continue;
-    }
-    const m = text.match(re);
+    if (hostname !== host) continue;
+    const m = pathname.match(re);
     if (m && m[1]) return eu ? { ats, slug: m[1], eu: true } : { ats, slug: m[1] };
   }
   return null;
@@ -504,7 +502,7 @@ export function unminedHints(cfg) {
  * Classify a fetch/probe failure for scan summaries and slug diagnostics.
  *
  * @param {Error|{status?: number, name?: string, message?: string}|null|undefined} err
- * @returns {'slug_gone'|'auth'|'network'|'server'|'unknown'}
+ * @returns {'slug_gone'|'auth'|'network'|'server'|'rate_limit'|'unknown'}
  */
 export function classifyFetchError(err) {
   if (!err) return 'unknown';
@@ -516,9 +514,11 @@ export function classifyFetchError(err) {
   const status = err.status;
   if (status === 404 || status === 410) return 'slug_gone';
   if (status === 401 || status === 403) return 'auth';
+  if (status === 429) return 'rate_limit';
   if (typeof status === 'number' && status >= 500) return 'server';
   if (/HTTP 404|HTTP 410/.test(msg)) return 'slug_gone';
   if (/HTTP 401|HTTP 403/.test(msg)) return 'auth';
+  if (/HTTP 429\b/.test(msg)) return 'rate_limit';
   if (/HTTP 5\d\d/.test(msg)) return 'server';
   return 'unknown';
 }
@@ -1040,6 +1040,7 @@ const ERROR_KIND_LABEL = {
   auth: 'auth blocked',
   network: 'network error',
   server: 'server error',
+  rate_limit: 'rate limited',
   unknown: 'unresolved',
 };
 

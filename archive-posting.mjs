@@ -219,41 +219,57 @@ function captureFilename(company, role, url) {
   return reportNum ? `${reportPrefix(reportNum)}-${base}` : base;
 }
 
+// Whole words only (plural allowed), so a company like "Headway" is not read as a
+// role for containing "head". "Engineering" stays a role word, as it was before
+// the whole-word rule ("Data Engineering | Acme").
+const ROLE_KEYWORDS = /\b(?:engineer(?:s|ing)?|(?:manager|director|analyst|scientist|designer|developer|lead|head|vp|president|officer|specialist|architect)s?)\b/i;
+
 /**
  * Try to extract company/role from the rendered page title.
  * Handles common ATS patterns:
  *   "Senior AI Engineer at Anthropic"   → role + company
  *   "Anthropic | Senior AI Engineer"    → company + role
  *   "Senior AI Engineer - Anthropic"    → role + company
+ *   "Acme - Senior Engineer"            → company + role (Lever)
+ *
+ * The company is one END of the title, never a middle piece: a role often
+ * carries its own separator ("Customer Success Manager - Dutch Speaking -
+ * Teamtailor", "Engineer | Platform | Acme"), and splitting at the first
+ * separator filed such a capture under "Dutch Speaking - Teamtailor". The
+ * other segments, with their separators, stay the role.
  */
-function parsePageTitle(title) {
+export function parsePageTitle(title) {
   if (!title) return { company: null, role: null };
 
-  // Strip common ATS platform suffixes
+  // Strip common ATS platform suffixes after any separator the split below
+  // recognises, so "Engineer — Greenhouse" does not name Greenhouse the company.
   const cleaned = title
-    .replace(/\s*[|–-]\s*(greenhouse|lever|ashby|workday|linkedin|indeed|wellfound|angellist)\s*$/i, '')
+    .replace(/\s*[|–—-]\s*(greenhouse|lever|ashby|workday|linkedin|indeed|wellfound|angellist)\s*$/i, '')
     .trim();
 
   // "Role at Company"
   const atMatch = cleaned.match(/^(.+?)\s+at\s+(.+)$/i);
   if (atMatch) return { role: atMatch[1].trim(), company: atMatch[2].trim() };
 
-  // "Company | Role" or "Company – Role"
-  const pipeMatch = cleaned.match(/^([^|–]+?)\s*[|–]\s*(.+)$/);
-  if (pipeMatch) {
-    const left = pipeMatch[1].trim();
-    const right = pipeMatch[2].trim();
-    const roleKeywords = /engineer|manager|director|analyst|scientist|designer|developer|lead|head|vp|president|officer|specialist|architect/i;
-    if (roleKeywords.test(right)) return { company: left, role: right };
-    if (roleKeywords.test(left)) return { role: left, company: right };
-    return { company: left, role: right };
-  }
+  // Segments and the separators between them, alternating: [seg, sep, seg, …].
+  // A hyphen separates only with spaces around it, so "Co-Founder" stays whole.
+  const parts = cleaned.split(/(\s*[|–—]\s*|\s+-\s+)/);
+  if (parts.length < 3) return { company: null, role: cleaned };
 
-  // "Role - Company"
-  const dashMatch = cleaned.match(/^(.+?)\s+-\s+(.+)$/);
-  if (dashMatch) return { role: dashMatch[1].trim(), company: dashMatch[2].trim() };
+  const first = parts[0].trim();
+  const last = parts[parts.length - 1].trim();
+  const companyFirst = { company: first, role: parts.slice(2).join('').trim() };
+  const companyLast = { company: last, role: parts.slice(0, -2).join('').trim() };
 
-  return { company: null, role: cleaned };
+  // The end that reads like a job title is the role; the other end is the company.
+  const firstIsRole = ROLE_KEYWORDS.test(first);
+  const lastIsRole = ROLE_KEYWORDS.test(last);
+  if (lastIsRole && !firstIsRole) return companyFirst;
+  if (firstIsRole && !lastIsRole) return companyLast;
+
+  // Undecided: "Company | Role" / "Company – Role" lead with the company,
+  // "Role - Company" ends with it.
+  return /[|–—]/.test(cleaned) ? companyFirst : companyLast;
 }
 
 /**
@@ -518,7 +534,7 @@ async function main() {
     // Loaded here, after --help / --dry-run / a missing pipeline have already
     // returned. A static import made those paths wait on the browser package
     // and crash when it was not installed.
-    const { chromium } = await import('playwright');
+    const { chromium } = await import('./lib/hardened-chromium.mjs');
     const browser = await chromium.launch(browserLaunchOptions({ headless: true }));
     try {
       for (const { url, company, role } of targets) {

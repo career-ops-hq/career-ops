@@ -319,6 +319,7 @@ All of them share one router, `.agents/skills/career-ops/SKILL.md`, and the same
 | [`scan`](modes/scan.md) | Scan portals and discover new offers |
 | [`discover`](modes/discover.md) | Resolve a list of company names to scannable ATS boards. Previews by default; adds them to `portals.yml` only with `--write` (zero-token) |
 | [`pipeline`](modes/pipeline.md) | Process pending URLs from the inbox (`data/pipeline.md`) |
+| [`capture`](modes/capture.md) | Record a posting in the inbox (plus its JD text when you have it) without evaluating it. For "save this for later" |
 | [`triage`](modes/triage.md) | Fast first-pass go/no-go score from `modes/_brief.md`, before a full evaluation (writes no files) |
 | [`batch`](modes/batch.md) | Evaluate many postings with headless workers (parallel with Claude, one at a time with other CLIs) |
 | [`titles`](modes/titles.md) | Suggest adjacent job titles from your CV to broaden the search |
@@ -344,6 +345,7 @@ All of them share one router, `.agents/skills/career-ops/SKILL.md`, and the same
 | [`latex-tex`](modes/latex-tex.md) | Tailor your own `resume.tex` in place (opt-in; `cv.md` stays the default) |
 | [`cover`](modes/cover.md) | Cover letter, from a pasted JD or an evaluated report (`cover {slug}`) |
 | [`email`](modes/email.md) | Formal application email draft. Draft-only: never sends, submits or clicks |
+| [`proposal`](modes/proposal.md) | Job/Upwork proposal as markdown. Draft-only: never submits |
 | [`contacto`](modes/contacto.md) | Find the hiring manager, recruiter or a peer, and draft a LinkedIn message |
 | [`gambit`](modes/gambit.md) | Pitch a role a company has not posted: research an evidenced need, then draft the role, CV, cover letter and pitch. Draft-only: never sends |
 | [`apply`](modes/apply.md) | Live application assistant (Playwright from this checkout). Does not submit |

@@ -231,6 +231,17 @@ test("verdictReason reads the header lede above ---", () => {
   );
 });
 
+test("a report with no section break does not reuse its body as the verdict reason", () => {
+  const report = [
+    "# Fixture States Co — Engineer",
+    "",
+    "**URL:** https://jobs.fixture-states.example/engineer",
+    "",
+    "Fictional browser test report.",
+  ].join("\n");
+  assert.equal(verdictReason({ report, intro: "" }), "");
+});
+
 test("verdictReason drops inline Markdown markers", () => {
   assert.equal(
     verdictReason({
@@ -309,4 +320,9 @@ test("sectionPreview prefers prose next to a table and counts a wide table", () 
   assert.equal(sectionPreview("| A | B |\n|---|---|\n| x | y |\n\nStrong fit overall. More detail."), "Strong fit overall.");
   assert.equal(sectionPreview("| Gap | Severity | Mitigation |\n|---|---|---|\n| SQL | Low | Course |\n| K8s | Mid | Lab |"), "2 rows");
   assert.equal(sectionPreview("| # | Situation | S | T | A | R | STAR story |\n|---|---|---|---|---|---|---|\n| 1 | a | b | c | d | e | f |"), "1 interview story");
+});
+
+test("a decimal-comma score is placed against the apply line as a decimal", () => {
+  assert.equal(applyLineLabel("3,8/5"), "Below the apply line");
+  assert.equal(applyLineLabel("4,2/5"), "Recommended");
 });

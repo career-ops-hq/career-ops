@@ -757,7 +757,44 @@ async function main() {
       );
       process.exit(1);
     }
-    const count = await commitState(result, all ? COMMIT_ALL : only);
+    // commitState() matches the scan's documents/-relative keys exactly, so a
+    // path spelled any other way (`./cv/master.md`, `documents/cv/master.md` as
+    // modes/intake.md annotates proposals, a typo) recorded nothing at exit 0,
+    // and the confirmed source was proposed again on the next run. Accept a
+    // path relative to documents/ or to the data root, and refuse the rest
+    // before anything is written. A path that names a scanned source both ways
+    // (documents/cv/master.md beside documents/documents/cv/master.md) is
+    // refused too: taking either one could record the source the user did not
+    // mean and leave theirs pending.
+    let keys = only;
+    if (!all) {
+      const scanned = new Set(result.sources.map((source) => source.path));
+      const matches = only.map((p) => [...new Set([resolve(DOCS_DIR, p), resolve(DATA_ROOT, p)]
+        .map((abs) => toRelPath(abs))
+        .filter((rel) => scanned.has(rel)))]);
+      const unknown = only.filter((_, i) => matches[i].length === 0);
+      if (unknown.length > 0) {
+        console.error(
+          `Not a scanned source: ${unknown.join(', ')}. Pass a path as \`node intake.mjs --summary\` lists it. `
+          + 'Nothing was recorded.',
+        );
+        process.exit(1);
+      }
+      // The listed key of the nested source is itself the ambiguous spelling,
+      // so the way out is an absolute path, which both readings resolve alike.
+      const ambiguous = only.flatMap((p, i) => (matches[i].length > 1
+        ? [`${p} matches ${matches[i].map((key) => resolve(DOCS_DIR, key)).join(' and ')}`]
+        : []));
+      if (ambiguous.length > 0) {
+        console.error(
+          `More than one scanned source: ${ambiguous.join('; ')}. Pass the absolute path of the one you confirmed. `
+          + 'Nothing was recorded.',
+        );
+        process.exit(1);
+      }
+      keys = matches.map(([key]) => key);
+    }
+    const count = await commitState(result, all ? COMMIT_ALL : keys);
     console.log(`Recorded ${count} source(s) as ingested → ${STATE_FILE}`);
     return;
   }

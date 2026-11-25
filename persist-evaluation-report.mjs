@@ -14,6 +14,7 @@
  * exits 1. A failed write removes only files this call created.
  */
 import fs from "node:fs";
+import { tryAcquireDirLockSync, releaseOrWarn } from "./lib/dir-lock.mjs";
 import path from "node:path";
 import { isMainModule } from "./lib/is-main-module.mjs";
 import { isPostingUrl, trackerTsvLine } from "./lib/tracker-addition.mjs";
@@ -38,7 +39,7 @@ function textProblem(name, value) {
 /**
  * @param {string} root
  * @param {object} payload
- * @param {Pick<typeof fs, "mkdirSync"|"existsSync"|"writeFileSync"|"unlinkSync">} [fsImpl]
+ * @param {Pick<typeof fs, "mkdirSync"|"mkdtempSync"|"openSync"|"closeSync"|"fstatSync"|"lstatSync"|"writeFileSync"|"linkSync"|"unlinkSync"|"rmSync">} [fsImpl]
  * @returns {{ok: true} | {ok: false, error: string}}
  */
 export function writeEvaluationArtifacts(root, payload, fsImpl = fs) {
@@ -91,30 +92,70 @@ export function writeEvaluationArtifacts(root, payload, fsImpl = fs) {
 
   const tsv = trackerTsvLine({ num, today, company, role, score, reportFile, notes, via, url });
   const attempted = [];
+  let lock;
   try {
     fsImpl.mkdirSync(reportsDir, { recursive: true });
     fsImpl.mkdirSync(additionsDir, { recursive: true });
+    lock = tryAcquireDirLockSync(`${reportPath}.lock`, { staleMs: 30_000, createParent: true });
+    if (!lock) throw new Error(`report is busy: ${reportPath}; retry the save`);
     writeNew(fsImpl, reportPath, markdown, attempted);
     writeNew(fsImpl, tsvPath, tsv, attempted);
   } catch (err) {
     const cleanupError = cleanupNew(fsImpl, attempted);
     const message = `Could not save the evaluation report: ${err.message}`;
     return fail(cleanupError ? `${message} ${cleanupError}` : message);
+  } finally {
+    try {
+      for (const { staging } of attempted) removeStaging(fsImpl, staging);
+    } finally {
+      if (lock) releaseOrWarn(lock);
+    }
   }
   return { ok: true };
 }
 
 function writeNew(fsImpl, filePath, content, attempted) {
-  const existed = fsImpl.existsSync(filePath);
-  attempted.push({ filePath, existed });
-  fsImpl.writeFileSync(filePath, content, "utf8");
+  // Keep failures before identity capture off the final artifact path, so a
+  // failed fstat cannot leave an orphan that blocks the next save with EEXIST.
+  const staging = fsImpl.mkdtempSync(path.join(path.dirname(filePath), ".evaluation-"));
+  const stagedPath = path.join(staging, path.basename(filePath));
+  let retained = false;
+  try {
+    const fd = fsImpl.openSync(stagedPath, "wx");
+    let identity;
+    try {
+      fsImpl.writeFileSync(fd, content, "utf8");
+      identity = fsImpl.fstatSync(fd, { bigint: true });
+    } finally {
+      fsImpl.closeSync(fd);
+    }
+    // A hard link publishes complete bytes exclusively on the same filesystem.
+    // A concurrent save at filePath wins without being overwritten or removed.
+    attempted.push({ filePath, identity, staging });
+    retained = true;
+    fsImpl.linkSync(stagedPath, filePath);
+  } finally {
+    if (!retained) removeStaging(fsImpl, staging);
+  }
+}
+
+function removeStaging(fsImpl, staging) {
+  try {
+    fsImpl.rmSync(staging, { recursive: true, force: true });
+  } catch (err) {
+    console.error(`Warning: evaluation staging cleanup failed at ${staging}: ${err.message}`);
+  }
 }
 
 function cleanupNew(fsImpl, attempted) {
   const problems = [];
-  for (const { filePath, existed } of attempted) {
-    if (existed) continue;
+  for (const { filePath, identity } of attempted) {
     try {
+      // The private staging link pins our inode until rollback has finished:
+      // a replacement cannot reuse it, even if birth time falls back to ctime
+      // (which creating a hard link changes on some filesystems).
+      const current = fsImpl.lstatSync(filePath, { bigint: true });
+      if (!current.isFile() || current.dev !== identity.dev || current.ino !== identity.ino) continue;
       fsImpl.unlinkSync(filePath);
     } catch (err) {
       if (err?.code !== "ENOENT") problems.push(err.message);

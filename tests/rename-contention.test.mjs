@@ -22,7 +22,7 @@
 //   1. the classifier agrees on the measured Windows codes and ONLY those,
 //   2. a contended rename is retried and the write completes,
 //   3. a non-contention errno still fails fast, with the temp file cleaned up,
-//   4. no bare renameSync remains in the tracker's atomic-write path.
+//   4. no bare renameSync remains in the rename helper or tracker-utils.mjs.
 
 import { readFileSync, existsSync, mkdtempSync, writeFileSync, readdirSync, rmSync } from 'fs';
 import { join } from 'path';
@@ -147,25 +147,34 @@ const mkErr = (code) => Object.assign(new Error(code), { code });
 }
 
 // ── 4. No bare renameSync in the atomic-write path ───────────────────────────
-// renameSyncWithRetry is the only code allowed to call renameSync in this file.
-// A bare call anywhere else reintroduces the lost write one refactor from now,
-// which is exactly how the mkdir/rm half of #2777 survived two earlier fixes.
+// renameSyncWithRetry, in lib/rename-retry.mjs, is the only code allowed to
+// call renameSync. A bare call in either file reintroduces the lost write one
+// refactor from now, which is exactly how the mkdir/rm half of #2777 survived
+// two earlier fixes.
 {
-  const src = readFileSync(join(ROOT, 'tracker-utils.mjs'), 'utf-8');
+  // renameSync must never be INVOKED directly. In lib/rename-retry.mjs it may
+  // only appear as the imported name and as renameSyncWithRetry's default
+  // parameter, neither of which is a call; tracker-utils.mjs no longer imports
+  // it at all. The call-site count must be zero in both.
+  for (const rel of ['lib/rename-retry.mjs', 'tracker-utils.mjs']) {
+    const src = readFileSync(join(ROOT, rel), 'utf-8');
+    const directCalls = [...src.matchAll(/(?<![\w.])renameSync\s*\(/g)].length;
+    ok(directCalls === 0, `${rel}: no direct renameSync() call remains (found ${directCalls})`);
+  }
 
-  // renameSync must never be INVOKED directly. It may only appear as the
-  // imported name and as renameSyncWithRetry's default parameter, neither of
-  // which is a call, so the call-site count must be zero.
-  const directCalls = [...src.matchAll(/(?<![\w.])renameSync\s*\(/g)].length;
-  ok(
-    directCalls === 0,
-    `tracker-utils.mjs: no direct renameSync() call remains (found ${directCalls})`,
-  );
-
-  // And the atomic path routes through the injectable seam exactly once.
-  const seamCalls = [...src.matchAll(/^\s*rename\(tmpPath, path\);/gm)].length;
+  // And the helper renames through the injectable seam exactly once.
+  const helper = readFileSync(join(ROOT, 'lib/rename-retry.mjs'), 'utf-8');
+  const seamCalls = [...helper.matchAll(/^\s*rename\(tmpPath, path\);/gm)].length;
   ok(
     seamCalls === 1,
-    `the atomic write renames through the injectable helper exactly once (found ${seamCalls})`,
+    `renameSyncWithRetry renames through the injectable seam exactly once (found ${seamCalls})`,
+  );
+
+  // tracker-utils.mjs re-exports the helper, so callers importing it from
+  // there keep working.
+  const trackerUtils = readFileSync(join(ROOT, 'tracker-utils.mjs'), 'utf-8');
+  ok(
+    /export\s*\{[^}]*\brenameSyncWithRetry\b[^}]*\}\s*from\s*'\.\/lib\/rename-retry\.mjs'/.test(trackerUtils),
+    'tracker-utils.mjs re-exports renameSyncWithRetry from lib/rename-retry.mjs',
   );
 }

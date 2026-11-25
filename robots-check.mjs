@@ -229,6 +229,8 @@ export function parseRobotsGroups(text) {
     } else if ((field === 'allow' || field === 'disallow') && agents.length > 0) {
       expectingAgents = false;
       for (const agent of agents) groups.get(agent).push({ allow: field === 'allow', pattern: value });
+    } else if (field === 'crawl-delay' && agents.length > 0) {
+      expectingAgents = false;
     }
   }
   return groups;
@@ -331,8 +333,11 @@ export function crawlDelaySeconds(text, agent) {
       agents.push(agentKey(value));
     } else if ((field === 'allow' || field === 'disallow') && agents.length > 0) {
       expectingAgents = false;
-    } else if (field === 'crawl-delay' && agents.length > 0 && /^\d+(?:\.\d+)?$/.test(value)) {
-      for (const a of agents) if (!delays.has(a)) delays.set(a, Number(value));
+    } else if (field === 'crawl-delay' && agents.length > 0) {
+      expectingAgents = false;
+      if (/^\d+(?:\.\d+)?$/.test(value)) {
+        for (const a of agents) if (!delays.has(a)) delays.set(a, Number(value));
+      }
     }
   }
   const own = delays.get(agentKey(agent));

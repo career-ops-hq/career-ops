@@ -39,48 +39,50 @@ jobs:
           # the merge queue, the entry's squash commit with its parent, the base.
           fetch-depth: 2
           persist-credentials: false
+      # The classifier that decides whether to skip four jobs and two OS legs must
+      # not be one the PR can edit: a PR that rewrote docs-only-change.mjs to always
+      # answer "docs only" would skip its own checks on itself. Run the BASE
+      # branch's copy against the PR's diff instead. It reads the diff from the
+      # working directory (the PR checkout above) and imports its helpers relative
+      # to itself, so the base copy of every module it loads comes with it. This
+      # step goes AFTER the PR checkout, which cleans the workspace.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # pull_request: the target branch name. merge_group: base_ref is empty,
+          # so pin the commit the group was built on.
+          ref: ${{ github.base_ref || github.event.merge_group.base_sha }}
+          path: base
+          persist-credentials: false
       - id: classify
-        run: node .github/scripts/docs-only-change.mjs
+        run: node base/.github/scripts/docs-only-change.mjs
         env:
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
 
-  test:
+  suite-ubuntu:
+    name: suite (ubuntu-latest, ${{ matrix.shard }}/2)
+    # Ubuntu runs the whole suite on every pull request and in the merge
+    # queue, docs-only changes included (about 45 test files read docs-type
+    # files, and the inline sections scan every tracked file), split in two so
+    # a pull request's result comes in about half the time. !cancelled() and
+    # not the implicit success(): a failed or skipped `changes` must still run
+    # it.
     needs: changes
-    # !cancelled() and not the implicit success(): a failed or skipped `changes`
-    # must still run this job, or the required checks would never pass.
     if: ${{ !cancelled() }}
     strategy:
-      # One OS failing must not cancel the evidence from the others —
-      # a platform-specific failure is exactly what this matrix exists to isolate.
+      # One shard failing must not cancel the other's evidence.
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    # Without a limit a hung job holds its runner for GitHub's default of six
-    # hours. test-all.mjs kills a discovered suite that runs past its budget,
-    # but its inline sections and the install steps have no limit of their
-    # own. The slowest leg (macOS) takes about 11 minutes.
-    timeout-minutes: 30
-    # A docs-only change runs the suite on Ubuntu only (#6402, #5723). The other
-    # two legs stay in the matrix and skip their steps, because these three check
-    # names are required, and a job-level `if` cannot read `matrix` to skip just
-    # them.
-    # Ubuntu keeps the whole suite: about 45 test files read docs-type files, and
-    # the inline sections of test-all.mjs scan every tracked file.
-    env:
-      SKIP_LEG: ${{ needs.changes.outputs.docs_only == 'true' && matrix.os != 'ubuntu-latest' }}
+        shard: [1, 2]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - name: Skip this leg (docs-only change)
-        if: env.SKIP_LEG == 'true'
-        run: echo "Docs-only change. The suite runs on the Ubuntu leg, so this leg has nothing to add."
       # The repo is committed with LF; Windows runners default to autocrlf,
       # which would rewrite every text file on checkout and make regexes that
       # rely on `.` (no \r) fail in ways the other platforms never see.
       - name: Force LF checkout on Windows
-        if: runner.os == 'Windows' && env.SKIP_LEG != 'true'
+        if: runner.os == 'Windows'
         run: git config --global core.autocrlf false
-      - if: env.SKIP_LEG != 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Test code (fork code, in a merge_group) must not find a token in .git/config.
           persist-credentials: false
@@ -89,35 +91,317 @@ jobs:
       # Renovate is told to leave node-version in this file alone (renovate.json);
       # tests/node-floor.test.mjs fails if this drifts from NODE_MIN.
       - name: Set up the Node floor (22.13) for syntax compatibility
-        if: env.SKIP_LEG != 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22.13'
-      - if: env.SKIP_LEG != 'true'
-        run: npm run lint
+      - run: npm run lint
       - name: Set up Node 24 for the test suite
-        if: env.SKIP_LEG != 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-      - if: env.SKIP_LEG != 'true'
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      # Skip the postinstall (npx playwright install chromium): the ~170 MB
+      # download on three OSes would buy only the few suites that launch a
+      # browser, and those skip here and run in the tool-suites job instead.
+      - run: npm install --ignore-scripts
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        if: ${{ matrix.shard == 1 }}
         with:
           go-version: '1.27'
           # The module lives in dashboard/, so without this setup-go looks for
           # go.sum at the root, warns, and caches nothing.
           cache-dependency-path: dashboard/go.sum
+      # The Go dashboard tests take 40-60 s, most of it the cross-compile in
+      # cross_compile_test.go. Started here, in the background, they run at the
+      # same time as the suite instead of after it. Not earlier: some of them
+      # run the repo's Node scripts (set-status.mjs), which need Node 24 and the
+      # installed dependencies. "Go dashboard tests" below waits for them and ends with
+      # their exit code, so a failing Go test still turns this check red. They
+      # write only to their own temp dirs, so the suite never sees them. Shard 1 only.
+      - name: Start the Go dashboard tests in the background
+        id: go_start
+        if: ${{ matrix.shard == 1 }}
+        shell: bash
+        working-directory: dashboard
+        run: |
+          out="$(cd "$RUNNER_TEMP" && pwd)"
+          nohup bash -c 'go test ./... > "$1/go-test.log" 2>&1; echo "$?" > "$1/go-test.exit"' _ "$out" > /dev/null 2>&1 &
+      - run: node test-all.mjs --quick --shard "${{ matrix.shard }}/2"
+      # Waits for the run started above and reports it as its own step. Runs
+      # after a red suite too (!cancelled()), so one failure does not hide the
+      # other; not when the start step did not run, which would wait for
+      # nothing.
+      - name: Go dashboard tests
+        if: ${{ !cancelled() && steps.go_start.outcome == 'success' }}
+        shell: bash
+        run: |
+          out="$(cd "$RUNNER_TEMP" && pwd)"
+          # 10 minutes: far past the 40-60 s these take, inside the job's limit.
+          for _ in $(seq 600); do [ -s "$out/go-test.exit" ] && break; sleep 1; done
+          cat "$out/go-test.log" 2>/dev/null || true
+          if [ ! -s "$out/go-test.exit" ]; then
+            echo "::error::The Go dashboard tests started in the background did not finish within 10 minutes."
+            exit 1
+          fi
+          exit "$(cat "$out/go-test.exit")"
+
+
+
+  test:
+    # The required check "test (ubuntu-latest)" (a matrix of one keeps that
+    # name). It runs no tests itself: it passes only when both Ubuntu shards
+    # passed. Unlike the macOS and Windows gates it never accepts a skip: the
+    # Ubuntu shards run for every change.
+    needs: [changes, suite-ubuntu]
+    if: ${{ !cancelled() }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - name: Every Ubuntu shard passed
+        shell: bash
+        env:
+          RESULT: ${{ needs.suite-ubuntu.result }}
+        run: |
+          if [ "$RESULT" = success ]; then
+            echo "Both Ubuntu shards of the suite passed."
+          else
+            echo "::error::The Ubuntu shards ended '$RESULT'. Open the failing 'suite (ubuntu-latest, n/2)' job for the failure."
+            exit 1
+          fi
+
+  suite-macos:
+    name: suite (macos-latest, ${{ matrix.shard }}/2)
+    # macOS in the merge queue, split 2 ways (test-all.mjs --shard,
+    # tests/shard.mjs). Not on a pull request, and not for a
+    # docs-only change: the job is skipped whole, so no macOS runner is
+    # taken. A failed classifier runs it.
+    needs: changes
+    if: ${{ !cancelled() && github.event_name == 'merge_group' && needs.changes.outputs.docs_only != 'true' }}
+    strategy:
+      # One shard failing must not cancel the others' evidence.
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      # The repo is committed with LF; Windows runners default to autocrlf,
+      # which would rewrite every text file on checkout and make regexes that
+      # rely on `.` (no \r) fail in ways the other platforms never see.
+      - name: Force LF checkout on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Test code (fork code, in a merge_group) must not find a token in .git/config.
+          persist-credentials: false
+      # The declared floor (lib/node-floor.mjs, package.json engines). Exact on
+      # purpose: a bare '22' resolves to the newest 22.x and tests nothing.
+      # Renovate is told to leave node-version in this file alone (renovate.json);
+      # tests/node-floor.test.mjs fails if this drifts from NODE_MIN.
+      - name: Set up the Node floor (22.13) for syntax compatibility
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22.13'
+      - run: npm run lint
+      - name: Set up Node 24 for the test suite
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
       # Skip the postinstall (npx playwright install chromium): the ~170 MB
       # download on three OSes would buy only the few suites that launch a
       # browser, and those skip here and run in the tool-suites job instead.
-      - if: env.SKIP_LEG != 'true'
-        run: npm install --ignore-scripts
-      - if: env.SKIP_LEG != 'true'
-        run: node test-all.mjs --quick
-      - name: Go dashboard tests
-        if: env.SKIP_LEG != 'true'
-        run: go test ./...
+      - run: npm install --ignore-scripts
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        if: ${{ matrix.shard == 1 }}
+        with:
+          go-version: '1.27'
+          # The module lives in dashboard/, so without this setup-go looks for
+          # go.sum at the root, warns, and caches nothing.
+          cache-dependency-path: dashboard/go.sum
+      # The Go dashboard tests take 40-60 s, most of it the cross-compile in
+      # cross_compile_test.go. Started here, in the background, they run at the
+      # same time as the suite instead of after it. Not earlier: some of them
+      # run the repo's Node scripts (set-status.mjs), which need Node 24 and the
+      # installed dependencies. "Go dashboard tests" below waits for them and ends with
+      # their exit code, so a failing Go test still turns this check red. They
+      # write only to their own temp dirs, so the suite never sees them. Shard 1 only.
+      - name: Start the Go dashboard tests in the background
+        id: go_start
+        if: ${{ matrix.shard == 1 }}
+        shell: bash
         working-directory: dashboard
+        run: |
+          out="$(cd "$RUNNER_TEMP" && pwd)"
+          nohup bash -c 'go test ./... > "$1/go-test.log" 2>&1; echo "$?" > "$1/go-test.exit"' _ "$out" > /dev/null 2>&1 &
+      - run: node test-all.mjs --quick --shard "${{ matrix.shard }}/2"
+      # Waits for the run started above and reports it as its own step. Runs
+      # after a red suite too (!cancelled()), so one failure does not hide the
+      # other; not when the start step did not run, which would wait for
+      # nothing.
+      - name: Go dashboard tests
+        if: ${{ !cancelled() && steps.go_start.outcome == 'success' }}
+        shell: bash
+        run: |
+          out="$(cd "$RUNNER_TEMP" && pwd)"
+          # 10 minutes: far past the 40-60 s these take, inside the job's limit.
+          for _ in $(seq 600); do [ -s "$out/go-test.exit" ] && break; sleep 1; done
+          cat "$out/go-test.log" 2>/dev/null || true
+          if [ ! -s "$out/go-test.exit" ]; then
+            echo "::error::The Go dashboard tests started in the background did not finish within 10 minutes."
+            exit 1
+          fi
+          exit "$(cat "$out/go-test.exit")"
+
+
+  suite-windows:
+    name: suite (windows-latest, ${{ matrix.shard }}/3)
+    # Windows in the merge queue, split 3 ways (test-all.mjs --shard,
+    # tests/shard.mjs). Three, not two: the same suites take about twice as long as on Ubuntu (tests/helpers.mjs, NODE_TEST_BUDGET_FACTOR). Not on a pull request, and not for a
+    # docs-only change: the job is skipped whole, so no Windows runner is
+    # taken. A failed classifier runs it.
+    needs: changes
+    if: ${{ !cancelled() && github.event_name == 'merge_group' && needs.changes.outputs.docs_only != 'true' }}
+    strategy:
+      # One shard failing must not cancel the others' evidence.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      # The repo is committed with LF; Windows runners default to autocrlf,
+      # which would rewrite every text file on checkout and make regexes that
+      # rely on `.` (no \r) fail in ways the other platforms never see.
+      - name: Force LF checkout on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Test code (fork code, in a merge_group) must not find a token in .git/config.
+          persist-credentials: false
+      # The declared floor (lib/node-floor.mjs, package.json engines). Exact on
+      # purpose: a bare '22' resolves to the newest 22.x and tests nothing.
+      # Renovate is told to leave node-version in this file alone (renovate.json);
+      # tests/node-floor.test.mjs fails if this drifts from NODE_MIN.
+      - name: Set up the Node floor (22.13) for syntax compatibility
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22.13'
+      - run: npm run lint
+      - name: Set up Node 24 for the test suite
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      # Skip the postinstall (npx playwright install chromium): the ~170 MB
+      # download on three OSes would buy only the few suites that launch a
+      # browser, and those skip here and run in the tool-suites job instead.
+      - run: npm install --ignore-scripts
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        if: ${{ matrix.shard == 1 }}
+        with:
+          go-version: '1.27'
+          # The module lives in dashboard/, so without this setup-go looks for
+          # go.sum at the root, warns, and caches nothing.
+          cache-dependency-path: dashboard/go.sum
+      # The Go dashboard tests take 40-60 s, most of it the cross-compile in
+      # cross_compile_test.go. Started here, in the background, they run at the
+      # same time as the suite instead of after it. Not earlier: some of them
+      # run the repo's Node scripts (set-status.mjs), which need Node 24 and the
+      # installed dependencies. "Go dashboard tests" below waits for them and ends with
+      # their exit code, so a failing Go test still turns this check red. They
+      # write only to their own temp dirs, so the suite never sees them. Shard 1 only.
+      - name: Start the Go dashboard tests in the background
+        id: go_start
+        if: ${{ matrix.shard == 1 }}
+        shell: bash
+        working-directory: dashboard
+        run: |
+          out="$(cd "$RUNNER_TEMP" && pwd)"
+          nohup bash -c 'go test ./... > "$1/go-test.log" 2>&1; echo "$?" > "$1/go-test.exit"' _ "$out" > /dev/null 2>&1 &
+      - run: node test-all.mjs --quick --shard "${{ matrix.shard }}/3"
+      # Waits for the run started above and reports it as its own step. Runs
+      # after a red suite too (!cancelled()), so one failure does not hide the
+      # other; not when the start step did not run, which would wait for
+      # nothing.
+      - name: Go dashboard tests
+        if: ${{ !cancelled() && steps.go_start.outcome == 'success' }}
+        shell: bash
+        run: |
+          out="$(cd "$RUNNER_TEMP" && pwd)"
+          # 10 minutes: far past the 40-60 s these take, inside the job's limit.
+          for _ in $(seq 600); do [ -s "$out/go-test.exit" ] && break; sleep 1; done
+          cat "$out/go-test.log" 2>/dev/null || true
+          if [ ! -s "$out/go-test.exit" ]; then
+            echo "::error::The Go dashboard tests started in the background did not finish within 10 minutes."
+            exit 1
+          fi
+          exit "$(cat "$out/go-test.exit")"
+
+
+  test-macos:
+    # The required check "test (macos-latest)". It runs no tests itself: it passes
+    # when every suite-macos shard passed, so the check means what it meant when
+    # one job ran the whole suite. On a pull request, or for a docs-only
+    # change, the shards are skipped on purpose and this says so; a skip for
+    # any other reason is a failure. Runs on Ubuntu, so it never waits for a
+    # macOS runner.
+    name: test (macos-latest)
+    needs: [changes, suite-macos]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every macOS shard passed
+        shell: bash
+        env:
+          RESULT: ${{ needs.suite-macos.result }}
+          MAY_SKIP: ${{ github.event_name == 'pull_request' || needs.changes.outputs.docs_only == 'true' }}
+        run: |
+          case "$RESULT" in
+            success) echo "Every macOS shard of the suite passed." ;;
+            skipped)
+              if [ "$MAY_SKIP" = true ]; then
+                echo "Not run here: on a pull request the macOS leg runs in the merge queue, and a docs-only change does not need it."
+              else
+                echo "::error::The macOS shards were skipped in a run that needs them."
+                exit 1
+              fi ;;
+            *) echo "::error::The macOS shards ended '$RESULT'. Open the failing 'suite (macos-latest, n/N)' job for the failure."; exit 1 ;;
+          esac
+
+  test-windows:
+    # The required check "test (windows-latest)". It runs no tests itself: it passes
+    # when every suite-windows shard passed, so the check means what it meant when
+    # one job ran the whole suite. On a pull request, or for a docs-only
+    # change, the shards are skipped on purpose and this says so; a skip for
+    # any other reason is a failure. Runs on Ubuntu, so it never waits for a
+    # Windows runner.
+    name: test (windows-latest)
+    needs: [changes, suite-windows]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every Windows shard passed
+        shell: bash
+        env:
+          RESULT: ${{ needs.suite-windows.result }}
+          MAY_SKIP: ${{ github.event_name == 'pull_request' || needs.changes.outputs.docs_only == 'true' }}
+        run: |
+          case "$RESULT" in
+            success) echo "Every Windows shard of the suite passed." ;;
+            skipped)
+              if [ "$MAY_SKIP" = true ]; then
+                echo "Not run here: on a pull request the Windows leg runs in the merge queue, and a docs-only change does not need it."
+              else
+                echo "::error::The Windows shards were skipped in a run that needs them."
+                exit 1
+              fi ;;
+            *) echo "::error::The Windows shards ended '$RESULT'. Open the failing 'suite (windows-latest, n/N)' job for the failure."; exit 1 ;;
+          esac
 
   cv-visual:
     # Not a required check, so the merge queue never waits on it: a red queue
@@ -199,7 +483,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: '1.27'   # old updaters rebuild the dashboard during apply
           cache-dependency-path: dashboard/go.sum

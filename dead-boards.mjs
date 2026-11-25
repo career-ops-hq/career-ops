@@ -2,8 +2,9 @@
 // Only a real HTTP 404 may advance a miss counter. Throttles, transport
 // failures and DNS errors mean "unknown", never "dead".
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { renameSyncWithRetry } from './lib/rename-retry.mjs';
 
 export const DEAD_BOARD_HEADER = 'ats\tboard\tmisses\tlast_checked';
 export const DEAD_BOARD_MISSES = 3;
@@ -82,5 +83,5 @@ export function saveDeadBoards(file, rows) {
     .map((row) => `${row.ats}\t${row.board}\t${row.misses}\t${new Date(row.lastChecked).toISOString()}`);
   const tmp = `${file}.tmp`;
   writeFileSync(tmp, `${DEAD_BOARD_HEADER}\n${body.length ? `${body.join('\n')}\n` : ''}`, 'utf8');
-  renameSync(tmp, file);
+  renameSyncWithRetry(tmp, file);
 }

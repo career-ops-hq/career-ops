@@ -7,8 +7,9 @@ import { load } from 'js-yaml';
 import { buildLocationFilter, buildPostingAgeFilter } from '../scan.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const agents = readFileSync(join(ROOT, 'AGENTS.md'), 'utf8');
-const step3 = agents.split('#### Step 3: Portals')[1]?.split('#### Step 4')[0] ?? '';
+// The onboarding steps moved from AGENTS.md to modes/_onboarding.md (#6693).
+const onboarding = readFileSync(join(ROOT, 'modes/_onboarding.md'), 'utf8');
+const step3 = onboarding.split('#### Step 3: Portals')[1]?.split('#### Step 4')[0] ?? '';
 const block = step3.match(/```yaml\n([\s\S]*?)```/)?.[1];
 const example = block ? load(block) : null;
 const DAY = 24 * 60 * 60 * 1000;

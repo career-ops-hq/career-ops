@@ -118,6 +118,28 @@ test('a title above the link is kept, and a slug fills in when the paste has no 
   assert.equal(offers[1].url, `https://www.linkedin.com/jobs/view/${B}`);
 });
 
+test('a tracking number on the link line does not take that posting\'s title', () => {
+  const own = '4400001234';
+  const other = '4400005678';
+  const text = [
+    'Analyst',
+    'Northwind',
+    `https://www.linkedin.com/comm/jobs/view/${own}?trk=eml-${other}`,
+    'Shift lead',
+    'Sundial Pharmacy',
+    `https://www.linkedin.com/jobs/view/${other}`,
+  ].join('\n');
+  const offers = linkedInOffers(linkedInJobsFromText(text), text);
+  assert.deepEqual(offers.map((offer) => offer.url), [
+    `https://www.linkedin.com/jobs/view/${own}`,
+    `https://www.linkedin.com/jobs/view/${other}`,
+  ]);
+  assert.equal(offers[0].title, 'Analyst');
+  assert.equal(offers[0].company, 'Northwind');
+  assert.equal(offers[1].title, 'Shift lead');
+  assert.equal(offers[1].company, 'Sundial Pharmacy');
+});
+
 test('a pasted title or company longer than the bound is cut, and one at the bound is kept', () => {
   const atLimit = 'T'.repeat(MAX_FIELD_LENGTH);
   const tooLong = `Northwind Market ${'operations '.repeat(40)}`.trim();

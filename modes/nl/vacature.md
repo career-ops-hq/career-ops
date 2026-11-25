@@ -244,7 +244,7 @@ De veldnamen in de kop (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`
 (lijst van 15-20 trefwoorden uit de vacature voor ATS-optimalisatie)
 
 ## Keyword Coverage
-(gegenereerd door `keyword-match.mjs` (1b) -- dekking in %, present, thin, missing)
+(gegenereerd door `keyword-match.mjs` (1b) -- dekking in %, present, missing)
 
 ## Job Description (archived verbatim)
 (de volledige tekst van de vacature, letterlijk geplakt -- zie de eis hieronder)

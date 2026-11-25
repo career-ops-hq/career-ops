@@ -1,16 +1,18 @@
 /**
- * upload-name.mjs — the file name an employer sees for the tailored CV the
- * apply flow attaches (#6399).
+ * upload-name.mjs — the file name an employer sees for the tailored CV
+ * (#6399).
  *
- * The PDF on disk is named for career-ops, `cv-{candidate}-{report}-{company}-
- * {date}.pdf`, and the manifest and matchers (cv-match.mjs) depend on that
- * pattern, so it never changes. What changes is the name the upload carries:
- * fillSession hands Playwright a file payload (name + bytes) instead of the
- * path, so the ATS receives `First-Last-Role-CV.pdf` while the file on disk
- * keeps its own name.
+ * The PDF on disk is named for career-ops, and the manifest and matchers
+ * depend on that pattern, so it never changes. What changes is the name the
+ * employer sees, `First-Last-Role-CV.pdf`:
+ *   - the web apply flow: fillSession hands Playwright a file payload (name +
+ *     bytes) instead of the path;
+ *   - a manual upload (LinkedIn Easy Apply, email): `generate-pdf.mjs
+ *     --upload-copy` writes a copy under that name in `upload/`.
  *
- * Plain .mjs (same pattern as cv-match.mjs) so the tests under web/tests/lib/
- * can import it with no build step.
+ * lib/upload-name.mjs is the source of truth. web/src/lib/apply/upload-name.mjs
+ * is a declared byte-identical copy, because the web app cannot import core
+ * modules; tests/upload-name.test.mjs compares the two.
  */
 
 import fs from 'node:fs';
@@ -45,14 +47,15 @@ export function fileWords(s, { recaseCaps = false } = {}) {
 /**
  * The role, cut at its first qualifier: "Data Engineer, Data Quality &
  * Provenance" -> "Data Engineer", "Analyst (Remote)" -> "Analyst",
- * "Data Engineer - Talent Ops" -> "Data Engineer". A form title such as
+ * "Data Engineer - Talent Ops" -> "Data Engineer", "Analyst · Remote" ->
+ * "Analyst". A form title such as
  * "Data Engineer @ Acme" or "Analyst at Acme" loses the company first.
  * @param {string} role
  * @returns {string}
  */
 export function shortRole(role) {
   const withoutCompany = String(role ?? '').split(/\s+@\s+|\s+at\s+(?=[A-Z])/)[0];
-  return withoutCompany.split(/\s*(?:,|\(|\s[-–—|]\s)/)[0].trim();
+  return withoutCompany.split(/\s*(?:,|\(|\s[-–—|·•]\s)/)[0].trim();
 }
 
 /**

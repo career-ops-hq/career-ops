@@ -72,14 +72,14 @@ export function classifyHimalayasPosting(originalUrl, status, body, metadata = {
 }
 
 /** One anonymous GET; callers must treat every returned string as job data. */
-export async function retrieveHimalayasPosting(originalUrl, { fetchFn = globalThis.fetch, now = Date.now } = {}) {
+export async function retrieveHimalayasPosting(originalUrl, { fetchFn = globalThis.fetch, now = Date.now, timeoutMs = TIMEOUT_MS } = {}) {
   const identity = resolveHimalayasPosting(originalUrl);
   if (!identity) return classifyHimalayasPosting(originalUrl, null, null);
   const metadata = { retrievedAt: new Date(now()).toISOString() };
   const fail = code => ({ ...evidence(identity, null, metadata), publisherStatus: 'unknown', code });
   try {
     const response = await fetchFn(identity.apiUrl, { method: 'GET', redirect: 'error',
-      headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+      headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(timeoutMs) });
     if (response.url && response.url !== identity.apiUrl) {
       await response.body?.cancel();
       return fail('response_url_mismatch');

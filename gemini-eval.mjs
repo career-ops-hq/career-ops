@@ -177,7 +177,7 @@ if (existsSync(PATHS.profileYml)) {
     const rawModesDir = profile && profile.language && profile.language.modes_dir;
     if (rawModesDir) {
       const candidates = Array.isArray(rawModesDir) ? rawModesDir : [rawModesDir];
-      // AGENTS.md "Output Language vs Market Modes": the FIRST declared entry
+      // modes/_markets.md "Multiple simultaneous target markets": the FIRST declared entry
       // is always primary. Resolve IT first, before touching the rest — an
       // unusable primary falls back to the DEFAULT evaluation mode, and must
       // NEVER silently promote a later declared market into the primary slot
@@ -339,14 +339,17 @@ function readFile(path, label) {
 
 function validateEvaluationShape(text) {
   const issues = [];
+  // The letter must end the word: `## Analysis` is not Block A, nor `## Gaps`
+  // Block G (the /i flag would otherwise let any heading through). Same guard
+  // as openrouter-runner.mjs's validateEvaluationResponse().
   const requiredBlocks = [
-    ['A', /(?:^|\n)#{1,3}\s*(?:A[).:-]?|Block A\b)/im],
-    ['B', /(?:^|\n)#{1,3}\s*(?:B[).:-]?|Block B\b)/im],
-    ['C', /(?:^|\n)#{1,3}\s*(?:C[).:-]?|Block C\b)/im],
-    ['D', /(?:^|\n)#{1,3}\s*(?:D[).:-]?|Block D\b)/im],
-    ['E', /(?:^|\n)#{1,3}\s*(?:E[).:-]?|Block E\b)/im],
-    ['F', /(?:^|\n)#{1,3}\s*(?:F[).:-]?|Block F\b)/im],
-    ['G', /(?:^|\n)#{1,3}\s*(?:G[).:-]?|Block G\b)/im],
+    ['A', /(?:^|\n)#{1,3}\s*(?:A(?![A-Za-z0-9])[).:-]?|Block A\b)/im],
+    ['B', /(?:^|\n)#{1,3}\s*(?:B(?![A-Za-z0-9])[).:-]?|Block B\b)/im],
+    ['C', /(?:^|\n)#{1,3}\s*(?:C(?![A-Za-z0-9])[).:-]?|Block C\b)/im],
+    ['D', /(?:^|\n)#{1,3}\s*(?:D(?![A-Za-z0-9])[).:-]?|Block D\b)/im],
+    ['E', /(?:^|\n)#{1,3}\s*(?:E(?![A-Za-z0-9])[).:-]?|Block E\b)/im],
+    ['F', /(?:^|\n)#{1,3}\s*(?:F(?![A-Za-z0-9])[).:-]?|Block F\b)/im],
+    ['G', /(?:^|\n)#{1,3}\s*(?:G(?![A-Za-z0-9])[).:-]?|Block G\b)/im],
   ];
 
   for (const [label, pattern] of requiredBlocks) {
@@ -406,7 +409,7 @@ const ofertaPrompt = resolvedOfertaRel === CANONICAL_OFERTA_REL
 // agent has all declared candidates' vocabulary/legal-concept context, not just
 // the primary one. It must pick per-JD by market signal (hiring-entity
 // jurisdiction, currency, benefits/legal vocabulary), never by JD language alone
-// — see AGENTS.md "Output Language vs Market Modes".
+// — see modes/_markets.md "Multiple simultaneous target markets".
 for (const extraDir of extraModesDirs) {
   const extraLabel = join(extraDir, '_shared.md').replace(/\\/g, '/');
   const extraContent = readFile(join(CODE_ROOT, extraDir, '_shared.md'), extraLabel);

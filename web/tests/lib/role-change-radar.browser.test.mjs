@@ -1,0 +1,50 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { liveServerSkip } from '../helpers/live-server.mjs';
+import path from 'node:path';
+
+test('Radar supports keyboard, narrow screens, safe rendering and durable review history', { skip: liveServerSkip('RADAR_TEST_URL'), timeout: 120_000 }, async t => {
+  const origin = new URL(process.env.RADAR_TEST_URL);
+  assert.ok(['localhost', '127.0.0.1'].includes(origin.hostname));
+  const { chromium } = await import('playwright-core');
+  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await page.goto(`${origin.origin}/pipeline/12`);
+  const open = page.getByRole('button', { name: 'Check for changes', exact: true });
+  await open.focus(); await page.keyboard.press('Enter');
+  await page.getByText('No baseline.', { exact: false }).waitFor();
+  await page.getByLabel('Paste text', { exact: true }).check();
+  const original = 'Title: Designer\nCompany: Fixture Beta\nWork arrangement: Remote\nSalary: USD 100,000–120,000 per year\nResponsibilities\nDesign accessible interfaces and maintain the component library.\nQualifications\nExperience with design tools and user research.';
+  await page.getByLabel('Complete latest job description').fill(original);
+  await page.getByRole('button', { name: 'Save current description as baseline' }).click();
+  await page.getByText('Baseline saved for future checks.', { exact: true }).waitFor();
+  const changed = original.replace('Remote', 'Hybrid') + '\n<script>window.radarPwned = true</script>';
+  await page.getByLabel('Complete latest job description').fill(changed);
+  const compare = page.getByRole('button', { name: 'Compare with baseline', exact: true });
+  await compare.focus(); await page.keyboard.press('Enter');
+  await page.getByRole('heading', { name: 'Work arrangement', exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.radarPwned), undefined);
+  await page.getByText('Full text comparison', { exact: true }).click();
+  assert.ok(await page.getByText('<script>window.radarPwned = true</script>', { exact: false }).count());
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+  await page.getByRole('button', { name: 'Mark comparison reviewed', exact: true }).click();
+  await page.getByRole('button', { name: 'Reviewed', exact: true }).waitFor();
+  await page.getByLabel('Complete latest job description').fill(original);
+  await compare.click();
+  await page.getByRole('heading', { name: 'No textual changes detected', exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Mark comparison reviewed', exact: true }).isEnabled(), true);
+  await page.getByLabel('Fetch public posting', { exact: true }).check();
+  await compare.click();
+  await page.getByText('Previous successful result is shown below; it is not a new check.', { exact: true }).waitFor();
+  await page.reload(); await page.getByRole('button', { name: 'Check for changes', exact: true }).click();
+  await page.getByText('Showing saved results. No new check has run.', { exact: true }).waitFor();
+  assert.equal(await page.getByLabel('Comparison history').locator('option').count(), 2);
+  await page.getByLabel('Comparison history').selectOption({ index: 1 });
+  await page.getByRole('button', { name: 'Reviewed', exact: true }).waitFor();
+  for (const theme of ['dark', 'light']) {
+    await page.evaluate(theme => { document.documentElement.classList.toggle('dark', theme === 'dark'); document.documentElement.dataset.theme = theme; }, theme);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+    if (process.env.RADAR_SCREENSHOT_DIR) await page.screenshot({ path: path.join(process.env.RADAR_SCREENSHOT_DIR, `role-change-radar-${theme}.png`), fullPage: true });
+  }
+});

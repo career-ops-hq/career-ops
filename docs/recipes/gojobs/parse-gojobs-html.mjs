@@ -6,6 +6,7 @@
  * interactive Radware challenge.
  */
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'fs';
+import { homedir } from 'os';
 import { extname, isAbsolute, join, relative, resolve, sep } from 'path';
 import { pathToFileURL } from 'url';
 
@@ -15,6 +16,35 @@ const CAPTCHA = ['radware captcha page', 'botmanager_support', 'validate.perfdri
 // Keep this recipe self-contained: users copy this file to local/, where core
 // module-relative imports would no longer resolve. The local-parser provider
 // launches scripts with the career-ops checkout as cwd.
+
+// The path spelled as given and with its symlinks resolved, so a cwd reached
+// through a link (macOS's /var -> /private/var) still matches.
+function spellings(path) {
+  const out = [resolve(path)];
+  try { out.push(realpathSync(path)); } catch { /* not on disk */ }
+  return process.platform === 'win32' ? out.map((p) => p.toLowerCase()) : out;
+}
+
+// Mirrors isPluginInstallCopy() in path-resolver.mjs: true when dir is inside
+// the copy Claude Code keeps for an installed plugin, which it replaces on
+// every plugin update.
+function isPluginInstallCopy(dir) {
+  const roots = [];
+  const cacheDir = process.env.CLAUDE_CODE_PLUGIN_CACHE_DIR?.trim();
+  if (cacheDir) roots.push(resolve(cacheDir));
+  const configDir = process.env.CLAUDE_CONFIG_DIR?.trim();
+  roots.push(join(configDir ? resolve(configDir) : join(homedir(), '.claude'), 'plugins'));
+  const candidates = spellings(dir);
+  return roots.some((root) => ['cache', 'marketplaces', 'synced'].some((sub) => {
+    const parents = spellings(join(root, sub));
+    return candidates.some((c) => parents.some((p) => {
+      const rel = relative(p, c);
+      return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+    }));
+  }));
+}
+
+// The same order as getCareerOpsRoot() in path-resolver.mjs.
 function getCareerOpsRoot() {
   const env = process.env.CAREER_OPS_ROOT?.trim() || process.env.CAREER_OPS_DATA_DIR?.trim();
   if (env) return resolve(process.cwd(), env);
@@ -23,6 +53,7 @@ function getCareerOpsRoot() {
     const configured = readFileSync(marker, 'utf8').trim();
     if (configured) return resolve(process.cwd(), configured);
   }
+  if (isPluginInstallCopy(process.cwd())) return join(homedir(), 'career-ops-data');
   return process.cwd();
 }
 

@@ -277,6 +277,7 @@ function coverSandbox() {
   // assertion below and not on a missing module. Resolving early is the quiet
   // form of this bug: it reads no profile path, so every letter gets the
   // project default while its CV keeps the user's configured size.
+  copyFileSync(join(ROOT, 'lib', 'output-names.mjs'), join(dir, 'lib', 'output-names.mjs'));
   copyFileSync(join(ROOT, 'lib', 'page-format.mjs'), join(dir, 'lib', 'page-format.mjs'));
   copyFileSync(
     join(ROOT, 'templates', 'cover-letter-template.html'),

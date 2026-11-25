@@ -13,18 +13,27 @@
 //   5. GitHub Actions output: ::error/::warning annotations and the step
 //      summary, only when GITHUB_ACTIONS is true.
 //
+// The rule tests (groups 4, 5 and the own-domain cases) change a copy of a
+// registry for each scenario. They copy the small valid registry in
+// tests/fixtures/employers-valid/, not employers/: a copy of the real registry
+// per scenario made this suite's run time grow with every fold, until it ran
+// past test-all's budget on Windows CI (#7561). The real registry is copied
+// once (COMMITTED), and once more for the one test that adds a contribution on
+// top of it.
+//
 // Run:  node --test tests/employers-registry.test.mjs
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT, unlistedEmployerBoard, unusedEmployerContributionDay } from './helpers.mjs';
+import { resolveProvider } from '../providers/_registry.mjs';
 
 import {
-  BOARD_ATS, DNS_LABEL_ATS, OPTIONAL_REGION_BOARD_URL_BUILDERS, REGIONAL_BOARD_URL_BUILDERS, REGIONS, SUBDOMAIN_LABEL_RE,
+  BOARD_ATS, DNS_LABEL_ATS, OWN_DOMAIN_ATS, OPTIONAL_REGION_BOARD_URL_BUILDERS, REGIONAL_BOARD_URL_BUILDERS, REGIONS, SUBDOMAIN_LABEL_RE,
   SUBDOMAIN_RESERVED_LABELS, WORKDAY_HOSTS, buildBoardUrl, regionsOf,
 } from '../lib/ats-board-url.mjs';
 import { parseBoardUrl } from '../seeds/employers-import.mjs';
@@ -61,16 +70,29 @@ import teamtailor from '../providers/teamtailor.mjs';
 import trakstar from '../providers/trakstar.mjs';
 import turbohire from '../providers/turbohire.mjs';
 import zohoRecruit from '../providers/zoho-recruit.mjs';
+import avature from '../providers/avature.mjs';
+import clearcompany from '../providers/clearcompany.mjs';
+import jobvite from '../providers/jobvite.mjs';
+import eightfold from '../providers/eightfold.mjs';
+import adpMyjobs from '../providers/adp-myjobs.mjs';
+import successfactorsClassic from '../providers/successfactors-classic.mjs';
+import oraclecloud from '../providers/oraclecloud.mjs';
+import csod from '../providers/csod.mjs';
+import phenom from '../providers/phenom.mjs';
+import successfactors from '../providers/successfactors.mjs';
+import peoplesoft from '../providers/peoplesoft.mjs';
 
 const PROVIDERS = {
   greenhouse, ashby, lever, workable, smartrecruiters, rippling, join: joinProvider,
   recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio,
-  prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, 'zoho-recruit': zohoRecruit, workday,
+  prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, 'zoho-recruit': zohoRecruit, avature, clearcompany, jobvite, eightfold, 'adp-myjobs': adpMyjobs, 'successfactors-classic': successfactorsClassic, oraclecloud, csod, phenom, successfactors, peoplesoft, workday,
 };
 
 const VALIDATOR = join(ROOT, 'seeds', 'employers-validate.mjs');
 const REGISTRY = join(ROOT, 'employers');
 const GARBAGE = join(ROOT, 'tests', 'fixtures', 'employers-garbage');
+/** A small valid registry for the rule tests; it is the base of every scenario that copies it. */
+const VALID = join(ROOT, 'tests', 'fixtures', 'employers-valid');
 
 // The suite itself runs in GitHub Actions, so the validator's environment is
 // set explicitly: plain output unless a case asks for the Actions one.
@@ -91,18 +113,21 @@ function rowsOf(dir) {
 }
 
 /**
- * A scratch checkout holding a copy of the real registry, without its inbox.
- * A pull request may add a file to employers/inbox/, and a board of it that the
- * registry already lists is a warning, not an error: the fold skips it. So the
- * tests of the registry read a copy without the inbox; the inbox has its own
- * tests, and one test below runs the validator on the tree as it is.
+ * A scratch checkout holding a copy of a registry (the real one unless `from`
+ * names another), without its inbox. A pull request may add a file to
+ * employers/inbox/, and a board of it that the registry already lists is a
+ * warning, not an error: the fold skips it. So the tests of the registry read a
+ * copy without the inbox; the inbox has its own tests, and one test below runs
+ * the validator on the tree as it is.
+ * @param {string} [from] The registry directory to copy.
  */
-const notTheInbox = (src) => relative(REGISTRY, src).split(sep)[0] !== 'inbox';
-function checkout() {
+function checkout(from = REGISTRY) {
   const dir = mkdtempSync(join(tmpdir(), 'co-employers-'));
-  cpSync(REGISTRY, join(dir, 'employers'), { recursive: true, filter: notTheInbox });
+  cpSync(from, join(dir, 'employers'), { recursive: true, filter: (src) => relative(from, src).split(sep)[0] !== 'inbox' });
   return dir;
 }
+/** A scratch copy of the fixture registry, for a scenario to change. */
+const scenario = () => checkout(join(VALID, 'employers'));
 /** The committed registry, without its inbox: what every test below calls "the registry". */
 const COMMITTED = checkout();
 process.on('exit', () => rmSync(COMMITTED, { recursive: true, force: true }));
@@ -142,7 +167,7 @@ test('the tree as it is, inbox included, passes the validator, and warns only of
 });
 
 test('a contribution waiting in the inbox with a board the registry already lists: a warning, and the registry still passes', () => {
-  const dir = checkout();
+  const dir = scenario();
   try {
     const { row } = rowsOf(reg(dir))[0];
     mkdirSync(reg(dir, 'inbox'), { recursive: true });
@@ -169,11 +194,14 @@ test('every admitted ATS has the provider that reads it, and that provider reads
   assert.deepEqual(Object.keys(PROVIDERS).sort(), [...BOARD_ATS].sort());
   for (const ats of BOARD_ATS) {
     assert.equal(PROVIDERS[ats].id, ats);
-    const board = ats === 'workday' ? 'acme/wd5/External' : 'acme';
+    // A ClearCompany board is its career site's GUID, not a slug.
+    const board = ats === 'workday' ? 'acme/wd5/External' : ats === 'clearcompany' ? '0f8fad5b-d9cb-469f-a165-70867728950e' : ats === 'successfactors-classic' ? 'career5/eu/ACME001' : ats === 'oraclecloud' ? 'acme.fa.us2.oraclecloud.com/CX_1001' : ats === 'csod' ? 'acme/4/acme' : ats === 'peoplesoft' ? 'recruit.acme.example/acme1' : OWN_DOMAIN_ATS.includes(ats) ? 'careers.acme.example' : 'acme';
     const regions = Object.hasOwn(REGIONAL_BOARD_URL_BUILDERS, ats) ? regionsOf(ats) : [undefined, ...regionsOf(ats)];
     for (const region of regions) {
       const url = buildBoardUrl({ ats, region, board, workday_host: ats === 'workday' ? 'jobs' : undefined });
       assert.ok(url, `${ats} ${region ?? ''}`);
+      // A careers site on a company's own domain is read with `provider:` set: no URL names its system.
+      if (OWN_DOMAIN_ATS.includes(ats)) continue;
       assert.ok(PROVIDERS[ats].detect({ name: 'Acme', careers_url: url }), `${ats}.detect() rejects ${url}`);
     }
   }
@@ -181,8 +209,17 @@ test('every admitted ATS has the provider that reads it, and that provider reads
 
 test('every committed row is read by its own provider', () => {
   const rows = rowsOf(REGISTRY);
+  const providers = new Map(Object.entries(PROVIDERS));
   assert.ok(rows.length >= 40, `expected the first hand-picked boards, found ${rows.length}`);
   for (const { file, row } of rows) {
+    if (OWN_DOMAIN_ATS.includes(row.ats)) {
+      assert.equal(buildBoardUrl({ ats: row.ats, board: row.board }), row.careers_url, file);
+      const entry = { name: row.name, careers_url: row.careers_url, provider: row.ats };
+      const resolved = resolveProvider(entry, providers);
+      assert.ok(resolved?.provider, file);
+      assert.equal(resolved.provider, PROVIDERS[row.ats], file);
+      continue;
+    }
     const detected = PROVIDERS[row.ats].detect({ name: row.name, careers_url: row.careers_url });
     assert.ok(detected, `${file}: ${row.ats}.detect() rejects ${row.careers_url}`);
   }
@@ -324,7 +361,17 @@ test('sourceProblem: web-index:<name>@<date> needs a lowercase name and a real d
   ]) {
     assert.match(sourceProblem(bad) ?? '', /^source .* (is not one of|does not end in a real calendar date)/, bad);
   }
-  assert.match(sourceProblem('scraped'), /web-index:<name>@<YYYY-MM-DD>$/);
+  assert.match(sourceProblem('scraped'), /web-index:<name>@<YYYY-MM-DD>, user-submissions@<YYYY-MM-DD>$/);
+});
+
+test('sourceProblem: user-submissions@<date> needs a real date and nothing else', () => {
+  for (const ok of ['user-submissions@2026-11-23', 'user-submissions@2024-02-29']) assert.equal(sourceProblem(ok), null, ok);
+  for (const bad of [
+    'user-submissions', 'user-submissions@', 'user-submissions@2026-11', 'user-submissions@2026-02-30', 'user-submissions@2025-02-29',
+    'User-submissions@2026-11-23', 'user-submissions:acme@2026-11-23', 'user-submissions@2026-11-23 ', 'user_submissions@2026-11-23',
+  ]) {
+    assert.match(sourceProblem(bad) ?? '', /^source .* (is not one of|does not end in a real calendar date)/, bad);
+  }
 });
 
 test('schema.json: the manifest id pattern accepts and rejects what the validator does', () => {
@@ -365,36 +412,47 @@ function addContribution(dir, row = NEW_ROW) {
   // No CHANGELOG.md edit: a contribution does not touch it.
 }
 // Not retired, so that retiring it is a change.
-const firstRow = () => rowsOf(REGISTRY).find((r) => !r.row.retired).row;
+const firstRow = () => rowsOf(join(VALID, 'employers')).find((r) => !r.row.retired).row;
 
-/** Run one PR scenario: base is the real registry, head is a copy changed by `change`. */
+/** Run one PR scenario: base is the fixture registry, head is a copy changed by `change`. */
 function pr(change) {
-  const head = checkout();
+  const head = scenario();
   try {
     change(head);
-    return run(head, ['--base', COMMITTED]);
+    return run(head, ['--base', VALID]);
   } finally {
     rmSync(head, { recursive: true, force: true });
   }
 }
 
-test('--base: a contribution with its own manifest passes, without touching CHANGELOG.md', () => {
-  const r = pr((head) => {
+test('--base: a contribution with its own manifest passes on top of the real registry, without touching CHANGELOG.md', () => {
+  // The one scenario on the real registry: a new row must not collide with anything already merged.
+  const head = checkout();
+  try {
     addContribution(head);
     assert.equal(readFileSync(reg(head, 'CHANGELOG.md'), 'utf8'), readFileSync(join(REGISTRY, 'CHANGELOG.md'), 'utf8'));
-  });
-  assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stderr, '', 'no warnings either');
+    const r = run(head, ['--base', COMMITTED]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stderr, '', 'no warnings either');
+  } finally { rmSync(head, { recursive: true, force: true }); }
 });
 
 test('--base: a base with no registry (the bootstrap PR) counts every row as new', () => {
   const empty = mkdtempSync(join(tmpdir(), 'co-employers-base-'));
-  // A registry that starts has no retired row (a new row cannot be retired), and the real one may
-  // have some: the copy it is checked from drops those marks.
-  const head = checkout();
+  // A registry that starts has no retired row (a new row cannot be retired), and the fixture has
+  // one: the copy it is checked from drops those marks.
+  const head = scenario();
   try {
-    for (const { row } of rowsOf(reg(head)).filter((r) => r.row.retired === true)) {
-      editRow(head, row.careers_url, ({ retired, retired_reason, ...rest }) => rest);
+    for (const ats of readdirSync(reg(head, 'boards'))) {
+      for (const f of readdirSync(reg(head, 'boards', ats))) {
+        const path = reg(head, 'boards', ats, f);
+        const lines = readFileSync(path, 'utf8').split('\n').filter(Boolean);
+        const next = lines.map((l) => {
+          const { retired, retired_reason, ...rest } = JSON.parse(l);
+          return retired === true ? JSON.stringify(rest) : l;
+        });
+        if (next.some((l, i) => l !== lines[i])) writeFileSync(path, `${next.join('\n')}\n`);
+      }
     }
     const r = run(head, ['--base', empty]);
     assert.equal(r.status, 0, r.stderr);
@@ -457,7 +515,8 @@ test('--base: the provenance of an existing row is fixed', () => {
 // A second spelling of a merged board fails on the newcomer, wherever it sorts.
 // Workday's API answers any letter case, so the registry stores the case of the
 // careers page's canonical link; CrowdStrike's is all lowercase, which makes an
-// uppercase newcomer sort BEFORE the merged row.
+// uppercase newcomer sort BEFORE the merged row. The fixture holds both rows as
+// they are committed in employers/.
 const CROWDSTRIKE = 'https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers';
 const GUIDEWIRE = 'https://wd5.myworkdaysite.com/recruiting/guidewire/external';
 
@@ -486,13 +545,13 @@ test('the committed Workday rows keep the case of the careers page canonical lin
 });
 
 test('--base: a letter-case variant of a merged board fails on the new row, even when it sorts first', () => {
-  const head = checkout();
+  const head = scenario();
   try {
     const order = addWorkdayVariant(head, 'crowdstrike/wd5/CrowdStrikeCareers', 'jobs');
     const newLine = order.indexOf('https://crowdstrike.wd5.myworkdayjobs.com/CrowdStrikeCareers') + 1;
     const keptLine = order.indexOf(CROWDSTRIKE) + 1;
     assert.ok(newLine < keptLine, 'the variant sorts before the merged row');
-    const r = run(head, ['--base', COMMITTED]);
+    const r = run(head, ['--base', VALID]);
     assert.equal(r.status, 1);
     const file = 'employers/boards/workday/c.ndjson';
     assert.match(r.stderr, new RegExp(`${file}:${newLine}: careers_url differs only in letter case from ${file}:${keptLine}, which is already merged and keeps its spelling`));
@@ -501,12 +560,12 @@ test('--base: a letter-case variant of a merged board fails on the new row, even
 });
 
 test('--base: a merged Workday board added again under the other host form fails on the new row', () => {
-  const head = checkout();
+  const head = scenario();
   try {
     const order = addWorkdayVariant(head, 'guidewire/wd5/external', 'jobs');
     const newLine = order.indexOf('https://guidewire.wd5.myworkdayjobs.com/external') + 1;
     const keptLine = order.indexOf(GUIDEWIRE) + 1;
-    const r = run(head, ['--base', COMMITTED]);
+    const r = run(head, ['--base', VALID]);
     assert.equal(r.status, 1);
     const file = 'employers/boards/workday/g.ndjson';
     assert.match(r.stderr, new RegExp(`${file}:${newLine}: the same Workday board as ${file}:${keptLine}, which is already merged and keeps its spelling, under the other host form`));
@@ -525,7 +584,7 @@ function addRows(dir, rows) {
 }
 
 test('--base: rows of the new subdomain ATS pass, and one Zoho Recruit tenant on two data-centre domains is two boards', () => {
-  const zoho = unlistedEmployerBoard('zoho-recruit', 'fixture-co');
+  const zoho = 'fixture-co';
   const r = pr((head) => addRows(head, [
     { ats: 'zoho-recruit', board: zoho },
     { ats: 'zoho-recruit', region: 'eu', board: zoho },
@@ -534,13 +593,13 @@ test('--base: rows of the new subdomain ATS pass, and one Zoho Recruit tenant on
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stderr, '', 'no warnings either');
   for (const [ats, region] of [['teamtailor'], ['personio'], ['personio', 'com'], ['trakstar'], ['hibob']]) {
-    const one = pr((head) => addRows(head, [{ ats, region, board: unlistedEmployerBoard(ats, 'fixture-co') }]));
+    const one = pr((head) => addRows(head, [{ ats, region, board: 'fixture-co' }]));
     assert.equal(one.status, 0, `${ats} ${region ?? ''}: ${one.stderr}`);
   }
 });
 
 test('Zoho Recruit and the new subdomain ATS: region, case, own subdomains and the canonical URL are checked', () => {
-  const zoho = unlistedEmployerBoard('zoho-recruit', 'fixture-co');
+  const zoho = 'fixture-co';
   const dotCom = buildBoardUrl({ ats: 'zoho-recruit', board: zoho });
   const cases = [
     [{ ats: 'zoho-recruit', region: 'us', board: zoho, careers_url: dotCom },
@@ -550,19 +609,18 @@ test('Zoho Recruit and the new subdomain ATS: region, case, own subdomains and t
     [{ ats: 'zoho-recruit', board: zoho.toUpperCase(), careers_url: dotCom }, 'zoho-recruit boards are lowercase'],
   ];
   for (const [row, message] of cases) {
-    const head = checkout();
+    const head = scenario();
     try {
       addRows(head, [row]);
       const { errors } = validateRegistry({ root: head });
       assert.ok(errors.some((x) => x.message.includes(message)), `${message}\n${JSON.stringify(errors)}`);
     } finally { rmSync(head, { recursive: true, force: true }); }
   }
-  const head = checkout();
+  const head = scenario();
   try {
-    const teamtailor = unlistedEmployerBoard('teamtailor', 'fixture-co');
+    const teamtailor = 'fixture-co';
     addRows(head, [
       { ats: 'teamtailor', region: 'eu', board: teamtailor, careers_url: buildBoardUrl({ ats: 'teamtailor', board: teamtailor }) },
-      // A reserved label is never a committed board, so it needs no unlisted name.
       { ats: 'taleez', board: 'aide', careers_url: 'https://aide.taleez.com' },
     ]);
     const { errors } = validateRegistry({ root: head });
@@ -610,13 +668,13 @@ test("each new subdomain ATS's reserved labels are refused by its own provider",
 
 test('boards/ has no hard size limit: above 25 MB it is a warning, never an error', () => {
   assert.equal(BOARDS_WARN_BYTES, 25 * 1024 * 1024);
-  const head = checkout();
+  const head = scenario();
   try {
     // One oversized row: its name is an error of its own, but the size is only a warning.
     mkdirSync(reg(head, 'boards', 'breezy'), { recursive: true });
     writeFileSync(reg(head, 'boards', 'breezy', 'f.ndjson'), `${JSON.stringify({ ...NEW_ROW, name: 'x'.repeat(BOARDS_WARN_BYTES) })}\n`);
     const { errors, warnings } = validateRegistry({ root: head });
-    assert.ok(warnings.some((w) => w.file === 'employers/boards' && /^boards\/ is \d+\.\d+ MB, above 25 MB/.test(w.message)), JSON.stringify(warnings));
+    assert.ok(warnings.some((w) => w.file === 'employers/boards' && /^boards\/ is \d+(?:\.\d+)? MB, above 25 MB/.test(w.message)), JSON.stringify(warnings));
     assert.deepEqual(errors.filter((e) => e.file === 'employers/boards'), [], 'the size is never an error');
   } finally { rmSync(head, { recursive: true, force: true }); }
 });
@@ -630,10 +688,10 @@ test('boards/ under the warning size is quiet, and the threshold is the only tri
 });
 
 test('CHANGELOG.md is generated by --write-changelog and not compared with the manifests', () => {
-  const manifests = readdirSync(join(REGISTRY, 'contributions')).map((f) => readJson(join(REGISTRY, 'contributions', f)));
+  const manifests = readdirSync(join(VALID, 'employers', 'contributions')).map((f) => readJson(join(VALID, 'employers', 'contributions', f)));
   for (const m of manifests) assert.ok(renderChangelog(manifests).includes(`\`${m.id}\` (${m.rows} boards, source \`${m.source}\`): ${m.attribution}`));
 
-  const head = checkout();
+  const head = scenario();
   try {
     writeFileSync(reg(head, 'CHANGELOG.md'), '# edited by hand\n');
     const stale = run(head);
@@ -683,7 +741,7 @@ test('in GitHub Actions, the garbage fixture fails with one ::error per finding 
     assert.equal(errorCommands.length, EXPECTED.length, r.stdout);
     assert.equal(warningCommands.length, 1, r.stdout);
     assert.ok(errorCommands.includes('::error file=employers/boards/greenhouse/a.ndjson,line=2::duplicate careers_url, already at employers/boards/greenhouse/a.ndjson:1'), r.stdout);
-    assert.ok(errorCommands.includes('::error file=employers/notes.txt::unexpected entry; the registry holds only README.md, LICENSE, THIRD_PARTY_NOTICES.md, CHANGELOG.md, schema.json, contributions, boards, inbox'), r.stdout);
+    assert.ok(errorCommands.includes('::error file=employers/notes.txt::unexpected entry; the registry holds only README.md, LICENSE, THIRD_PARTY_NOTICES.md, CHANGELOG.md, schema.json, contributions, boards, inbox, OWN_DOMAIN_CONTRIBUTORS'), r.stdout);
     assert.match(warningCommands[0], /^::warning file=employers\/boards\/lever\/e\.ndjson,line=2::website "euco\.example" is also on /);
     // The plain per-finding lines are not repeated; the closing count stays.
     assert.ok(!r.stderr.split('\n').some((l) => l.startsWith('employers/') || l.startsWith('warning: ')), r.stderr);
@@ -742,4 +800,57 @@ test('the step summary lists the first findings only, errors first, and makes re
   const row = one.split('\n').find((l) => l.startsWith('| warning |'));
   assert.equal(row, '| warning | employers/boards/ashby/b.ndjson | 1 | a \\| pipe, \\<b\\>html\\</b\\> and \\`code\\` second line |');
   assert.ok(one.includes('**Valid**: 1 row in 1 file, 1 contribution; 0 errors, 1 warning.'), one);
+});
+
+// ── Careers sites on a company's own domain (phenom, successfactors, peoplesoft) ──
+
+const MARK = { mark: 'phenompeople-assets', checked_on: NEW_DAY };
+const ownRow = (over = {}) => ({ ats: 'phenom', board: 'careers.fixture-own.example', own_domain_mark: MARK, ...over });
+const allowNewcomer = (head) => appendFileSync(reg(head, 'OWN_DOMAIN_CONTRIBUTORS'), '\nnewcomer\n');
+
+test('own domain: rows from a contributor in OWN_DOMAIN_CONTRIBUTORS pass, for each of the three systems', () => {
+  const r = pr((head) => {
+    allowNewcomer(head);
+    addRows(head, [
+      ownRow(),
+      { ats: 'successfactors', board: 'jobs.fixture-own.example/Brand', own_domain_mark: { mark: 'rmkcdn-assets', checked_on: NEW_DAY } },
+      { ats: 'peoplesoft', board: 'recruit.fixture-own.example/own1', own_domain_mark: { mark: 'hrs-cg-search', checked_on: NEW_DAY } },
+    ]);
+  });
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test('own domain: the contributor, the mark, the host and the board are checked', () => {
+  const cases = [
+    [(head) => addRows(head, [ownRow()]), 'comes only from a contribution of OWN_DOMAIN_CONTRIBUTORS'],
+    [(head) => { allowNewcomer(head); addRows(head, [ownRow({ own_domain_mark: undefined })]); }, 'own_domain_mark is required on phenom rows'],
+    [(head) => { allowNewcomer(head); addRows(head, [ownRow({ own_domain_mark: { mark: 'jobs2web', checked_on: NEW_DAY } })]); }, 'own_domain_mark.mark "jobs2web" is not one of: phenompeople-assets'],
+    [(head) => { allowNewcomer(head); addRows(head, [ownRow({ own_domain_mark: { mark: 'phenompeople-assets', checked_on: '2999-01-01' } })]); }, 'is in the future'],
+    [(head) => { allowNewcomer(head); addRows(head, [ownRow(), { ats: 'successfactors', board: 'careers.fixture-own.example', own_domain_mark: { mark: 'jobs2web', checked_on: NEW_DAY } }]); }, 'a company\'s own domain is on one row'],
+    [(head) => { allowNewcomer(head); addRows(head, [ownRow({ board: 'careers.phenompeople.com' })]); }, 'not on a vendor\'s domain'],
+    [(head) => { allowNewcomer(head); addRows(head, [ownRow({ board: 'jobs.fixture-own.local' })]); }, 'not local'],
+    [(head) => { allowNewcomer(head); addRows(head, [ownRow({ board: 'careers.fixture-own.example/Brand' })]); }, 'must be the site\'s host'],
+    [(head) => { allowNewcomer(head); addRows(head, [{ ats: 'peoplesoft', board: 'recruit.fixture-own.example', own_domain_mark: { mark: 'hrs-cg-search', checked_on: NEW_DAY } }]); }, 'must be host/site'],
+    [(head) => addRows(head, [{ ats: 'teamtailor', board: 'fixture-co', own_domain_mark: MARK }]), 'own_domain_mark is only used on phenom, successfactors, peoplesoft rows'],
+  ];
+  for (const [change, message] of cases) {
+    const head = scenario();
+    try {
+      change(head);
+      const { errors } = validateRegistry({ root: head });
+      assert.ok(errors.some((x) => x.message.includes(message)), `${message}\n${JSON.stringify(errors)}`);
+    } finally { rmSync(head, { recursive: true, force: true }); }
+  }
+});
+
+test('own domain: OWN_DOMAIN_CONTRIBUTORS is a file, and the committed one names only the maintainer', () => {
+  const lines = readFileSync(reg(ROOT, 'OWN_DOMAIN_CONTRIBUTORS'), 'utf8').split('\n').map((l) => l.split('#')[0].trim()).filter(Boolean);
+  assert.deepEqual(lines, ['santifer']);
+  const head = scenario();
+  try {
+    rmSync(reg(head, 'OWN_DOMAIN_CONTRIBUTORS'), { force: true });
+    mkdirSync(reg(head, 'OWN_DOMAIN_CONTRIBUTORS'));
+    const { errors } = validateRegistry({ root: head });
+    assert.ok(errors.some((x) => x.file === 'employers/OWN_DOMAIN_CONTRIBUTORS' && x.message === 'must be a file'), JSON.stringify(errors));
+  } finally { rmSync(head, { recursive: true, force: true }); }
 });

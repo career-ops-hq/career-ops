@@ -628,7 +628,9 @@ export const hasMissingArchive = (findings) => findings.some((f) => f.type === '
 // a real counterparty and a real history, so having no record of what the role
 // asked for is a hole in the candidate's own archive — distinct from `SKIP` /
 // `Evaluated`, which were never applied to and are out of scope here.
-const SUBMITTED_LABELS = new Set(['Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected']);
+// Assessment (#4317) sits between Responded and Interview: the application is
+// out, and the employer has answered with a test.
+const SUBMITTED_LABELS = new Set(['Applied', 'Responded', 'Assessment', 'Interview', 'Offer', 'Hired', 'Rejected']);
 
 /**
  * Applications that were SENT but have no archive of any kind.
@@ -1282,5 +1284,8 @@ if (isMainModule(import.meta.url)) {
     }, null, 2));
   }
 
-  process.exit(hasMissingArchive(result.findings) ? 1 : 0);
+  // process.exitCode, not process.exit(): a write to a pipe can still be
+  // queued here (it is on macOS), and process.exit() drops it, so a result
+  // over the 64 KiB pipe buffer reached an agent's shell cut off mid-JSON.
+  process.exitCode = hasMissingArchive(result.findings) ? 1 : 0;
 }

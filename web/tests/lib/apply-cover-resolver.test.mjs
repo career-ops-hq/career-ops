@@ -114,12 +114,17 @@ async function withFixture(files, fn, rows, manifest) {
         '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
         '|---|------|---------|------|-------|--------|-----|--------|-------|',
         ...rows.map(
-          ({ n, company, role }) =>
-            `| ${n} | 2026-01-01 | ${company} | ${role} | 4.5/5 | Applied | ✅ | [${n}](../reports/${n}-x-2026-01-01.md) | |`
+          ({ n, company, role, reportCell }) =>
+            `| ${n} | 2026-01-01 | ${company} | ${role} | 4.5/5 | Applied | ✅ | ${reportCell ?? `[${n}](../reports/${n}-x-2026-01-01.md)`} | |`
         ),
         '',
       ].join('\n')
     );
+  }
+  for (const { n, reportFile } of rows ?? []) {
+    if (!reportFile) continue;
+    mkdirSync(join(root, 'reports'), { recursive: true });
+    writeFileSync(join(root, 'reports', reportFile), `# Report ${n}\n`);
   }
   if (manifest) {
     mkdirSync(join(root, 'data'), { recursive: true });
@@ -336,4 +341,192 @@ test('matchesTailoredCover: an over-budget draft beside the cover is never the c
   assert.equal(matchesTailoredCover('acme-vp-marketing-cover.overflow.pdf', 'acme'), false);
   assert.equal(matchesTailoredCover('acme-vp-marketing-cover.overflow-2.pdf', 'acme'), false);
   assert.equal(matchesTailoredCover('acme-vp-marketing-cover.pdf', 'acme'), true);
+});
+
+test('matchers: report-leading names from lib/output-names.mjs (#6667)', async () => {
+  const { matchesTailoredCv, matchesTailoredCover } = await import('../../src/lib/apply/cv-match.mjs');
+  // The new layout: {NNN}-{company}-{kind}-{candidate}-{date}.pdf
+  assert.equal(matchesTailoredCv('024-zep-cv-avery-quinn-2026-11-07.pdf', 'zep'), true);
+  assert.equal(matchesTailoredCover('024-zep-cv-avery-quinn-2026-11-07.pdf', 'zep'), false);
+  assert.equal(matchesTailoredCover('024-zep-cover-avery-quinn-2026-11-07.pdf', 'zep'), true);
+  assert.equal(matchesTailoredCv('024-zep-cover-avery-quinn-2026-11-07.pdf', 'zep'), false);
+  // buildOutputName refuses a name with a cv/cover word in a slug, so a standard
+  // name has one kind token and a name with two is not one this repo wrote:
+  // neither matcher claims it, whatever slug the tracker gives.
+  for (const [name, slug] of [
+    ['024-acme-cv-tools-cover-jane-smith-2026-11-07.pdf', 'acme-cv-tools'],
+    ['024-acme-cv-tools-cover-jane-smith-2026-11-07.pdf', 'acme'],
+    ['024-acme-cv-cover-dana-2026-11-07.pdf', 'acme'],
+    ['024-zep-cover-robin-cover-jones-2026-11-07.pdf', 'zep'],
+  ]) {
+    assert.equal(matchesTailoredCv(name, slug), false, name);
+    assert.equal(matchesTailoredCover(name, slug), false, name);
+  }
+  // The company match is exact (cv.ts, #2352): Acme does not claim Acme Bank,
+  // and a tracker slug that is only the front of the company finds nothing.
+  assert.equal(matchesTailoredCv('024-acme-bank-cv-jane-smith-2026-11-07.pdf', 'acme'), false);
+  assert.equal(matchesTailoredCover('024-acme-bank-cover-jane-smith-2026-11-07.pdf', 'acme'), false);
+  assert.equal(matchesTailoredCv('330-veeva-systems-cv-robin-jones-2026-11-07.pdf', 'veeva'), false);
+  assert.equal(matchesTailoredCv('330-veeva-systems-cv-robin-jones-2026-11-07.pdf', 'veeva-systems'), true);
+  // The company is a prefix match: a candidate called Zep is not the company.
+  assert.equal(matchesTailoredCv('024-acme-cv-zep-smith-2026-11-07.pdf', 'zep'), false);
+  assert.equal(matchesTailoredCover('024-acme-cover-zep-smith-2026-11-07.pdf', 'zep'), false);
+  assert.equal(matchesTailoredCv('024-acme-cv-robin-jones-2026-11-07.pdf', 'robin'), false);
+  // Variants, drafts and other companies keep their existing behavior.
+  assert.equal(matchesTailoredCv('024-zep-cv-avery-quinn-2026-11-07-ats.pdf', 'zep'), true);
+  assert.equal(matchesTailoredCv('024-zep-cv-avery-quinn-2026-11-07.overflow.pdf', 'zep'), false);
+  assert.equal(matchesTailoredCv('024-zepellin-cv-avery-quinn-2026-11-07.pdf', 'zep'), false);
+  assert.equal(matchesTailoredCv('cv-avery-quinn-zep-2026-11-07.pdf', 'zep'), true);
+  // An accented company slugs the same way here as in lib/output-names.mjs.
+  const { companySlug } = await import('../../src/lib/company-slug.mjs');
+  const { kebab } = await import('../../../lib/output-names.mjs');
+  assert.equal(companySlug('Zoë Café').slug, kebab('Zoë Café'));
+  assert.equal(matchesTailoredCv('031-zoe-cafe-cv-dana-quinn-2026-11-09.pdf', companySlug('Zoë Café').slug), true);
+});
+
+test('matchers agree with buildOutputName for every name it will write (#6667)', async () => {
+  const { buildOutputName } = await import('../../../lib/output-names.mjs');
+  const { kebab } = await import('../../../lib/output-names.mjs');
+  const { matchesTailoredCv, matchesTailoredCover, standardKind } = await import('../../src/lib/apply/cv-match.mjs');
+  const companies = ['Acme', 'CV Tools', 'Cover Systems', 'Cover Genius', 'The CV Centre', 'Zoë Café'];
+  const candidates = ['Jane Smith', 'Jane Cover', 'Cover Dana', 'Robin Cv Jones'];
+  let built = 0;
+  let refused = 0;
+  const bad = [];
+  for (const company of companies) {
+    for (const candidate of candidates) {
+      for (const kind of ['cv', 'cover']) {
+        let name;
+        try {
+          name = buildOutputName({ report: 24, company, kind, candidate, date: '2026-11-07' });
+        } catch {
+          refused += 1;
+          continue;
+        }
+        built += 1;
+        const slug = kebab(company);
+        const wantCv = kind === 'cv';
+        if (standardKind(name) !== kind) bad.push(`${name} -> kind ${standardKind(name)}`);
+        if (matchesTailoredCv(name, slug) !== wantCv) bad.push(`${name} cv-match`);
+        if (matchesTailoredCover(name, slug) !== !wantCv) bad.push(`${name} cover-match`);
+      }
+    }
+  }
+  assert.deepEqual(bad, []);
+  // Both sides are exercised: names with kind words at the edges are written
+  // and read back, and the ones with a kind word inside a slug are refused.
+  assert.ok(built > 0 && refused > 0, `built=${built} refused=${refused}`);
+  for (const [company, candidate, kind] of [['Cover Systems', 'Jane Smith', 'cover'], ['Acme', 'Jane Cover', 'cover'], ['Cover Genius', 'Dana Quinn', 'cover'], ['CV Tools', 'Jane Smith', 'cover']]) {
+    const name = buildOutputName({ report: 24, company, kind, candidate, date: '2026-11-07' });
+    assert.equal(standardKind(name), kind, name);
+  }
+});
+
+test('an accented company is found under both its folded and its legacy slug', async () => {
+  const { companySlug } = await import('../../src/lib/company-slug.mjs');
+  const { matchesTailoredCover, matchesTailoredCv, matchesCompanyKeys } = await import('../../src/lib/apply/cv-match.mjs');
+  const key = companySlug('Zoë Café');
+  assert.deepEqual(key.keys, ['zoe-cafe', 'zo-caf']);
+  const anyKey = (match, name) => matchesCompanyKeys(match, name, key.keys);
+  // The standard name uses the folded slug; covers written without --report and
+  // older CVs carry the slug that dropped the accented letters.
+  assert.equal(anyKey(matchesTailoredCover, '031-zoe-cafe-cover-dana-quinn-2026-11-09.pdf'), true);
+  assert.equal(anyKey(matchesTailoredCover, 'zo-caf--engineer-cover.pdf'), true);
+  assert.equal(anyKey(matchesTailoredCv, 'cv-dana-quinn-zo-caf-2026-11-09.pdf'), true);
+  assert.equal(anyKey(matchesTailoredCover, 'acme-engineer-cover.pdf'), false);
+  // An unaccented company has a single key.
+  assert.deepEqual(companySlug('Acme Co').keys, ['acme-co']);
+});
+
+test('a legacy key never claims a standard-layout file or a kind word (#6667)', async () => {
+  const { companySlug } = await import('../../src/lib/company-slug.mjs');
+  const { matchesTailoredCover, matchesTailoredCv, matchesCompanyKeys } = await import('../../src/lib/apply/cv-match.mjs');
+  // "Café" has the legacy key "caf"; the company CAF owns this standard name.
+  const cafe = companySlug('Café');
+  assert.deepEqual(cafe.keys, ['cafe', 'caf']);
+  assert.equal(matchesCompanyKeys(matchesTailoredCv, '031-caf-cv-dana-quinn-2026-11-09.pdf', cafe.keys), false);
+  assert.equal(matchesCompanyKeys(matchesTailoredCover, '031-caf-cover-dana-quinn-2026-11-09.pdf', cafe.keys), false);
+  assert.equal(matchesCompanyKeys(matchesTailoredCv, '031-cafe-cv-dana-quinn-2026-11-09.pdf', cafe.keys), true);
+  // A legacy key that is a kind word is dropped, so "CVé" cannot pick up any cv-*.pdf.
+  assert.deepEqual(companySlug('CVé').keys, ['cve']);
+  assert.deepEqual(companySlug('Coveré').keys, ['covere']);
+  assert.equal(matchesCompanyKeys(matchesTailoredCv, 'cv-acme-2026-11-09.pdf', companySlug('CVé').keys), false);
+  assert.equal(matchesCompanyKeys(matchesTailoredCover, 'acme-role-cover.pdf', companySlug('Coveré').keys), false);
+});
+
+test('a standard cover is selected by the row\'s report number, not a role token (#6667)', async () => {
+  await withFixture(
+    [['031-acme-cover-dana-quinn-2026-11-09.pdf'], ['032-acme-cover-dana-quinn-2026-11-09.pdf']],
+    async (outputDir) => {
+      assert.equal(await resolveTailoredCover(undefined, '31'), join(outputDir, '031-acme-cover-dana-quinn-2026-11-09.pdf'));
+      assert.equal(await resolveTailoredCover(undefined, '32'), join(outputDir, '032-acme-cover-dana-quinn-2026-11-09.pdf'));
+      assert.equal(await resolveTailoredCover(undefined, '33'), null);
+    },
+    [
+      { n: '31', company: 'Acme', role: 'Engineer' },
+      { n: '32', company: 'Acme', role: 'Designer' },
+      { n: '33', company: 'Acme', role: 'Analyst' },
+    ]
+  );
+});
+
+test('Zoë does not claim a standard file written for Zo (#6667)', async () => {
+  const { companySlug } = await import('../../src/lib/company-slug.mjs');
+  const { matchesTailoredCover, matchesTailoredCv, matchesCompanyKeys } = await import('../../src/lib/apply/cv-match.mjs');
+  const { keys } = companySlug('Zoë');
+  assert.deepEqual(keys, ['zoe', 'zo']);
+  assert.equal(matchesCompanyKeys(matchesTailoredCv, '024-zo-cv-jane-smith-2026-11-07.pdf', keys), false);
+  assert.equal(matchesCompanyKeys(matchesTailoredCover, '024-zo-cover-jane-smith-2026-11-07.pdf', keys), false);
+  assert.equal(matchesCompanyKeys(matchesTailoredCv, '024-zoe-cv-jane-smith-2026-11-07.pdf', keys), true);
+});
+
+test('a legacy cover keeps the unfolded role spelling the writer emits (#6667)', async () => {
+  await withFixture(
+    [['acme-d-veloppeur-cover.pdf']],
+    async (outputDir) => {
+      assert.equal(await resolveTailoredCover(undefined, '31'), join(outputDir, 'acme-d-veloppeur-cover.pdf'));
+    },
+    [{ n: '31', company: 'Acme', role: 'Développeur' }]
+  );
+});
+
+test('a standard cover resolves from the report file when the tracker row has no report link (#6667)', async () => {
+  await withFixture(
+    [['031-acme-cover-dana-quinn-2026-11-09.pdf']],
+    async (outputDir) => {
+      assert.equal(await resolveTailoredCover(undefined, '31'), join(outputDir, '031-acme-cover-dana-quinn-2026-11-09.pdf'));
+    },
+    [{ n: '31', company: 'Acme', role: 'Engineer', reportCell: '—', reportFile: '031-acme-2026-11-09.md' }]
+  );
+});
+
+test('a standard cover whose report slug carries the role is still found by report number (#6667)', async () => {
+  await withFixture(
+    [
+      ['031-acme-engineer-cover-dana-quinn-2026-11-09.pdf'],
+      ['031-acme-engineer-cv-dana-quinn-2026-11-09.pdf'],
+    ],
+    async (outputDir) => {
+      assert.equal(
+        await resolveTailoredCover(undefined, '31'),
+        join(outputDir, '031-acme-engineer-cover-dana-quinn-2026-11-09.pdf')
+      );
+    },
+    [{ n: '31', company: 'Acme', role: 'Engineer' }]
+  );
+});
+
+test('an ATS CV is never matched as a cover (#6667)', async () => {
+  const { matchesTailoredCover } = await import('../../src/lib/apply/cv-match.mjs');
+  assert.equal(matchesTailoredCover('024-zep-cv-avery-cover-2026-11-07.ats.pdf', 'zep'), false);
+});
+
+test("a numeric report fallback never lets another company's standard cover through (#6667)", async () => {
+  await withFixture(
+    [['031-other-engineer-cover-dana-quinn-2026-11-09.pdf']],
+    async () => {
+      assert.equal(await resolveTailoredCover(undefined, '31'), null);
+    },
+    [{ n: '31', company: 'Acme', role: 'Engineer', reportCell: '—', reportFile: '031-other-engineer-2026-11-09.md' }]
+  );
 });

@@ -50,6 +50,8 @@ import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
 import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
 import { APPLY_MIN } from './lib/score-action.mjs';
 import { browserLaunchOptions } from './lib/browser-launch.mjs';
+import { rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
+import { fetchResponse } from './providers/_http.mjs';
 
 // Ambient privacy guard over global fetch. Installed explicitly here (rather
 // than relying on NODE_OPTIONS) so the OpenRouter path is guarded in a plain
@@ -84,7 +86,11 @@ function loadEnvFile() {
 // ---------------------------------------------------------------------------
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
-const MAX_TOKENS = 8192;
+// Output cap sent as max_tokens. CAREER_OPS_MAX_TOKENS overrides it, the variable
+// openai-eval.mjs and openai-tailor.mjs already read: a reasoning model (glm-5.3,
+// a thinking Qwen) can spend all 8192 tokens reasoning and leave the reply empty,
+// while a full A-G report plus that reasoning fits in openai-eval's 32768.
+const DEFAULT_MAX_TOKENS = 8192;
 const RATE_LIMIT_DELAY_MS = 2500;  // pause between requests on free tier
 const DEFAULT_MODEL_TIMEOUT_MS = 120_000;
 // setTimeout() treats delays above 2^31-1 ms as 1 ms, so larger overrides are rejected.
@@ -101,6 +107,21 @@ const getModelTimeoutMs = () =>
   parseTimeoutOverride(process.env.CAREER_OPS_TIMEOUT_MS) ??
   parseTimeoutOverride(process.env.OPENROUTER_TIMEOUT_MS) ??
   DEFAULT_MODEL_TIMEOUT_MS;
+// Same rules as openai-eval: empty means unset, digits only (so "8k" is not read
+// as 8). An invalid value warns once and keeps the default instead of failing
+// every model in the rotation. Resolved on each call, like the timeout.
+let warnedMaxTokens = null;
+const getMaxTokens = () => {
+  const raw = process.env.CAREER_OPS_MAX_TOKENS?.trim();
+  if (!raw) return DEFAULT_MAX_TOKENS;
+  const parsed = /^\d+$/.test(raw) ? Number(raw) : NaN;
+  if (Number.isSafeInteger(parsed) && parsed > 0) return parsed;
+  if (warnedMaxTokens !== raw) {
+    warnedMaxTokens = raw;
+    console.warn(`⚠️  Invalid CAREER_OPS_MAX_TOKENS: "${raw}" (must be a positive integer of output tokens); using ${DEFAULT_MAX_TOKENS}.`);
+  }
+  return DEFAULT_MAX_TOKENS;
+};
 
 // ---------------------------------------------------------------------------
 // Quota & response validation errors
@@ -402,10 +423,16 @@ export function buildCachedSystemMessage(systemPrompt) {
 // still carry every block heading and the score line validateEvaluationResponse
 // checks, so it would be saved as the report. A reply with no finish_reason is
 // accepted: some servers omit the field, and nothing then says it stopped early.
-function assertReplyFinished(data) {
+//
+// It runs before the empty-content check: a reasoning model that spends the
+// whole cap thinking answers with empty content and finish_reason "length",
+// and "Empty response" would hide that raising CAREER_OPS_MAX_TOKENS fixes it.
+function assertReplyFinished(data, maxTokens = getMaxTokens()) {
   const reason = data.choices?.[0]?.finish_reason;
   if (reason == null || reason === 'stop') return;
-  const hint = reason === 'length' ? ` (cut off at max_tokens ${MAX_TOKENS})` : '';
+  const hint = reason === 'length'
+    ? ` (cut off at max_tokens ${maxTokens}; raise CAREER_OPS_MAX_TOKENS for a reasoning model)`
+    : '';
   throw new Error(`Incomplete reply: finish_reason "${String(reason).slice(0, 40)}"${hint}`);
 }
 
@@ -426,13 +453,14 @@ async function callOpenRouter(systemPrompt, userMessage) {
   if (pinnedModel) {
     activeModel = pinnedModel;
     process.stdout.write(`[model] ${pinnedModel} (pinned) ... `);
+    const maxTokens = getMaxTokens();
     const body = JSON.stringify({
       model: pinnedModel,
       messages: [
         buildCachedSystemMessage(systemPrompt),
         { role: 'user', content: userMessage },
       ],
-      max_tokens: MAX_TOKENS,
+      max_tokens: maxTokens,
     });
     const ctrl = new AbortController();
     const timeoutMs = getModelTimeoutMs();
@@ -461,14 +489,14 @@ async function callOpenRouter(systemPrompt, userMessage) {
       }
       const data = await resp.json();
       if (data.error) throw new Error(data.error.message);
+      assertReplyFinished(data, maxTokens);
       const content = data.choices?.[0]?.message?.content ?? '';
       if (!content) throw new Error('Empty response');
-      assertReplyFinished(data);
       console.log('OK');
       const usage = normalizeOpenAIUsage(data.usage);
       return { content, usage };
     } catch (e) {
-      if (e.name === 'AbortError') throw new Error(`Pinned model timed out after ${timeoutMs / 1000}s`);
+      if (e.name === 'AbortError') throw new Error(`Pinned model timed out after ${timeoutMs / 1000}s (set CAREER_OPS_TIMEOUT_MS to wait longer)`);
       throw e;
     } finally {
       clearTimeout(timerId);
@@ -493,13 +521,14 @@ async function callOpenRouter(systemPrompt, userMessage) {
     process.stdout.write(`[model] ${model} ... `);
 
     try {
+      const maxTokens = getMaxTokens();
       const body = JSON.stringify({
         model,
         messages: [
           buildCachedSystemMessage(systemPrompt),
           { role: 'user', content: userMessage },
         ],
-        max_tokens: MAX_TOKENS,
+        max_tokens: maxTokens,
       });
 
       const controller = new AbortController();
@@ -536,9 +565,9 @@ async function callOpenRouter(systemPrompt, userMessage) {
       }
       if (data.error) throw new Error(data.error.message);
 
+      assertReplyFinished(data, maxTokens);
       const content = data.choices?.[0]?.message?.content ?? '';
       if (!content) throw new Error('Empty response');
-      assertReplyFinished(data);
 
       const usage = normalizeOpenAIUsage(data.usage);
 
@@ -596,6 +625,7 @@ export {
   rateLimitCounts,
   blacklistedModels,
   getModelTimeoutMs,
+  getMaxTokens,
   cmdEvaluate,
   cmdPipeline,
 };
@@ -707,22 +737,39 @@ export function buildSystemPrompt(modeContent, ctx, { evaluate = false } = {}) {
 // ---------------------------------------------------------------------------
 // Job page content fetcher (Playwright-first, plain fetch fallback)
 // ---------------------------------------------------------------------------
-// Reject unsafe fetch targets (SSRF defense-in-depth): http(s) only, never
-// loopback / link-local / private / cloud-metadata hosts. URLs come from the
-// user's own portals.yml / pipeline.md, but we still fail closed.
-function assertSafeRemoteUrl(url) {
-  let u;
-  try { u = new URL(url); } catch { throw new Error(`Invalid URL: ${url}`); }
-  if (u.protocol !== 'https:' && u.protocol !== 'http:') {
-    throw new Error(`Refusing non-HTTP(S) URL: ${url}`);
+// Reject unsafe fetch targets (SSRF): http(s) only, and never a host that is,
+// or resolves to, a loopback / private / link-local / cloud-metadata address.
+// The URLs come from pipeline.md, which the scan fills from job-board APIs
+// (Greenhouse's absolute_url, for one), so they are third-party data.
+//
+// This used to keep its own literal-only list: `[::1]` passed (URL.hostname
+// keeps the brackets, so the '::1' comparison never matched), and so did
+// 0.0.0.0, IPv4-mapped IPv6, fd00::/8, 100.64.0.0/10 and any name that resolved
+// privately. It now asks the same two-layer check the liveness scanners use,
+// which judges every address with providers/_ip-guard.mjs isBlockedAddress.
+// A host that does not resolve is let through here and fails when fetched.
+//
+// This check runs on the URL before a browser starts and on every hop of the
+// plain-fetch fallback. The browser's own requests, redirect hops included, go
+// through the egress filter that lib/hardened-chromium.mjs puts on the launch.
+export async function assertSafeRemoteUrl(url) {
+  const verdict = rejectPrivateOrInvalid(url);
+  if (verdict) {
+    throw new Error(verdict.code === 'blocked_host'
+      ? `Refusing private/loopback host: ${url}`
+      : `Refusing ${verdict.reason}: ${url}`);
   }
-  const host = u.hostname.toLowerCase();
-  const blocked = host === 'localhost' || host === '::1' || host.endsWith('.local') ||
-    /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) ||
-    /^169\.254\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host);
-  if (blocked) throw new Error(`Refusing private/loopback host: ${host}`);
-  return u;
+  try {
+    await validateUrlSecurity(url);
+  } catch (err) {
+    if (err?.livenessCode === 'dns_no_addresses') return;
+    throw new Error(`Refusing private/loopback host: ${err?.message ?? url}`);
+  }
 }
+
+// Redirect hops the plain-fetch fallback follows, each checked before it is
+// requested.
+const MAX_JOB_PAGE_REDIRECTS = 5;
 
 // Verdicts from the liveness check that mean the page is not an open posting
 // that can be read: besides any `expired` one (404, a closed or listing page),
@@ -815,7 +862,7 @@ export async function waitForJobText(page, { status = 0, url = '' } = {}) {
 
 // `fetchApi` is a test seam for the ATS API fetch; the default is the real one.
 export async function fetchJobPage(url, { fetchApi = fetchJdViaKnownApi } = {}) {
-  assertSafeRemoteUrl(url);
+  await assertSafeRemoteUrl(url);
   const viaApi = await fetchApi(url, JD_TEXT_CAP);
   if (viaApi?.text) {
     const { title, text } = viaApi;
@@ -835,7 +882,7 @@ export async function fetchJobPage(url, { fetchApi = fetchJdViaKnownApi } = {}) 
   let chromium;
   if (!process.env.CAREER_OPS_NO_PLAYWRIGHT) {
     try {
-      ({ chromium } = await import('playwright'));
+      ({ chromium } = await import('./lib/hardened-chromium.mjs'));
     } catch {
       console.warn('[fetch] Playwright unavailable — falling back to plain fetch.');
     }
@@ -867,15 +914,29 @@ export async function fetchJobPage(url, { fetchApi = fetchJdViaKnownApi } = {}) 
     if (unreadable) throw new Error(`No job description to evaluate at ${url} (${unreadable})`);
   }
 
-  // Plain HTTP fallback
+  // Plain HTTP fallback, through providers/_http.mjs: its lookup-time guard
+  // checks the address it actually dials. Redirects are followed by hand so
+  // each hop is checked before it is requested; fetch() used to follow a 302
+  // to a private address on its own.
   try {
-    const r = await fetch(url, {
-      headers: { 'User-Agent': DEFAULT_USER_AGENT }
-    });
+    let finalUrl = url;
+    let r;
+    for (let hop = 0; ; hop++) {
+      r = await fetchResponse(finalUrl, {
+        headers: { 'User-Agent': DEFAULT_USER_AGENT },
+        redirect: 'manual',
+        timeoutMs: 30_000,
+      });
+      const location = r.status >= 300 && r.status < 400 ? r.headers.get('location') : null;
+      if (!location) break;
+      if (hop >= MAX_JOB_PAGE_REDIRECTS) throw new Error(`more than ${MAX_JOB_PAGE_REDIRECTS} redirects`);
+      finalUrl = new URL(location, finalUrl).href;
+      await assertSafeRemoteUrl(finalUrl);
+    }
     if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
     const html = await r.text();
-    const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-    const unreadable = unreadableJobPage({ status: r.status, requestedUrl: url, finalUrl: r.url, text });
+    const text = html.replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag)).replace(/\s+/g, ' ').trim();
+    const unreadable = unreadableJobPage({ status: r.status, requestedUrl: url, finalUrl, text });
     if (unreadable) throw new Error(`no job description (${unreadable})`);
     return text.slice(0, JD_TEXT_CAP);
   } catch (e) {
@@ -1038,8 +1099,10 @@ async function cmdScan() {
   for (const c of companies) {
     process.stdout.write(`  ${c.name.padEnd(25)} → `);
     try {
-      assertSafeRemoteUrl(c.api);
-      const r = await fetch(c.api);
+      await assertSafeRemoteUrl(c.api);
+      // redirect: 'error', as for every provider call: a board API has no reason
+      // to redirect, and a followed 3xx is a hop nothing checked.
+      const r = await fetch(c.api, { redirect: 'error' });
       if (!r.ok) { console.log(`HTTP ${r.status}`); continue; }
       const data = await r.json();
       const jobs = data.jobs ?? [];

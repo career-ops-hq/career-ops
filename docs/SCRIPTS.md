@@ -21,6 +21,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run sync-check` | `cv-sync-check.mjs` | Validate CV/profile consistency |
 | `npm run cv:verify-facts` | `verify-cv-facts.mjs` | Check a generated CV against `cv.md` and `article-digest.md` (read-only) |
 | `npm run cv:verify-ats` | `verify-ats.mjs` | Score a generated CV HTML for ATS parseability, 0–100 (read-only) |
+| `npm run cv:verify-all` | `verify-all.mjs` | Every pre-send check on one file: facts, ATS (HTML), voice, and with `--links` dead links and unpinned repos (read-only) |
 | `npm run test:cv-visual` | `playwright.cv.config.mjs` | Visual regression suite for CV templates; canonical run is the Linux container in [CV_VISUAL_TESTING.md](CV_VISUAL_TESTING.md) |
 | `npm run patterns` | `analyze-patterns.mjs` | Analyze tracker outcomes and report patterns |
 | `npm run keyword-match` | `keyword-match.mjs` | Report which keywords from a report the CV actually covers (read-only; never edits the CV) |
@@ -78,6 +79,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `node audit-portals.mjs` | `audit-portals.mjs` | Audit what each portals.yml board actually serves — provider, posting count, sample titles — not just whether it answers (network; `--baseline` diffs against an earlier `--json` run) |
 | `npm run reposts` | `detect-reposts.mjs` | Flag re-listed (ghost) postings from scan history |
 | `npm run filter-audit` | `filter-audit.mjs` | Show which `title_filter.positive` keywords never match, add nothing, or bring mostly low-scored offers, replayed over scan history (read-only) |
+| `npm run interview-jd-terms` | `interview-jd-terms.mjs` | Suggest `content_filter.positive` terms that appear more in the JDs of postings that reached an interview than in applied-but-no-interview ones (read-only, advisory) |
 | `node coverage-check.mjs <url> --company <name> --title <title>` | `coverage-check.mjs` | Explain why the scanners missed a posting you found by hand, and propose the `portals.yml` change that would have caught it (read-only, zero-network) |
 | `node rank-pipeline.mjs` | `rank-pipeline.mjs` | Opt-in LLM relevance re-ranker — annotates pending pipeline rows with a score + reason (off by default) |
 | `npm run gemini:eval` | `gemini-eval.mjs` | Evaluate a JD with Google Gemini (free-tier alternative) |
@@ -318,7 +320,7 @@ node audit-portals.mjs --strict              # exit 1 on any non-ok verdict
 
 The offline half — *which enabled entries does no provider claim?* — is pure config matching, so `verify-pipeline.mjs` runs it as check 15 at zero network cost: an entry naming an unknown provider is an error (it can never scan), an entry no provider claims is a warning, and an absent `portals.yml` is not a finding. The live half stays here because it needs one fetch per board.
 
-**Exit codes:** `0` on every normal run; `1` if the run itself fails, or under `--strict` when any verdict is not `ok` or any board lost ≥50% of its `--baseline` count.
+**Exit codes:** `0` on every normal run; `1` if the run itself fails, or under `--strict` when any verdict is not `ok` or any board lost ≥50% of its `--baseline` count. A `--baseline` file that is missing, is not JSON, or has no rows exits `1` before any board is fetched.
 
 ---
 
@@ -416,6 +418,22 @@ npm run cv:verify-ats -- --self-test
 ```
 
 Exit `0` when the structural score is at least `--min-score` (default 70) and there is no critical issue; `1` otherwise.
+
+---
+
+## cv:verify-all
+
+Runs every pre-send check on one candidate-facing file in one command: `verify-cv-facts.mjs`, `verify-ats.mjs` (HTML files only) and the voice check from `cv-voice.mjs` against `cv.md` (skipped when the file is `cv.md` itself). Read-only.
+
+With `--links` it also fetches every http(s) link in the file. A 4xx/5xx or no answer fails. linkedin.com only warns, because it refuses scripts. A name that does not resolve fails too. Loopback and private-network hosts are never dialled: redirects are followed by hand and every hop goes through the same egress guard as the JD page fetch (literal check, DNS pre-check, connect-time address check), so a link that resolves or redirects to a private address is reported as not checked. A malformed link always fails, even when the network checks are skipped. Those checks are skipped, with an `[info]` line, when `CAREER_OPS_NO_DNS_CACHE` turns off the connect-time address guard, or when `NODE_USE_ENV_PROXY` is set without `CAREER_OPS_TRUST_PROXY_EGRESS=1` (an HTTP proxy would hide the destination from the guard); no link is then fetched. A bare relative path names a file in the data root (`CAREER_OPS_ROOT`); start it with `./` to mean the working directory. When the file links a `github.com/<user>` profile and `gh` is signed in, it warns about public repos the file names that are not pinned on that profile; without `gh` that step is skipped and says so.
+
+```bash
+npm run cv:verify-all -- output/cv-acme.html
+npm run cv:verify-all -- output/cv-acme.html --links
+npm run cv:verify-all -- --self-test
+```
+
+Exit `0` when every check passes, `1` when one fails, `2` on a usage error. Warnings never fail.
 
 ---
 
@@ -956,7 +974,7 @@ A row is a candidate when its status resolves to `Applied` (aliases such as `Sen
 
 Every other state (Evaluated, Responded, Assessment, Interview, Offer, Hired, Rejected, Discarded, SKIP) is never touched.
 
-`--confirm` rewrites the candidates inside one tracker transaction (the lock and atomic replace `dedup-tracker.mjs` uses): Status becomes `--status` (default `Discarded`; any canonical state except `Applied`, aliases accepted), the fixed tag `no response (auto-closed YYYY-MM-DD, Nd)` is appended to Notes so these rows can be told apart from real rejections and found again if a reply arrives, and one `source=close-stale` line per row is appended to `data/status-log.tsv`. To reopen a row that did get a reply, use `set-status.mjs`. Re-running changes nothing.
+`--confirm` rewrites the candidates inside one tracker transaction (the lock and atomic replace `dedup-tracker.mjs` uses): Status becomes `--status` (default `Discarded`; any canonical state except `Applied`, aliases accepted), the fixed tag `no response (auto-closed YYYY-MM-DD, Nd)` is appended to Notes so these rows can be told apart from real rejections and found again if a reply arrives, and one `source=close-stale` line per row is appended to `data/status-log.tsv`. If those lines cannot be written, the command fails and tries to put the tracker back, so that no row is closed without its ledger line. That holds when the write left the log unchanged and the tracker could be put back. If the tracker cannot be put back, the rows stay closed with no ledger line. If the failed write may have left lines in the log (it changed the log's size, or the size could not be checked), the rows stay closed to match them. In both cases the error names `data/status-log.tsv`: check its last lines before running `close-stale` again. To reopen a row that did get a reply, use `set-status.mjs`. Re-running changes nothing.
 
 ```bash
 node close-stale.mjs                       # dry run, JSON (metadata, candidates, skipped)
@@ -989,7 +1007,7 @@ Columns are matched by header name, so their order does not matter. The file nee
 | unknown stage | a stage neither table knows. Rename it in the file to a tracker state and run again |
 | missing company or role | the row is left out |
 
-Dates are read as `YYYY-MM-DD` (a time part is dropped), `Jul 3, 2026`, `3 Jul 2026`, or a slash date. Slash dates are read month first unless a date in the file has a first part above 12, which proves day first. `--day-first` forces day/month/year and skips that check, so a mixed file is not refused. A slash date that does not fit the chosen order has no readable date. It gets today's date and `no date in source` in Notes. Normalize the dates in the file before importing. Notes also carry `imported from <file>` and the source stage when it differs from the tracker state.
+Dates are read as `YYYY-MM-DD` (a time part is dropped), `Jul 3, 2026`, `3 Jul 2026`, or a slash date. Slash dates are read month first unless a date in the file has a first part above 12, which proves day first. A dotted date (`05.11.2026`) also makes the file day first, since that is how dotted dates are written. `--day-first` forces day/month/year and skips that check, so a mixed file is not refused. A slash date that does not fit the chosen order has no readable date. It gets today's date and `no date in source` in Notes. Normalize the dates in the file before importing. Notes also carry `imported from <file>` and the source stage when it differs from the tracker state.
 
 `--confirm` reserves numbers with `reserve-report-num.mjs`, writes one headed tracker-addition TSV per row, runs `merge-tracker.mjs` and releases the numbers. A missing tracker is created first, with a `URL` column when the file has posting links. On a tracker with no `URL` column the preview says the links cannot be kept, and `--confirm` refuses the import until `node merge-tracker.mjs --backfill-urls` adds the column. A row merge refuses (for example a report link to a number `batch-state.tsv` marks failed) is not lost: its TSV stays in the printed temp directory with its number reserved, the import exits `1`, and the message gives the `merge-tracker.mjs` command to re-run after the fix. Use that command, not a second import. The refused row is not in the tracker, so importing the file again plans it again under a new number. After an import that completes, re-running the same file adds nothing. Imports do not write to `data/status-log.tsv`, so `funnel-velocity.mjs` has no pre-import stage timing for those rows.
 
@@ -1040,14 +1058,14 @@ Possible JSON responses:
 | `status` | Meaning |
 |----------|---------|
 | `up-to-date` | Local version matches remote |
-| `update-available` | Newer version exists (includes `local`, `remote`, `changelog`) |
+| `update-available` | Newer version exists (includes `local`, `remote`, `changelog`). With `--channel main`, also reported when system files differ from `main`, when the comparison with `main` fails, or when main's commit cannot be resolved, and it carries `reason` |
 | `dismissed` | User said no to this release (`update-system.mjs dismiss --version X.Y.Z`); a newer release reports again |
 | `offline` | Could not reach GitHub (carries `detail`: what failed and why). With `--channel main`, both curl sources and a `git ls-remote` fallback failed |
 | `no-remote-version` | GitHub answered without a usable `career-ops-vX.Y.Z` release (with `--channel main`, may carry `detail` when the git fallback reached upstream but found no release tag) |
 | `worktree-without-main` | Run from a linked git worktree while no checkout has `main` checked out (see **update** below) |
 | `checkout-unreadable` | A git checkout whose commit git cannot read (git missing, no commit yet, or git refusing the directory, e.g. "detected dubious ownership"). Carries `detail`: the first line of the error. No version verdict, on either channel |
 
-`check --force` ignores a dismissal. `check --channel main` keeps the previous behaviour for installs that follow `main`: main's `VERSION` plus system-file drift (`reason: system-files-changed`).
+`check --force` ignores a dismissal. `check --channel main` keeps the previous behaviour for installs that follow `main`: main's `VERSION` plus system-file drift. Its `reason` is the first that applies: `system-files-changed` when system files differ from `main` or when fetching `main` or comparing the trees fails, `version-changed` when the remote version is newer, and `main-commit-unresolved` when the lookup of main's commit failed in a git checkout, since `check` then cannot tell whether the install matches `main`.
 
 The `local` field in the JSON output stays a bare semver string (e.g., `"1.32.0"`). A separate `local_sha` field is provided alongside it when the install is a git checkout — containing the short commit SHA (e.g., `"ae919b6f"`). For tarball installs without git metadata, `local_sha` will be omitted. This lets a bug report identify the exact tree under test, not just the release name (two installs pulled days apart can share a version string while running different code — see #3203).
 
@@ -1330,7 +1348,7 @@ Cache hits and lookups that coalesce onto an in-flight one are free, so only unc
 ```bash
 CAREER_OPS_DNS_LOOKUPS_PER_MIN=800 npm run scan:full   # raise the ceiling
 CAREER_OPS_DNS_LOOKUPS_PER_MIN=0 npm run scan:full     # no pacing (pre-#2229 behaviour)
-CAREER_OPS_NO_DNS_CACHE=1 npm run scan:full            # no DNS cache AND no pacing
+CAREER_OPS_NO_DNS_CACHE=1 npm run scan:full            # no DNS cache, no pacing AND no connect-time address guard
 ```
 
 The cost is real: a full Workday + iCIMS + BambooHR sweep becomes DNS-bound at roughly 63 minutes (25,205 hostnames ÷ 400/min default pacing). Raise the ceiling if your resolver has the budget — but if you see `fetch failed` in bulk from one ATS section, suspect the resolver before the boards.
@@ -1589,6 +1607,14 @@ npm run or:pipeline             # process pending URLs
 npm run or:apply                # application assistance
 ```
 
+Each request asks for at most 8192 output tokens and waits 120 s. A reasoning
+model pinned with `CAREER_OPS_MODEL` (glm-5.3, a thinking Qwen) can spend the
+whole cap thinking through a full evaluation: the reply then fails as cut off at
+`max_tokens`. Raise the cap with `CAREER_OPS_MAX_TOKENS` (32768, the
+`openai-eval.mjs` default, fits a full A-G report plus the reasoning) and the
+wait with `CAREER_OPS_TIMEOUT_MS` (in milliseconds; `OPENROUTER_TIMEOUT_MS` also
+works). The free-model rotation keeps 8192 unless you set the variable.
+
 ---
 
 ## reconcile
@@ -1667,11 +1693,42 @@ it reports `hits` and `unique` (offers no other keyword catches), and flags:
 
 Rank keywords by `unique`, not `hits`. The audit reads only the positive list:
 offers that `title_filter.negative` or `location_filter` already drop still
-count. Duplicate entries are audited once and listed. Read-only, zero-LLM.
+count. Duplicate entries are audited once and listed. A `tracked_companies` entry
+with its own `title_filter.positive` replaces the global list for that company,
+so its rows are replayed against that list and its keywords are reported in a
+separate `companyRows` / "company-level keywords" section instead of landing in
+`unmatched`; the row's `company` must match the entry's `name`. `job_boards`
+entries are not covered, since an aggregator records each posting's own
+employer. Read-only, zero-LLM.
 
 ```bash
 npm run filter-audit            # human-readable summary
 node filter-audit.mjs           # JSON
+```
+
+---
+
+## interview-jd-terms
+
+Suggests `content_filter.positive` terms from the job descriptions of postings
+that reached an interview. Rows that ever reached Interview or higher (stage
+recovery from `data/status-log.tsv`, as `stats.mjs` does) are compared with rows
+that reached Applied, Responded or Assessment but never Interview. The JD is the
+report's `## Job Description (archived verbatim)` section, else a text capture
+in `jds/` found by report number; rows with no readable JD are counted and
+reported. Single words, word pairs and `skill-extract.mjs` skills are counted
+once per JD and ranked by smoothed log2 lift (Laplace smoothing). Terms already
+in `content_filter.positive` are left out, and the commonest terms overall are
+listed so boilerplate is visible.
+
+Below 8 interview and 20 baseline JDs it prints counts only, no ratios. Small
+samples and selection bias are real: treat the output as a prompt to re-read
+the JDs. Read-only and zero-LLM; it never edits `portals.yml`.
+
+```bash
+npm run interview-jd-terms          # markdown report
+node interview-jd-terms.mjs --json  # JSON
+node interview-jd-terms.mjs --self-test
 ```
 
 ---
@@ -1718,10 +1775,12 @@ that the flag cannot raise), and a summary prints the entries ranked, the number
 of CLI calls, and elapsed time. Re-runs are idempotent — an already-annotated
 row is skipped, so you can work through a large pipeline in bounded passes.
 
-The ranking is done by whichever agent CLI you already have installed (the
-Headless / Batch Mode table in `AGENTS.md`): `claude`, `opencode`, `codex`,
-`copilot`, `qwen`, `agy`, `grok` — first one found wins. No API key, no new
-dependency, no new network endpoint. Each call sends a `cv.md` excerpt (the
+`--cli <name>` picks the agent CLI that does the ranking. Without it, the
+ranker uses the CLI saved in `CAREER_OPS_CLI` (`node remember-cli.mjs <cli>`)
+when that one is installed. Otherwise it takes the first one installed from
+its own list in `rank-pipeline.mjs`: `claude`, `opencode`, `codex`, `copilot`,
+`qwen`, `agy`, `grok`, `pi`, `omp`. No API key, no new dependency, no new
+network endpoint. Each call sends a `cv.md` excerpt (the
 first ~2000 chars) and the selected postings through that CLI's own auth and
 provider handling — review your chosen CLI's data-retention/provider settings
 before running this on sensitive CV content.
@@ -1741,9 +1800,17 @@ fails or returns no usable JSON exits 1, `--dry-run` included.
 ```bash
 node rank-pipeline.mjs                  # rank up to 20 pending entries
 node rank-pipeline.mjs --limit 10
+node rank-pipeline.mjs --url <url>      # rank one pending row
 node rank-pipeline.mjs --cli codex      # override auto-detection
 node rank-pipeline.mjs --dry-run        # print annotations, write nothing
 ```
+
+`--url <url>` ranks only the first unranked row in the Pending section (from
+its heading to the next `##` heading, as `sync-batch-input.mjs` reads it; a
+file with no Pending heading is read whole) whose first cell is exactly that
+URL. When there is none, because the row was ranked or skipped,
+or its URL is not the first cell, the script exits 4 before it looks for a CLI,
+so nothing is called. The dashboard's Inbox runs it for its `a` key.
 
 Writes go through `pipeline-lock.mjs`, the same lock `scan.mjs` and
 `scan-ats-full.mjs` use, and the file is re-read inside the lock — so a
@@ -1884,6 +1951,7 @@ These have no `npm run` binding — modes and agents call them with
 | `node generate-latex.mjs <input.tex> [output.pdf] [--compile-only] [--source <path>] [--skip-fact-check] [--help]` | Fact-check, validate and compile a generated `.tex` CV via tectonic or pdflatex. The CV fact gate runs first whenever the data root has a `cv.md`, and a blocked document is not compiled; `--source` adds an evidence file (repeatable; `latex-tex` passes the user's own `.tex`). `--compile-only` skips career-ops template validation so a user-owned `.tex` compiles as-is (`latex-tex` mode) |
 | `node install-latex-engine.mjs [--check] [--force] [--json] [--help]` | Opt-in local LaTeX engine: downloads a pinned tectonic release for this platform, verifies its SHA-256 before extracting, and places it in the repo root (gitignored) where `generate-latex.mjs` looks first. Downloads are bounded by a timeout and a size cap. No-op when tectonic is already available (a pdflatex-only host still gets tectonic, which the CJK template needs); `--check` never downloads |
 | `node classify-tier.mjs` | Classify a job title into intern / entry / mid / senior |
+| `node validate-template-pack.mjs <pack-dir>` | Structural gate for a template pack: `pack.json` shape, declared files and previews inside the pack, placeholders, `renderLint` (any finding fails) and `atsLint` for a template that claims `ats: true` |
 | `node ats-payload.mjs <payload.json> [--summary]` | ATS payload transform: folds `competencies[]` into `skills[]` (one safe, idempotent transform) and reports three judgement calls it deliberately does not apply. Payload on stdout, findings on stderr |
 | `node evidence-freshness.mjs` | Opt-in. Before Block A in `oferta` and `auto-pipeline`, once per run in batch: says whether the GitHub evidence behind `cv.md` is stale (age of the newest `output/github-evidence-*.json`, plus PRs authored and merged since in repos the user does not own, from one metadata-only `gh search prs`). Read-only, always exit 0, JSON on stdout. See [evidence-freshness.mjs](#evidence-freshnessmjs) |
 | `node plugins.mjs list\|run <id> [hook]` | CLI host for non-provider plugin hooks (see [PLUGINS.md](PLUGINS.md)) |

@@ -243,7 +243,7 @@ Die Feldnamen im Kopf (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`)
 (Liste mit 15-20 Keywords aus der Stellenanzeige für ATS-Optimierung)
 
 ## Keyword Coverage
-(von `keyword-match.mjs` (1b) erzeugt — Abdeckung in %, present, thin, missing)
+(von `keyword-match.mjs` (1b) erzeugt — Abdeckung in %, present, missing)
 
 ## Job Description (archived verbatim)
 (der vollständige Text der Stellenanzeige, wortgleich eingefügt — siehe Anforderung unten)

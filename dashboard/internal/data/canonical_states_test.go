@@ -2,7 +2,6 @@ package data
 
 import (
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -30,51 +29,17 @@ import (
 // REJECTED by the dashboard as malformed input, which is a functional failure
 // rather than a cosmetic one — the user picks a valid status and the UI refuses.
 //
-// Parsed with a regex rather than a YAML library because the Go module has no
-// YAML dependency and adding one so a test can read ten ids is not a trade
-// worth making. The shape is `  - id: name`, and the guards below fail loudly
-// if that stops matching.
-
-var stateIDRe = regexp.MustCompile(`(?m)^\s*-\s+id:\s*([a-z_]+)\s*$`)
-
-// repoRoot walks up from the test's directory to the checkout that holds
-// templates/states.yml, so the test does not depend on how deep the package is.
-func repoRoot(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	for i := 0; i < 8; i++ {
-		if _, err := os.Stat(filepath.Join(dir, "templates", "states.yml")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	t.Skip("templates/states.yml not found above the package directory — not a full checkout")
-	return ""
-}
+// The ids come from loadCanonicalStates (states_parity_test.go), the one
+// reader of states.yml in this package. It fails the test when the file is
+// missing or no longer parses, because a skipped parity guard looks the same
+// as a passing one.
 
 func canonicalStatesFromYAML(t *testing.T) []string {
 	t.Helper()
-	path := filepath.Join(repoRoot(t), "templates", "states.yml")
-	content, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	var ids []string
-	for _, m := range stateIDRe.FindAllStringSubmatch(string(content), -1) {
-		ids = append(ids, m[1])
-	}
-	// Guard on the guard. If the file's shape changes and the regex stops
-	// matching, every assertion below would pass over an empty list and report
-	// as coverage — the exact failure mode this test exists to prevent.
-	if len(ids) < 8 {
-		t.Fatalf("parsed only %d state ids from states.yml (%v) — the parse has lost its subject", len(ids), ids)
+	states := loadCanonicalStates(t)
+	ids := make([]string, len(states))
+	for i, st := range states {
+		ids[i] = st.id
 	}
 	return ids
 }

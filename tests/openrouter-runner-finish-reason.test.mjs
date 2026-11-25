@@ -1,5 +1,5 @@
 // tests/openrouter-runner-finish-reason.test.mjs — openrouter-runner saves only
-// a reply that finished, as openai-eval (#3949) and openai-tailor already do.
+// a reply that finished, as openai-eval.mjs (#3949) and openai-tailor.mjs already do.
 //
 // The runner read choices[0].message.content and never looked at
 // finish_reason. A reply cut off at max_tokens still carries the block
@@ -13,7 +13,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -98,6 +98,10 @@ async function withRunner(label, { pinned = null, fetchImpl }, body) {
   try {
     for (const n of Object.keys(inherited)) delete process.env[n];
     process.env.CAREER_OPS_ROOT = dataRoot;
+    // reserve-report-num also reads the CHECKOUT's batch/batch-state.tsv (#6449), so a failed row
+    // left there by a real batch run would shift the report number below. Pin it to a file in the
+    // scratch root, the same isolation #4742 and #4846 gave the merge-tracker and reserve fixtures.
+    process.env.CAREER_OPS_BATCH_STATE = join(dataRoot, 'batch-state.tsv');
     process.env.OPENROUTER_API_KEY = 'test-key';
     const runner = await import(`${pathToFileURL(join(ROOT, 'openrouter-runner.mjs')).href}?finish-reason=${label}`);
     if (pinned) process.env.CAREER_OPS_MODEL = pinned;
@@ -157,3 +161,19 @@ for (const [label, extra] of [['finish_reason "stop"', { finish_reason: 'stop' }
     });
   });
 }
+
+// The batch state the number reservation reads is the scratch one, not the checkout's: a failed
+// row there is honored, which is how the test above stays independent of a developer's own file.
+test('the report number skips a number the scratch batch-state marks failed', async () => {
+  const fetchImpl = replyFetch([MODEL_A], { [MODEL_A]: [choice(EVALUATION, { finish_reason: 'stop' })] });
+  await withRunner('pinned-batch-state', { pinned: MODEL_A, fetchImpl }, async (runner, dataRoot) => {
+    writeFileSync(
+      join(dataRoot, 'batch-state.tsv'),
+      'id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries\n'
+        + '1\thttps://example.com/job\tfailed\t2026-01-01T00:00:00Z\t2026-01-01T00:01:00Z\t001\t-\tfixture\t0\n',
+    );
+    const res = await runner.cmdEvaluate(JD, CTX);
+    assert.equal(res?.success, true);
+    assert.match(saved(dataRoot, 'reports')[0], /^002-/, 'a failed number in the scratch batch-state was not skipped');
+  });
+});
