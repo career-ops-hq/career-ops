@@ -59,7 +59,7 @@ export const PAGE_TEXT_CAP = 20_000;
 export const MIN_PAGE_JD_WORDS = 80;
 
 // ========================================================================
-// Tier 2 — the page's own bytes: fetch it, read its structured data, judge closure
+// Tier 2 — the page's own bytes: fetch it and read its structured data
 // ========================================================================
 
 /** LinkedIn hosts, which this module never requests. */
@@ -182,16 +182,6 @@ function jobPostingNodes(html) {
   return found;
 }
 
-/** Is a posting's `validThrough` in the past? An absent or unparseable date is not evidence. */
-function isPastValidThrough(node, now) {
-  const raw = node?.validThrough;
-  if (typeof raw !== 'string' || !raw.trim()) return false;
-  let when = Date.parse(raw);
-  // A date-only value parses as UTC midnight, but means "through that day".
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) when += 24 * 60 * 60 * 1000;
-  return Number.isFinite(when) && when < now;
-}
-
 /** Distinct large description-like strings in a hydration payload (see fromEmbeddedDescription). */
 function embeddedDescriptionCount(html) {
   const seen = new Set();
@@ -201,32 +191,12 @@ function embeddedDescriptionCount(html) {
   return seen.size;
 }
 
-/**
- * Pick the JD out of already-downloaded page HTML. Pure — exported for tests.
- * Null when the page holds no single posting of at least MIN_PAGE_JD_WORDS
- * words. A posting past its `validThrough` date returns `{closed: true,
- * evidence}` instead, so the caller can pass the closure on rather than
- * letting a fallback fetch score a posting the page itself calls closed.
- *
- * @param {string} html
- * @param {number} [now] epoch ms, injectable for tests
- * @returns {{text: string, method: string, closed?: boolean, evidence?: string}|null}
- */
-export function jdFromPageHtml(html, now = Date.now()) {
-  return inspectPage(html, now).found;
-}
-
-/**
- * Like jdFromPageHtml, but says when the page is ambiguous (several postings or several
- * description-sized payloads): nothing on such a page, closure included, belongs to one URL.
- * @returns {{found: object|null, ambiguous: boolean}}
- */
 const collapseWs = (v) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : v);
 
 /** Stable form of a JSON value: object keys sorted at every depth, strings whitespace-collapsed. */
-function canon(v) {
-  if (Array.isArray(v)) return v.map(canon);
-  if (v && typeof v === 'object') return Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])]));
+function canonicalJson(v) {
+  if (Array.isArray(v)) return v.map(canonicalJson);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonicalJson(v[k])]));
   return collapseWs(v);
 }
 
@@ -271,37 +241,52 @@ function postingNamesOtherJob(node, requestedUrl) {
   return !want.some((t) => got.includes(t));
 }
 
-export function inspectPage(html, now = Date.now(), requestedUrl = '') {
+/**
+ * What a page's own structured data (JSON-LD, then an embedded payload) says about
+ * the one posting it should hold. The single reader both extractJd (is there a JD?)
+ * and pageClosureEvidence (is the posting closed?) ask, so they cannot disagree
+ * about which posting the page is about. Pure — exported for tests.
+ *
+ *   `ambiguous` — the page names several postings, one for another job, or holds
+ *                 several description-sized payloads: nothing on it, closure
+ *                 included, belongs to one URL.
+ *   `expired`   — its JobPosting is past `validThrough`; `evidence` says so.
+ *   `jd`        — one posting of at least MIN_PAGE_JD_WORDS words: `{text, title, method}`.
+ *   `none`      — no usable structured data.
+ *
+ * @param {string} html
+ * @param {string} [requestedUrl] when given, a posting that names another job is `ambiguous`
+ * @param {number} [now] epoch ms, injectable for tests
+ * @returns {{kind: 'ambiguous'|'none'}|{kind: 'expired', evidence: string}|{kind: 'jd', jd: {text: string, title: string, method: string}}}
+ */
+export function readPostingData(html, requestedUrl = '', now = Date.now()) {
   const postings = jobPostingNodes(html);
   // A page that names more than one posting is a listing, or a page whose other
-  // postings we cannot tell apart from the requested one. Nothing on it can be
-  // attributed to this URL: not a JD, and not a closure either. Postings are
+  // postings we cannot tell apart from the requested one. Postings are
   // told apart by title, description, url, @id, identifier, employer and location, and an identical
   // duplicate representation of one posting does not count twice.
-  const distinctLd = new Set(postings.map((node) => JSON.stringify(canon([node.title ?? '', node.description ?? '', node.url ?? '', node['@id'] ?? '', node.identifier ?? '', node.hiringOrganization ?? '', node.jobLocation ?? ''])))).size;
-  if (distinctLd > 1) return { found: null, ambiguous: true };
+  const distinctLd = new Set(postings.map((node) => JSON.stringify(canonicalJson([node.title ?? '', node.description ?? '', node.url ?? '', node['@id'] ?? '', node.identifier ?? '', node.hiringOrganization ?? '', node.jobLocation ?? ''])))).size;
+  if (distinctLd > 1) return { kind: 'ambiguous' };
   // A single posting that names a different job than the requested URL is that other job's, not ours.
-  if (postings.length && postingNamesOtherJob(postings[0], requestedUrl)) return { found: null, ambiguous: true };
+  if (postings.length && postingNamesOtherJob(postings[0], requestedUrl)) return { kind: 'ambiguous' };
 
-  // Closed per the page's own structured data: not a JD to score. A miss hands
-  // the URL back to the worker's WebFetch path and the mode's closed-posting rule.
   const expired = postings.find((node) => isPastValidThrough(node, now));
-  if (expired) return { found: { closed: true, evidence: `JobPosting validThrough ${String(expired.validThrough).slice(0, 40)}`, text: '', method: 'ld-json-expired' }, ambiguous: false };
+  if (expired) return { kind: 'expired', evidence: `JobPosting validThrough ${String(expired.validThrough).slice(0, 40)}` };
 
   let ld = null;
-  try { ld = fromLdJson(html); } catch { /* malformed JSON-LD fields: ignore, the ambiguity and closure checks still run */ }
+  try { ld = fromLdJson(html); } catch { /* malformed JSON-LD fields: ignore, the ambiguity and expiry checks still ran */ }
   if (ld && wordCount(ld.text) >= MIN_PAGE_JD_WORDS) {
     const rawTitle = postings[0]?.title;
     const title = typeof rawTitle === 'string' ? rawTitle.trim().slice(0, 300) : '';
-    return { found: { ...ld, title }, ambiguous: false };
+    return { kind: 'jd', jd: { ...ld, title } };
   }
 
   // The embedded-payload fallback picks the LONGEST description on the page. It
   // is only trusted when the page holds one description-sized string (and, above,
   // at most one posting), so what it returns can only be this posting's.
-  if (embeddedDescriptionCount(html) > 1) return { found: null, ambiguous: true };
+  if (embeddedDescriptionCount(html) > 1) return { kind: 'ambiguous' };
   const embedded = fromEmbeddedDescription(html);
-  return { found: embedded && wordCount(embedded.text) >= MIN_PAGE_JD_WORDS ? embedded : null, ambiguous: false };
+  return embedded && wordCount(embedded.text) >= MIN_PAGE_JD_WORDS ? { kind: 'jd', jd: { title: '', ...embedded } } : { kind: 'none' };
 }
 
 export const TRUNCATION_NOTICE = (cap) =>
@@ -322,11 +307,6 @@ export function capJdText(text, cap) {
   if (para > cap * 0.6) cut = cut.slice(0, para);
   return `${cut.trimEnd()}\n\n${TRUNCATION_NOTICE(cap)}`;
 }
-
-// Closure codes classifyLiveness can reach from page text alone. The softer
-// codes (listing page, missing apply control) lean on a rendered DOM's apply
-// buttons, which a plain download does not have, so they are not trusted here.
-const VISIBLE_CLOSURE_CODES = new Set(['expired_url', 'expired_body', 'deadline_passed']);
 
 const SKIP_ELEMENTS = new Set(['script', 'style', 'noscript', 'template']);
 const VISIBLE_SCAN_CAP = 1_000_000;
@@ -386,6 +366,89 @@ export function sameDocument(requested, final) {
     };
     return norm(requested) === norm(final);
   } catch { return false; }
+}
+
+/**
+ * ATS results are capped by compactText, which marks a cut
+ * with a bare trailing `…`. Nothing downstream recognises that, so turn it into
+ * the same explicit notice a cut page JD carries. Text that was not cut is
+ * returned unchanged. Pure — exported for tests.
+ *
+ * @param {string} text
+ * @param {number} cap the cap the text was compacted to
+ */
+export function markCappedAtsText(text, cap) {
+  if (text.length !== cap + 1 || !text.endsWith('\u2026')) return text;
+  return `${text.slice(0, -1).trimEnd()}\n\n${TRUNCATION_NOTICE(cap)}`;
+}
+
+/**
+ * The one place a fetched page becomes a JD. Takes what a fetch returned
+ * (fetchHtml's result, or a page the batch runner downloaded with curl) and
+ * returns the JD, or null when the page holds no JD that can be attributed to
+ * this URL. Whether the posting is still open is not decided here; that is
+ * fetchedPageClosure's job, asked first by the caller.
+ *
+ * Attribution: a page that landed on another document, names several postings,
+ * or is too large to inspect whole yields nothing. Then structured data (JSON-LD,
+ * an embedded payload), then, only when the caller asks for it, the visible text.
+ *
+ * `visibleText` is opt-in because text with no structured data cannot prove it
+ * belongs to one posting. The networked reader keeps its contract ("never the
+ * longest description on a listing"); the batch runner, which has always handed
+ * its worker that text, asks for it.
+ *
+ * @param {{html?: string, finalUrl?: string}} page what the fetch returned
+ * @param {string} url the URL that was requested
+ * @param {{textCap?: number, minWords?: number, visibleText?: boolean}} [opts]
+ * @returns {{url: string, title: string, text: string, method: string}|null}
+ */
+export function extractJd(page, url, { textCap = PAGE_TEXT_CAP, minWords = MIN_PAGE_JD_WORDS, visibleText: allowVisibleText = false } = {}) {
+  const html = String(page?.html ?? '');
+  if (!html || html.length > MAX_BODY_BYTES || !sameDocument(url, page?.finalUrl || url)) return null;
+  const data = readPostingData(html, url);
+  if (data.kind === 'ambiguous' || data.kind === 'expired') return null;
+  if (data.kind === 'jd') return { url, title: data.jd.title ?? '', text: capJdText(data.jd.text, textCap), method: data.jd.method };
+  if (!allowVisibleText) return null;
+  const text = visibleText(withoutExpiryViews(withoutScripts(html))).replace(/\s+/g, ' ').trim();
+  return wordCount(text) >= minWords ? { url, title: '', text: capJdText(text, textCap), method: 'visible-text' } : null;
+}
+
+/**
+ * @param {string} url
+ * @param {number} [textCap]
+ * @param {number} [timeoutMs]
+ * @returns {Promise<{url: string, title: string, text: string, method: string, closed?: boolean, evidence?: string, unreachable?: boolean}|null>}
+ */
+export async function fetchJdViaPage(url, textCap = PAGE_TEXT_CAP, timeoutMs = DEFAULT_TIMEOUT_MS, { visibleText = false } = {}) {
+  let host;
+  try { host = new URL(url).hostname; } catch { return null; }
+  if (isLinkedInHost(host)) return null;
+  const page = await fetchHtml(url, timeoutMs);
+  if (!page) return null;
+  if (page.unreachable) return { url, title: '', text: '', method: 'unreachable', unreachable: true };
+  const closure = fetchedPageClosure(page, url);
+  if (closure) return { url, title: '', text: '', method: page.gone ? 'http-gone' : 'page-closure', closed: true, evidence: closure };
+  return extractJd(page, url, { textCap, visibleText });
+}
+
+// ========================================================================
+// Closure — is the posting still open? Read from the page, never guessed
+// ========================================================================
+
+// Closure codes classifyLiveness can reach from page text alone. The softer
+// codes (listing page, missing apply control) lean on a rendered DOM's apply
+// buttons, which a plain download does not have, so they are not trusted here.
+const VISIBLE_CLOSURE_CODES = new Set(['expired_url', 'expired_body', 'deadline_passed']);
+
+/** Is a posting's `validThrough` in the past? An absent or unparseable date is not evidence. */
+function isPastValidThrough(node, now) {
+  const raw = node?.validThrough;
+  if (typeof raw !== 'string' || !raw.trim()) return false;
+  let when = Date.parse(raw);
+  // A date-only value parses as UTC midnight, but means "through that day".
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) when += 24 * 60 * 60 * 1000;
+  return Number.isFinite(when) && when < now;
 }
 
 // A script-toggled expiry view that is always present in the static markup (Phenom).
@@ -485,7 +548,7 @@ function visibleClosureEvidence(html, url, finalUrl, now = new Date()) {
  * @returns {string|null}
  */
 export function pageClosureEvidence(html, url, finalUrl = url) {
-  // Same gates as fetchJdFromPage: a redirect to another page is not this posting's closure,
+  // Same gates as fetchJdViaPage: a redirect to another page is not this posting's closure,
   // an ambiguous page proves nothing, and the HTML is capped so hostile input stays cheap.
   if (finalUrl && !sameDocument(url, finalUrl)) {
     // Off the requested page: its text is not this posting's. Only the URL itself can still
@@ -497,56 +560,10 @@ export function pageClosureEvidence(html, url, finalUrl = url) {
   // so nothing page-derived counts as closure (the URL check above and the ATS API still do).
   if (String(html).length > MAX_BODY_BYTES) return null;
   const capped = String(html);
-  const { found, ambiguous } = inspectPage(capped, Date.now(), url);
-  if (ambiguous) return null;
-  if (found?.closed) return found.evidence;
+  const data = readPostingData(capped, url);
+  if (data.kind === 'ambiguous') return null;
+  if (data.kind === 'expired') return data.evidence;
   return visibleClosureEvidence(capped, url, finalUrl);
-}
-
-/**
- * ATS results are capped by compactText, which marks a cut
- * with a bare trailing `…`. Nothing downstream recognises that, so turn it into
- * the same explicit notice a cut page JD carries. Text that was not cut is
- * returned unchanged. Pure — exported for tests.
- *
- * @param {string} text
- * @param {number} cap the cap the text was compacted to
- */
-export function markCappedAtsText(text, cap) {
-  if (text.length !== cap + 1 || !text.endsWith('\u2026')) return text;
-  return `${text.slice(0, -1).trimEnd()}\n\n${TRUNCATION_NOTICE(cap)}`;
-}
-
-/**
- * The one place a fetched page becomes a JD. Takes what a fetch returned
- * (fetchHtml's result, or a page the batch runner downloaded with curl) and
- * returns the JD, or null when the page holds no JD that can be attributed to
- * this URL. Whether the posting is still open is not decided here; that is
- * fetchedPageClosure's job, asked first by the caller.
- *
- * Attribution: a page that landed on another document, names several postings,
- * or is too large to inspect whole yields nothing. Then structured data (JSON-LD,
- * an embedded payload), then, only when the caller asks for it, the visible text.
- *
- * `visibleText` is opt-in because text with no structured data cannot prove it
- * belongs to one posting. The networked reader keeps its contract ("never the
- * longest description on a listing"); the batch runner, which has always handed
- * its worker that text, asks for it.
- *
- * @param {{html?: string, finalUrl?: string}} page what the fetch returned
- * @param {string} url the URL that was requested
- * @param {{textCap?: number, minWords?: number, visibleText?: boolean}} [opts]
- * @returns {{url: string, title: string, text: string, method: string}|null}
- */
-export function extractJd(page, url, { textCap = PAGE_TEXT_CAP, minWords = MIN_PAGE_JD_WORDS, visibleText: allowVisibleText = false } = {}) {
-  const html = String(page?.html ?? '');
-  if (!html || html.length > MAX_BODY_BYTES || !sameDocument(url, page?.finalUrl || url)) return null;
-  const { found, ambiguous } = inspectPage(html, Date.now(), url);
-  if (ambiguous || found?.closed) return null;
-  if (found) return { url, title: found.title ?? '', text: capJdText(found.text, textCap), method: found.method };
-  if (!allowVisibleText) return null;
-  const text = visibleText(withoutExpiryViews(withoutScripts(html))).replace(/\s+/g, ' ').trim();
-  return wordCount(text) >= minWords ? { url, title: '', text: capJdText(text, textCap), method: 'visible-text' } : null;
 }
 
 /**
@@ -565,22 +582,66 @@ export function fetchedPageClosure(page, url) {
   return pageClosureEvidence(String(page?.html ?? ''), url, finalUrl);
 }
 
+// Floor below which a jd-mode extraction is treated as failure, not content.
+// A posting page whose main text is a couple of sentences is a render we
+// missed (SPA shell, consent wall, bot interstitial), never a real JD; the
+// cost of being wrong is one silent fallback to the MCP path, whereas the
+// cost of NOT failing is an empty JD evaluated as if it were the posting.
+// Only jd mode gets this guard: an empty `listing` result is legitimate — a
+// company with no open roles.
+const MIN_JD_TEXT_CHARS = 200;
+
 /**
- * @param {string} url
- * @param {number} [textCap]
- * @param {number} [timeoutMs]
- * @returns {Promise<{url: string, title: string, text: string, method: string, closed?: boolean, evidence?: string, unreachable?: boolean}|null>}
+ * A Cloudflare challenge or block page served in place of the posting, as a
+ * jd-mode failure, or null. Pure — exported for tests.
+ *
+ * jdFailure() never rejects a result above the length floor, and a
+ * site-branded challenge body clears it (#6713: 838 characters, "Humans
+ * only"), so the interstitial was emitted as the JD. Cloudflare titles the page
+ * itself, and archive-posting.mjs refuses the same pages by that title on an
+ * HTTP error (#6724). `bot_challenge` is the code liveness gives the same wall.
+ *
+ * @param {{ status?: number, pageTitle?: string, url?: string }} page
  */
-export async function fetchJdFromPage(url, textCap = PAGE_TEXT_CAP, timeoutMs = DEFAULT_TIMEOUT_MS, { visibleText = false } = {}) {
-  let host;
-  try { host = new URL(url).hostname; } catch { return null; }
-  if (isLinkedInHost(host)) return null;
-  const page = await fetchHtml(url, timeoutMs);
-  if (!page) return null;
-  if (page.unreachable) return { url, title: '', text: '', method: 'unreachable', unreachable: true };
-  const closure = fetchedPageClosure(page, url);
-  if (closure) return { url, title: '', text: '', method: page.gone ? 'http-gone' : 'page-closure', closed: true, evidence: closure };
-  return extractJd(page, url, { textCap, visibleText });
+export function challengeFailure({ status = 0, pageTitle = '', url = '' } = {}) {
+  if (!(status >= 400)) return null;
+  const kind = cloudflareInterstitial(pageTitle);
+  if (!kind) return null;
+  return { error: `HTTP ${status} Cloudflare ${kind} ("${String(pageTitle).trim()}"), not the posting`, code: 'bot_challenge', url };
+}
+
+/**
+ * Why a jd-mode result cannot be emitted, or null when it can. Pure — exported
+ * for tests.
+ *
+ * A page whose cleaned text is below the floor is either unreadable (a client-
+ * rendered shell: `empty_text`, worth another attempt) or gone (the posting
+ * was taken down: `unavailable`, terminal). Both produce the same empty text,
+ * because the "no longer available" banner usually sits in a header or footer
+ * that readDom() strips — so the unstripped body is checked too. A result at or
+ * above the floor is never reclassified: a full JD may quote such a phrase.
+ */
+export function jdFailure(result, maxChars) {
+  const floor = Math.min(MIN_JD_TEXT_CHARS, maxChars);
+  if (result.text.length >= floor) return null;
+  // The shared liveness classifier, not a second phrase list. Only its
+  // posting-specific expiry verdicts count: `insufficient_content` is what a
+  // page that has not rendered yet looks like (liveness-browser treats it the
+  // same way), so it stays empty_text and remains worth retrying.
+  const verdict = classifyLiveness({
+    requestedUrl: result.url,
+    finalUrl: result.url,
+    bodyText: `${result.text}\n${result.bodyText || ''}`,
+  });
+  if (verdict.result === 'expired' && (verdict.code === 'expired_body' || verdict.code === 'expired_body_soft')) {
+    return { error: `posting is no longer available (${verdict.reason})`, code: 'unavailable', url: result.url };
+  }
+  return {
+    error: `extracted ${result.text.length} chars of JD text (minimum ${floor}) — the page most likely renders its content client-side`,
+    code: 'empty_text',
+    url: result.url,
+    body_text: String(result.bodyText || '').slice(0, 4000),
+  };
 }
 
 // ========================================================================
@@ -714,7 +775,7 @@ export function normalizeWorkdayJob(json, postingUrl, textCap = JD_TEXT_CAP) {
  *
  * @param {Response} res
  */
-async function discard(res) {
+async function drainBody(res) {
   try {
     const reader = res.body?.getReader();
     while (reader && !(await reader.read()).done) { /* drop the chunk */ }
@@ -743,7 +804,7 @@ async function fetchApiBody(apiUrl, { timeoutMs, as = 'json', headers = {} }) {
       redirect: 'error',
       signal: controller.signal,
     });
-    if (!res.ok) return await discard(res);
+    if (!res.ok) return await drainBody(res);
     return as === 'json' ? await res.json() : await res.text();
   } catch {
     return null;
@@ -1010,7 +1071,7 @@ async function fetchGreenhouseEmbeddedJd(resolved, postingUrl, textCap, timeoutM
       signal: controller.signal,
     });
     jobApiUrl = await resolved.followEmbed(res, resolved.parts);
-    await discard(res); // only its status and Location header are read
+    await drainBody(res); // only its status and Location header are read
   } catch {
     return null;
   } finally {
@@ -1350,12 +1411,12 @@ async function fetchWorkableJd(resolved, postingUrl, textCap, timeoutMs) {
       if (!apiUrl || rejectPrivateOrInvalid(apiUrl)) return null;
     }
     const res = await fetch(apiUrl, options);
-    if (!res.ok) return await discard(res);
+    if (!res.ok) return await drainBody(res);
     return normalizeWorkableJob(await res.json(), resolved.parts.shortcode, postingUrl, textCap);
   } catch {
     return null;
   } finally {
-    if (redirect) await discard(redirect);
+    if (redirect) await drainBody(redirect);
     clearTimeout(timer);
   }
 }
@@ -1407,7 +1468,6 @@ async function fetchHimalayasJd(_resolved, url, textCap, timeoutMs) {
   if (!text) return null;
   return { url, title: compactText(result.job.title, 300), text: compactText(text, textCap) };
 }
-
 
 /**
  * ats id → fetcher. THE routing table `fetchJdViaKnownApi` dispatches through,
@@ -1484,112 +1544,44 @@ export async function fetchJdViaKnownApi(url, textCap = JD_TEXT_CAP, timeoutMs =
 // Tier 3 — a rendered page in headless Chromium (only with browser: true)
 // ========================================================================
 
-/**
- * A Cloudflare challenge or block page served in place of the posting, as a
- * jd-mode failure, or null. Pure — exported for tests.
- *
- * jdFailure() never rejects a result above the length floor, and a
- * site-branded challenge body clears it (#6713: 838 characters, "Humans
- * only"), so the interstitial was emitted as the JD. Cloudflare titles the page
- * itself, and archive-posting.mjs refuses the same pages by that title on an
- * HTTP error (#6724). `bot_challenge` is the code liveness gives the same wall.
- *
- * @param {{ status?: number, pageTitle?: string, url?: string }} page
- */
-export function challengeFailure({ status = 0, pageTitle = '', url = '' } = {}) {
-  if (!(status >= 400)) return null;
-  const kind = cloudflareInterstitial(pageTitle);
-  if (!kind) return null;
-  return { error: `HTTP ${status} Cloudflare ${kind} ("${String(pageTitle).trim()}"), not the posting`, code: 'bot_challenge', url };
-}
-
 const HYDRATION_WAIT_MS = 2_000;
 
-// Floor below which a jd-mode extraction is treated as failure, not content.
-// A posting page whose main text is a couple of sentences is a render we
-// missed (SPA shell, consent wall, bot interstitial), never a real JD; the
-// cost of being wrong is one silent fallback to the MCP path, whereas the
-// cost of NOT failing is an empty JD evaluated as if it were the posting.
-// Only jd mode gets this guard: an empty `listing` result is legitimate — a
-// company with no open roles.
-const MIN_JD_TEXT_CHARS = 200;
-
-
 /**
- * Shape a JD-mode result from the raw DOM read. Pure — exported for tests.
- * @param {{ title?: string, text?: string }} raw
+ * The JD a rendered page holds: its structured data (extractJd, read from the
+ * page's HTML) or its rendered text, whichever is longer.
+ *
+ * A schema.org JobPosting, when the page ships one, beats the rendered DOM: it is
+ * the posting body as the employer published it, not as their template happened
+ * to lay it out. On Phenom boards (careers.roche.com) the rendered <main> holds
+ * title, location and Apply chrome only (~300 characters) while the body never
+ * becomes visible text, so reading the DOM alone emitted a JD with no
+ * requirements and reported success. Longer wins rather than structured data
+ * always winning: plenty of pages carry a stub JobPosting alongside a fully
+ * rendered body, and preferring the stub would break the common case to fix the
+ * rare one. Lengths are compared after whitespace is collapsed: raw DOM text on a
+ * chrome-heavy page is mostly repeated newlines and would out-length a shorter
+ * but substantive description.
+ *
+ * `bodyText` is for jdFailure() only, never emitted: `text` has had nav, header and
+ * footer stripped, and an expired-posting banner often sits in one of them.
+ * Pure — exported for tests.
+ *
+ * @param {{title?: string, text?: string, bodyText?: string}} raw readDom's result
+ * @param {string} html the rendered page's HTML
  * @param {string} finalUrl
+ * @param {number} [textCap]
  */
-export function normalizeJd(raw, finalUrl, textCap = JD_TEXT_CAP) {
-  // A schema.org JobPosting, when the page ships one, beats the rendered DOM:
-  // it is the posting body as the employer published it, not as their template
-  // happened to lay it out. On Phenom boards (careers.roche.com) the rendered
-  // <main> holds title, location and Apply chrome only — ~300 characters — while
-  // the body never becomes visible text at all, so the DOM path emitted a JD
-  // with no requirements in it and reported success. Same shape on other
-  // template-driven corporate boards, which is why this keys off the standard
-  // rather than off a host.
-  //
-  // Longer wins rather than JSON-LD always winning: plenty of pages carry a
-  // stub JobPosting (a one-line summary, or just the title) alongside a fully
-  // rendered body, and preferring the stub there would break the common case to
-  // fix the rare one.
-  const ldText = jdHtmlToText(raw?.jsonLdDescription || '');
-  // Normalized length, not raw length: raw DOM text on a chrome-heavy page is
-  // mostly repeated newlines ("Apply now\n\n\n\n\n\nSave job\n\n\n\n\n\n..."), which
-  // can out-length a shorter-in-raw-HTML but substantive JSON-LD description
-  // before either side is compacted. Comparing pre-collapse defeats the whole
-  // point of "longer wins". No cap here (Infinity) — only the comparison needs
-  // normalizing; the real textCap is still applied below.
+export function jdFromRenderedPage(raw, html, finalUrl, textCap = JD_TEXT_CAP) {
+  const structured = extractJd({ html, finalUrl }, finalUrl, { textCap: Infinity });
   const domText = compactText(String(raw?.text || ''), Infinity);
-  const text = ldText.length > domText.length ? ldText : domText;
-
+  const useStructured = structured && structured.text.length > domText.length;
   return {
     url: finalUrl,
-    title: compactText(raw?.title || raw?.jsonLdTitle || '', 300),
-    text: compactText(text, textCap),
-    // For the liveness check in jdFailure() only. `text` has had nav/header/footer
-    // stripped, and an expired-posting banner often sits in one of them. Never
-    // emitted on the success path.
+    title: compactText(raw?.title || structured?.title || '', 300),
+    text: compactText(useStructured ? structured.text : domText, textCap),
     bodyText: compactText(raw?.bodyText || '', 4100),
   };
 }
-
-
-/**
- * Why a jd-mode result cannot be emitted, or null when it can. Pure — exported
- * for tests.
- *
- * A page whose cleaned text is below the floor is either unreadable (a client-
- * rendered shell: `empty_text`, worth another attempt) or gone (the posting
- * was taken down: `unavailable`, terminal). Both produce the same empty text,
- * because the "no longer available" banner usually sits in a header or footer
- * that readDom() strips — so the unstripped body is checked too. A result at or
- * above the floor is never reclassified: a full JD may quote such a phrase.
- */
-export function jdFailure(result, maxChars) {
-  const floor = Math.min(MIN_JD_TEXT_CHARS, maxChars);
-  if (result.text.length >= floor) return null;
-  // The shared liveness classifier, not a second phrase list. Only its
-  // posting-specific expiry verdicts count: `insufficient_content` is what a
-  // page that has not rendered yet looks like (liveness-browser treats it the
-  // same way), so it stays empty_text and remains worth retrying.
-  const verdict = classifyLiveness({
-    requestedUrl: result.url,
-    finalUrl: result.url,
-    bodyText: `${result.text}\n${result.bodyText || ''}`,
-  });
-  if (verdict.result === 'expired' && (verdict.code === 'expired_body' || verdict.code === 'expired_body_soft')) {
-    return { error: `posting is no longer available (${verdict.reason})`, code: 'unavailable', url: result.url };
-  }
-  return {
-    error: `extracted ${result.text.length} chars of JD text (minimum ${floor}) — the page most likely renders its content client-side`,
-    code: 'empty_text',
-    url: result.url,
-    body_text: String(result.bodyText || '').slice(0, 4000),
-  };
-}
-
 
 // Read the raw DOM inside the page: title, main visible text, and visible
 // anchors. Runs in the browser context; returns plain data only.
@@ -1638,42 +1630,6 @@ export async function readDom(page) {
       })
       .map((el) => ({ href: el.getAttribute('href') || '', label: (el.innerText || '').trim() }));
 
-    // schema.org JobPosting, if present. Returned as the raw description markup
-    // so the shared jdHtmlToText() does the conversion, keeping one entity /
-    // block-break implementation rather than a second one inside the page.
-    let jsonLdDescription = '';
-    let jsonLdTitle = '';
-    for (const el of document.querySelectorAll('script[type="application/ld+json"]')) {
-      let parsed;
-      try {
-        parsed = JSON.parse(el.textContent || 'null');
-      } catch {
-        continue; // a malformed block must not cost us the well-formed one after it
-      }
-      // Publishers ship a bare object, an array, or an @graph wrapper.
-      const candidates = Array.isArray(parsed)
-        ? parsed
-        : Array.isArray(parsed?.['@graph'])
-          ? parsed['@graph']
-          : [parsed];
-      // @type is the bare token in most feeds, but some publishers use the
-      // absolute schema.org IRI instead — both forms occur in the wild.
-      const isJobPostingType = (t) =>
-        t === 'JobPosting' || t === 'http://schema.org/JobPosting' || t === 'https://schema.org/JobPosting';
-      for (const node of candidates) {
-        const type = node?.['@type'];
-        const isJobPosting = Array.isArray(type) ? type.some(isJobPostingType) : isJobPostingType(type);
-        if (!isJobPosting) continue;
-        const desc = typeof node.description === 'string' ? node.description : '';
-        if (desc.length > jsonLdDescription.length) {
-          jsonLdDescription = desc;
-          // Always reset, never carry over: a stub JobPosting's title must not
-          // survive onto the description of a later, longer JobPosting node.
-          jsonLdTitle = typeof node.title === 'string' ? node.title : '';
-        }
-      }
-    }
-
     // The unstripped body: `text` above removes nav/header/footer, where an
     // expired-posting banner often lives.
     // Head and tail, so a banner in the footer is still in the sample when the
@@ -1683,7 +1639,7 @@ export async function readDom(page) {
 
     // The document's own title, which `title` above passes over for an <h1>:
     // challengeFailure() reads it.
-    return { title, text, anchors, jsonLdDescription, jsonLdTitle, bodyText, pageTitle: document.title || '' };
+    return { title, text, anchors, bodyText, pageTitle: document.title || '' };
   });
 }
 
@@ -1736,7 +1692,7 @@ export async function withBrowserPage(url, timeoutMs, read) {
 
 /**
  * The last JD tier: render the page and read its DOM. A JSON-LD JobPosting on the
- * page wins over the rendered text when it is longer (normalizeJd). A Cloudflare
+ * page wins over the rendered text when it is longer (jdFromRenderedPage). A Cloudflare
  * challenge, an empty render or a taken-down posting comes back as `failure`
  * instead of a JD-shaped result; `failure.code === 'unavailable'` means closed.
  *
@@ -1750,7 +1706,7 @@ export async function fetchJdViaBrowser(url, textCap = JD_TEXT_CAP, timeoutMs = 
     const raw = await readDom(page);
     const challenge = challengeFailure({ status: response?.status() ?? 0, pageTitle: raw.pageTitle, url: finalUrl });
     if (challenge) return { failure: challenge };
-    const result = normalizeJd(raw, finalUrl, textCap);
+    const result = jdFromRenderedPage(raw, await page.content(), finalUrl, textCap);
     const failure = jdFailure(result, textCap);
     return failure ? { failure } : { ...result, method: 'browser' };
   });
@@ -1776,7 +1732,7 @@ export async function fetchJdViaBrowser(url, textCap = JD_TEXT_CAP, timeoutMs = 
 export async function fetchJd(url, { textCap = JD_TEXT_CAP, timeoutMs = DEFAULT_TIMEOUT_MS, visibleText = false, browser = false } = {}) {
   const viaApi = await fetchJdViaKnownApi(url, textCap, timeoutMs);
   if (viaApi) return viaApi;
-  const viaPage = await fetchJdFromPage(url, textCap, timeoutMs, { visibleText });
+  const viaPage = await fetchJdViaPage(url, textCap, timeoutMs, { visibleText });
   if (viaPage && !viaPage.unreachable) return viaPage;
   if (!browser) return viaPage;
   return await fetchJdViaBrowser(url, textCap, timeoutMs);

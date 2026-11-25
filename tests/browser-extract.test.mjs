@@ -14,7 +14,7 @@ try {
   const { resolveAtsApi, JD_TEXT_API_ATS } = await import(pathToFileURL(join(ROOT, 'liveness-api.mjs')).href);
   const { resolveExtractorMode, normalizeListing, parseArgs } = mod;
   const {
-    compactText, normalizeJd, workdayCxsUrl, jdHtmlToText, normalizeWorkdayJob,
+    compactText, jdFromRenderedPage, workdayCxsUrl, jdHtmlToText, normalizeWorkdayJob,
     normalizeAshbyJob, normalizeGreenhouseJob, normalizeLeverJob, normalizeSmartRecruitersJob,
     normalizeZohoJob, fetchJdViaKnownApi, resolveJdApi, JD_FETCHERS,
   } = await import(pathToFileURL(join(ROOT, 'fetch-jd.mjs')).href);
@@ -74,52 +74,49 @@ try {
   if (capped.length === 11 && capped.endsWith('…')) pass('compactText caps length and appends an ellipsis');
   else fail(`compactText cap => ${JSON.stringify(capped)}`);
 
-  // normalizeJd — shape { url, title, text }
-  const jd = normalizeJd({ title: '  Senior Go  Engineer ', text: 'Line1\n\n\n\nLine2   end' }, 'https://x/1');
+  // jdFromRenderedPage — shape { url, title, text }
+  const jd = jdFromRenderedPage({ title: '  Senior Go  Engineer ', text: 'Line1\n\n\n\nLine2   end' }, '', 'https://x/1');
   if (jd.url === 'https://x/1' && jd.title === 'Senior Go Engineer' && jd.text === 'Line1\n\nLine2 end') {
-    pass('normalizeJd shapes { url, title, text } and compacts both');
+    pass('jdFromRenderedPage shapes { url, title, text } and compacts both');
   } else {
-    fail(`normalizeJd => ${JSON.stringify(jd)}`);
+    fail(`jdFromRenderedPage => ${JSON.stringify(jd)}`);
   }
 
-  // normalizeJd prefers a schema.org JobPosting from JSON-LD when the page
-  // ships one, over the rendered DOM text — but the comparison must be on
-  // NORMALIZED length, not raw length. Phenom-style chrome ("Apply now / Save
-  // job / Share ...") is mostly repeated newlines: it can out-length a real,
-  // shorter-in-raw-HTML JSON-LD description before whitespace is collapsed,
-  // even though the JSON-LD is clearly the substantive content once both are
-  // normalized. (Regression for the case where raw-length comparison let DOM
-  // chrome win and the JD came out empty.)
+  // A schema.org JobPosting the page ships beats the rendered DOM text — but the
+  // comparison must be on NORMALIZED length, not raw length. Phenom-style chrome
+  // ("Apply now / Save job / Share ...") is mostly repeated newlines: it can
+  // out-length a real, shorter-in-raw-HTML description before whitespace is
+  // collapsed, even though the JobPosting is clearly the substantive content once
+  // both are normalized.
+  const ldPage = (description) => `<html><head><script type="application/ld+json">${JSON.stringify({ '@type': 'JobPosting', title: 'Rust Engineer', description })}</script></head><body></body></html>`;
   const chromeHeavy = 'Apply now\n\n\n\n\n\n\n\nSave job\n\n\n\n\n\n\n\nShare\n\n\n\n\n\n\n\nLocation\n\n\n\n\n\n\n\nBasel\n\n\n\n\n\n\n\nJob ID\n\n\n\n\n\n\n\n2024\n\n\n\n\n\n\n\n';
-  const substantiveLd = '<p>Lead the Rust platform team. Own the roadmap for the core services and mentor five engineers.</p>';
-  const ldWins = normalizeJd({ title: '', text: chromeHeavy, jsonLdDescription: substantiveLd }, 'https://x/1');
-  if (ldWins.text === 'Lead the Rust platform team. Own the roadmap for the core services and mentor five engineers.') {
-    pass('normalizeJd compares normalized (not raw) DOM length, so JSON-LD wins over whitespace-heavy DOM chrome');
+  const sentence = 'Lead the Rust platform team and own the roadmap for the core services, mentoring engineers across the group. ';
+  const ldWins = jdFromRenderedPage({ title: '', text: chromeHeavy }, ldPage(`<p>${sentence.repeat(8)}</p>`), 'https://x/1');
+  if (ldWins.text.includes('Lead the Rust platform team') && ldWins.title === 'Rust Engineer') {
+    pass('jdFromRenderedPage compares normalized (not raw) DOM length, so the JobPosting wins over whitespace-heavy DOM chrome');
   } else {
-    fail(`normalizeJd chrome-vs-ld => ${JSON.stringify(ldWins.text)}`);
+    fail(`jdFromRenderedPage chrome-vs-ld => ${JSON.stringify(ldWins.text)}`);
   }
 
-  // ...and the rule stays "longer wins", not "JSON-LD always wins": a genuinely
-  // longer, substantive DOM text must still beat a short stub JobPosting.
-  const realDomText = 'Full job description with responsibilities, requirements, and a benefits section spanning several sentences.';
-  const stubLd = '<p>Rust Engineer</p>';
-  const domWins = normalizeJd({ title: '', text: realDomText, jsonLdDescription: stubLd }, 'https://x/1');
-  if (domWins.text === realDomText) {
-    pass('normalizeJd keeps the rendered DOM text when the JSON-LD is a shorter stub');
+  // ...and the rule stays "longer wins", not "the JobPosting always wins": a
+  // longer, substantive DOM text must still beat a shorter structured description.
+  const realDomText = 'Full job description with responsibilities, requirements, and a benefits section. '.repeat(30);
+  const domWins = jdFromRenderedPage({ title: '', text: realDomText }, ldPage(`<p>${sentence.repeat(8)}</p>`), 'https://x/1');
+  if (domWins.text === realDomText.trim()) {
+    pass('jdFromRenderedPage keeps the rendered DOM text when the JobPosting is shorter');
   } else {
-    fail(`normalizeJd dom-vs-stub-ld => ${JSON.stringify(domWins.text)}`);
+    fail(`jdFromRenderedPage dom-vs-ld => ${JSON.stringify(domWins.text.slice(0, 60))}`);
   }
 
-  // normalizeJd honors a custom text cap (a long JD is truncated at the cap, not
-  // silently at the 12000 default) while leaving the default behavior unchanged.
+  // A custom text cap truncates at the cap, not silently at the 12000 default.
   const longText = 'y'.repeat(20000);
-  const raised = normalizeJd({ title: 'Role', text: longText }, 'https://x/1', 15000);
-  const defaulted = normalizeJd({ title: 'Role', text: longText }, 'https://x/1');
+  const raised = jdFromRenderedPage({ title: 'Role', text: longText }, '', 'https://x/1', 15000);
+  const defaulted = jdFromRenderedPage({ title: 'Role', text: longText }, '', 'https://x/1');
   if (raised.text.length === 15001 && raised.text.endsWith('…') &&
       defaulted.text.length === 12001 && defaulted.text.endsWith('…')) {
-    pass('normalizeJd applies a custom textCap and defaults to the 12000 JD cap');
+    pass('jdFromRenderedPage applies a custom textCap and defaults to the 12000 JD cap');
   } else {
-    fail(`normalizeJd textCap => raised=${raised.text.length} default=${defaulted.text.length}`);
+    fail(`jdFromRenderedPage textCap => raised=${raised.text.length} default=${defaulted.text.length}`);
   }
 
   // workdayCxsUrl — Workday posting URLs map to the per-job CXS endpoint;

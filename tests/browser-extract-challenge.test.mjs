@@ -30,6 +30,7 @@ const tab = {
   waitForTimeout: async () => {},
   url: () => page.url,
   evaluate: async () => page.raw,
+  content: async () => '<html></html>',
 };
 export const chromium = {
   launch: async () => ({
@@ -56,7 +57,7 @@ const CHALLENGE_BODY = `Humans only\n\n${'Please wait while we check that your b
 const JD_BODY = `Senior Platform Engineer\n\n${'You will own the infrastructure that runs our payments platform, from provisioning to deployment. '.repeat(5)}`;
 
 function extract(status, pageTitle, h1, body) {
-  const raw = { title: h1, text: body, anchors: [], jsonLdDescription: '', jsonLdTitle: '', bodyText: body, pageTitle };
+  const raw = { title: h1, text: body, anchors: [], bodyText: body, pageTitle };
   const r = spawnSync(NODE, ['--import', pathToFileURL(register).href, join(ROOT, 'browser-extract.mjs'), URL_], {
     cwd: dir, encoding: 'utf8', timeout: 60000,
     env: { ...process.env, FAKE_PAGE: JSON.stringify({ status, url: URL_, raw }) },

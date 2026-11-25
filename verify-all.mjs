@@ -187,7 +187,7 @@ async function checkLinks(urls) {
   };
   // The connect-time guard lives in the patched dns.lookup, so the patch has
   // to be in place, and a fetch through an untrusted HTTP proxy would hide the
-  // destination from it: fail closed in both cases, as fetchJdFromPage does.
+  // destination from it: fail closed in both cases, as fetchJdViaPage does.
   const { dnsLookupPatched } = await import('./providers/_dns-cache.mjs');
   const { providerFetchContext } = await import('./providers/_ip-guard.mjs');
   const { validateUrlSecurity } = await import('./liveness-browser.mjs');
