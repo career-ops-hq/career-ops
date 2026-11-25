@@ -4252,9 +4252,11 @@ export async function appendToPipeline(offers, {
   scanHistoryPath = SCAN_HISTORY_PATH,
   historyPolicy = null,
 } = {}) {
-  if (offers.length === 0) return;
+  if (offers.length === 0) return 0;
 
-  await withPipelineLock(pipelinePath, async () => {
+  // The row count comes back through the lock so the caller can tell a saved
+  // offer from one this write boundary refused (#7740).
+  return await withPipelineLock(pipelinePath, async () => {
     // Auto-create with standard skeleton if missing (fresh-install guard).
     let text = existsSync(pipelinePath)
       ? readFileSync(pipelinePath, 'utf-8')
@@ -4270,13 +4272,13 @@ export async function appendToPipeline(offers, {
       if (err?.code !== 'EISDIR') throw err;
     }
     const fresh = offersMissingFromPipeline(offers, text, historyText, policy);
-    if (fresh.length === 0) return;
+    if (fresh.length === 0) return 0;
     // formatPipelineOffer returns '' for an offer with no safe http(s) URL. The
     // filter is belt-and-braces: offersMissingFromPipeline already drops those
     // through sameJobWriteKey, but a row joined from an empty entry would be a
     // bare `- [ ]  | Company | Role` line the pipeline mode still parses.
     const rows = fresh.map(formatPipelineOffer).filter(Boolean);
-    if (rows.length === 0) return;
+    if (rows.length === 0) return 0;
 
     const headings = [...text.matchAll(/^##[ \t].*$/gm)];
     const pending = headings.find(h => sectionKind(h[0]) === 'pending');
@@ -4298,6 +4300,7 @@ export async function appendToPipeline(offers, {
     }
 
     atomicWriteFile(pipelinePath, text);
+    return rows.length;
   });
 }
 
@@ -6219,8 +6222,9 @@ async function main() {
   const crossListings = findCrossListings(verifiedOffers, dedupSnapshot.fingerprintHistory);
 
   // 6. Write results
+  let pipelined = 0;
   if (!dryRun && verifiedOffers.length > 0) {
-    await appendToPipeline(verifiedOffers);
+    pipelined = await appendToPipeline(verifiedOffers);
     await appendToScanHistory(verifiedOffers, date);
   }
   // Postings the experience filter dropped: recorded for visibility, no dedup
@@ -6438,7 +6442,11 @@ async function main() {
     console.log(`No apply control:      ${droppedOffers.length} dropped`);
     console.log(`Invalid (guarded):     ${invalidOffers.length} dropped`);
   }
-  console.log(`New offers added:      ${verifiedOffers.length}`);
+  const unsafeCount = verifiedOffers.filter(offer => !safePostingUrl(offer?.url)).length;
+  // A dry run has no write to count, so it previews the number of offers this
+  // boundary would carry, minus the ones it refuses for the same reason.
+  const addedCount = dryRun ? verifiedOffers.length - unsafeCount : pipelined;
+  console.log(`New offers added:      ${addedCount}${unsafeCount > 0 ? ` (${unsafeCount} dropped: no safe http(s) URL)` : ''}`);
 
   // Trust validation summary (only when trust_filter is configured)
   if (config.trust_filter && config.trust_filter.enabled !== false && verifiedOffers.length > 0) {
@@ -6589,7 +6597,7 @@ async function main() {
     }
     if (dryRun) {
       console.log('\n(dry run — run without --dry-run to save results)');
-    } else {
+    } else if (pipelined > 0) {
       console.log(`\nResults saved to ${PIPELINE_PATH} and ${SCAN_HISTORY_PATH}`);
     }
   }
@@ -6612,7 +6620,7 @@ async function main() {
       filteredLocation: totalFilteredLocation, filteredPostingAge: totalFilteredPostingAge,
       filteredSalary: totalFilteredSalary, filteredWorkplace: totalFilteredWorkplace,
       filteredContent: totalFilteredContent, filteredCooldown: totalFilteredCooldown,
-      dupes: totalDupes, newAdded: verifiedOffers.length, errors: errors.length,
+      dupes: totalDupes, newAdded: pipelined, errors: errors.length,
       filteredBlacklist: totalFilteredBlacklist,
       filteredVisa: totalFilteredVisa,
       filteredPostedDate: totalFilteredPostedDate,

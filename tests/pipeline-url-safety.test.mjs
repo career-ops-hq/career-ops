@@ -102,6 +102,46 @@ test('appendToPipeline drops a hostile URL and still writes the valid offers', a
     rmSync(dir, { recursive: true, force: true });
   }
 });
+test('appendToPipeline reports the rows it wrote, so a refused offer is not counted as added', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pipeline-url-count-'));
+  try {
+    const pipelinePath = join(dir, 'pipeline.md');
+    const scanHistoryPath = join(dir, 'scan-history.tsv');
+    const options = { pipelinePath, scanHistoryPath, historyPolicy: {} };
+
+    const written = await appendToPipeline([
+      { url: 'https://boards.example/jobs/11', company: 'Acme', title: 'Dev' },
+      { url: 'https://boards.example/jobs/12', company: 'Globex', title: 'SRE' },
+    ], options);
+    assert.equal(written, 2, 'both postings landed');
+    assert.equal(await appendToPipeline([{ url: 'javascript:alert(1)', company: 'Hostile', title: 'Dev' }], options), 0);
+    assert.equal(await appendToPipeline([], options), 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a scanner-authored local: reference stays out of the pipeline, and the write reports it', async () => {
+  // local:jds/... is how the deep-JD spec points at a captured description, and
+  // the pipeline mode reads that prefix. It is not a posting this write boundary
+  // may carry: the value would be board-controlled text telling the agent to
+  // read a local path. So the offer is refused here and the scan summary reports
+  // the drop instead of claiming the run saved it (#7740).
+  assert.equal(safePostingUrl('local:jds/acme-1.md'), '');
+  assert.equal(formatPipelineOffer({ url: 'local:jds/acme-1.md', company: 'Acme', title: 'Dev' }), '');
+
+  const dir = mkdtempSync(join(tmpdir(), 'pipeline-local-jd-'));
+  try {
+    const written = await appendToPipeline(
+      [{ url: 'local:jds/acme-1.md', company: 'Acme', title: 'Dev' }],
+      { pipelinePath: join(dir, 'pipeline.md'), scanHistoryPath: join(dir, 'scan-history.tsv'), historyPolicy: {} },
+    );
+    assert.equal(written, 0, 'nothing was written, so the caller can report the drop');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('appendToScanHistory records only a safe URL, and an all-rejected batch leaves the file untouched', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'scan-history-url-safety-'));
   try {
