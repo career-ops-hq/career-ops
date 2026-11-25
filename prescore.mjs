@@ -857,7 +857,7 @@ const ANNUAL_RE = /\b(?:annual(?:ly)?|yearly|per\s+(?:year|annum)|a\s+year|al\s+
 const CADENCE_RE = new RegExp('(?:' + NON_ANNUAL_RE.source + ')|(?:' + ANNUAL_RE.source + ')', 'gi');
 // Prefix labels may include modifiers ("monthly home office stipend").
 // Stop at conjunctions so a postfix label cannot consume another pay clause.
-const CADENCE_PREFIX_TAIL_RE = /^[\s:=-]*(?:(?:(?!(?:and|or|plus|with)\b)[\p{L}\p{M}-]+\s+)*(?:salary|pay|wages?|stipend|allowance|budget|bonus|compensation|rate|ctc|ote)[\s:=-]*)?$/iu;
+const CADENCE_PREFIX_TAIL_RE = /^[\s:=-]*(?:(?:(?!(?:and|or|plus|with)\b)[\p{L}\p{M}-]+\s+)*(?:salary|pay|wages?|stipend|allowance|budget|bonus|compensation|rate|ctc|ote)(?:\s+of)?[\s:=-]*)?$/iu;
 
 function nonAnnualFigureLookup(text, matches) {
   const groups = [];
@@ -916,14 +916,21 @@ function nonAnnualFigureLookup(text, matches) {
       current.chars.push(char);
     }
   }
-  // A cadence-only wrapper, such as "$40k (per month)", qualifies its
-  // surrounding figure. Prose such as "(monthly team breakfast)" does not.
+  // Bare figure/cadence wrappers are transparent: "Monthly salary ($40k)"
+  // and "$40k (per month)" associate exactly as their unwrapped forms. Work
+  // inside out so doubled wrappers remain transparent too. A figure with its
+  // own cadence, or prose such as "including a $200 allowance", stays isolated.
   for (const context of contexts) context.surface = context.chars.join('');
-  for (const context of contexts) {
-    const marker = context.events[0];
+  for (let i = contexts.length - 1; i >= 0; i--) {
+    const context = contexts[i];
+    const event = context.events[0];
     if (context.parent && context.closed && context.events.length === 1
-      && marker.type === 'cadence' && context.surface.trim() === text.slice(marker.index, marker.end).trim()) {
-      context.parent.events.push({ ...marker, offset: context.parentOffset, offsetEnd: context.parentOffset + 1 });
+      && !context.surface.slice(0, event.offset).trim()
+      && (event.type === 'figure' ? /^[\s+]*$/ : /^\s*$/).test(context.surface.slice(event.offsetEnd))) {
+      context.events.pop();
+      event.offset = context.parentOffset;
+      event.offsetEnd = context.parentOffset + 1;
+      context.parent.events.push(event);
     }
   }
   const excluded = new Set();

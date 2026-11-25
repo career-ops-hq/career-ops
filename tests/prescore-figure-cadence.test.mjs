@@ -9,7 +9,7 @@ import { prescore, extractJdComp } from '../prescore.mjs';
 
 const profile = { target_roles: { primary: ['AI Developer'] }, pipeline: { prescore: { enabled: true, gate_threshold: 3.5 } }, compensation: { currency: 'USD', minimum: '$120k' } };
 const jd = (salary) => 'Title: AI Engineer\n## Requirements\n- Python\n- Docker\n- Kubernetes\n\n## Compensation\n' + salary;
-const evaluate = (salary) => prescore({ jdText: jd(salary), cvText: 'Python', profile });
+const evaluate = (salary, threshold = null) => prescore({ jdText: jd(salary), cvText: 'Python', profile, threshold });
 const details = '(depending on experience; location and ' + 'other factors '.repeat(30) + ')';
 const salaries = [
   'Salary: $150k per year (depending on experience and location), plus a $200 per month stipend',
@@ -53,6 +53,34 @@ for (const salary of [
     assert.ok(extractJdComp(salary).nonAnnual);
   });
 }
+const wrapperCases = [
+  ['Annual salary $150k and monthly stipend of $200', 5, 3.6, 'proceed', 3.5],
+  ['Annual salary of $150k and monthly stipend of $200', 5, 3.6, 'proceed', 3.5],
+  ['Monthly stipend of $200 and annual salary of $150k', 5, 3.6, 'proceed', 3.5],
+  ['$200 monthly stipend and annual salary of $150k', 5, 3.6, 'proceed', 3.5],
+  ['Monthly salary of $40k and annual stipend of $200', 4, 3.4, 'proceed', 3],
+  ['Monthly salary ($40k)', 4, 3.4, 'proceed', 3],
+  ['Monthly salary (($40k))', 4, 3.4, 'proceed', 3],
+  ['($40k) per month', 4, 3.4, 'proceed', 3],
+  ['(($40k)) per month', 4, 3.4, 'proceed', 3],
+  ['Annual salary ($150k)', 5, 3.6, 'proceed', 3.5],
+  ['Annual salary (($150k)) and monthly stipend of ($200)', 5, 3.6, 'proceed', 3.5],
+  ['Monthly salary ($40k per year)', 1, 2.8, 'skip', 3],
+  ['Monthly salary (($40k per year))', 1, 2.8, 'skip', 3],
+  ['Monthly salary ($150k per year)', 5, 3.6, 'proceed', 3.5],
+  ['Salary $40k (including a $200 equipment allowance) per month', 4, 3.4, 'proceed', 3],
+  ['Annual salary $150k (including a $200 monthly equipment allowance)', 5, 3.6, 'proceed', 3.5],
+  ['Monthly salary ($40k) and annual equipment stipend of ($200)', 4, 3.4, 'proceed', 3],
+];
+for (const [salary, comp, score, verdict, threshold] of wrapperCases) {
+  test('cadence labels and bare wrappers retain their owner: ' + salary, () => {
+    const result = evaluate(salary, threshold);
+    assert.equal(result.signals.comp.score, comp);
+    assert.equal(result.signals.comp.unknown, comp === 4);
+    assert.equal(result.score, score);
+    assert.equal(result.verdict, verdict);
+  });
+}
 test('cadence cannot cross a physical line or a top-level semicolon', () => {
   for (const suffix of ['\nMonthly team meeting', '; monthly team meeting', '\r\nMonthly team meeting']) {
     const result = evaluate('Salary: $150k' + suffix);
@@ -76,7 +104,7 @@ test('CLI preserves the real proceed decision and leaves discard bytes unchanged
   writeFileSync(join(root, 'cv.md'), 'Python\n');
   const original = Buffer.from('2026-01-01\thttps://example.invalid/prior\tprior reason\n');
   writeFileSync(log, original);
-  const cli = (salary) => spawnSync(process.execPath, [fileURLToPath(new URL('../prescore.mjs', import.meta.url)), '-', '--log', '--url', 'https://example.invalid/figure-cadence'], {
+  const cli = (salary, threshold = 3.5) => spawnSync(process.execPath, [fileURLToPath(new URL('../prescore.mjs', import.meta.url)), '-', '--log', '--url', 'https://example.invalid/figure-cadence', '--threshold', String(threshold)], {
     input: jd(salary), encoding: 'utf8', timeout: 10000, windowsHide: true,
     env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PROFILE: selected },
   });
@@ -90,6 +118,20 @@ test('CLI preserves the real proceed decision and leaves discard bytes unchanged
       assert.equal(result.discardLogged, false);
       assert.deepEqual(readFileSync(log), original);
     }
+    for (const [salary, comp, score, verdict, threshold] of wrapperCases) {
+      writeFileSync(log, original);
+      const child = cli(salary, threshold);
+      assert.equal(child.status, 0, child.stderr);
+      const result = JSON.parse(child.stdout);
+      assert.equal(result.signals.comp.score, comp, salary);
+      assert.equal(result.signals.comp.unknown, comp === 4, salary);
+      assert.equal(result.score, score, salary);
+      assert.equal(result.verdict, verdict, salary);
+      assert.equal(result.discardLogged, verdict === 'skip', salary);
+      if (verdict === 'proceed') assert.deepEqual(readFileSync(log), original, salary);
+      else assert.equal(readFileSync(log, 'utf8').trimEnd().split('\n').length, 2, salary);
+    }
+    writeFileSync(log, original);
     const skipped = cli('Salary: $40k per year');
     assert.equal(skipped.status, 0, skipped.stderr);
     assert.equal(JSON.parse(skipped.stdout).verdict, 'skip');
