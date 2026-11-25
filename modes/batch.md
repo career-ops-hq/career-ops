@@ -56,7 +56,8 @@ batch/
 
       ```bash
       # Use your CLI's headless command (see `modes/_headless.md`)
-      <headless-cmd> "Process this job. URL: {url}. JD: {jd_file}. Report: {num}. ID: {id}"      ```
+      <headless-cmd> "Process this job. URL: {url}. JD: {jd_file}. Report: {num}. ID: {id}"
+      ```
 
    e. Handle `needs_confirmation` before any completion: follow **Agency confirmation handoff** in `modes/_shared.md`. The worker writes no tracker, report, or CV; the parent asks its question with the posting URL, releases the unused reservation, and resumes only after the user's explicit answer for that posting. Other jobs may continue. Update `batch-state.tsv` (completed/failed/needs_confirmation + score + report_num); a held item has no score or report artifact.
    f. Log to `logs/{report_num}-{id}.log`
