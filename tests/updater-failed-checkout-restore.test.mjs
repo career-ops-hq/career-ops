@@ -20,7 +20,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, symlinkSync, lstatSync, chmodSync, readlinkSync } from 'fs';
 import { join } from 'path';
-import { pass, fail, makeUpdaterRepo, captureConsoleErrors, rmSync, ROOT } from './helpers.mjs';
+import { pass, fail, makeUpdaterRepo, captureConsoleErrors, rmSync, ROOT, hermeticGitRunner } from './helpers.mjs';
 import { gitIn, restoreAfterFailedUpdate, restoreBootstrapBackups, backupSystemFiles, checkoutErrorIsBenign, capturePreUpdateIndex, restoreWrittenDirtyState, locallyModifiedSystemFiles, parsePorcelainStatus, gitStatusEntries, refreshPreUpdateSnapshot, preservedCheckoutCollision, preservedSpecCollision } from '../update-system.mjs';
 
 function write(dir, rel, text) {
@@ -1262,8 +1262,9 @@ async function stagedOver(setupWorktree, mutateState) {
     const initialIndexState = capturePreUpdateIndex(startEntries, { gitRaw: rawOf(g), root: dir });
     if (mutateState) mutateState(initialIndexState.get('sys/a.md'));
     g('checkout', target, '--', 'sys/a.md');
+    const checkoutBytes = read(dir, 'sys/a.md');
     const { result: unrestored } = await captureConsoleErrors(() => restoreWrittenDirtyState(['sys/a.md'], { initialStatusPaths, initialIndexState, backupByFile: new Map(), preservedSet: new Set() }, { ...ctx }));
-    return { dir, g, unrestored, indexOk: g('rev-parse', ':sys/a.md') === stagedBlob };
+    return { dir, g, unrestored, checkoutBytes, indexOk: g('rev-parse', ':sys/a.md') === stagedBlob };
   } catch (err) {
     rmSync(dir, { recursive: true, force: true });
     throw err;
@@ -1299,8 +1300,8 @@ if (process.platform !== 'win32') {
 {
   const r = await stagedOver(() => {}, (entry) => { entry.worktreeCaptureFailed = true; });
   try {
-    if (r.unrestored.length === 1 && r.indexOk) pass('a worktree the capture could not read is reported, not overwritten with the staged blob');
-    else fail(`capture-failed wrong: ${JSON.stringify(r.unrestored)}`);
+    if (r.unrestored.length === 1 && r.indexOk && read(r.dir, 'sys/a.md') === r.checkoutBytes) pass('a worktree the capture could not read is reported, and the checkout bytes are left intact');
+    else fail(`capture-failed wrong: ${JSON.stringify(r.unrestored)} bytes=${JSON.stringify(read(r.dir, 'sys/a.md'))} want=${JSON.stringify(r.checkoutBytes)}`);
   } finally { rmSync(r.dir, { recursive: true, force: true }); }
 }
 
@@ -1315,7 +1316,7 @@ for (const [label, config, attrs, bytes] of [
   ['a lossy custom clean filter', [['filter.up.clean', 'tr a-z A-Z'], ['filter.up.smudge', 'cat']], 'sys/* filter=up\n', 'a v2 lower\n'],
 ]) {
   const r = await stagedOver((dir) => {
-    for (const [k, v] of config) gitIn(dir, 'config', k, v);
+    for (const [k, v] of config) hermeticGitRunner(dir)('config', k, v);
     if (attrs) writeFileSync(join(dir, '.git', 'info', 'attributes'), attrs);
     writeFileSync(join(dir, 'sys/a.md'), bytes);
   });
@@ -1337,6 +1338,23 @@ if (process.platform !== 'win32') {
       else fail(`permissions changed: ${got.toString(8)} want ${perms.toString(8)} unrestored=${JSON.stringify(r.unrestored)}`);
     } finally { rmSync(r.dir, { recursive: true, force: true }); }
   }
+}
+
+// ── 20s2. a special file at the path is not read as a regular file: reading a
+//    FIFO blocks, so the capture records it as unreadable and the restore
+//    reports the path instead of hanging or writing guessed bytes.
+if (process.platform !== 'win32') {
+  const { execFileSync } = await import('child_process');
+  let made = true;
+  const r = await stagedOver((dir) => {
+    rmSync(join(dir, 'sys/a.md'), { force: true });
+    try { execFileSync('mkfifo', [join(dir, 'sys/a.md')]); } catch { made = false; }
+  });
+  try {
+    if (!made) pass('a special file at the path is not read as a regular file (mkfifo unavailable, skipped)');
+    else if (r.unrestored.length === 1 && r.indexOk) pass('a special file at the path is not read as a regular file');
+    else fail(`special-file capture wrong: ${JSON.stringify(r.unrestored)}`);
+  } finally { rmSync(r.dir, { recursive: true, force: true }); }
 }
 
 // ── 20t. a write that fails part way must not cost the file at the path: the
