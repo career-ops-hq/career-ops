@@ -300,7 +300,7 @@ function latinHeadingKind(line, item) {
   const bare = line.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
   // A lead-in line that introduces a preferred list, however long ("It would
   // be great if you also have the following things").
-  if (bare.length <= 120 && !/\d/.test(bare) && PREFERRED_HEADING.test(bare) && /(?::|\bfollowing\b[\w\s]*)$/i.test(bare)) return 'preferred';
+  if (bare.length <= 120 && !hasFigure(bare) && PREFERRED_HEADING.test(bare) && /(?::|\bfollowing\b[\w\s]*)$/i.test(bare)) return 'preferred';
   if (bare.length > 60 || hasFigure(bare)) return null;
   const words = bare.split(/\s+/).length;
   if (!/:$/.test(bare) && (words > 6 || /[.!?]$/.test(bare))) return null;
