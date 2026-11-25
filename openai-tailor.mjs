@@ -136,6 +136,15 @@ const reportText = readFileSync(reportPath, 'utf-8').trim();
 // The report filename identifies the application being tailored.
 const reportFilename = basename(reportPath);
 
+// Text derived from the endpoint is untrusted output, and it is the one place a
+// request's own key can come back out: a gateway can answer 200 with an error
+// event that quotes the key, not only a non-2xx body. Redact it before printing;
+// locally generated diagnostics never contain the key.
+function redactKey(text) {
+  const s = String(text ?? '');
+  return apiKey ? s.split(apiKey).join('[REDACTED]') : s;
+}
+
 // ---------------------------------------------------------------------------
 // Endpoint + security guard.
 // ---------------------------------------------------------------------------
@@ -361,8 +370,7 @@ try {
     // The body is the gateway's own text, and the one place this request's key
     // can come back out. gemini-eval.mjs redacts its key from error text the
     // same way; redact before truncating so a long key cannot survive in pieces.
-    const shown = apiKey ? body.split(apiKey).join('[REDACTED]') : body;
-    console.error(`    ${shown.slice(0, 300)}`);
+    console.error(`    ${redactKey(body).slice(0, 300)}`);
     if (res.status === 402) {
       console.error(`    → Not enough credit at ${endpointHost} for the prompt plus the ${maxTokens}-token output cap.`);
       console.error(`      Top up, or lower CAREER_OPS_MAX_TOKENS.`);
@@ -395,7 +403,7 @@ try {
     await exitWhenDrained(1);
   }
 } catch (err) {
-  console.error(`❌  API call failed: ${err.message}`);
+  console.error(`❌  API call failed: ${redactKey(err.message)}`);
   await exitWhenDrained(1);
 }
 

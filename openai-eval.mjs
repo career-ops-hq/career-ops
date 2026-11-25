@@ -206,6 +206,15 @@ if (postingUrl && !isPostingUrl(postingUrl)) {
   process.exit(1);
 }
 
+// Text derived from the endpoint is untrusted output, and it is the one place a
+// request's own key can come back out: a gateway can answer 200 with an error
+// event that quotes the key, not only a non-2xx body. Redact it before printing;
+// locally generated diagnostics never contain the key.
+function redactKey(text) {
+  const s = String(text ?? '');
+  return apiKey ? s.split(apiKey).join('[REDACTED]') : s;
+}
+
 // ---------------------------------------------------------------------------
 // Endpoint + security guard.
 // cv.md + the full JD (and the API key) are sent to this endpoint, so:
@@ -474,8 +483,7 @@ try {
     // The body is the gateway's own text, and the one place this request's key
     // can come back out. gemini-eval.mjs redacts its key from error text the
     // same way; redact before truncating so a long key cannot survive in pieces.
-    const shown = apiKey ? body.split(apiKey).join('[REDACTED]') : body;
-    console.error(`    ${shown.slice(0, 300)}`);
+    console.error(`    ${redactKey(body).slice(0, 300)}`);
     if (res.status === 401 || res.status === 403) {
       console.error(`    → Check your API key for ${endpointHost}.`);
     } else if (res.status === 402) {
@@ -507,8 +515,19 @@ try {
     eventData = [];
     eventSize = 0;
     if (payload === '[DONE]') { streamDone = true; return; }
-    const obj = JSON.parse(payload);
-    if (obj.error) throw new Error(String(obj.error.message || obj.error).slice(0, 300));
+    let obj;
+    try {
+      obj = JSON.parse(payload);
+    } catch {
+      // Do not echo the payload: JSON.parse would quote its first characters, and a
+      // key left as that prefix no longer matches the catch-level redaction. The
+      // payload is not rewritten either — a key that collides with a field value
+      // (finish_reason "stop", say) must not change what a valid event means.
+      throw new Error('Malformed SSE payload from the endpoint (not valid JSON).');
+    }
+    // Redact before the cut: a key that straddles the 300-character boundary would
+    // otherwise leave a fragment that the catch-level redaction can no longer match.
+    if (obj.error) throw new Error(redactKey(obj.error.message || obj.error).slice(0, 300));
     // Some compatible endpoints report running totals or Groq-shaped usage.
     // Keep the latest complete counts, including a genuine measured zero.
     const usage = obj.usage ?? obj.x_groq?.usage;
@@ -583,7 +602,7 @@ try {
     console.error(`❌  Request timed out after ${Math.round(timeoutMs / 1000)}s.`);
     console.error(`    Try a smaller/faster model, or increase OPENAI_TIMEOUT_MS.`);
   } else {
-    console.error(`❌  API call failed: ${err.message}`);
+    console.error(`❌  API call failed: ${redactKey(err.message)}`);
   }
   await exitWhenDrained(1);
 }
