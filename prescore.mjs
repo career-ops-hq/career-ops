@@ -848,42 +848,121 @@ function figureContext(text, index, length) {
   };
 }
 
-// Index cadence once per same-line clause. Parenthetical details may be long
-// or contain semicolons; neither truncates the salary's cadence. Currency and
-// open-bound markers still use the bounded local context above.
-function nonAnnualClauseLookup(text) {
-  const ranges = [];
-  let start = 0;
-  let depth = 0;
-  const finish = (end) => {
-    if (NON_ANNUAL_RE.test(text.slice(start, end))) ranges.push([start, end]);
-    start = end + 1;
+// Collect cadence on each parenthesis level once, then associate markers with
+// adjacent physical figures. Overlapping leading/trailing-currency matches
+// describe the SAME figure and must not steal one another's postfix cadence.
+// Parenthetical amounts belong to their own level: an allowance inside a
+// salary explanation cannot intercept the salary's following "per month".
+const ANNUAL_RE = /\b(?:annual(?:ly)?|yearly|per\s+(?:year|annum)|a\s+year|al\s+año|por\s+año|par\s+an|pro\s+Jahr|jährlich)\b|\/\s*(?:yr|year)\b/i;
+const CADENCE_RE = new RegExp('(?:' + NON_ANNUAL_RE.source + ')|(?:' + ANNUAL_RE.source + ')', 'gi');
+// Prefix labels may include modifiers ("monthly home office stipend").
+// Stop at conjunctions so a postfix label cannot consume another pay clause.
+const CADENCE_PREFIX_TAIL_RE = /^[\s:=-]*(?:(?:(?!(?:and|or|plus|with)\b)[\p{L}\p{M}-]+\s+)*(?:salary|pay|wages?|stipend|allowance|budget|bonus|compensation|rate|ctc|ote)[\s:=-]*)?$/iu;
+
+function nonAnnualFigureLookup(text, matches) {
+  const groups = [];
+  for (const match of matches.filter((match) => !/[\r\n]/.test(match[0].trim())).sort((a, b) => a.index - b.index)) {
+    const end = match.index + match[0].trimEnd().length;
+    const previous = groups.at(-1);
+    if (previous && match.index < previous.end) {
+      previous.end = Math.max(previous.end, end);
+      previous.members.push(match);
+    } else {
+      groups.push({ index: match.index, end, members: [match], type: 'figure' });
+    }
+  }
+  const events = [...groups];
+  for (const marker of text.matchAll(CADENCE_RE)) {
+    if (/[\r\n]/.test(marker[0])) continue;
+    events.push({ index: marker.index, end: marker.index + marker[0].length, nonAnnual: NON_ANNUAL_RE.test(marker[0]), type: 'cadence' });
+  }
+  events.sort((a, b) => a.index - b.index);
+  const contexts = [];
+  const makeContext = () => {
+    const context = { chars: [], events: [] };
+    contexts.push(context);
+    return context;
   };
+  let current = makeContext();
+  const stack = [];
+  let eventIndex = 0;
+  // Each character appears in one context only. Nested details disappear from
+  // the outer gap, avoiding full suffix rescans for every salary on a long line.
   for (let i = 0; i < text.length; i++) {
     const char = text[i];
     if (char === '\r' || char === '\n') {
-      finish(i);
-      depth = 0;
+      stack.length = 0;
+      current = makeContext();
     } else if (char === '(') {
-      depth++;
+      current.chars.push(' ');
+      const parent = current;
+      stack.push(parent);
+      current = makeContext();
+      current.parent = parent;
+      current.parentOffset = parent.chars.length - 1;
     } else if (char === ')') {
-      depth = Math.max(0, depth - 1);
-    } else if (char === ';' && depth === 0) {
-      finish(i);
+      if (stack.length) current.closed = true;
+      current = stack.pop() ?? current;
+      current.chars.push(' ');
+    } else if (char === ';' && stack.length === 0) {
+      current = makeContext();
+    } else {
+      while (eventIndex < events.length && events[eventIndex].index === i) {
+        const event = events[eventIndex++];
+        event.offset = current.chars.length;
+        event.offsetEnd = event.offset + event.end - event.index;
+        current.events.push(event);
+      }
+      current.chars.push(char);
     }
   }
-  finish(text.length);
-  return (index) => {
-    let lo = 0;
-    let hi = ranges.length - 1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >>> 1;
-      if (index < ranges[mid][0]) hi = mid - 1;
-      else if (index >= ranges[mid][1]) lo = mid + 1;
-      else return true;
+  // A cadence-only wrapper, such as "$40k (per month)", qualifies its
+  // surrounding figure. Prose such as "(monthly team breakfast)" does not.
+  for (const context of contexts) context.surface = context.chars.join('');
+  for (const context of contexts) {
+    const marker = context.events[0];
+    if (context.parent && context.closed && context.events.length === 1
+      && marker.type === 'cadence' && context.surface.trim() === text.slice(marker.index, marker.end).trim()) {
+      context.parent.events.push({ ...marker, offset: context.parentOffset, offsetEnd: context.parentOffset + 1 });
     }
-    return false;
-  };
+  }
+  const excluded = new Set();
+  for (const context of contexts) {
+    const surface = context.surface;
+    context.events.sort((a, b) => a.offset - b.offset);
+    let previous = null;
+    let markers = [];
+    const attach = (next) => {
+      const last = markers.at(-1);
+      // "monthly stipend $200" prefixes the next figure; "per year, plus
+      // $200" remains a postfix of the previous one. Only the final marker in
+      // a gap can prefix its next figure, so every gap is examined once.
+      const tail = next && last ? surface.slice(last.offsetEnd, next.offset).replace(new RegExp('(?:' + CUR + ')\\s*$', 'i'), '') : '';
+      const prefixesNext = next && last && CADENCE_PREFIX_TAIL_RE.test(tail);
+      for (const marker of markers) {
+        const owner = !previous || (marker === last && prefixesNext) ? next : previous;
+        if (!owner) continue;
+        const distance = marker.offset < owner.offset ? owner.offset - marker.offsetEnd : marker.offset - owner.offsetEnd;
+        if (owner.cadenceDistance === undefined || distance < owner.cadenceDistance) {
+          owner.cadenceDistance = distance;
+          owner.nonAnnual = marker.nonAnnual;
+        }
+      }
+      markers = [];
+    };
+    for (const event of context.events) {
+      if (event.type === 'cadence') markers.push(event);
+      else {
+        attach(event);
+        previous = event;
+      }
+    }
+    attach(null);
+  }
+  for (const group of groups) {
+    if (group.nonAnnual) for (const member of group.members) excluded.add(member);
+  }
+  return (match) => excluded.has(match);
 }
 
 function isOpenLowerBound(before, after, hi) {
@@ -990,7 +1069,10 @@ function parseCapturedRange(lo, hi) {
  */
 export function extractJdComp(jdText) {
   const text = String(jdText ?? '');
-  const hasNonAnnualCadence = nonAnnualClauseLookup(text);
+  const leading = [...text.matchAll(COMP_LEAD_RE)];
+  const trailing = [...text.matchAll(COMP_TRAIL_RE)];
+  const lpa = [...text.matchAll(LPA_RE)];
+  const hasNonAnnualCadence = nonAnnualFigureLookup(text, [...leading, ...trailing, ...lpa]);
   const annual = [];
   let nonAnnual = null;
 
@@ -1000,7 +1082,7 @@ export function extractJdComp(jdText) {
     const parsed = parseCapturedRange(lo, hi);
     if (!parsed) return;
     const { before, after } = figureContext(text, match.index, match[0].trimEnd().length);
-    if (hasNonAnnualCadence(match.index)) {
+    if (hasNonAnnualCadence(match)) {
       nonAnnual ??= { raw: match[0].trim() };
       return;
     }
@@ -1025,9 +1107,13 @@ export function extractJdComp(jdText) {
     });
   };
 
-  for (const m of text.matchAll(COMP_LEAD_RE)) consider(m, m[1], m[2], m[3]);
-  for (const m of text.matchAll(COMP_TRAIL_RE)) consider(m, m[4], m[1], m[3]);
-  for (const m of text.matchAll(LPA_RE)) {
+  for (const m of leading) consider(m, m[1], m[2], m[3]);
+  for (const m of trailing) consider(m, m[4], m[1], m[3]);
+  for (const m of lpa) {
+    if (hasNonAnnualCadence(m)) {
+      nonAnnual ??= { raw: m[0].trim() };
+      continue;
+    }
     const lo = Number(m[1]);
     const hi = m[2] !== undefined ? Number(m[2]) : lo;
     if (!Number.isFinite(lo) || !Number.isFinite(hi)) continue;
