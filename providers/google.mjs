@@ -188,6 +188,7 @@ export default {
     let requestsMade = 0;
     let truncated = false;
     let fetchFailed = false;
+    let unparsablePage = false;
     let unrestrictedPageReturned = false;
     let firstPageFailures = 0;
     let firstPageError;
@@ -234,6 +235,13 @@ export default {
         if (page === 1 && cards.length === 0 && postingLinks > 0) {
           throw new Error(`google: ${entry.name} page 1 links to ${postingLinks} posting(s) but no card could be parsed — the results markup may have changed`);
         }
+        // The same on a later page: stop, but mark the result partial so the
+        // scan does not read an early stop as the whole board.
+        if (cards.length === 0 && postingLinks > 0) {
+          unparsablePage = true;
+          console.error(`⚠️  google: ${entry.name} stopped ${q === '' ? 'the full board' : `"${q}"`} at page ${page}: it links to ${postingLinks} posting(s) but no card could be parsed (${byId.size} jobs so far)`);
+          break;
+        }
         let newThisQuery = 0;
         for (const { id, slug, title, employer, locations } of cards) {
           if (!seenThisQuery.has(id)) { seenThisQuery.add(id); newThisQuery += 1; }
@@ -263,6 +271,9 @@ export default {
         ? `⚠️  google: ${entry.name} hit the ${maxPages}-page cap on the full board (${jobs.length} postings read) — raise max_pages on this entry for more (up to ${FULL_BOARD_MAX_PAGES_CAP})`
         : `⚠️  google: ${entry.name} hit the ${maxPages}-page cap on at least one query — raise max_pages on this entry for more`);
       jobs = markTruncated(jobs, 'page-cap', { fetched: jobs.length });
+    }
+    if (unparsablePage) {
+      jobs = markTruncated(jobs, 'unparsable-page', { fetched: jobs.length });
     }
     if (fetchFailed) {
       jobs = markTruncated(jobs, 'fetch-error', { fetched: jobs.length });

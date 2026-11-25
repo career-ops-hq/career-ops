@@ -401,10 +401,18 @@ try {
       ? pass('page 1 with no posting links still returns []')
       : fail(`empty page 1 should return [], got ${JSON.stringify(empty)}`);
     const { ctx, calls } = recordingCtx(({ n }) => (n === 0 ? linkPage(fullPageIds(1000)) : page1));
-    const later = await provider.fetch({ name: 'Google', google: { full_board: true } }, ctx);
+    let later;
+    const warned = await captureErrors(async () => { later = await provider.fetch({ name: 'Google', google: { full_board: true } }, ctx); });
     later.length === PAGE_SIZE && calls.length === 2
-      ? pass('an unparsable later page ends the walk without throwing')
-      : fail(`later unparsable page: ${later.length} jobs, ${calls.length} calls`);
+      && later.truncated?.reason === 'unparsable-page' && later.truncated?.fetched === PAGE_SIZE
+      && warned.some((l) => /stopped the full board at page 2/.test(l))
+      ? pass('an unparsable later page ends the walk, warns, and marks the result partial')
+      : fail(`later unparsable page: ${later.length} jobs, ${calls.length} calls, truncated=${JSON.stringify(later.truncated)}`);
+    const { ctx: endCtx } = recordingCtx(({ n }) => (n === 0 ? linkPage(fullPageIds(1000)) : '<!doctype html><p>No more results</p>'));
+    const ended = await provider.fetch({ name: 'Google', google: { full_board: true } }, endCtx);
+    ended.length === PAGE_SIZE && ended.truncated === undefined
+      ? pass('a later page with no posting links is the normal end (no marker)')
+      : fail(`later empty page: truncated=${JSON.stringify(ended.truncated)}`);
   }
 
   // ── short-page stop counts posting links, not parsed cards ──
