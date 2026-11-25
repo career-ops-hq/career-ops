@@ -855,6 +855,7 @@ function figureContext(text, index, length) {
 // salary explanation cannot intercept the salary's following "per month".
 const ANNUAL_RE = /\b(?:annual(?:ly)?|yearly|per\s+(?:year|annum)|a\s+year|al\s+año|por\s+año|par\s+an|pro\s+Jahr|jährlich)\b|\/\s*(?:yr|year)\b/i;
 const CADENCE_RE = new RegExp('(?:' + NON_ANNUAL_RE.source + ')|(?:' + ANNUAL_RE.source + ')', 'gi');
+const EXPLICIT_RATE_RE = /^(?:\/|(?:per|al|por|par|pro|je)\b|an\s+hour\b|a\s+year\b)/i;
 // Prefix labels may include modifiers ("monthly home office stipend").
 // Stop at conjunctions so a postfix label cannot consume another pay clause.
 const CADENCE_PREFIX_TAIL_RE = /^[\s:=-]*(?:(?:(?!(?:and|or|plus|with)\b)[\p{L}\p{M}-]+\s+)*(?:salary|pay|wages?|stipend|allowance|budget|bonus|compensation|rate|ctc|ote)(?:\s+of)?[\s:=-]*)?$/iu;
@@ -874,7 +875,7 @@ function nonAnnualFigureLookup(text, matches) {
   const events = [...groups];
   for (const marker of text.matchAll(CADENCE_RE)) {
     if (/[\r\n]/.test(marker[0])) continue;
-    events.push({ index: marker.index, end: marker.index + marker[0].length, nonAnnual: NON_ANNUAL_RE.test(marker[0]), type: 'cadence' });
+    events.push({ index: marker.index, end: marker.index + marker[0].length, nonAnnual: NON_ANNUAL_RE.test(marker[0]), explicitRate: EXPLICIT_RATE_RE.test(marker[0]), type: 'cadence' });
   }
   events.sort((a, b) => a.index - b.index);
   const contexts = [];
@@ -900,10 +901,15 @@ function nonAnnualFigureLookup(text, matches) {
       current = makeContext();
       current.parent = parent;
       current.parentOffset = parent.chars.length - 1;
+      current.parentPrefixStart = Math.max(parent.lastEventEnd ?? 0, parent.lastChildEnd ?? 0);
+      current.parentHadFigure = Boolean(parent.hasFigure);
     } else if (char === ')') {
       if (stack.length) current.closed = true;
+      const childHasFigure = current.hasFigure;
       current = stack.pop() ?? current;
+      current.hasFigure ||= childHasFigure;
       current.chars.push(' ');
+      current.lastChildEnd = current.chars.length;
     } else if (char === ';' && stack.length === 0) {
       current = makeContext();
     } else {
@@ -912,6 +918,8 @@ function nonAnnualFigureLookup(text, matches) {
         event.offset = current.chars.length;
         event.offsetEnd = event.offset + event.end - event.index;
         current.events.push(event);
+        current.lastEventEnd = event.offsetEnd;
+        if (event.type === 'figure') current.hasFigure = true;
       }
       current.chars.push(char);
     }
@@ -921,16 +929,36 @@ function nonAnnualFigureLookup(text, matches) {
   // inside out so doubled wrappers remain transparent too. A figure with its
   // own cadence, or prose such as "including a $200 allowance", stays isolated.
   for (const context of contexts) context.surface = context.chars.join('');
+  const proxies = [];
   for (let i = contexts.length - 1; i >= 0; i--) {
     const context = contexts[i];
     const event = context.events[0];
+    const parentGap = context.parent ? context.parent.surface.slice(context.parentPrefixStart, context.parentOffset) : '';
+    const prefix = parentGap.split(/\b(?:and|or|plus|with)\b|,/i).at(-1).trim();
+    const newPayHead = prefix && CADENCE_PREFIX_TAIL_RE.test(prefix);
     if (context.parent && context.closed && context.events.length === 1
       && !context.surface.slice(0, event.offset).trim()
-      && (event.type === 'figure' ? /^[\s+]*$/ : /^\s*$/).test(context.surface.slice(event.offsetEnd))) {
+      && ((event.type === 'figure' ? /^[\s+]*$/ : /^\s*$/).test(context.surface.slice(event.offsetEnd))
+        || (event.type === 'cadence' && event.explicitRate && !newPayHead))) {
       context.events.pop();
       event.offset = context.parentOffset;
       event.offsetEnd = context.parentOffset + 1;
       context.parent.events.push(event);
+    } else if (context.parent && context.closed) {
+      context.events.sort((a, b) => a.offset - b.offset);
+      const target = context.events.find((item) => item.type === 'figure');
+      const first = context.events[0];
+      // An isolated standalone amount still occupies a physical owner slot in
+      // its parent. A pay head also opens a slot: "monthly stipend ($200 for
+      // equipment)". Explanations after an existing amount ("$40k (including
+      // a $200 allowance) per month") do not open a competing slot.
+      const standalone = first && !context.surface.slice(0, first.offset).trim()
+        && (!context.parentHadFigure || /[,]|\b(?:and|or|plus|with)\b/i.test(parentGap));
+      if (target && (standalone || newPayHead)) {
+        const proxy = { type: 'figure', target, offset: context.parentOffset, offsetEnd: context.parentOffset + 1 };
+        context.parent.events.push(proxy);
+        proxies.push(proxy);
+      }
     }
   }
   const excluded = new Set();
@@ -946,9 +974,25 @@ function nonAnnualFigureLookup(text, matches) {
       // a gap can prefix its next figure, so every gap is examined once.
       const tail = next && last ? surface.slice(last.offsetEnd, next.offset).replace(new RegExp('(?:' + CUR + ')\\s*$', 'i'), '') : '';
       const prefixesNext = next && last && CADENCE_PREFIX_TAIL_RE.test(tail);
-      for (const marker of markers) {
+      let bridgeEnd = previous?.offsetEnd ?? 0;
+      let conjunction = false;
+      let comma = false;
+      for (let i = 0; i < markers.length; i++) {
+        const marker = markers[i];
+        const bridge = surface.slice(bridgeEnd, marker.offset);
+        bridgeEnd = marker.offsetEnd;
+        conjunction ||= /\b(?:and|or|plus|with|excluding)\b/i.test(bridge);
+        comma ||= bridge.includes(',');
         const owner = !previous || (marker === last && prefixesNext) ? next : previous;
         if (!owner) continue;
+        const continuation = surface.slice(marker.offsetEnd, markers[i + 1]?.offset ?? next?.offset ?? surface.length)
+          .trim().replace(/[.!?]+$/, '').trim();
+        // An adjectival cadence in a separate clause describes that clause,
+        // even when it has no amount ("plus a monthly stipend"). Commas also
+        // separate unrelated prose, while "$40k, monthly salary" remains a
+        // pay label and "$40k, per month" remains an explicit rate.
+        if (owner === previous && !marker.explicitRate && /[\p{L}\p{M}]/u.test(continuation)
+          && (conjunction || (comma && !CADENCE_PREFIX_TAIL_RE.test(continuation)))) continue;
         const distance = marker.offset < owner.offset ? owner.offset - marker.offsetEnd : marker.offset - owner.offsetEnd;
         if (owner.cadenceDistance === undefined || distance < owner.cadenceDistance) {
           owner.cadenceDistance = distance;
@@ -965,6 +1009,15 @@ function nonAnnualFigureLookup(text, matches) {
       }
     }
     attach(null);
+  }
+  // Local explicit cadence wins. Only otherwise may an enclosing owner slot
+  // supply it; process outer proxies first to support nested wrappers.
+  for (let i = proxies.length - 1; i >= 0; i--) {
+    const proxy = proxies[i];
+    if (proxy.cadenceDistance !== undefined && proxy.target.cadenceDistance === undefined) {
+      proxy.target.cadenceDistance = proxy.cadenceDistance;
+      proxy.target.nonAnnual = proxy.nonAnnual;
+    }
   }
   for (const group of groups) {
     if (group.nonAnnual) for (const member of group.members) excluded.add(member);

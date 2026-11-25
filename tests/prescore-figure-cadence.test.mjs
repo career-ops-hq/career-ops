@@ -54,6 +54,40 @@ for (const salary of [
   });
 }
 const wrapperCases = [
+  ['Salary $150k, excluding monthly equipment allowance', 5, 3.6, 'proceed', 3.5],
+  ['Salary ($150k) and monthly on-call rotation', 5, 3.6, 'proceed', 3.5],
+  ['Salary $150k, monthly performance review', 5, 3.6, 'proceed', 3.5],
+  ['Salary $150k plus a monthly stipend', 5, 3.6, 'proceed', 3.5],
+  ['Salary ($150k) plus a monthly stipend', 5, 3.6, 'proceed', 3.5],
+  ['Monthly salary $40k and annual bonus', 4, 3.4, 'proceed', 3],
+  ['Salary $40k (per month, depending on locale)', 4, 3.4, 'proceed', 3],
+  ['Salary $40k ((per month, depending on locale))', 4, 3.4, 'proceed', 3],
+  ['$40k monthly salary', 4, 3.4, 'proceed', 3],
+  ['$40k, per month', 4, 3.4, 'proceed', 3],
+  ['$40k, monthly salary', 4, 3.4, 'proceed', 3],
+  ['Salary $40k ($200 annual equipment allowance included) per month', 4, 3.4, 'proceed', 3],
+  ['Salary $40k ($200 per year equipment allowance included) per month', 4, 3.4, 'proceed', 3],
+  ['Salary ($150k) and monthly stipend ($200 for equipment)', 5, 3.6, 'proceed', 3.5],
+  ['Salary ($150k) and stipend ($200 for equipment) per month', 5, 3.6, 'proceed', 3.5],
+  ['Monthly salary ($40k depending on experience)', 4, 3.4, 'proceed', 3],
+  ['Salary ($40k depending on experience) per month', 4, 3.4, 'proceed', 3],
+  ['Monthly salary $40k, annual bonus ($200 per year)', 4, 3.4, 'proceed', 3],
+  ['Salary ($40k (including a $200 annual equipment allowance)) per month', 4, 3.4, 'proceed', 3],
+  ['Annual salary ($150k including a $200 monthly home office allowance)', 5, 3.6, 'proceed', 3.5],
+  ['Salary ($150k) and monthly stipend ($200 per month)', 5, 3.6, 'proceed', 3.5],
+  ['Salary $150k and monthly stipend ($200 per month)', 5, 3.6, 'proceed', 3.5],
+  ['Salary ($150k) and monthly stipend of ($200 per month)', 5, 3.6, 'proceed', 3.5],
+  ['Salary (($150k)) and monthly stipend (($200 per month))', 5, 3.6, 'proceed', 3.5],
+  ['Salary ($150k) and ($200 per month) monthly stipend', 5, 3.6, 'proceed', 3.5],
+  ['Monthly stipend ($200 per month) and annual salary ($150k)', 5, 3.6, 'proceed', 3.5],
+  ['Monthly salary ($40k) and annual stipend ($200 per year)', 4, 3.4, 'proceed', 3],
+  ['Salary ($40k) per month and annual stipend ($200 per year)', 4, 3.4, 'proceed', 3],
+  ['Monthly salary ($40k per month) and annual stipend ($200)', 4, 3.4, 'proceed', 3],
+  ['Monthly salary (($40k)) and annual stipend (($200 per year))', 4, 3.4, 'proceed', 3],
+  ['Salary ($150k) and monthly stipend (monthly $200)', 5, 3.6, 'proceed', 3.5],
+  ['Salary ($150k) and monthly stipend ((($200 per month)))', 5, 3.6, 'proceed', 3.5],
+  ['Salary $40k (including a $200 monthly equipment allowance) per month', 4, 3.4, 'proceed', 3],
+  ['Salary $40k (including an annual $200 equipment allowance) per month', 4, 3.4, 'proceed', 3],
   ['Annual salary $150k and monthly stipend of $200', 5, 3.6, 'proceed', 3.5],
   ['Annual salary of $150k and monthly stipend of $200', 5, 3.6, 'proceed', 3.5],
   ['Monthly stipend of $200 and annual salary of $150k', 5, 3.6, 'proceed', 3.5],
@@ -75,12 +109,25 @@ const wrapperCases = [
 for (const [salary, comp, score, verdict, threshold] of wrapperCases) {
   test('cadence labels and bare wrappers retain their owner: ' + salary, () => {
     const result = evaluate(salary, threshold);
+    assert.equal(result.signals.comp.failed, undefined);
     assert.equal(result.signals.comp.score, comp);
     assert.equal(result.signals.comp.unknown, comp === 4);
     assert.equal(result.score, score);
     assert.equal(result.verdict, verdict);
   });
 }
+test('an explanatory annual allowance cannot steal the outer salary cadence', () => {
+  for (const salary of [
+    'Salary $40k ($200 annual equipment allowance included) per month',
+    'Salary $40k ($200 per year equipment allowance included) per month',
+    'Salary $40k (including a $200 equipment allowance) per month',
+    'Salary ($40k (including a $200 annual equipment allowance)) per month',
+  ]) {
+    const result = extractJdComp(salary);
+    assert.ok(result.nonAnnual, salary);
+    assert.ok(result.annual.every((figure) => figure.max !== 40000), salary);
+  }
+});
 test('cadence cannot cross a physical line or a top-level semicolon', () => {
   for (const suffix of ['\nMonthly team meeting', '; monthly team meeting', '\r\nMonthly team meeting']) {
     const result = evaluate('Salary: $150k' + suffix);
@@ -123,6 +170,7 @@ test('CLI preserves the real proceed decision and leaves discard bytes unchanged
       const child = cli(salary, threshold);
       assert.equal(child.status, 0, child.stderr);
       const result = JSON.parse(child.stdout);
+      assert.equal(result.signals.comp.failed, undefined, salary);
       assert.equal(result.signals.comp.score, comp, salary);
       assert.equal(result.signals.comp.unknown, comp === 4, salary);
       assert.equal(result.score, score, salary);
