@@ -106,17 +106,33 @@ for (const paths of [['config/profile.yml'], ['portals.yml'], YAML_PATHS]) {
   });
 }
 
-for (const source of ['scan:\n  extractor: cli\n', '', '# Empty configuration is valid YAML.\n']) {
-  test(`valid YAML remains accepted: ${source || '(empty)'}`, (t) => {
+test('valid YAML remains accepted', (t) => {
+  const root = fixture(t, Object.fromEntries(YAML_PATHS.map((path) => [path, 'scan:\n  extractor: cli\n'])));
+  const state = runDoctor(root);
+  assert.deepEqual(state.missing, []);
+  assert.equal(state.onboardingNeeded, false);
+  assert.deepEqual(yamlWarnings(state), []);
+  const human = runDoctor(root, { json: false });
+  for (const path of YAML_PATHS) assert.ok(human.stdout.includes(`✓ ${path} found`), human.stdout);
+  assert.ok(human.stdout.includes('✓ Scan extractor: cli'), human.stdout);
+  // These cases check YAML; unrelated prerequisites may still fail.
+  assert.ok(!human.stdout.includes('invalid YAML'), human.stdout);
+});
+
+// Empty and comment-only files parse (to nothing), so they are not invalid
+// YAML. They are reported by the separate "has no settings" check instead,
+// which also asks for onboarding (#7256); this file only checks that the
+// invalid-YAML line stays out of it.
+for (const source of ['', '# Empty configuration is valid YAML.\n']) {
+  test(`empty YAML is not reported as invalid: ${source || '(empty)'}`, (t) => {
     const root = fixture(t, Object.fromEntries(YAML_PATHS.map((path) => [path, source])));
     const state = runDoctor(root);
     assert.deepEqual(state.missing, []);
-    assert.equal(state.onboardingNeeded, false);
     assert.deepEqual(yamlWarnings(state), []);
+    assert.deepEqual(state.unpersonalized.map(({ path }) => path).sort(), [...YAML_PATHS].sort());
     const human = runDoctor(root, { json: false });
-    for (const path of YAML_PATHS) assert.ok(human.stdout.includes(`✓ ${path} found`), human.stdout);
-    assert.ok(human.stdout.includes(`✓ Scan extractor: ${source.startsWith('scan:') ? 'cli' : 'mcp'}`), human.stdout);
-    // These cases check YAML; unrelated prerequisites may still fail.
+    for (const path of YAML_PATHS) assert.ok(human.stdout.includes(`⚠ ${path} has no settings`), human.stdout);
+    assert.ok(human.stdout.includes('✓ Scan extractor: mcp'), human.stdout);
     assert.ok(!human.stdout.includes('invalid YAML'), human.stdout);
   });
 }
@@ -128,8 +144,10 @@ test('missing YAML keeps onboarding and warning semantics', (t) => {
   assert.equal(state.onboardingNeeded, true);
   assert.deepEqual(yamlWarnings(state), []);
   const human = runDoctor(root, { json: false });
+  // A missing profile is an error and a missing portals.yml a warning; either
+  // way it is the "not found" line, never an invalid-YAML one.
   for (const path of YAML_PATHS) {
-    assert.ok(human.stdout.includes(`⚠ ${path} not found (user setup required)`), human.stdout);
+    assert.ok(human.stdout.includes(`${path} not found (user setup required)`), human.stdout);
   }
   assert.ok(!human.stdout.includes('invalid YAML'), human.stdout);
 });

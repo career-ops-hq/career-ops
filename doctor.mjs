@@ -1349,6 +1349,10 @@ function invalidYamlPrereq(root, prereq) {
     loadYaml(source);
     return null;
   } catch (err) {
+    // js-yaml's fixed reason for a `---` stream; it carries no position.
+    if (err?.reason === 'expected a single document in the stream, but found more') {
+      return { pass: false, label: `${path}: invalid YAML (expected a single document)`, fix: [`Keep ${path} to one YAML document (no second \`---\`)`] };
+    }
     const { line, column } = err?.mark || {};
     const position = Number.isInteger(line) && line >= 0 && Number.isInteger(column) && column >= 0
       ? ` (line ${line + 1}, column ${column + 1})` : '';
@@ -1710,6 +1714,7 @@ async function main() {
 
   const playwrightCheck = await checkPlaywright(browserProcessEnv);
   const prereqChecks = new Map(USER_LAYER_PREREQS.map((prereq) => [prereq.path, checkPrereq(prereq)]));
+  const profileParses = prereqChecks.get('config/profile.yml').pass !== false;
 
   const checks = [
     checkNodeVersion(),
@@ -1726,11 +1731,14 @@ async function main() {
     checkPlaywrightMcp(process.cwd(), activeCli),
     // An unparseable profile falls back to MCP in the runtime loader; that is
     // not a successful configuration check when diagnosing a broken file.
-    prereqChecks.get('config/profile.yml').pass !== false && checkScanExtractor(projectRoot),
+    profileParses && checkScanExtractor(projectRoot),
     ...prereqChecks.values(),
     checkFonts(),
     checkPersonalization(projectRoot),
-    checkProfileShape(projectRoot),
+    // The shape check quotes the parser's message for a profile that does not
+    // parse, and that message can carry file content (an alias or tag name).
+    // The prereq line above already reports the broken file, by position only.
+    profileParses && checkProfileShape(projectRoot),
     checkTitleFilterConflicts(projectRoot),
     checkCvShape(projectRoot),
     checkUserTemplates(projectRoot),
@@ -2041,7 +2049,7 @@ function onboardingState(root) {
     ...(cvShape?.warn ? [`${cvShape.label}\n→ ${[].concat(cvShape.fix || []).join('\n  ')}`] : []),
     ...(userTemplates?.warn ? [`${userTemplates.label}\n→ ${[].concat(userTemplates.fix || []).join('\n  ')}`] : []),
     ...(envFileProfile ? [`${envFileProfile.label}\n→ ${envFileProfile.fix.join('\n  ')}`] : []),
-    ...invalidYaml.map((check) => `${check.label}\n→ ${check.fix.join('\n  ')}`),
+    ...invalidYaml.map((check) => check.label),
     ...unpersonalized.map((u) => `${u.path} ${u.reason} — ${u.impact}\n→ Personalize it from cv.md before running evaluations.`),
   ];
 
