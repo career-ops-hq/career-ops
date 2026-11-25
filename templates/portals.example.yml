@@ -1627,6 +1627,12 @@ search_queries:
 #   provider: talentlink   # branded domains are never auto-detected
 #   enabled: true
 #
+# - name: Example Talents Connect Co
+#   careers_url: https://karriere.exampleco.example/   # the "powered by Talents Connect" career site; keep a language path such as /en/
+#   provider: talents-connect   # every tenant is on its own domain, never auto-detected
+#   max_pages: 20          # optional page cap (250 jobs/page, default 20, max 200)
+#   enabled: true
+#
 # - name: Example Collage HR Co
 #   careers_url: https://secure.collage.co/jobs/exampleco      # explicit job-site address
 #   # Or pin the API directly: api: https://api.collage.co/v1/positions/exampleco
@@ -3244,6 +3250,12 @@ tracked_companies:
     careers_url: https://jobs.ashbyhq.com/qonto
     notes: "Paris / Berlin / Barcelona / Milan. SMB neobank, MLOps for AI Product roles. Moved from Lever to Ashby (qonto.com/en/careers links here)."
     enabled: true
+
+  - name: Deutsche Börse
+    careers_url: https://careers.deutsche-boerse.com/
+    provider: talents-connect
+    notes: "Frankfurt / Prague / Luxembourg. Exchange and post-trade group (Clearstream, Eurex), IT and QA roles, English postings."
+    enabled: false
 
   # -- DACH logistics / mobility --
 
