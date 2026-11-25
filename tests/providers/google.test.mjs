@@ -386,8 +386,9 @@ try {
 
   // ── page 1 links to postings but no card parses -> throw, not an empty board ──
   {
-    const sq = (id) => `<a href='jobs/results/${id}-role'>x</a>`; // single-quoted: ANCHOR_RE skips it
-    const page1 = `<!doctype html>${['111', '222', '333'].map(sq).join('\n')}`;
+    // A posting ID that is not numeric: counted as a posting link, never parsed.
+    const odd = (id) => `<a href="jobs/results/${id}-role">x</a>`;
+    const page1 = `<!doctype html>${['aaa', 'bbb', 'ccc'].map(odd).join('\n')}`;
     let thrown = null;
     try {
       await provider.fetch({ name: 'Google', google: { full_board: true } }, recordingCtx(() => page1).ctx);
@@ -417,14 +418,33 @@ try {
 
   // ── short-page stop counts posting links, not parsed cards ──
   {
-    // 19 parsable cards + 1 single-quoted posting link = a full page of 20.
+    const { countPostingLinks, postingLinkIds } = mod;
+    // 19 cards + 1 posting whose ID the parser cannot read = a full page of 20.
     const mixed = (start) => `<!doctype html>${fullPageIds(start).slice(0, PAGE_SIZE - 1).map((id) => link(id)).join('\n')}
-<a href='jobs/results/${start + PAGE_SIZE - 1}-odd'>x</a>`;
+<a href="jobs/results/x${start}-odd">x</a>`;
     const { ctx, calls } = recordingCtx(({ n }) => (n === 0 ? mixed(2000) : linkPage(['3000', '3001'])));
-    const jobs = await provider.fetch({ name: 'Google', google: { full_board: true } }, ctx);
+    let jobs;
+    const unreadWarn = await captureErrors(async () => { jobs = await provider.fetch({ name: 'Google', google: { full_board: true } }, ctx); });
     calls.length === 2 && jobs.length === PAGE_SIZE - 1 + 2
       ? pass('a full page with one unparsable posting link is not read as short')
       : fail(`mixed full page: ${calls.length} calls, ${jobs.length} jobs`);
+    jobs.truncated?.reason === 'unread-postings' && jobs.truncated?.fetched === PAGE_SIZE + 1
+      && unreadWarn.some((l) => /could not read 1 of the 20 posting\(s\) linked on page 1/.test(l))
+      ? pass('a linked posting no card returned marks the result partial and warns')
+      : fail(`unread posting: truncated=${JSON.stringify(jobs.truncated)}`);
+    // Single quotes, no slug, mixed case: the parser reads every link shape the counter counts.
+    const shapes = `<!doctype html><h3>Single</h3><a href='jobs/results/71-single'>x</a>
+<h3>Bare</h3><A HREF=jobs/results/72>x</A>`;
+    const shaped = mod.parseResultsPage(shapes);
+    shaped.map((c) => `${c.id}:${c.title}`).join(',') === '71:Single,72:Bare'
+      && countPostingLinks(shapes) === shaped.length
+      ? pass('parseResultsPage reads every link shape countPostingLinks counts')
+      : fail(`link shapes: ${JSON.stringify(shaped)}`);
+    const { ctx: bareCtx } = recordingCtx(() => `<!doctype html><h3>Bare</h3><a href="jobs/results/72">x</a>`);
+    const bare = await provider.fetch({ name: 'Google', google: { full_board: true } }, bareCtx);
+    bare[0]?.url.endsWith('/jobs/results/72') && bare.truncated === undefined
+      ? pass('a posting link with no slug keeps a working URL')
+      : fail(`bare link url: ${bare[0]?.url}`);
     // Page 2 repeats 19 postings from page 1 and adds one new posting whose
     // card does not parse: that is new content, so the walk goes on to page 3.
     const repeatPlusOdd = `<!doctype html>${fullPageIds(2000).slice(0, PAGE_SIZE - 1).map((id) => link(id)).join('\n')}
@@ -432,8 +452,9 @@ try {
     const { ctx: rpCtx, calls: rpCalls } = recordingCtx(({ n }) => (n === 0 ? linkPage(fullPageIds(2000))
       : n === 1 ? repeatPlusOdd : linkPage(['4000', '4001'])));
     const rp = await provider.fetch({ name: 'Google', google: { full_board: true } }, rpCtx);
-    rpCalls.length === 3 && rp.length === PAGE_SIZE + 2 && rp.truncated === undefined
-      ? pass('a repeated page with one new unparsable posting does not end the walk')
+    rpCalls.length === 3 && rp.length === PAGE_SIZE + 1 + 2 && rp.truncated === undefined
+      && rp.some((j) => j.externalId === '2500')
+      ? pass('a repeated page with one new single-quoted posting returns it and walks on')
       : fail(`repeat + odd: ${rpCalls.length} calls, ${rp.length} jobs, truncated=${JSON.stringify(rp.truncated)}`);
     // A page that only repeats earlier postings still ends the walk.
     const { ctx: reCtx, calls: reCalls } = recordingCtx(() => linkPage(fullPageIds(2000)));
@@ -441,7 +462,6 @@ try {
     reCalls.length === 2
       ? pass('a page that only repeats earlier postings still ends the walk')
       : fail(`re-served page: ${reCalls.length} calls`);
-    const { countPostingLinks, postingLinkIds } = mod;
     [...postingLinkIds(`${link('77')}<a href='jobs/results/77-other'>y</a><a href="jobs/results/abc">z</a>`)].join(',') === '77,abc'
       ? pass('postingLinkIds keys a posting by its numeric ID')
       : fail('postingLinkIds keyed wrongly');

@@ -65,8 +65,10 @@ const FULL_BOARD_MAX_PAGES_CAP = 300;
 const INTER_PAGE_DELAY_MS = 400;
 // The anchor that closes each card; the markup since the previous anchor is that
 // card. Google serves the href relative ("jobs/results/…"); a path prefix is
-// tolerated, and the URL is rebuilt from BASE either way.
-const ANCHOR_RE = /<a\b[^>]*?\bhref="(?:[^"]*\/)?jobs\/results\/(\d+)-([a-z0-9-]+)[^"]*"[^>]*>/g;
+// tolerated, and the URL is rebuilt from BASE either way. It accepts the same
+// quoting as POSTING_LINK_RE, and the slug is optional, so every posting link
+// the page is counted for is one the parser can read (#7320 review).
+const ANCHOR_RE = /<a\b[^>]*?\bhref\s*=\s*["']?(?:[^"'\s>]*\/)?jobs\/results\/(\d+)(?:-([^"'\s>?#/]*))?[^>]*>/gi;
 // Any link to a posting under jobs/results/, whatever its quoting or ID shape.
 // It counts the postings a page links to before ANCHOR_RE filters them, so a
 // card the parser cannot read still counts toward a full page (#7320 review).
@@ -128,12 +130,15 @@ export function parseResultsPage(html) {
   const cards = [];
   let prevEnd = 0;
   for (const a of String(html).matchAll(ANCHOR_RE)) {
-    const [tag, id, slug] = a;
+    const [tag, id, slug = ''] = a;
     const card = html.slice(prevEnd, a.index);
     prevEnd = /** @type {number} */ (a.index) + tag.length;
     const h3 = lastMatch(H3_RE, card);
     const aria = tag.match(ARIA_TITLE_RE);
     const title = (h3 && text(h3[1])) || (aria && text(aria[1])) || titleFromSlug(slug);
+    // No title anywhere: not a row the scan's filters can judge. Leave it out,
+    // and the walk counts it as an unread posting.
+    if (!title) continue;
     const line = lastMatch(EMPLOYER_LINE_RE, card);
     let employer = '';
     let locations = [];
@@ -201,6 +206,7 @@ export default {
     let truncated = false;
     let fetchFailed = false;
     let unparsablePage = false;
+    let unreadPostings = 0;
     let unrestrictedPageReturned = false;
     let firstPageFailures = 0;
     let firstPageError;
@@ -266,12 +272,19 @@ export default {
           if (byId.has(id)) continue;
           byId.set(id, {
             title,
-            url: `${BASE}${id}-${slug}`,
+            url: slug ? `${BASE}${id}-${slug}` : `${BASE}${id}`,
             company: employer || entry.name,
             location: locations.join('; '),
             ...(locations.length > 0 ? { locations } : {}),
             ...(coerceId(id) ? { externalId: /** @type {string} */ (coerceId(id)) } : {}),
           });
+        }
+        // A posting the page links to that no card on this page or an earlier
+        // one returned: the walk goes on, but the result is not the whole board.
+        const unread = [...linkIds].filter((id) => !byId.has(id)).length;
+        if (unread > 0) {
+          unreadPostings += unread;
+          console.error(`⚠️  google: ${entry.name} could not read ${unread} of the ${postingLinks} posting(s) linked on page ${page} of ${q === '' ? 'the full board' : `"${q}"`}`);
         }
         // Stop at this query's last page: empty, re-served (no new posting
         // links), or short. "Short" counts every posting link on the page, not the parsed
@@ -292,6 +305,9 @@ export default {
     }
     if (unparsablePage) {
       jobs = markTruncated(jobs, 'unparsable-page', { fetched: jobs.length });
+    }
+    if (unreadPostings > 0) {
+      jobs = markTruncated(jobs, 'unread-postings', { fetched: jobs.length });
     }
     if (fetchFailed) {
       jobs = markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
