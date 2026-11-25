@@ -13,6 +13,7 @@
     "nominatim.openstreetmap.org",
     "localhost"
   ],
+  "allowsLocalhost": true,
   "skill": true,
   "license": "MIT",
   "version": "0.2.0",
