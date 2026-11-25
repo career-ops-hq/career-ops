@@ -8,7 +8,7 @@
 // the shell. Every case below is offline: fetch and DNS are stubbed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pageClosureEvidence, readPostingData, extractJd, fetchJdViaPage, capJdText, markCappedAtsText, isLinkedInHost, MIN_PAGE_JD_WORDS, TRUNCATION_NOTICE } from '../fetch-jd.mjs';
+import { pageClosureEvidence, readPostingData, extractJd, fetchJdViaPage, capJdText, isLinkedInHost, MIN_PAGE_JD_WORDS, TRUNCATION_NOTICE } from '../fetch-jd.mjs';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -364,15 +364,6 @@ test('same-title description-less postings that differ only by employer are sepa
 
 test('same-title description-less postings that differ only by location are separate postings', () => {
   assert.equal(sameButFor('jobLocation', { address: { addressLocality: 'Berlin' } }), null);
-});
-
-test('markCappedAtsText turns the bare ellipsis of a capped ATS result into the explicit notice', () => {
-  const cap = 50;
-  const capped = `${'x'.repeat(cap)}\u2026`;
-  const out = markCappedAtsText(capped, cap);
-  assert.ok(out.endsWith(TRUNCATION_NOTICE(cap)) && !out.includes('\u2026'));
-  assert.equal(markCappedAtsText('x'.repeat(cap), cap), 'x'.repeat(cap), 'text that was not cut is untouched');
-  assert.equal(markCappedAtsText('short \u2026', cap), 'short \u2026', 'an ellipsis in uncut text is not a cut marker');
 });
 
 test('rebinding over a real socket: public pre-check, loopback at connect time, and the server sees nothing', () => {

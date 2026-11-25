@@ -14,7 +14,7 @@ try {
   const { resolveAtsApi, JD_TEXT_API_ATS } = await import(pathToFileURL(join(ROOT, 'liveness-api.mjs')).href);
   const { resolveExtractorMode, normalizeListing, parseArgs } = mod;
   const {
-    compactText, jdFromRenderedPage, workdayCxsUrl, normalizeWorkdayJob,
+    compactText, TRUNCATION_NOTICE, jdFromRenderedPage, workdayCxsUrl, normalizeWorkdayJob,
     normalizeAshbyJob, normalizeGreenhouseJob, normalizeLeverJob, normalizeSmartRecruitersJob,
     normalizeZohoJob, fetchJdViaKnownApi, resolveJdApi, JD_FETCHERS,
   } = await import(pathToFileURL(join(ROOT, 'fetch-jd.mjs')).href);
@@ -113,8 +113,8 @@ try {
   const longText = 'y'.repeat(20000);
   const raised = jdFromRenderedPage({ title: 'Role', text: longText }, '', 'https://x/1', 15000);
   const defaulted = jdFromRenderedPage({ title: 'Role', text: longText }, '', 'https://x/1');
-  if (raised.text.length === 15001 && raised.text.endsWith('…') &&
-      defaulted.text.length === 12001 && defaulted.text.endsWith('…')) {
+  if (raised.text.endsWith(TRUNCATION_NOTICE(15000)) && !raised.text.includes('y'.repeat(15001)) &&
+      defaulted.text.endsWith(TRUNCATION_NOTICE(12000)) && !defaulted.text.includes('y'.repeat(12001))) {
     pass('jdFromRenderedPage applies a custom textCap and defaults to the 12000 JD cap');
   } else {
     fail(`jdFromRenderedPage textCap => raised=${raised.text.length} default=${defaulted.text.length}`);

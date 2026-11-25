@@ -327,20 +327,6 @@ export function sameDocument(requested, final) {
 }
 
 /**
- * ATS results are capped by compactText, which marks a cut
- * with a bare trailing `…`. Nothing downstream recognises that, so turn it into
- * the same explicit notice a cut page JD carries. Text that was not cut is
- * returned unchanged. Pure — exported for tests.
- *
- * @param {string} text
- * @param {number} cap the cap the text was compacted to
- */
-export function markCappedAtsText(text, cap) {
-  if (text.length !== cap + 1 || !text.endsWith('\u2026')) return text;
-  return `${text.slice(0, -1).trimEnd()}\n\n${TRUNCATION_NOTICE(cap)}`;
-}
-
-/**
  * The one place a fetched page becomes a JD. Takes what a fetch returned
  * (fetchHtml's result, or a page the batch runner downloaded with curl) and
  * returns the JD, or null when the page holds no JD that can be attributed to
@@ -609,10 +595,20 @@ export function jdFailure(result, maxChars) {
 export const JD_TEXT_CAP = 12_000;     // the API tiers' default cap; fetch-jd's own CLI asks for more
 export const WORKDAY_TIMEOUT_MS = 10_000;
 
-// Collapse runs of whitespace and cap length so the JD text stays compact.
+// Collapse runs of whitespace.
+export function tidyText(s) {
+  return String(s ?? '').replace(/[ \t\u00a0]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+// A short field (title, page excerpt) kept to `cap` characters, cut with a bare `…`.
 export function compactText(s, cap = JD_TEXT_CAP) {
-  const text = String(s ?? '').replace(/[ \t ]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+  const text = tidyText(s);
   return text.length > cap ? `${text.slice(0, cap)}…` : text;
+}
+
+// A JD body kept to `cap` characters; a cut says so (capJdText), so nobody archives it as whole.
+export function jdText(s, cap = JD_TEXT_CAP) {
+  return capJdText(tidyText(s), cap);
 }
 
 /**
@@ -678,7 +674,7 @@ export function normalizeWorkdayJob(json, postingUrl, textCap = JD_TEXT_CAP) {
   return {
     url: postingUrl,
     title: compactText(str(info.title), 300),
-    text: compactText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
+    text: jdText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
   };
 }
 
@@ -799,7 +795,7 @@ export function normalizeAshbyJob(json, jobId, postingUrl, textCap = JD_TEXT_CAP
   return {
     url: postingUrl,
     title: compactText(str(job.title), 300),
-    text: compactText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
+    text: jdText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
     // isListed:false is NOT closure: Ashby serves an unlisted posting by direct
     // link and it can still take applications. The note in the text is the only
     // carrier; closure needs independent evidence.
@@ -874,7 +870,7 @@ export function normalizeGreenhouseJob(json, postingUrl, textCap = JD_TEXT_CAP) 
   return {
     url: postingUrl,
     title: compactText(str(json?.title), 300),
-    text: compactText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
+    text: jdText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
   };
 }
 
@@ -912,7 +908,7 @@ async function fetchGreenhouseJd(apiUrl, postingUrl, textCap, timeoutMs) {
  * append `openingPlain` / `descriptionBodyPlain`: `descriptionPlain` already
  * equals their concatenation, so adding them duplicates the description.
  *
- * Order is the contract, since compactText truncates the TAIL — a lowered
+ * Order is the contract, since jdText truncates the TAIL — a lowered
  * `--max-chars` has to drop boilerplate, not requirements.
  *
  * There is no closed-state check. The public v0 endpoint 404s a closed posting
@@ -950,7 +946,7 @@ export function normalizeLeverJob(json, postingUrl, textCap = JD_TEXT_CAP) {
   return {
     url: postingUrl,
     title: compactText(str(json.text), 300),
-    text: compactText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
+    text: jdText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
   };
 }
 
@@ -1038,7 +1034,7 @@ export function normalizeSmartRecruitersJob(json, postingUrl, textCap = JD_TEXT_
   return {
     url: postingUrl,
     title: compactText(str(json?.name), 300),
-    text: compactText([meta.join('\n'), ...blocks].filter(Boolean).join('\n\n'), textCap),
+    text: jdText([meta.join('\n'), ...blocks].filter(Boolean).join('\n\n'), textCap),
   };
 }
 
@@ -1078,7 +1074,7 @@ export function normalizeZohoJob(html, id, postingUrl, textCap = JD_TEXT_CAP) {
   return {
     url: postingUrl,
     title: compactText(str(record.Posting_Title) || str(record.Job_Opening_Name), 300),
-    text: compactText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
+    text: jdText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
   };
 }
 
@@ -1111,7 +1107,7 @@ export function normalizeHireHiveJob(json, id, postingUrl, textCap = JD_TEXT_CAP
   return {
     url: postingUrl,
     title: compactText(str(json.title), 300),
-    text: compactText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
+    text: jdText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
   };
 }
 
@@ -1160,7 +1156,7 @@ function ultiproYears(min, max) {
  * buttons and the equal-opportunity notice: on 2026-10-29, of 103 postings
  * read both ways, every work model, pay line, travel line and criteria list
  * the page showed was here too. Qualifications go before the description
- * because compactText cuts the tail, and a long description must not push the
+ * because jdText cuts the tail, and a long description must not push the
  * requirements out.
  *
  * A closed posting keeps its record, so its JD is still returned, with the
@@ -1224,7 +1220,7 @@ export function normalizeUltiproJob(html, id, postingUrl, textCap = JD_TEXT_CAP)
   return {
     url: postingUrl,
     title: compactText(str(record.Title), 300),
-    text: compactText([
+    text: jdText([
       meta.join('\n'),
       qualifications.length ? `Qualifications:\n${qualifications.join('\n')}` : '',
       body,
@@ -1279,7 +1275,7 @@ export function normalizeHibobJob(json, postingUrl, textCap = JD_TEXT_CAP) {
   return {
     url: postingUrl,
     title: compactText(str(ad.title), 300),
-    text: compactText([meta.join('\n'), ...blocks].filter(Boolean).join('\n\n'), textCap),
+    text: jdText([meta.join('\n'), ...blocks].filter(Boolean).join('\n\n'), textCap),
   };
 }
 
@@ -1305,7 +1301,7 @@ export function normalizeWorkableJob(json, shortcode, postingUrl, textCap = JD_T
   return {
     url: postingUrl,
     title,
-    text: compactText(blocks.join('\n\n'), textCap),
+    text: jdText(blocks.join('\n\n'), textCap),
   };
 }
 
@@ -1375,7 +1371,7 @@ async function fetchBambooHrJd(resolved, url, textCap, timeoutMs) {
     if (shareUrl.username || shareUrl.password || postingPath !== resolved.postingPath) return null;
     const text = htmlToText(job.description);
     if (!text) return null;
-    return { url, title: compactText(htmlToText(job.jobOpeningName), 300), text: compactText(text, textCap) };
+    return { url, title: compactText(htmlToText(job.jobOpeningName), 300), text: jdText(text, textCap) };
   } catch {
     return null;
   }
@@ -1386,7 +1382,7 @@ async function fetchHimalayasJd(_resolved, url, textCap, timeoutMs) {
   if (result.publisherStatus !== 'open') return null;
   const text = htmlToText(result.job.description);
   if (!text) return null;
-  return { url, title: compactText(result.job.title, 300), text: compactText(text, textCap) };
+  return { url, title: compactText(result.job.title, 300), text: jdText(text, textCap) };
 }
 
 /**
@@ -1493,12 +1489,12 @@ const HYDRATION_WAIT_MS = 2_000;
  */
 export function jdFromRenderedPage(raw, html, finalUrl, textCap = JD_TEXT_CAP) {
   const structured = extractJd({ html, finalUrl }, finalUrl, { textCap: Infinity });
-  const domText = compactText(String(raw?.text || ''), Infinity);
+  const domText = tidyText(raw?.text);
   const useStructured = structured && structured.text.length > domText.length;
   return {
     url: finalUrl,
     title: compactText(raw?.title || structured?.title || '', 300),
-    text: compactText(useStructured ? structured.text : domText, textCap),
+    text: jdText(useStructured ? structured.text : domText, textCap),
     bodyText: compactText(raw?.bodyText || '', 4100),
   };
 }
@@ -1738,7 +1734,7 @@ Options:
 
   // The structured-page reader already includes the posting title in its text.
   const header = result.title && result.method !== 'ld+json' ? `${result.title}\n\n` : '';
-  process.stdout.write(header + markCappedAtsText(result.text, PAGE_TEXT_CAP));
+  process.stdout.write(header + result.text);
 }
 
 if (isMainModule(import.meta.url)) {
