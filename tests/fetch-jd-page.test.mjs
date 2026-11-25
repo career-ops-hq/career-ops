@@ -531,17 +531,12 @@ test('a page with no extractable JD but a closure banner is closed, not a plain 
   } finally { net.restore(); }
 });
 
-test('named Latin-1 entities decode in visible text, case-sensitively', async () => {
-  const net = stubNetwork(() => html(page(`<p>${BODY}</p>`, { body: '<p>Ce poste est ferm&eacute; &mdash; M&uuml;nchen &Eacute;cole.</p>' })));
+test('named Latin-1 entities in a description decode case-sensitively', async () => {
+  const net = stubNetwork(() => html(page(`<p>${BODY} Poste ferm&eacute; &mdash; M&uuml;nchen &Eacute;cole, salaire &pound;50k &copy;</p>`)));
   try {
     const out = await fetchJdViaPage('https://careers.example.com/job/1');
-    assert.ok(out);
+    assert.match(out.text, /ferm\u00e9 \u2014 M\u00fcnchen \u00c9cole, salaire \u00a350k \u00a9/);
   } finally { net.restore(); }
-  const { LATIN1_ENTITIES } = await import('../lib/jd-parse.mjs');
-  assert.equal(LATIN1_ENTITIES.eacute, 'é');
-  assert.equal(LATIN1_ENTITIES.Eacute, 'É');
-  assert.equal(LATIN1_ENTITIES.uuml, 'ü');
-  assert.equal(Object.hasOwn(LATIN1_ENTITIES, 'nbsp'), false);
 });
 
 test('a closure banner on a page that names several postings is not attributed to the URL', async () => {

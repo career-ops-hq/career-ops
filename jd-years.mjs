@@ -47,8 +47,8 @@
  * "Chinese" below); the figure counts only when experience is named with it.
  */
 
+import { htmlToText } from './lib/jd-parse.mjs';
 import {
-  jdHtmlToText,
   fetchJdViaKnownApi,
   resolveJdApi,
   normalizeAshbyJob,
@@ -220,7 +220,7 @@ const LIST_MARKER = /^\s*(?:[-*•·]|\d+[.)])(?:\s+|$)/;
 
 /**
  * Plain text for parsing. Provider descriptions arrive as HTML, ATS JD
- * normalizers already return text; both end up as lines. jdHtmlToText writes an
+ * normalizers already return text; both end up as lines. htmlToText writes an
  * <li> as "- ", so `item` holds for either source.
  * @param {string} input
  * @returns {{ text: string, item: boolean }[]}
@@ -228,7 +228,7 @@ const LIST_MARKER = /^\s*(?:[-*•·]|\d+[.)])(?:\s+|$)/;
 function toLines(input) {
   const raw = String(input ?? '');
   // [^<>]: '<a<a<a…' fails each start at once instead of scanning to the end.
-  const text = /<[a-z!/][^<>]*>/i.test(raw) ? jdHtmlToText(raw) : raw;
+  const text = /<[a-z!/][^<>]*>/i.test(raw) ? htmlToText(raw) : raw;
   // Runs of spaces collapse first: the sentence split is quadratic on them.
   // A marker may also end its line: `<li>\n<p>text` and `<li></li>` arrive as a
   // bare "-", and headingKind would take it for a heading and hide the real one

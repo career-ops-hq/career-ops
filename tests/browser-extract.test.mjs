@@ -14,10 +14,11 @@ try {
   const { resolveAtsApi, JD_TEXT_API_ATS } = await import(pathToFileURL(join(ROOT, 'liveness-api.mjs')).href);
   const { resolveExtractorMode, normalizeListing, parseArgs } = mod;
   const {
-    compactText, jdFromRenderedPage, workdayCxsUrl, jdHtmlToText, normalizeWorkdayJob,
+    compactText, jdFromRenderedPage, workdayCxsUrl, normalizeWorkdayJob,
     normalizeAshbyJob, normalizeGreenhouseJob, normalizeLeverJob, normalizeSmartRecruitersJob,
     normalizeZohoJob, fetchJdViaKnownApi, resolveJdApi, JD_FETCHERS,
   } = await import(pathToFileURL(join(ROOT, 'fetch-jd.mjs')).href);
+  const { htmlToText } = await import(pathToFileURL(join(ROOT, 'lib/jd-parse.mjs')).href);
 
   // resolveExtractorMode — default mcp, explicit cli, garbage → mcp, missing → mcp
   const tmp = mkdtempSync(join(tmpdir(), 'career-ops-extractor-'));
@@ -149,41 +150,41 @@ try {
     fail('workdayCxsUrl must reject ".." in the job path');
   }
 
-  // jdHtmlToText — block structure survives as newlines, entities decode
+  // htmlToText — block structure survives as newlines, entities decode
   // (including entity-escaped markup), script/style bodies are dropped.
-  const html = jdHtmlToText('<h1>About</h1><p>We build&nbsp;things &amp; ship.</p><style>p{color:red}</style><ul><li>Own the roadmap</li><li>Ship</li></ul><p>Line<br/>break</p>');
+  const html = htmlToText('<h1>About</h1><p>We build&nbsp;things &amp; ship.</p><style>p{color:red}</style><ul><li>Own the roadmap</li><li>Ship</li></ul><p>Line<br/>break</p>');
   if (html === 'About\nWe build things & ship.\n\n- Own the roadmap\n- Ship\nLine\nbreak') {
-    pass('jdHtmlToText keeps block breaks and bullets, decodes entities, drops <style>');
+    pass('htmlToText keeps block breaks and bullets, decodes entities, drops <style>');
   } else {
-    fail(`jdHtmlToText => ${JSON.stringify(html)}`);
+    fail(`htmlToText => ${JSON.stringify(html)}`);
   }
-  const commented = jdHtmlToText('<p>Pay</p><!-- salary < 100000 --><p>Benefits</p>');
+  const commented = htmlToText('<p>Pay</p><!-- salary < 100000 --><p>Benefits</p>');
   if (commented === 'Pay\nBenefits') {
-    pass('jdHtmlToText strips a comment whose body holds an unquoted <');
+    pass('htmlToText strips a comment whose body holds an unquoted <');
   } else {
-    fail(`jdHtmlToText comment => ${JSON.stringify(commented)}`);
+    fail(`htmlToText comment => ${JSON.stringify(commented)}`);
   }
-  if (jdHtmlToText('&lt;p&gt;Escaped &lt;b&gt;markup&lt;/b&gt;&lt;/p&gt;') === 'Escaped markup') {
-    pass('jdHtmlToText double-decodes entity-escaped markup');
+  if (htmlToText('&lt;p&gt;Escaped &lt;b&gt;markup&lt;/b&gt;&lt;/p&gt;') === 'Escaped markup') {
+    pass('htmlToText double-decodes entity-escaped markup');
   } else {
-    fail(`jdHtmlToText escaped => ${JSON.stringify(jdHtmlToText('&lt;p&gt;Escaped &lt;b&gt;markup&lt;/b&gt;&lt;/p&gt;'))}`);
+    fail(`htmlToText escaped => ${JSON.stringify(htmlToText('&lt;p&gt;Escaped &lt;b&gt;markup&lt;/b&gt;&lt;/p&gt;'))}`);
   }
-  const comparison = jdHtmlToText('<p>Teams of &lt; 5 people, &gt; 2 years of experience, &lt;10 engineers and &gt;150k users.</p>');
+  const comparison = htmlToText('<p>Teams of &lt; 5 people, &gt; 2 years of experience, &lt;10 engineers and &gt;150k users.</p>');
   if (comparison === 'Teams of < 5 people, > 2 years of experience, <10 engineers and >150k users.') {
-    pass('jdHtmlToText keeps comparison text between decoded angle brackets');
+    pass('htmlToText keeps comparison text between decoded angle brackets');
   } else {
-    fail(`jdHtmlToText comparison => ${JSON.stringify(comparison)}`);
+    fail(`htmlToText comparison => ${JSON.stringify(comparison)}`);
   }
-  const quotedAttr = jdHtmlToText('<p title="a > b">Text</p>');
+  const quotedAttr = htmlToText('<p title="a > b">Text</p>');
   if (quotedAttr === 'Text') {
-    pass('jdHtmlToText strips a whole tag whose quoted attribute holds an angle bracket');
+    pass('htmlToText strips a whole tag whose quoted attribute holds an angle bracket');
   } else {
-    fail(`jdHtmlToText quoted attribute => ${JSON.stringify(quotedAttr)}`);
+    fail(`htmlToText quoted attribute => ${JSON.stringify(quotedAttr)}`);
   }
-  if (jdHtmlToText(null) === '' && jdHtmlToText('') === '' && jdHtmlToText(42) === '') {
-    pass('jdHtmlToText returns "" for a non-string / empty body');
+  if (htmlToText(null) === '' && htmlToText('') === '' && htmlToText(42) === '') {
+    pass('htmlToText returns "" for a non-string / empty body');
   } else {
-    fail('jdHtmlToText should return "" for non-string input');
+    fail('htmlToText should return "" for non-string input');
   }
 
   // normalizeWorkdayJob — same { url, title, text } contract as the scraped path
@@ -318,7 +319,7 @@ try {
   else fail(`normalizeAshbyJob nulls => ${JSON.stringify(ashbyNulls)}`);
 
   // normalizeGreenhouseJob — `content` is HTML (often entity-escaped), so it
-  // goes through the same jdHtmlToText pass as Workday's jobDescription.
+  // goes through the same htmlToText pass as Workday's jobDescription.
   const gh = normalizeGreenhouseJob(
     {
       title: 'Backend Engineer',

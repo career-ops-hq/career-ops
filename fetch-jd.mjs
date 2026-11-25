@@ -32,13 +32,12 @@ import { hasFlag } from './lib/cli-flags.mjs';
 import { LIVENESS_CONTEXT_OPTIONS, rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
 import { browserLaunchOptions } from './lib/browser-launch.mjs';
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
-import { asciiLower, fromLdJson, fromEmbeddedDescription, embeddedDescriptionStrings, ldJsonBlocks, wordCount } from './lib/jd-parse.mjs';
+import { asciiLower, fromLdJson, fromEmbeddedDescription, embeddedDescriptionStrings, ldJsonBlocks, wordCount, htmlToText } from './lib/jd-parse.mjs';
 import { classifyLiveness, cloudflareInterstitial } from './liveness-core.mjs';
 import { resolveAtsApi, JD_TEXT_API_ATS } from './liveness-api.mjs';
 import { resolveHimalayasPosting, retrieveHimalayasPosting } from './himalayas-posting.mjs';
 import { fetchJson } from './providers/_http.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
-import { HTML_TAG_RE, stripHtmlComments } from './providers/_html-to-text.mjs';
 import { isWorkModelOnly } from './providers/greenhouse.mjs';
 import { buildLocation } from './providers/hirehive.mjs';
 import { isZohoRecordClosed, parseZohoDetailPage } from './providers/zoho-recruit.mjs';
@@ -308,48 +307,7 @@ export function capJdText(text, cap) {
   return `${cut.trimEnd()}\n\n${TRUNCATION_NOTICE(cap)}`;
 }
 
-const SKIP_ELEMENTS = new Set(['script', 'style', 'noscript', 'template']);
 const VISIBLE_SCAN_CAP = 1_000_000;
-
-/**
- * The text a reader of the page would see: no scripts, styles or markup.
- * One forward pass with indexOf, so hostile input (millions of `<`, `<!--` or
- * unclosed `<script`) costs linear time instead of the quadratic backtracking a
- * lazy regex would.
- */
-function visibleText(html) {
-  const src = String(html).slice(0, VISIBLE_SCAN_CAP);
-  const lower = asciiLower(src);
-  const out = [];
-  let i = 0;
-  let nextGt = -2;
-  while (i < src.length) {
-    const lt = src.indexOf('<', i);
-    if (lt === -1) { out.push(src.slice(i)); break; }
-    out.push(src.slice(i, lt));
-    if (src.startsWith('<!--', lt)) {
-      const end = src.indexOf('-->', lt + 4);
-      i = end === -1 ? src.length : end + 3;
-      out.push(' ');
-      continue;
-    }
-    const m = /^<(\/?)([a-z][a-z0-9]*)/.exec(lower.slice(lt, lt + 24));
-    // Cache the next '>' so a run of '<' with no '>' after it costs one scan, not one per '<'.
-    if (nextGt !== -1 && nextGt <= lt) nextGt = src.indexOf('>', lt + 1);
-    const gt = nextGt;
-    if (!m || gt === -1) { out.push(' '); i = lt + 1; continue; }
-    if (!m[1] && SKIP_ELEMENTS.has(m[2])) {
-      const close = lower.indexOf(`</${m[2]}`, gt + 1);
-      const closeEnd = close === -1 ? -1 : src.indexOf('>', close);
-      i = closeEnd === -1 ? src.length : closeEnd + 1;
-      out.push(' ');
-      continue;
-    }
-    out.push(/^(br|p|div|li|h[1-6]|tr|section|article|ul|ol|table|header|footer|main)$/.test(m[2]) ? '\n' : ' ');
-    i = gt + 1;
-  }
-  return decodeEntities(out.join('')).replace(/[ \t]+/g, ' ');
-}
 
 /**
  * Did the fetch land on the page that was asked for? A job URL that redirects to
@@ -410,7 +368,7 @@ export function extractJd(page, url, { textCap = PAGE_TEXT_CAP, minWords = MIN_P
   if (data.kind === 'ambiguous' || data.kind === 'expired') return null;
   if (data.kind === 'jd') return { url, title: data.jd.title ?? '', text: capJdText(data.jd.text, textCap), method: data.jd.method };
   if (!allowVisibleText) return null;
-  const text = visibleText(withoutExpiryViews(withoutScripts(html))).replace(/\s+/g, ' ').trim();
+  const text = htmlToText(withoutExpiryViews(withoutScripts(html))).replace(/\s+/g, ' ').trim();
   return wordCount(text) >= minWords ? { url, title: '', text: capJdText(text, textCap), method: 'visible-text' } : null;
 }
 
@@ -535,7 +493,7 @@ function visibleClosureEvidence(html, url, finalUrl, now = new Date()) {
   // (a bundle that merely names the class) must not suppress a separate closure banner.
   // The expiry view itself is dropped; any other closure banner on the page still counts.
   const markup = withoutExpiryViews(withoutScripts(html));
-  const verdict = classifyLiveness({ status: 200, requestedUrl: url, finalUrl, bodyText: visibleText(markup), now });
+  const verdict = classifyLiveness({ status: 200, requestedUrl: url, finalUrl, bodyText: htmlToText(markup), now });
   return verdict.result === 'expired' && VISIBLE_CLOSURE_CODES.has(verdict.code)
     ? `page text: ${verdict.reason}`.slice(0, 200)
     : null;
@@ -675,44 +633,6 @@ export function workdayCxsUrl(rawUrl) {
   return ats && ats.ats === 'workday' ? ats.apiUrl : null;
 }
 
-// Tags whose CLOSE ends a block, so it becomes a line break. `li` is absent on
-// purpose: its OPEN tag already emits the break plus a bullet below, and
-// breaking on both ends double-spaces every list.
-const BLOCK_END_RE = /<\/(p|div|ul|ol|h[1-6]|tr|section|article|blockquote)\s*>/gi;
-
-/**
- * Description markup -> plain text, keeping block structure as newlines. Pure —
- * exported for tests.
- *
- * Not providers/_html-to-text.mjs's htmlToText: that one is tuned for scan
- * payloads and hard-caps at 4000 chars while collapsing ALL whitespace
- * (newlines included) into single spaces. A JD read for evaluation wants the
- * full body up to `--max-chars`, with its paragraph and bullet breaks intact.
- * The entity decoder and the tag matcher ARE shared, so the two cannot drift on
- * the thing that has actually drifted historically (#1555/#1639/#2623).
- *
- * Double-decode for the same reason htmlToText does: payloads often carry
- * entity-escaped markup (`&lt;p&gt;`), and text-level entities only become
- * decodable once the real tags are stripped.
- *
- * @param {unknown} html
- * @returns {string}
- */
-export function jdHtmlToText(html) {
-  if (typeof html !== 'string' || !html) return '';
-  const stripped = stripHtmlComments(decodeEntities(html))
-    .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<li[^>]*>/gi, '\n- ')
-    .replace(BLOCK_END_RE, '\n')
-    .replace(HTML_TAG_RE, ' ');
-  return decodeEntities(stripped)
-    .replace(/[ \t\u00a0]+/g, ' ')
-    .replace(/ *\n */g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
 /**
  * Shape a jd-mode result from a Workday CXS job payload, into the SAME
  * `{ url, title, text }` contract as the scraped path so no caller has to know
@@ -739,7 +659,7 @@ export function normalizeWorkdayJob(json, postingUrl, textCap = JD_TEXT_CAP) {
   const info = json && typeof json === 'object' ? json.jobPostingInfo : null;
   if (!info || typeof info !== 'object') return null;
 
-  const body = jdHtmlToText(info.jobDescription);
+  const body = htmlToText(info.jobDescription);
   if (!body) return null;
 
   const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : '');
@@ -839,7 +759,7 @@ async function fetchWorkdayJd(apiUrl, postingUrl, textCap, timeoutMs) {
  * classifyAshbyBoard's match logic without importing it, since that function
  * returns a liveness verdict, not a job record.
  *
- * `descriptionPlain` is already plain text, so it needs no jdHtmlToText pass.
+ * `descriptionPlain` is already plain text, so it needs no htmlToText pass.
  * The metadata header carries what the rendered page shows and the description
  * does not, same rationale as normalizeWorkdayJob.
  *
@@ -913,7 +833,7 @@ async function fetchAshbyJd(apiUrl, jobId, postingUrl, textCap, timeoutMs) {
  * contract as normalizeWorkdayJob/normalizeAshbyJob.
  *
  * `content` is HTML (and HTML-escaped at that), so it goes through
- * jdHtmlToText exactly like Workday's `jobDescription`. `requisition_id` is
+ * htmlToText exactly like Workday's `jobDescription`. `requisition_id` is
  * carried for the tracker's same-title disambiguation rule.
  *
  * `location.name` is the PRIMARY location field and `offices[]` is enrichment
@@ -938,7 +858,7 @@ async function fetchAshbyJd(apiUrl, jobId, postingUrl, textCap, timeoutMs) {
  * @param {number} [textCap]
  */
 export function normalizeGreenhouseJob(json, postingUrl, textCap = JD_TEXT_CAP) {
-  const body = jdHtmlToText(json?.content);
+  const body = htmlToText(json?.content);
   if (!body) return null;
 
   const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : '');
@@ -964,7 +884,7 @@ export function normalizeGreenhouseJob(json, postingUrl, textCap = JD_TEXT_CAP) 
  *
  * `content=true` is required — without it the endpoint omits the JD body
  * entirely (same query param providers/greenhouse.mjs uses for its list scan).
- * `content` comes back as HTML, so it goes through jdHtmlToText like Workday's
+ * `content` comes back as HTML, so it goes through htmlToText like Workday's
  * `jobDescription`.
  *
  * @param {string} apiUrl - `resolveAtsApi(url).apiUrl` (no query string)
@@ -1012,14 +932,14 @@ export function normalizeLeverJob(json, postingUrl, textCap = JD_TEXT_CAP) {
     ? json.lists
         .map((l) => {
           const heading = str(l?.text);
-          const content = jdHtmlToText(l?.content);
+          const content = htmlToText(l?.content);
           return content ? `${heading ? `${heading}\n` : ''}${content}` : '';
         })
         .filter(Boolean)
         .join('\n\n')
     : '';
   // Lever can leave descriptionPlain empty while description holds the HTML.
-  const intro = str(json.descriptionPlain) || jdHtmlToText(json.description);
+  const intro = str(json.descriptionPlain) || htmlToText(json.description);
   const body = [intro, lists, str(json.additionalPlain)].filter(Boolean).join('\n\n');
   if (!body) return null;
 
@@ -1098,7 +1018,7 @@ export function normalizeSmartRecruitersJob(json, postingUrl, textCap = JD_TEXT_
   const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : '');
   const blocks = ['companyDescription', 'jobDescription', 'qualifications', 'additionalInformation']
     .map((key) => {
-      const body = jdHtmlToText(sections[key]?.text);
+      const body = htmlToText(sections[key]?.text);
       return body ? [str(sections[key]?.title), body].filter(Boolean).join('\n') : '';
     })
     .filter(Boolean);
@@ -1142,7 +1062,7 @@ async function fetchSmartRecruitersJd(apiUrl, postingUrl, textCap, timeoutMs) {
 export function normalizeZohoJob(html, id, postingUrl, textCap = JD_TEXT_CAP) {
   const record = parseZohoDetailPage(html);
   if (!record || String(record.id) !== String(id)) return null;
-  const body = jdHtmlToText(record.Job_Description);
+  const body = htmlToText(record.Job_Description);
   if (!body) return null;
 
   const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : '');
@@ -1180,7 +1100,7 @@ async function fetchZohoJd(apiUrl, id, postingUrl, textCap, timeoutMs) {
 export function normalizeHireHiveJob(json, id, postingUrl, textCap = JD_TEXT_CAP) {
   if (!json || String(json.id) !== String(id)) return null;
   const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : '');
-  const body = jdHtmlToText(json.description?.html) || str(json.description?.text);
+  const body = htmlToText(json.description?.html) || str(json.description?.text);
   if (!body) return null;
   const meta = [];
   const location = buildLocation(json);
@@ -1260,7 +1180,7 @@ export function normalizeUltiproJob(html, id, postingUrl, textCap = JD_TEXT_CAP)
   } catch {
     return null;
   }
-  const body = jdHtmlToText(record.Description);
+  const body = htmlToText(record.Description);
   if (!body) return null;
 
   const str = (v) => (typeof v === 'string' && v.trim() ? v.replace(/\s+/g, ' ').trim() : '');
@@ -1342,7 +1262,7 @@ export function normalizeHibobJob(json, postingUrl, textCap = JD_TEXT_CAP) {
   const labels = field('sectionLabels') && typeof field('sectionLabels') === 'object' ? field('sectionLabels') : {};
   const blocks = [];
   for (const [key, label] of [['description', 'Description'], ['responsibilities', 'Responsibilities'], ['requirements', 'Requirements'], ['benefits', 'Benefits']]) {
-    const body = jdHtmlToText(typeof field(key) === 'string' ? field(key) : '');
+    const body = htmlToText(typeof field(key) === 'string' ? field(key) : '');
     if (body) blocks.push(`${str(labels[key]) || label}:\n${body}`);
   }
   if (!blocks.length) return null;
@@ -1372,13 +1292,13 @@ async function fetchHibobJd(resolved, postingUrl, textCap, timeoutMs) {
 export function normalizeWorkableJob(json, shortcode, postingUrl, textCap = JD_TEXT_CAP) {
   if (!json || typeof json !== 'object' || json.shortcode !== shortcode ||
       typeof json.title !== 'string' || !json.title.trim()) return null;
-  const title = compactText(jdHtmlToText(json.title), 300);
+  const title = compactText(htmlToText(json.title), 300);
   if (!title) return null;
   const blocks = [];
   for (const [key, label] of [['description', 'Description'], ['requirements', 'Requirements'], ['benefits', 'Benefits']]) {
     const html = typeof json[key] === 'string' ? json[key] : '';
     // Decode before removing chrome: the API can entity-escape its HTML tags.
-    const body = jdHtmlToText(decodeEntities(html).replace(/<(nav|header|footer)\b[^>]*>[\s\S]*?<\/\1>/gi, ' '));
+    const body = htmlToText(decodeEntities(html).replace(/<(nav|header|footer)\b[^>]*>[\s\S]*?<\/\1>/gi, ' '));
     if (/[\p{L}\p{N}]/u.test(body)) blocks.push(`${label}:\n${body}`);
   }
   if (!blocks.length) return null;
@@ -1453,9 +1373,9 @@ async function fetchBambooHrJd(resolved, url, textCap, timeoutMs) {
     const shareUrl = new URL(job.jobOpeningShareUrl);
     const postingPath = shareUrl.origin + shareUrl.pathname.replace(/\/$/, '');
     if (shareUrl.username || shareUrl.password || postingPath !== resolved.postingPath) return null;
-    const text = jdHtmlToText(job.description);
+    const text = htmlToText(job.description);
     if (!text) return null;
-    return { url, title: compactText(jdHtmlToText(job.jobOpeningName), 300), text: compactText(text, textCap) };
+    return { url, title: compactText(htmlToText(job.jobOpeningName), 300), text: compactText(text, textCap) };
   } catch {
     return null;
   }
@@ -1464,7 +1384,7 @@ async function fetchBambooHrJd(resolved, url, textCap, timeoutMs) {
 async function fetchHimalayasJd(_resolved, url, textCap, timeoutMs) {
   const result = await retrieveHimalayasPosting(url, { timeoutMs });
   if (result.publisherStatus !== 'open') return null;
-  const text = jdHtmlToText(result.job.description);
+  const text = htmlToText(result.job.description);
   if (!text) return null;
   return { url, title: compactText(result.job.title, 300), text: compactText(text, textCap) };
 }
