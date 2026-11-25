@@ -54,6 +54,12 @@ for (const salary of [
   });
 }
 const wrapperCases = [
+  ['Salary $150k, a stipend paid per month', 5, 3.6, 'proceed', 3.5],
+  ['Salary $150k plus a stipend paid weekly or per month', 5, 3.6, 'proceed', 3.5],
+  ['Salary $150k plus a stipend paid per month', 5, 3.6, 'proceed', 3.5],
+  ['Salary ($150k) plus a stipend paid per month', 5, 3.6, 'proceed', 3.5],
+  ['Salary $150k and an equipment allowance paid per month', 5, 3.6, 'proceed', 3.5],
+  ['$40k gross and paid per month', 4, 3.4, 'proceed', 3],
   ['Salary $150k, excluding monthly equipment allowance', 5, 3.6, 'proceed', 3.5],
   ['Salary ($150k) and monthly on-call rotation', 5, 3.6, 'proceed', 3.5],
   ['Salary $150k, monthly performance review', 5, 3.6, 'proceed', 3.5],

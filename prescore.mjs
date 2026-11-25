@@ -977,14 +977,21 @@ function nonAnnualFigureLookup(text, matches) {
       let bridgeEnd = previous?.offsetEnd ?? 0;
       let conjunction = false;
       let comma = false;
+      let independentPayClause = false;
       for (let i = 0; i < markers.length; i++) {
         const marker = markers[i];
         const bridge = surface.slice(bridgeEnd, marker.offset);
         bridgeEnd = marker.offsetEnd;
         conjunction ||= /\b(?:and|or|plus|with|excluding)\b/i.test(bridge);
         comma ||= bridge.includes(',');
+        independentPayClause ||= bridge.split(/\b(?:and|or|plus|with|excluding)\b|,/i).slice(1)
+          .some((clause) => /\b(?:stipend|allowance|budget|bonus|sign[- ]on)\b/i.test(clause));
         const owner = !previous || (marker === last && prefixesNext) ? next : previous;
         if (!owner) continue;
+        // A separately named pay item owns its following rate even without
+        // an amount: "plus a stipend paid weekly or per month". Retain that
+        // owner through every cadence marker until the next physical figure.
+        if (owner === previous && independentPayClause) continue;
         const continuation = surface.slice(marker.offsetEnd, markers[i + 1]?.offset ?? next?.offset ?? surface.length)
           .trim().replace(/[.!?]+$/, '').trim();
         // An adjectival cadence in a separate clause describes that clause,
