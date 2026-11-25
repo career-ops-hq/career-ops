@@ -653,7 +653,7 @@ test('a job id carried in the URL fragment tells two jobs apart', () => {
 });
 
 test('an oversize page proves no closure from its prefix', () => {
-  const pad = ' '.repeat(3_100_000);
+  const pad = ' '.repeat(3_200_000);
   const expired = `<script type="application/ld+json">${JSON.stringify({ '@type': 'JobPosting', title: 'E', description: 'x', validThrough: '2020-01-01' })}</script>`;
   assert.equal(pageClosureEvidence(`<html>${expired}${pad}</html>`, 'https://careers.example.com/job/1'), null);
 });

@@ -1,38 +1,29 @@
 #!/usr/bin/env node
 /**
- * fetch-jd.mjs — read a job description from its ATS's public API instead of
- * the rendered page (#2582).
+ * fetch-jd.mjs — the one place a job description is fetched and read (#2582).
  *
- * A headless caller that wants a JD today has one option: fetch the posting
- * page and strip HTML. That is 10-30k tokens of nav and markup on a
- * server-rendered board, and on a JS-rendered one (Ashby, Greenhouse's
- * embedded boards) it returns an unrendered shell — correctly detected as thin
- * and discarded — so the caller falls through to WebFetch, which hits the same
- * shell and fails the same way. Meanwhile the ATS's own public JSON endpoint,
- * the one liveness checks already use, ships the full JD body for free.
+ *   node fetch-jd.mjs <url> [--visible-text] [--browser]
  *
- *   node fetch-jd.mjs <url>
- *
- * JD text on stdout, exit 0, when a known ATS answers with real content.
- * Exit 3 with `CLOSED_POSTING <evidence>` on stdout when the page itself says the
- * posting is closed: a JobPosting past its validThrough date, closure text
- * in the visible page, or a page that answers HTTP 404 or 410.
- * Exit 2 with empty stdout when the page could not be reached at all (a transport
- * failure worth retrying). Exit 1 with empty stdout and no stderr noise otherwise — a miss is the
- * expected "fall back to the browser path" case, not an error condition, and
- * a visible miss is the whole point: never a fabricated JD.
- *
- * Coverage is JD_TEXT_API_ATS (liveness-api.mjs), including company careers
- * pages that carry only a Greenhouse `?gh_jid=`, and canonical/share-link
- * Workable postings (description, requirements and benefits).
- * When no API covers the host, the page's own schema.org JobPosting (JSON-LD)
- * is read next (fetchJdFromPage below, behind the egress guard). Phenom and
- * bespoke career sites render the JD from script data, so their visible HTML is
- * a shell that any text conversion, WebFetch included, reports as empty.
- * With --browser, a page the first two tiers could not read is rendered in
- * headless Chromium (fetchJdViaBrowser, last). fetchJd() runs the three tiers
- * cheapest first, and browser-extract.mjs calls it, so the two commands cannot
+ * Three tiers, cheapest first; a later tier runs only when the earlier one found
+ * nothing (fetchJd, at the bottom):
+ *   1. the ATS's public JSON API (JD_TEXT_API_ATS in liveness-api.mjs), the same
+ *      endpoint liveness checks use, which ships the whole JD for free where the
+ *      rendered page is an unrendered shell;
+ *   2. the page's own bytes: its schema.org JobPosting (JSON-LD) or embedded
+ *      payload, read behind an egress guard. Phenom and bespoke career sites
+ *      render the JD from script data, so any text conversion, WebFetch
+ *      included, sees an empty shell;
+ *   3. with --browser, the page rendered in headless Chromium.
+ * browser-extract.mjs is a command line over the same fetchJd, so the two cannot
  * drift on which ATS is API-fetchable or what counts as a JD.
+ *
+ * JD text on stdout, exit 0, on a hit. Exit 3 with `CLOSED_POSTING <evidence>`
+ * when the posting is closed: a JobPosting past its validThrough date, closure
+ * text in the visible page, an HTTP 404 or 410, or (tier 3) a taken-down page.
+ * Exit 2 with empty stdout when the page could not be reached at all (a transport
+ * failure worth retrying). Exit 1 otherwise, with no stderr noise except a tier-3
+ * failure reason: a miss is the expected "fall back" case, not an error, and a
+ * visible miss is the whole point: never a fabricated JD.
  */
 
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -41,12 +32,12 @@ import { hasFlag } from './lib/cli-flags.mjs';
 import { LIVENESS_CONTEXT_OPTIONS, rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
 import { browserLaunchOptions } from './lib/browser-launch.mjs';
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
-import { asciiLower, fromLdJson, fromEmbeddedDescription, embeddedDescriptionStrings, ldJsonBlocks, wordCount, LATIN1_ENTITIES } from './lib/jd-parse.mjs';
+import { asciiLower, fromLdJson, fromEmbeddedDescription, embeddedDescriptionStrings, ldJsonBlocks, wordCount } from './lib/jd-parse.mjs';
 import { classifyLiveness, cloudflareInterstitial } from './liveness-core.mjs';
 import { resolveAtsApi, JD_TEXT_API_ATS } from './liveness-api.mjs';
 import { resolveHimalayasPosting, retrieveHimalayasPosting } from './himalayas-posting.mjs';
 import { fetchJson } from './providers/_http.mjs';
-import { decodeEntities as decodeHtmlEntities } from './providers/_html-entities.mjs';
+import { decodeEntities } from './providers/_html-entities.mjs';
 import { HTML_TAG_RE, stripHtmlComments } from './providers/_html-to-text.mjs';
 import { isWorkModelOnly } from './providers/greenhouse.mjs';
 import { buildLocation } from './providers/hirehive.mjs';
@@ -58,9 +49,18 @@ import { dnsLookupPatched } from './providers/_dns-cache.mjs';
 import { providerFetchContext } from './providers/_ip-guard.mjs';
 
 const MAX_REDIRECTS = 5;
+// The most of one page ever downloaded, and of it ever inspected for a JD or closure.
 const MAX_BODY_BYTES = 3 * 1024 * 1024;
+const DEFAULT_TIMEOUT_MS = 15_000;
+// What the page tier and this script's own command line keep of a JD: a batch
+// report reads the whole posting, so there is no token-budget reason to cap tighter.
+export const PAGE_TEXT_CAP = 20_000;
 // Below this many words the "JD" is a stub, not a posting.
 export const MIN_PAGE_JD_WORDS = 80;
+
+// ========================================================================
+// Tier 2 — the page's own bytes: fetch it, read its structured data, judge closure
+// ========================================================================
 
 /** LinkedIn hosts, which this module never requests. */
 export function isLinkedInHost(hostname) {
@@ -304,9 +304,6 @@ export function inspectPage(html, now = Date.now(), requestedUrl = '') {
   return { found: embedded && wordCount(embedded.text) >= MIN_PAGE_JD_WORDS ? embedded : null, ambiguous: false };
 }
 
-/** Largest page the already-downloaded closure check will read (a 1-3 MB cap keeps hostile markup cheap). */
-const PAGE_HTML_CAP = 3_000_000;
-
 export const TRUNCATION_NOTICE = (cap) =>
   `[Job description truncated here: the posting is longer than ${cap} characters. This text is NOT the complete job description.]`;
 
@@ -372,17 +369,6 @@ function visibleText(html) {
     i = gt + 1;
   }
   return decodeEntities(out.join('')).replace(/[ \t]+/g, ' ');
-}
-
-const NAMED_ENTITIES = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", rsquo: '\u2019', lsquo: '\u2018', rdquo: '\u201d', ldquo: '\u201c', ndash: '\u2013', mdash: '\u2014' };
-
-/** Decode numeric and the common named character references; unknown ones stay as written. */
-function decodeEntities(text) {
-  return text.replace(/&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([a-zA-Z]{2,8}));/g, (m, dec, hex, name) => {
-    if (name) { if (Object.hasOwn(LATIN1_ENTITIES, name)) return LATIN1_ENTITIES[name]; const k = name.toLowerCase(); return Object.hasOwn(NAMED_ENTITIES, k) ? NAMED_ENTITIES[k] : m; }
-    const cp = dec ? Number(dec) : parseInt(hex, 16);
-    return cp > 0 && cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff) ? String.fromCodePoint(cp) : m;
-  });
 }
 
 /**
@@ -509,7 +495,7 @@ export function pageClosureEvidence(html, url, finalUrl = url) {
   }
   // A page past the cap cannot be checked whole: a second posting after the prefix could be hidden,
   // so nothing page-derived counts as closure (the URL check above and the ATS API still do).
-  if (String(html).length > PAGE_HTML_CAP) return null;
+  if (String(html).length > MAX_BODY_BYTES) return null;
   const capped = String(html);
   const { found, ambiguous } = inspectPage(capped, Date.now(), url);
   if (ambiguous) return null;
@@ -552,9 +538,9 @@ export function markCappedAtsText(text, cap) {
  * @param {{textCap?: number, minWords?: number, visibleText?: boolean}} [opts]
  * @returns {{url: string, title: string, text: string, method: string}|null}
  */
-export function extractJd(page, url, { textCap = 20_000, minWords = MIN_PAGE_JD_WORDS, visibleText: allowVisibleText = false } = {}) {
+export function extractJd(page, url, { textCap = PAGE_TEXT_CAP, minWords = MIN_PAGE_JD_WORDS, visibleText: allowVisibleText = false } = {}) {
   const html = String(page?.html ?? '');
-  if (!html || html.length > PAGE_HTML_CAP || !sameDocument(url, page?.finalUrl || url)) return null;
+  if (!html || html.length > MAX_BODY_BYTES || !sameDocument(url, page?.finalUrl || url)) return null;
   const { found, ambiguous } = inspectPage(html, Date.now(), url);
   if (ambiguous || found?.closed) return null;
   if (found) return { url, title: found.title ?? '', text: capJdText(found.text, textCap), method: found.method };
@@ -585,7 +571,7 @@ export function fetchedPageClosure(page, url) {
  * @param {number} [timeoutMs]
  * @returns {Promise<{url: string, title: string, text: string, method: string, closed?: boolean, evidence?: string, unreachable?: boolean}|null>}
  */
-export async function fetchJdFromPage(url, textCap = 20_000, timeoutMs = 15_000, { visibleText = false } = {}) {
+export async function fetchJdFromPage(url, textCap = PAGE_TEXT_CAP, timeoutMs = DEFAULT_TIMEOUT_MS, { visibleText = false } = {}) {
   let host;
   try { host = new URL(url).hostname; } catch { return null; }
   if (isLinkedInHost(host)) return null;
@@ -596,6 +582,10 @@ export async function fetchJdFromPage(url, textCap = 20_000, timeoutMs = 15_000,
   if (closure) return { url, title: '', text: '', method: page.gone ? 'http-gone' : 'page-closure', closed: true, evidence: closure };
   return extractJd(page, url, { textCap, visibleText });
 }
+
+// ========================================================================
+// Tier 1 — the ATS's public API: one fetcher and one normalizer per ATS
+// ========================================================================
 
 export const JD_TEXT_CAP = 12_000;     // the API tiers' default cap; fetch-jd's own CLI asks for more
 export const WORKDAY_TIMEOUT_MS = 10_000;
@@ -649,13 +639,13 @@ const BLOCK_END_RE = /<\/(p|div|ul|ol|h[1-6]|tr|section|article|blockquote)\s*>/
  */
 export function jdHtmlToText(html) {
   if (typeof html !== 'string' || !html) return '';
-  const stripped = stripHtmlComments(decodeHtmlEntities(html))
+  const stripped = stripHtmlComments(decodeEntities(html))
     .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<li[^>]*>/gi, '\n- ')
     .replace(BLOCK_END_RE, '\n')
     .replace(HTML_TAG_RE, ' ');
-  return decodeHtmlEntities(stripped)
+  return decodeEntities(stripped)
     .replace(/[ \t\u00a0]+/g, ' ')
     .replace(/ *\n */g, '\n')
     .replace(/\n{3,}/g, '\n\n')
@@ -733,6 +723,36 @@ async function discard(res) {
 }
 
 /**
+ * GET one ATS endpoint and return its body, parsed as JSON (default) or read as
+ * text, or null for ANY inconclusive outcome: a blocked host, a redirect (never
+ * followed: one off the derived host is not one to trust), a non-200, an
+ * unparseable body or a timeout. Every per-ATS fetcher goes through here, so the
+ * guard, the abort timer and the error-body drain exist once.
+ *
+ * @param {string} apiUrl
+ * @param {{timeoutMs: number, as?: 'json'|'text', headers?: Record<string, string>}} opts
+ * @returns {Promise<any|null>}
+ */
+async function fetchApiBody(apiUrl, { timeoutMs, as = 'json', headers = {} }) {
+  if (rejectPrivateOrInvalid(apiUrl)) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(apiUrl, {
+      headers: { accept: as === 'json' ? 'application/json' : 'text/html', 'user-agent': DEFAULT_USER_AGENT, ...headers },
+      redirect: 'error',
+      signal: controller.signal,
+    });
+    if (!res.ok) return await discard(res);
+    return as === 'json' ? await res.json() : await res.text();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Fetch + shape one Workday posting from its CXS endpoint. Returns null for
  * ANY inconclusive outcome (blocked host, redirect, non-200, unparseable or
  * unexpected body, timeout) so the caller falls through to the browser path —
@@ -745,25 +765,8 @@ async function discard(res) {
  * @param {number} timeoutMs
  */
 async function fetchWorkdayJd(apiUrl, postingUrl, textCap, timeoutMs) {
-  // Same host as the already-guarded input, but the guard is cheap and this is
-  // the request that actually leaves the process.
-  if (rejectPrivateOrInvalid(apiUrl)) return null;
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Math.max(timeoutMs, WORKDAY_TIMEOUT_MS));
-  try {
-    const res = await fetch(apiUrl, {
-      headers: { accept: 'application/json', 'user-agent': DEFAULT_USER_AGENT },
-      redirect: 'error', // a redirect off the derived host is not one to follow
-      signal: controller.signal,
-    });
-    if (!res.ok) return await discard(res);
-    return normalizeWorkdayJob(await res.json(), postingUrl, textCap);
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+  const json = await fetchApiBody(apiUrl, { timeoutMs: Math.max(timeoutMs, WORKDAY_TIMEOUT_MS) });
+  return json && normalizeWorkdayJob(json, postingUrl, textCap);
 }
 
 /**
@@ -840,23 +843,8 @@ export function normalizeAshbyJob(json, jobId, postingUrl, textCap = JD_TEXT_CAP
  * @param {number} timeoutMs
  */
 async function fetchAshbyJd(apiUrl, jobId, postingUrl, textCap, timeoutMs) {
-  if (rejectPrivateOrInvalid(apiUrl)) return null;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(apiUrl, {
-      headers: { accept: 'application/json', 'user-agent': DEFAULT_USER_AGENT },
-      redirect: 'error',
-      signal: controller.signal,
-    });
-    if (!res.ok) return await discard(res);
-    const json = await res.json();
-    return normalizeAshbyJob(json, jobId, postingUrl, textCap);
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+  const json = await fetchApiBody(apiUrl, { timeoutMs });
+  return json && normalizeAshbyJob(json, jobId, postingUrl, textCap);
 }
 
 /**
@@ -924,24 +912,8 @@ export function normalizeGreenhouseJob(json, postingUrl, textCap = JD_TEXT_CAP) 
  * @param {number} timeoutMs
  */
 async function fetchGreenhouseJd(apiUrl, postingUrl, textCap, timeoutMs) {
-  const withContent = `${apiUrl}?content=true`;
-  if (rejectPrivateOrInvalid(withContent)) return null;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(withContent, {
-      headers: { accept: 'application/json', 'user-agent': DEFAULT_USER_AGENT },
-      redirect: 'error',
-      signal: controller.signal,
-    });
-    if (!res.ok) return await discard(res);
-    const json = await res.json();
-    return normalizeGreenhouseJob(json, postingUrl, textCap);
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+  const json = await fetchApiBody(`${apiUrl}?content=true`, { timeoutMs });
+  return json && normalizeGreenhouseJob(json, postingUrl, textCap);
 }
 
 /**
@@ -1016,23 +988,8 @@ export function normalizeLeverJob(json, postingUrl, textCap = JD_TEXT_CAP) {
  * @param {number} timeoutMs
  */
 async function fetchLeverJd(apiUrl, postingUrl, textCap, timeoutMs) {
-  if (rejectPrivateOrInvalid(apiUrl)) return null;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(apiUrl, {
-      headers: { accept: 'application/json', 'user-agent': DEFAULT_USER_AGENT },
-      redirect: 'error',
-      signal: controller.signal,
-    });
-    if (!res.ok) return await discard(res);
-    const json = await res.json();
-    return normalizeLeverJob(json, postingUrl, textCap);
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+  const json = await fetchApiBody(apiUrl, { timeoutMs });
+  return json && normalizeLeverJob(json, postingUrl, textCap);
 }
 
 /**
@@ -1105,23 +1062,8 @@ export function normalizeSmartRecruitersJob(json, postingUrl, textCap = JD_TEXT_
 }
 
 async function fetchSmartRecruitersJd(apiUrl, postingUrl, textCap, timeoutMs) {
-  if (rejectPrivateOrInvalid(apiUrl)) return null;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(apiUrl, {
-      headers: { accept: 'application/json', 'user-agent': DEFAULT_USER_AGENT },
-      redirect: 'error',
-      signal: controller.signal,
-    });
-    if (!res.ok) return await discard(res);
-    const json = await res.json();
-    return normalizeSmartRecruitersJob(json, postingUrl, textCap);
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+  const json = await fetchApiBody(apiUrl, { timeoutMs });
+  return json && normalizeSmartRecruitersJob(json, postingUrl, textCap);
 }
 
 /**
@@ -1160,22 +1102,8 @@ export function normalizeZohoJob(html, id, postingUrl, textCap = JD_TEXT_CAP) {
 }
 
 async function fetchZohoJd(apiUrl, id, postingUrl, textCap, timeoutMs) {
-  if (rejectPrivateOrInvalid(apiUrl)) return null;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(apiUrl, {
-      headers: { accept: 'text/html', 'user-agent': DEFAULT_USER_AGENT },
-      redirect: 'error',
-      signal: controller.signal,
-    });
-    if (!res.ok) return await discard(res);
-    return normalizeZohoJob(await res.text(), id, postingUrl, textCap);
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+  const html = await fetchApiBody(apiUrl, { timeoutMs, as: 'text' });
+  return html && normalizeZohoJob(html, id, postingUrl, textCap);
 }
 
 /**
@@ -1207,22 +1135,8 @@ export function normalizeHireHiveJob(json, id, postingUrl, textCap = JD_TEXT_CAP
 }
 
 async function fetchHireHiveJd(apiUrl, id, postingUrl, textCap, timeoutMs) {
-  if (rejectPrivateOrInvalid(apiUrl)) return null;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(apiUrl, {
-      headers: { accept: 'application/json', 'user-agent': DEFAULT_USER_AGENT },
-      redirect: 'error',
-      signal: controller.signal,
-    });
-    if (!res.ok) return await discard(res);
-    return normalizeHireHiveJob(await res.json(), id, postingUrl, textCap);
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+  const json = await fetchApiBody(apiUrl, { timeoutMs });
+  return json && normalizeHireHiveJob(json, id, postingUrl, textCap);
 }
 
 // `JobLocationType` as the board labels it. The page maps the number in script
@@ -1338,22 +1252,8 @@ export function normalizeUltiproJob(html, id, postingUrl, textCap = JD_TEXT_CAP)
 }
 
 async function fetchUltiproJd(apiUrl, id, postingUrl, textCap, timeoutMs) {
-  if (rejectPrivateOrInvalid(apiUrl)) return null;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(apiUrl, {
-      headers: { accept: 'text/html', 'user-agent': DEFAULT_USER_AGENT },
-      redirect: 'error',
-      signal: controller.signal,
-    });
-    if (!res.ok) return await discard(res);
-    return normalizeUltiproJob(await res.text(), id, postingUrl, textCap);
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+  const html = await fetchApiBody(apiUrl, { timeoutMs, as: 'text' });
+  return html && normalizeUltiproJob(html, id, postingUrl, textCap);
 }
 
 /**
@@ -1403,22 +1303,8 @@ export function normalizeHibobJob(json, postingUrl, textCap = JD_TEXT_CAP) {
 }
 
 async function fetchHibobJd(resolved, postingUrl, textCap, timeoutMs) {
-  if (rejectPrivateOrInvalid(resolved.apiUrl)) return null;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(resolved.apiUrl, {
-      headers: { accept: 'application/json', 'user-agent': DEFAULT_USER_AGENT, ...resolved.headers },
-      redirect: 'error',
-      signal: controller.signal,
-    });
-    if (!res.ok) return await discard(res);
-    return normalizeHibobJob(await res.json(), postingUrl, textCap);
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+  const json = await fetchApiBody(resolved.apiUrl, { timeoutMs, headers: resolved.headers });
+  return json && normalizeHibobJob(json, postingUrl, textCap);
 }
 
 /** Workable full-body JD, independent of liveness state and listing text caps. */
@@ -1431,7 +1317,7 @@ export function normalizeWorkableJob(json, shortcode, postingUrl, textCap = JD_T
   for (const [key, label] of [['description', 'Description'], ['requirements', 'Requirements'], ['benefits', 'Benefits']]) {
     const html = typeof json[key] === 'string' ? json[key] : '';
     // Decode before removing chrome: the API can entity-escape its HTML tags.
-    const body = jdHtmlToText(decodeHtmlEntities(html).replace(/<(nav|header|footer)\b[^>]*>[\s\S]*?<\/\1>/gi, ' '));
+    const body = jdHtmlToText(decodeEntities(html).replace(/<(nav|header|footer)\b[^>]*>[\s\S]*?<\/\1>/gi, ' '));
     if (/[\p{L}\p{N}]/u.test(body)) blocks.push(`${label}:\n${body}`);
   }
   if (!blocks.length) return null;
@@ -1593,6 +1479,10 @@ export async function fetchJdViaKnownApi(url, textCap = JD_TEXT_CAP, timeoutMs =
   const result = await fetcher(resolved, url, textCap, budgetMs);
   return result ? { ...result, ats: resolved.ats } : null;
 }
+
+// ========================================================================
+// Tier 3 — a rendered page in headless Chromium (only with browser: true)
+// ========================================================================
 
 /**
  * A Cloudflare challenge or block page served in place of the posting, as a
@@ -1855,7 +1745,7 @@ export async function withBrowserPage(url, timeoutMs, read) {
  * @param {number} [timeoutMs]
  * @returns {Promise<{url: string, title: string, text: string, bodyText: string, method: 'browser'}|{failure: {error: string, code: string}}>}
  */
-export async function fetchJdViaBrowser(url, textCap = JD_TEXT_CAP, timeoutMs = 15_000) {
+export async function fetchJdViaBrowser(url, textCap = JD_TEXT_CAP, timeoutMs = DEFAULT_TIMEOUT_MS) {
   const read = await withBrowserPage(url, timeoutMs, async ({ page, response, finalUrl }) => {
     const raw = await readDom(page);
     const challenge = challengeFailure({ status: response?.status() ?? 0, pageTitle: raw.pageTitle, url: finalUrl });
@@ -1866,6 +1756,10 @@ export async function fetchJdViaBrowser(url, textCap = JD_TEXT_CAP, timeoutMs = 
   });
   return read.ok ? read.value : { failure: read.failure };
 }
+
+// ========================================================================
+// The waterfall, and the command line over it
+// ========================================================================
 
 /**
  * The whole waterfall, cheapest first; a later tier runs only when the earlier one
@@ -1879,7 +1773,7 @@ export async function fetchJdViaBrowser(url, textCap = JD_TEXT_CAP, timeoutMs = 
  * @returns {Promise<object|null>} a JD result, `{closed, evidence}`, `{unreachable}`,
  *   `{failure}` from the browser tier, or null when no tier found anything
  */
-export async function fetchJd(url, { textCap = JD_TEXT_CAP, timeoutMs = 15_000, visibleText = false, browser = false } = {}) {
+export async function fetchJd(url, { textCap = JD_TEXT_CAP, timeoutMs = DEFAULT_TIMEOUT_MS, visibleText = false, browser = false } = {}) {
   const viaApi = await fetchJdViaKnownApi(url, textCap, timeoutMs);
   if (viaApi) return viaApi;
   const viaPage = await fetchJdFromPage(url, textCap, timeoutMs, { visibleText });
@@ -1887,9 +1781,6 @@ export async function fetchJd(url, { textCap = JD_TEXT_CAP, timeoutMs = 15_000, 
   if (!browser) return viaPage;
   return await fetchJdViaBrowser(url, textCap, timeoutMs);
 }
-
-const TEXT_CAP = 20_000; // a batch report reads the whole JD; no token-budget reason to cap tighter
-const TIMEOUT_MS = 15_000;
 
 async function main() {
   const args = process.argv.slice(2);
@@ -1919,8 +1810,8 @@ Options:
   // The waterfall: ATS API, then the page's own bytes, then (only with --browser)
   // a rendered page. A later tier runs only when the earlier one found nothing.
   const result = await fetchJd(url, {
-    textCap: TEXT_CAP,
-    timeoutMs: TIMEOUT_MS,
+    textCap: PAGE_TEXT_CAP,
+    timeoutMs: DEFAULT_TIMEOUT_MS,
     visibleText: hasFlag(args, '--visible-text'),
     browser: hasFlag(args, '--browser'),
   });
@@ -1971,7 +1862,7 @@ Options:
 
   // The structured-page reader already includes the posting title in its text.
   const header = result.title && result.method !== 'ld+json' ? `${result.title}\n\n` : '';
-  process.stdout.write(header + markCappedAtsText(result.text, TEXT_CAP));
+  process.stdout.write(header + markCappedAtsText(result.text, PAGE_TEXT_CAP));
 }
 
 if (isMainModule(import.meta.url)) {
