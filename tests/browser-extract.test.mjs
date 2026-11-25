@@ -12,9 +12,9 @@ console.log('\nbrowser-extract.mjs (config + normalizers)');
 try {
   const mod = await import(pathToFileURL(join(ROOT, 'browser-extract.mjs')).href);
   const { resolveAtsApi, JD_TEXT_API_ATS } = await import(pathToFileURL(join(ROOT, 'liveness-api.mjs')).href);
-  const { resolveExtractorMode, normalizeJd, normalizeListing, parseArgs } = mod;
+  const { resolveExtractorMode, normalizeListing, parseArgs } = mod;
   const {
-    compactText, workdayCxsUrl, jdHtmlToText, normalizeWorkdayJob,
+    compactText, normalizeJd, workdayCxsUrl, jdHtmlToText, normalizeWorkdayJob,
     normalizeAshbyJob, normalizeGreenhouseJob, normalizeLeverJob, normalizeSmartRecruitersJob,
     normalizeZohoJob, fetchJdViaKnownApi, resolveJdApi, JD_FETCHERS,
   } = await import(pathToFileURL(join(ROOT, 'fetch-jd.mjs')).href);

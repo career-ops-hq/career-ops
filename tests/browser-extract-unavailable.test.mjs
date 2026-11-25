@@ -13,7 +13,7 @@ console.log('\nbrowser-extract.mjs (unavailable posting vs unrendered page)');
 
 let browser;
 try {
-  const { jdFailure, normalizeJd, readDom } = await import(pathToFileURL(join(ROOT, 'browser-extract.mjs')).href);
+  const { jdFailure, normalizeJd, readDom } = await import(pathToFileURL(join(ROOT, 'fetch-jd.mjs')).href);
 
   const longJd = 'Responsibilities include analysing product data. '.repeat(10);
 

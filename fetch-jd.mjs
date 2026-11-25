@@ -29,15 +29,17 @@
  * is read next (fetchJdFromPage below, behind the egress guard). Phenom and
  * bespoke career sites render the JD from script data, so their visible HTML is
  * a shell that any text conversion, WebFetch included, reports as empty.
- * Every API fetch runs through fetchJdViaKnownApi() below
- * — the same dispatch its own `jd` mode uses — so this script and the
- * interactive extractor cannot drift on which ATS is API-fetchable.
+ * With --browser, a page the first two tiers could not read is rendered in
+ * headless Chromium (fetchJdViaBrowser, last). fetchJd() runs the three tiers
+ * cheapest first, and browser-extract.mjs calls it, so the two commands cannot
+ * drift on which ATS is API-fetchable or what counts as a JD.
  */
 
 import { isMainModule } from './lib/is-main-module.mjs';
 import { hasFlag } from './lib/cli-flags.mjs';
 
-import { rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
+import { LIVENESS_CONTEXT_OPTIONS, rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
 import { asciiLower, fromLdJson, fromEmbeddedDescription, embeddedDescriptionStrings, ldJsonBlocks, wordCount, LATIN1_ENTITIES } from './lib/jd-parse.mjs';
 import { classifyLiveness, cloudflareInterstitial } from './liveness-core.mjs';
@@ -1611,6 +1613,281 @@ export function challengeFailure({ status = 0, pageTitle = '', url = '' } = {}) 
   return { error: `HTTP ${status} Cloudflare ${kind} ("${String(pageTitle).trim()}"), not the posting`, code: 'bot_challenge', url };
 }
 
+const HYDRATION_WAIT_MS = 2_000;
+
+// Floor below which a jd-mode extraction is treated as failure, not content.
+// A posting page whose main text is a couple of sentences is a render we
+// missed (SPA shell, consent wall, bot interstitial), never a real JD; the
+// cost of being wrong is one silent fallback to the MCP path, whereas the
+// cost of NOT failing is an empty JD evaluated as if it were the posting.
+// Only jd mode gets this guard: an empty `listing` result is legitimate — a
+// company with no open roles.
+const MIN_JD_TEXT_CHARS = 200;
+
+
+/**
+ * Shape a JD-mode result from the raw DOM read. Pure — exported for tests.
+ * @param {{ title?: string, text?: string }} raw
+ * @param {string} finalUrl
+ */
+export function normalizeJd(raw, finalUrl, textCap = JD_TEXT_CAP) {
+  // A schema.org JobPosting, when the page ships one, beats the rendered DOM:
+  // it is the posting body as the employer published it, not as their template
+  // happened to lay it out. On Phenom boards (careers.roche.com) the rendered
+  // <main> holds title, location and Apply chrome only — ~300 characters — while
+  // the body never becomes visible text at all, so the DOM path emitted a JD
+  // with no requirements in it and reported success. Same shape on other
+  // template-driven corporate boards, which is why this keys off the standard
+  // rather than off a host.
+  //
+  // Longer wins rather than JSON-LD always winning: plenty of pages carry a
+  // stub JobPosting (a one-line summary, or just the title) alongside a fully
+  // rendered body, and preferring the stub there would break the common case to
+  // fix the rare one.
+  const ldText = jdHtmlToText(raw?.jsonLdDescription || '');
+  // Normalized length, not raw length: raw DOM text on a chrome-heavy page is
+  // mostly repeated newlines ("Apply now\n\n\n\n\n\nSave job\n\n\n\n\n\n..."), which
+  // can out-length a shorter-in-raw-HTML but substantive JSON-LD description
+  // before either side is compacted. Comparing pre-collapse defeats the whole
+  // point of "longer wins". No cap here (Infinity) — only the comparison needs
+  // normalizing; the real textCap is still applied below.
+  const domText = compactText(String(raw?.text || ''), Infinity);
+  const text = ldText.length > domText.length ? ldText : domText;
+
+  return {
+    url: finalUrl,
+    title: compactText(raw?.title || raw?.jsonLdTitle || '', 300),
+    text: compactText(text, textCap),
+    // For the liveness check in jdFailure() only. `text` has had nav/header/footer
+    // stripped, and an expired-posting banner often sits in one of them. Never
+    // emitted on the success path.
+    bodyText: compactText(raw?.bodyText || '', 4100),
+  };
+}
+
+
+/**
+ * Why a jd-mode result cannot be emitted, or null when it can. Pure — exported
+ * for tests.
+ *
+ * A page whose cleaned text is below the floor is either unreadable (a client-
+ * rendered shell: `empty_text`, worth another attempt) or gone (the posting
+ * was taken down: `unavailable`, terminal). Both produce the same empty text,
+ * because the "no longer available" banner usually sits in a header or footer
+ * that readDom() strips — so the unstripped body is checked too. A result at or
+ * above the floor is never reclassified: a full JD may quote such a phrase.
+ */
+export function jdFailure(result, maxChars) {
+  const floor = Math.min(MIN_JD_TEXT_CHARS, maxChars);
+  if (result.text.length >= floor) return null;
+  // The shared liveness classifier, not a second phrase list. Only its
+  // posting-specific expiry verdicts count: `insufficient_content` is what a
+  // page that has not rendered yet looks like (liveness-browser treats it the
+  // same way), so it stays empty_text and remains worth retrying.
+  const verdict = classifyLiveness({
+    requestedUrl: result.url,
+    finalUrl: result.url,
+    bodyText: `${result.text}\n${result.bodyText || ''}`,
+  });
+  if (verdict.result === 'expired' && (verdict.code === 'expired_body' || verdict.code === 'expired_body_soft')) {
+    return { error: `posting is no longer available (${verdict.reason})`, code: 'unavailable', url: result.url };
+  }
+  return {
+    error: `extracted ${result.text.length} chars of JD text (minimum ${floor}) — the page most likely renders its content client-side`,
+    code: 'empty_text',
+    url: result.url,
+    body_text: String(result.bodyText || '').slice(0, 4000),
+  };
+}
+
+
+// Read the raw DOM inside the page: title, main visible text, and visible
+// anchors. Runs in the browser context; returns plain data only.
+export async function readDom(page) {
+  return page.evaluate(() => {
+    const title = (document.querySelector('h1')?.innerText || document.title || '').trim();
+
+    // Main text: prefer <main>/[role=main]/<article>, else body; strip nav chrome.
+    // Keep the candidate with the most text left after stripping, not the first
+    // match: a board can lead with a short <article> (a share widget) ahead of
+    // the one holding the posting, and a <main> that is mostly menu would
+    // otherwise outrank it.
+    // Read innerText from the live element: on a detached clone it degrades to
+    // textContent, so CSS-hidden text would count and could outrank the posting.
+    // The chrome is hidden only for the read and its style attribute restored.
+    // script/style/noscript are never rendered, so innerText already skips them.
+    const strippedText = (el) => {
+      if (el.getClientRects().length === 0 && getComputedStyle(el).display !== 'contents') return '';
+      const chrome = Array.from(el.querySelectorAll('nav, header, footer'));
+      const saved = chrome.map((n) => n.getAttribute('style'));
+      // Attribute writes only: setting a property through n.style leaves style=""
+      // behind after removeAttribute. The prefix is the browser's serialized
+      // cssText, not the raw attribute, so an unterminated token in the original
+      // (an open /* comment) cannot swallow the appended display:none.
+      chrome.forEach((n) => n.setAttribute('style', `${n.style.cssText} display: none !important;`));
+      try {
+        return el.innerText || '';
+      } finally {
+        chrome.forEach((n, i) => (saved[i] == null ? n.removeAttribute('style') : n.setAttribute('style', saved[i])));
+      }
+    };
+    const candidates = Array.from(document.querySelectorAll('main, [role="main"], article'));
+    let text = '';
+    for (const el of candidates) {
+      const t = strippedText(el);
+      if (t.length > text.length) text = t;
+    }
+    if (candidates.length === 0 && document.body) text = strippedText(document.body);
+
+    const anchors = Array.from(document.querySelectorAll('a[href]'))
+      .filter((el) => {
+        if (el.closest('nav, header, footer')) return false;
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+        return el.getClientRects().length > 0;
+      })
+      .map((el) => ({ href: el.getAttribute('href') || '', label: (el.innerText || '').trim() }));
+
+    // schema.org JobPosting, if present. Returned as the raw description markup
+    // so the shared jdHtmlToText() does the conversion, keeping one entity /
+    // block-break implementation rather than a second one inside the page.
+    let jsonLdDescription = '';
+    let jsonLdTitle = '';
+    for (const el of document.querySelectorAll('script[type="application/ld+json"]')) {
+      let parsed;
+      try {
+        parsed = JSON.parse(el.textContent || 'null');
+      } catch {
+        continue; // a malformed block must not cost us the well-formed one after it
+      }
+      // Publishers ship a bare object, an array, or an @graph wrapper.
+      const candidates = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed?.['@graph'])
+          ? parsed['@graph']
+          : [parsed];
+      // @type is the bare token in most feeds, but some publishers use the
+      // absolute schema.org IRI instead — both forms occur in the wild.
+      const isJobPostingType = (t) =>
+        t === 'JobPosting' || t === 'http://schema.org/JobPosting' || t === 'https://schema.org/JobPosting';
+      for (const node of candidates) {
+        const type = node?.['@type'];
+        const isJobPosting = Array.isArray(type) ? type.some(isJobPostingType) : isJobPostingType(type);
+        if (!isJobPosting) continue;
+        const desc = typeof node.description === 'string' ? node.description : '';
+        if (desc.length > jsonLdDescription.length) {
+          jsonLdDescription = desc;
+          // Always reset, never carry over: a stub JobPosting's title must not
+          // survive onto the description of a later, longer JobPosting node.
+          jsonLdTitle = typeof node.title === 'string' ? node.title : '';
+        }
+      }
+    }
+
+    // The unstripped body: `text` above removes nav/header/footer, where an
+    // expired-posting banner often lives.
+    // Head and tail, so a banner in the footer is still in the sample when the
+    // leading content fills the first 4000 characters.
+    const fullBody = document.body?.innerText || '';
+    const bodyText = fullBody.length > 4000 ? `${fullBody.slice(0, 2000)}\n…\n${fullBody.slice(-2000)}` : fullBody;
+
+    // The document's own title, which `title` above passes over for an <h1>:
+    // challengeFailure() reads it.
+    return { title, text, anchors, jsonLdDescription, jsonLdTitle, bodyText, pageTitle: document.title || '' };
+  });
+}
+
+/**
+ * Open one posting in headless Chromium and hand the loaded page to `read`. The
+ * browser tier of the JD waterfall, and the listing reader in browser-extract.mjs.
+ *
+ * Every request the page makes (navigation, redirect hop, subresource) to a
+ * private, loopback, link-local or non-http(s) host is aborted: guarding only the
+ * first URL is not enough once page CONTENT is returned, since a server-side
+ * redirect could steer the browser at internal infrastructure (SSRF).
+ *
+ * @template T
+ * @param {string} url
+ * @param {number} timeoutMs
+ * @param {(ctx: {page: any, response: any, finalUrl: string}) => Promise<T>} read
+ * @returns {Promise<{ok: true, value: T}|{ok: false, failure: {error: string, code: string}}>}
+ */
+export async function withBrowserPage(url, timeoutMs, read) {
+  const guard = rejectPrivateOrInvalid(url);
+  if (guard) return { ok: false, failure: { error: guard.reason, code: guard.code } };
+  let chromium;
+  try {
+    ({ chromium } = await import('./lib/hardened-chromium.mjs'));
+  } catch {
+    return { ok: false, failure: { error: 'playwright not installed', code: 'no_playwright' } };
+  }
+  let browser;
+  try {
+    browser = await chromium.launch(browserLaunchOptions({ headless: true }));
+    const context = await browser.newContext(LIVENESS_CONTEXT_OPTIONS);
+    await context.route('**/*', (route) => {
+      if (rejectPrivateOrInvalid(route.request().url())) return route.abort('blockedbyclient');
+      return route.continue();
+    });
+    const page = await context.newPage();
+    const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+    await page.waitForTimeout(HYDRATION_WAIT_MS); // let SPAs hydrate
+    // Belt-and-suspenders: never return content read from a private final URL.
+    const finalUrl = page.url();
+    const finalGuard = rejectPrivateOrInvalid(finalUrl);
+    if (finalGuard) return { ok: false, failure: { error: `blocked final URL: ${finalGuard.reason}`, code: finalGuard.code } };
+    return { ok: true, value: await read({ page, response, finalUrl }) };
+  } catch (err) {
+    return { ok: false, failure: { error: `navigation error: ${String(err.message).split('\n')[0]}`, code: 'navigation_error' } };
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
+/**
+ * The last JD tier: render the page and read its DOM. A JSON-LD JobPosting on the
+ * page wins over the rendered text when it is longer (normalizeJd). A Cloudflare
+ * challenge, an empty render or a taken-down posting comes back as `failure`
+ * instead of a JD-shaped result; `failure.code === 'unavailable'` means closed.
+ *
+ * @param {string} url
+ * @param {number} [textCap]
+ * @param {number} [timeoutMs]
+ * @returns {Promise<{url: string, title: string, text: string, bodyText: string, method: 'browser'}|{failure: {error: string, code: string}}>}
+ */
+export async function fetchJdViaBrowser(url, textCap = JD_TEXT_CAP, timeoutMs = 15_000) {
+  const read = await withBrowserPage(url, timeoutMs, async ({ page, response, finalUrl }) => {
+    const raw = await readDom(page);
+    const challenge = challengeFailure({ status: response?.status() ?? 0, pageTitle: raw.pageTitle, url: finalUrl });
+    if (challenge) return { failure: challenge };
+    const result = normalizeJd(raw, finalUrl, textCap);
+    const failure = jdFailure(result, textCap);
+    return failure ? { failure } : { ...result, method: 'browser' };
+  });
+  return read.ok ? read.value : { failure: read.failure };
+}
+
+/**
+ * The whole waterfall, cheapest first; a later tier runs only when the earlier one
+ * found nothing. 1: the ATS's public API. 2: the page's own bytes (JSON-LD, and
+ * visible text when asked). 3, only with `browser: true`: a rendered page.
+ * A closed posting stops the walk, since a later tier could read a cached or
+ * stale body of it.
+ *
+ * @param {string} url
+ * @param {{textCap?: number, timeoutMs?: number, visibleText?: boolean, browser?: boolean}} [opts]
+ * @returns {Promise<object|null>} a JD result, `{closed, evidence}`, `{unreachable}`,
+ *   `{failure}` from the browser tier, or null when no tier found anything
+ */
+export async function fetchJd(url, { textCap = JD_TEXT_CAP, timeoutMs = 15_000, visibleText = false, browser = false } = {}) {
+  const viaApi = await fetchJdViaKnownApi(url, textCap, timeoutMs);
+  if (viaApi) return viaApi;
+  const viaPage = await fetchJdFromPage(url, textCap, timeoutMs, { visibleText });
+  if (viaPage && !viaPage.unreachable) return viaPage;
+  if (!browser) return viaPage;
+  return await fetchJdViaBrowser(url, textCap, timeoutMs);
+}
+
 const TEXT_CAP = 20_000; // a batch report reads the whole JD; no token-budget reason to cap tighter
 const TIMEOUT_MS = 15_000;
 
@@ -1618,13 +1895,16 @@ async function main() {
   const args = process.argv.slice(2);
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`Usage:
-  node fetch-jd.mjs <url> [--visible-text]
+  node fetch-jd.mjs <url> [--visible-text] [--browser]
   node fetch-jd.mjs --help
 
 Options:
   --visible-text  When the page has no structured JD, use its visible text (at least
                   80 words). Off by default: such text cannot prove it belongs to
                   one posting
+  --browser       Last tier: render the page in headless Chromium when the API and the
+                  page's own bytes found no JD (needs Playwright). A failure reason is
+                  printed to stderr as JSON
   --help, -h      Print this usage block and exit`);
     process.exit(0);
   }
@@ -1636,12 +1916,14 @@ Options:
     process.exit(1);
   }
 
-  // Tier 1: the ATS's public API. Tier 2: the page's own JSON-LD JobPosting, for
-  // template-driven boards no API covers (Phenom, bespoke sites) whose visible
-  // HTML carries no JD at all.
-  const visibleText = hasFlag(args, '--visible-text');
-  const result = (await fetchJdViaKnownApi(url, TEXT_CAP, TIMEOUT_MS))
-    ?? (await fetchJdFromPage(url, TEXT_CAP, TIMEOUT_MS, { visibleText }));
+  // The waterfall: ATS API, then the page's own bytes, then (only with --browser)
+  // a rendered page. A later tier runs only when the earlier one found nothing.
+  const result = await fetchJd(url, {
+    textCap: TEXT_CAP,
+    timeoutMs: TIMEOUT_MS,
+    visibleText: hasFlag(args, '--visible-text'),
+    browser: hasFlag(args, '--browser'),
+  });
   // No stderr, by design: the caller's browser/WebFetch fallback is the
   // intended next step, and warning on every non-covered host would make the
   // normal path look broken.
@@ -1660,6 +1942,20 @@ Options:
   // a page that cannot be read, so a caller may retry it. Exit 2, empty stdout.
   if (result.unreachable) {
     process.exitCode = 2;
+    return;
+  }
+
+  // The browser tier ran and could not return a JD: a taken-down posting is
+  // closed (exit 3), anything else (challenge, empty render, no Playwright) is a
+  // miss whose reason goes to stderr as JSON, as browser-extract.mjs prints it.
+  if (result.failure) {
+    if (result.failure.code === 'unavailable') {
+      process.stdout.write(`CLOSED_POSTING ${result.failure.error}`);
+      process.exitCode = 3;
+      return;
+    }
+    console.error(JSON.stringify(result.failure));
+    process.exitCode = 1;
     return;
   }
 

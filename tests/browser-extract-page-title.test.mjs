@@ -16,7 +16,7 @@ console.log('\nbrowser-extract.mjs — readDom() reads the document title as wel
 
 let browser;
 try {
-  const { readDom, challengeFailure } = await import(pathToFileURL(join(ROOT, 'browser-extract.mjs')).href);
+  const { readDom, challengeFailure } = await import(pathToFileURL(join(ROOT, 'fetch-jd.mjs')).href);
   const { chromium } = await import('playwright');
   try {
     browser = await chromium.launch({ headless: true });
