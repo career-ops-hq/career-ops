@@ -83,7 +83,7 @@ import { join, dirname } from 'path';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { extractJdSkillsByClass, classifySkillGaps } from './jd-skill-gap.mjs';
-import { parseAmount } from './providers/_salary-text.mjs';
+import { parseAmount, compensationCurrency } from './providers/_salary-text.mjs';
 import { ROLE_STOPWORDS, BASELINE_TOKENS, normalizeTitle } from './role-matcher.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -109,13 +109,13 @@ export const WEIGHTS = Object.freeze({
  * in `config/profile.example.yml` agree on one boundary: a score below 3.0 is
  * the FAIL band, "does not clear the bar — filtered", and it is the only band
  * filtered silently (3.0 up to the triage threshold is MARGINAL and is shown to
- * the user). The pre-score cuts at exactly that line, so a posting it drops
- * silently is one the triage pass would also have dropped silently. Scores are
- * rounded to 0.1 before the comparison, the same as triage.
+ * the user). The pre-score uses the same numeric boundary without assuming
+ * agreement with triage's
+ * separate evaluation. Scores are rounded to 0.1 before comparison.
  *
  * RFC #494 proposed 4.0. That was written for a scale where a missing signal is
- * neutral; here a missing signal scores 4, so a 4.0 gate would skip every
- * posting that merely omits a salary line.
+ * neutral. Here four unknown signals total 4.0 and proceed at a 4.0 gate;
+ * a missing salary alone is not negative evidence.
  */
 export const DEFAULT_THRESHOLD = 3.0;
 
@@ -467,11 +467,25 @@ function detectTitleWithConfidence(jdText, explicit = null, company = null) {
   const isTitleCandidate = (line) => !isCompanyLine(line) && looksLikeTitle(line);
 
   const headings = [];
+  // Only the opening company/role pair can supply negative evidence. Later
+  // title-shaped headings can be related postings, even in a short capture.
+  const openingHeadings = new Set();
   const plainLines = [];
+  let beforeBody = true;
+  let nonblankLines = 0;
   for (const line of lines) {
+    if (line.trim() && ++nonblankLines > MAX_PREAMBLE_LINES) beforeBody = false;
     const heading = MD_HEADING_RE.exec(line);
-    if (heading && heading[1].trim()) headings.push(heading[1].trim());
-    else if (line.trim() && !TITLE_LABEL_RE.test(line)) plainLines.push(line.trim());
+    if (heading && heading[1].trim()) {
+      const title = heading[1].trim();
+      headings.push(title);
+      if (SECTION_HEADING_RE.test(title) && !PREAMBLE_WRAPPER_RE.test(title)) beforeBody = false;
+      if (beforeBody && headings.length <= 2) openingHeadings.add(title);
+    } else if (line.trim()) {
+      if (!TITLE_LABEL_RE.test(line)) plainLines.push(line.trim());
+      if (!TITLE_LABEL_RE.test(line) && !COMPANY_LABEL_RE.test(line) && !URL_LABEL_RE.test(line)
+        && !POSTING_METADATA_HEADING_RE.test(line) && !isPreambleFragment(line.trim())) beforeBody = false;
+    }
   }
 
   if (ambiguousPosition) {
@@ -491,11 +505,11 @@ function detectTitleWithConfidence(jdText, explicit = null, company = null) {
       const lastWord = base.split(/\s+/).at(-1) ?? '';
       return looksLikeTitle(base) && ROLE_NOUN_RE.test(lastWord);
     }) ?? null;
-    return { title, confident: title !== null };
+    return { title, confident: title !== null && (openingHeadings.has(title) || (firstPlain && title === firstLine)) };
   }
 
   const titledHeading = headings.find(isTitleCandidate);
-  if (titledHeading) return { title: titledHeading, confident: true };
+  if (titledHeading) return { title: titledHeading, confident: openingHeadings.has(titledHeading) };
 
   if (headings.length > 0) {
     // No heading reads like a job title by the English vocabulary above. Still
@@ -515,7 +529,9 @@ function detectTitleWithConfidence(jdText, explicit = null, company = null) {
   const head = plainLines.slice(0, 5);
   const first = head.find(isTitleCandidate) ?? head[0] ?? null;
   const title = first !== null && isTitleLength(first) ? first : null;
-  return { title, confident: title !== null && isTitleCandidate(title) };
+  const firstContent = plainLines.find((line) => !isCompanyLine(line)
+    && !COMPANY_LABEL_RE.test(line) && !URL_LABEL_RE.test(line) && !POSTING_METADATA_HEADING_RE.test(line));
+  return { title, confident: title !== null && title === firstContent && isTitleCandidate(title) && isPreambleFragment(title) };
 }
 
 /**
@@ -658,7 +674,10 @@ export function scoreRequirements(jdText, cvText) {
     return { score: UNKNOWN_SCORE, evidence: 'no cv.md to compare against', unknown: true };
   }
 
-  const { required, preferred } = extractJdSkillsByClass(requirementsWithoutAllowances(jdText));
+  const { required, preferred, hasAlternativeRequirements } = extractJdSkillsByClass(requirementsWithoutAllowances(jdText));
+  if (hasAlternativeRequirements) {
+    return { score: UNKNOWN_SCORE, evidence: 'requirements include alternatives, not independent must-haves', unknown: true };
+  }
   if (required.length === 0) {
     return {
       score: UNKNOWN_SCORE,
@@ -813,7 +832,7 @@ const COMP_TRAIL_RE = new RegExp(
 // Any cadence that is not "per year". A comp figure sitting next to one of
 // these is not an annual band and is treated as no evidence, never compared
 // against an annual floor.
-const NON_ANNUAL_RE = /\b(?:per\s+hour|an\s+hour|hourly|\/\s*(?:hr|hour)|per\s+day|daily|per\s+diem|\/\s*(?:d|day)|per\s+week|weekly|\/\s*(?:wk|week)|per\s+month|monthly|\/\s*(?:mo|month))\b/i;
+const NON_ANNUAL_RE = /(?:\b(?:per\s+hour|an\s+hour|hourly|per\s+day|daily|per\s+diem|per\s+week|weekly|per\s+month|monthly)|\/\s*(?:hr|hour|d|day|wk|week|mo|month))\b/i;
 
 const CONTEXT_CHARS = 40;
 
@@ -930,14 +949,23 @@ export function extractJdComp(jdText) {
     }
     // "$100k+": a lower bound with no top. Kept apart so a floor above it is
     // read as "no top to compare", never as "top of band below floor".
-    const open = text[match.index + match[0].trimEnd().length] === '+';
+    const before = text.slice(start, match.index).split(/\r?\n/).at(-1);
+    const after = text.slice(match.index + match[0].trimEnd().length).split(/\r?\n/, 1)[0];
+    const currencyPrefix = new RegExp('\\b(' + ISO_CODES.join('|') + ')\\s*$', 'i').exec(before)?.[1] ?? '';
+    const currencySuffix = new RegExp('^\\s*(' + ISO_CODES.join('|') + ')\\b', 'i').exec(after)?.[1] ?? '';
+    // Explicit currency text wins over an ambiguous dollar symbol. Keep the
+    // context local to this figure so a second salary cannot relabel it.
+    const currencyText = currencyPrefix.toUpperCase() + ' ' + match[0] + ' ' + currencySuffix.toUpperCase();
+    const currency = compensationCurrency(currencyText) ?? toCurrencyCode(currencyToken);
+    const lowerBoundPrefix = before.replace(new RegExp('(?:' + CUR + ')\\s*$', 'i'), '').trimEnd();
+    const open = /^\s*\+/.test(after) || (!hi && /\b(?:from|starting\s+at|starts?\s+at|at\s+least)\s*$/i.test(lowerBoundPrefix));
     annual.push({
       index: match.index,
       min: parsed.min,
       max: parsed.max,
       open,
-      currency: toCurrencyCode(currencyToken),
-      raw: match[0].trim() + (open ? '+' : ''),
+      currency: currency || null,
+      raw: match[0].trim() + (/^\s*\+/.test(after) ? '+' : ''),
       nonSalary: isNonSalaryFigure(text, match.index, match[0].length),
     });
   };
@@ -1191,8 +1219,11 @@ export function matchPriorityOverride(company, overrides) {
  */
 export function configuredThreshold(profile) {
   const raw = profile?.pipeline?.prescore?.gate_threshold;
-  if (raw === undefined || raw === null || String(raw).trim() === '') {
+  if (raw === undefined || raw === null || (typeof raw === 'string' && raw.trim() === '')) {
     return { raw: null, value: null, valid: true };
+  }
+  if (typeof raw !== 'number' && typeof raw !== 'string') {
+    return { raw, value: null, valid: false };
   }
   const text = String(raw).trim();
   const parsed = typeof raw === 'number'
@@ -1607,8 +1638,11 @@ function main() {
   const profile = profileRead.value;
   const configured = configuredThreshold(profile);
   if (!configured.valid) {
+    const rawLabel = typeof configured.raw === 'object'
+      ? (Array.isArray(configured.raw) ? '[sequence]' : '[mapping]')
+      : String(configured.raw);
     warnings.push(
-      `pipeline.prescore.gate_threshold is "${configured.raw}", which is not a score between 0 and 5; using the default ${DEFAULT_THRESHOLD}`,
+      `pipeline.prescore.gate_threshold is "${rawLabel}", which is not a score between 0 and 5; using the default ${DEFAULT_THRESHOLD}`,
     );
   }
 

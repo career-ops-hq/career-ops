@@ -346,6 +346,23 @@ const PREFERRED_HEADER_RE = new RegExp(
   'im'
 );
 
+function isPreferredHeader(text) {
+  // Reuse the already recognized qualified-heading grammar. A qualifier may
+  // follow "Additional", while a mixed required/preferred label is uncertain.
+  if (/\b(?:required|mandatory|must)\b/i.test(text)) return false;
+  return PREFERRED_HEADER_RE.test(text)
+    || (QUALIFIED_REQUIREMENT_HEADER_RE.test(text) && /\b(?:desired|desirable)\b/i.test(text));
+}
+
+// Explicit optional wording can follow the skill list, too. Keep the scope
+// to one line; a following bullet still inherits its own section's class.
+function requirementLineClass(text, blockClass) {
+  const line = stripBoldMarkers(text).trim();
+  const optionalSuffix = /\b(?:a plus|preferred|nice[- ]to[- ]have)[.!]?$/i.test(line)
+    && !/\b(?:not|never|required|mandatory|must)\b/i.test(line);
+  return isPreferredHeader(line) || optionalSuffix ? 'preferred' : blockClass;
+}
+
 // The Set scanJd() collects skills into, plus the requirement lines it could
 // not read. A Set subclass, so addSkillTokens() keeps its (text, skills)
 // signature at every call site.
@@ -372,7 +389,7 @@ class SkillCollector extends Set {
  *
  * @param {string} jdText
  * @returns {{skills: string[], sawRequirementSection: boolean, unreadLines: string[],
- *   required: string[], preferred: string[], sawRequiredSection: boolean, sawPreferredSection: boolean}}
+ *   required: string[], preferred: string[], sawRequiredSection: boolean, sawPreferredSection: boolean, hasAlternativeRequirements: boolean}}
  */
 function scanJd(jdText) {
   const lines = jdText.split('\n');
@@ -382,15 +399,19 @@ function scanJd(jdText) {
   let blockClass = 'required';
   let sawRequiredSection = false;
   let sawPreferredSection = false;
+  let hasAlternativeRequirements = false;
   // All extraction paths keep the flat result and unread-line diagnostics,
   // while prescore receives only the tokens from the appropriate class.
-  const collectorFor = (classification) => ({
-    add(skill) {
-      skills.add(skill);
-      (classification === 'preferred' ? preferred : required).add(skill);
-    },
-    unreadLines: skills.unreadLines,
-  });
+  const collectorFor = (classification, text = '') => {
+    if (classification === 'required' && /\b(?:one of|either)\b/i.test(text)) hasAlternativeRequirements = true;
+    return {
+      add(skill) {
+        skills.add(skill);
+        (classification === 'preferred' ? preferred : required).add(skill);
+      },
+      unreadLines: skills.unreadLines,
+    };
+  };
   let inRequirementsBlock = false;
   let sawRequirementSection = false;
 
@@ -413,7 +434,7 @@ function scanJd(jdText) {
     if (REQUIREMENT_HEADER_RE.test(headerLine)) {
       inRequirementsBlock = true;
       sawRequirementSection = true;
-      blockClass = PREFERRED_HEADER_RE.test(headerLine) ? 'preferred' : 'required';
+      blockClass = isPreferredHeader(headerLine) ? 'preferred' : 'required';
       if (blockClass === 'preferred') sawPreferredSection = true;
       else sawRequiredSection = true;
       // "Requirements: SQL; dbt; Tableau" puts the whole list on the header
@@ -434,16 +455,16 @@ function scanJd(jdText) {
       // heading, so its known skills are kept — vocabulary names only. Every
       // other heading keeps the #5173 rule: a sentence after the colon ("About
       // you: Curious about Kubernetes.") is not a list.
-      if (/[;,、，；]/.test(inline)) addSkillTokens(inline, collectorFor(blockClass));
+      if (/[;,、，；]/.test(inline)) addSkillTokens(inline, collectorFor(blockClass, inline));
       else if (QUALIFIED_REQUIREMENT_HEADER_RE.test(headerLine)) {
-        for (const skill of extractSkills(inline)) collectorFor(blockClass).add(skill);
+        for (const skill of extractSkills(inline)) collectorFor(blockClass, inline).add(skill);
       }
       continue;
     }
     const bulletMatch = BULLET_LINE_RE.exec(line);
     // A bare, bold or markdown "Bonus points:" separator changes the class
     // before generic heading closure can discard its following bullets.
-    if (inRequirementsBlock && !BULLET_LINE_RE.test(headerLine) && PREFERRED_HEADER_RE.test(headerLine)) {
+    if (inRequirementsBlock && !BULLET_LINE_RE.test(headerLine) && isPreferredHeader(headerLine)) {
       blockClass = 'preferred';
       sawPreferredSection = true;
       const colon = headerLine.search(/[:：]/);
@@ -457,8 +478,8 @@ function scanJd(jdText) {
 
     if (!inRequirementsBlock) continue;
     if (bulletMatch) {
-      const lineClass = PREFERRED_HEADER_RE.test(stripBoldMarkers(bulletMatch[1])) ? 'preferred' : blockClass;
-      addSkillTokens(bulletMatch[1], collectorFor(lineClass));
+      const lineClass = requirementLineClass(bulletMatch[1], blockClass);
+      addSkillTokens(bulletMatch[1], collectorFor(lineClass, bulletMatch[1]));
       continue;
     }
     // Text copied from a rendered posting page loses its list markers, so each
@@ -474,11 +495,11 @@ function scanJd(jdText) {
     // ("Possess a curiosity"). Drop it unless the vocabulary knows it as a skill.
     const opener = /^\s*([A-Z][a-z]+)\s+[a-z]/.exec(line);
     const unknownOpener = opener && extractSkills(opener[1]).size === 0;
-    addSkillTokens(unknownOpener ? line.slice(opener[0].length - 1) : line, collectorFor(blockClass));
+    addSkillTokens(unknownOpener ? line.slice(opener[0].length - 1) : line, collectorFor(requirementLineClass(line, blockClass), line));
   }
   return {
     skills: [...skills], sawRequirementSection, unreadLines: skills.unreadLines,
-    required: [...required], preferred: [...preferred], sawRequiredSection, sawPreferredSection,
+    required: [...required], preferred: [...preferred], sawRequiredSection, sawPreferredSection, hasAlternativeRequirements,
   };
 }
 
@@ -532,7 +553,7 @@ function extractJdSkills(jdText) {
  * required coverage should read `required` and ignore the overlap.
  *
  * @param {string} jdText
- * @returns {{required: string[], preferred: string[], sawRequired: boolean, sawPreferred: boolean}}
+ * @returns {{required: string[], preferred: string[], sawRequired: boolean, sawPreferred: boolean, hasAlternativeRequirements: boolean}}
  */
 function extractJdSkillsByClass(jdText) {
   const scan = scanJd(jdText);
@@ -541,6 +562,7 @@ function extractJdSkillsByClass(jdText) {
     preferred: scan.preferred,
     sawRequired: scan.sawRequiredSection,
     sawPreferred: scan.sawPreferredSection,
+    hasAlternativeRequirements: scan.hasAlternativeRequirements,
   };
 }
 
