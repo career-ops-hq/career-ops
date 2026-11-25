@@ -302,6 +302,10 @@ test('pagination: a short page ends the walk, and `found` ends it on a full page
   assert.equal(jobs.length, 500);
   assert.equal(searchCalls(exact.calls).length, 2);
   assert.equal(jobs.truncated, undefined);
+
+  const grown = makeCtx({ pages: [result(docs(1, 250), 500), result(docs(251, 250), 501), result(docs(501, 1), 501)] });
+  assert.equal((await provider.fetch(entry(), grown.ctx)).length, 501, 'the `found` of the latest page decides the stop');
+  assert.equal(searchCalls(grown.calls).length, 3);
 });
 
 test('pagination: DEFAULT_MAX_PAGES stops the walk even when the source reports more, and says so', quietWarn(async (warnings) => {

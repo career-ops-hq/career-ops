@@ -346,7 +346,8 @@ export default {
         stopReason = 'fetch-error';
         break;
       }
-      if (page === 0) total = parsed.total;
+      // The latest `found` decides the stop: postings added during the walk are still read.
+      if (parsed.total !== undefined) total = parsed.total;
       lastRaw = parsed.rawCount;
       for (const job of parsed.jobs) {
         if (seen.has(job.url)) continue;
