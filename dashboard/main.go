@@ -1,12 +1,17 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -40,10 +45,27 @@ type appModel struct {
 }
 
 func (m *appModel) reloadPipelineData() {
-	apps := data.ParseApplications(m.careerOpsPath)
+	apps, trackerErr := data.ParseApplications(m.careerOpsPath)
+	if trackerErr != nil {
+		// Retain every derived value and surface the failure, the same way the
+		// status-ledger read below does. Rebuilding from a failed read would
+		// empty the pipeline AND drop every rate to 0% through
+		// ComputeProgressMetrics, so the screen would report an empty, failing
+		// search because a file could not be opened.
+		m.reloadPendingRows()
+		m.pipeline, _ = m.pipeline.Update(screens.PipelineTrackerFailedMsg{Err: trackerErr.Error()})
+		return
+	}
 	metrics := data.ComputeMetrics(apps)
-	m.progressMetrics = data.ComputeProgressMetrics(apps)
+	ledger, historyErr := data.ReadStatusLedger(m.careerOpsPath)
+	if historyErr == nil {
+		m.progressMetrics = data.ComputeProgressMetrics(apps, ledger.Reached)
+	}
+	// After a failed ledger read LatestDate is nil, so the DATE column falls
+	// back to each row's tracker date while current statuses still refresh.
+	data.ApplyStatusDates(apps, ledger.LatestDate)
 	m.pipeline = m.pipeline.WithReloadedData(apps, metrics)
+	m.reloadPendingRows()
 	enrichArchetypes(m.careerOpsPath, apps, &m.pipeline)
 	m.statsMetrics = data.ComputeStatsMetrics(apps)
 	// Count only apps with a score so the header reflects evaluated offers.
@@ -53,6 +75,24 @@ func (m *appModel) reloadPipelineData() {
 			m.evaluatedCount++
 		}
 	}
+	if historyErr != nil {
+		// Refresh current statuses, but retain historical metrics and surface
+		// the failed history read in the TUI after rebuilding the pipeline.
+		m.pipeline, _ = m.pipeline.Update(screens.PipelineHistoryFailedMsg{Err: historyErr.Error()})
+	}
+}
+
+// reloadPendingRows re-reads the Inbox tab's rows (#5269) from
+// data/pipeline.md and the batch files. It runs only with a tracker reload
+// (startup, `r`, after a status write): there is no timer. A failed read keeps
+// the rows already shown and says why.
+func (m *appModel) reloadPendingRows() {
+	rows, err := data.LoadPendingRows(m.careerOpsPath)
+	if err != nil {
+		m.pipeline, _ = m.pipeline.Update(screens.PipelinePendingFailedMsg{Err: err.Error()})
+		return
+	}
+	m.pipeline.SetPendingRows(rows)
 }
 
 // enrichArchetypes lazy-loads each app's report-derived archetype (used by
@@ -118,20 +158,21 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case screens.PipelineUpdateStatusMsg:
 		err := data.UpdateApplicationStatus(msg.CareerOpsPath, msg.App, msg.NewStatus)
-		if err != nil {
-			// Log the error but still reload data to keep UI consistent
-			fmt.Fprintf(os.Stderr, "WARN: status update failed: %v\n", err)
-		}
 		m.reloadPipelineData()
+		if err != nil {
+			m.pipeline, _ = m.pipeline.Update(screens.StatusUpdateFailedMsg{Err: err.Error()})
+		} else if data.NormalizeStatus(msg.NewStatus) == "hired" {
+			m.pipeline, _ = m.pipeline.StartHiredFlow(msg.App)
+		}
 		return m, nil
 
 	case screens.PipelineUpdateStatusAndNotesMsg:
 		// Issue 1380: atomic status + notes write from the discard reason picker.
 		err := data.UpdateApplicationStatusAndNotes(msg.CareerOpsPath, msg.App, msg.NewStatus, msg.NotesAppend)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "WARN: status+notes update failed: %v\n", err)
-		}
 		m.reloadPipelineData()
+		if err != nil {
+			m.pipeline, _ = m.pipeline.Update(screens.StatusUpdateFailedMsg{Err: err.Error()})
+		}
 		return m, nil
 
 	case screens.PipelineRefreshMsg:
@@ -164,18 +205,6 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case screens.ViewerUpdateStatusMsg:
 		normalized := data.NormalizeStatus(msg.NewStatus)
-		if normalized == "hired" {
-			err := data.UpdateApplicationStatus(m.careerOpsPath, msg.App, msg.NewStatus)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "WARN: status update failed: %v\n", err)
-				m.reloadPipelineData()
-				return m, nil
-			}
-			m.state = viewPipeline
-			m.pipeline, _ = m.pipeline.StartHiredFlow(msg.App)
-			m.reloadPipelineData()
-			return m, nil
-		}
 		if normalized == "discarded" || normalized == "skip" {
 			m.state = viewPipeline
 			m.pipeline, _ = m.pipeline.StartDiscardReasonFlow(msg.App, msg.NewStatus)
@@ -184,11 +213,36 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		err := data.UpdateApplicationStatus(m.careerOpsPath, msg.App, msg.NewStatus)
+		m.reloadPipelineData()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "WARN: status update failed: %v\n", err)
+			// A sidecar failure can follow a successful tracker write. Reflect
+			// the persisted status, retaining the old one if it cannot be read
+			// or the row's identity is no longer unique. Re-find the row by the
+			// same identity the write addressed it with, which for a row with no
+			// report link is its tracker #.
+			if data.HasTrackerIdentity(msg.App) {
+				savedStatus, matches := "", 0
+				// A failed re-read leaves matches at 0, so the displayed status
+				// stays as it was — which is what the comment above promises.
+				saved, _ := data.ParseApplications(m.careerOpsPath)
+				for _, app := range saved {
+					if data.SameTrackerRow(app, msg.App) {
+						savedStatus = app.Status
+						matches++
+					}
+				}
+				if matches == 1 {
+					m.viewer.UpdateAppStatus(savedStatus)
+				}
+			}
+			m.viewer, _ = m.viewer.Update(screens.StatusUpdateFailedMsg{Err: err.Error()})
+			return m, nil
 		}
 		m.viewer.UpdateAppStatus(msg.NewStatus)
-		m.reloadPipelineData()
+		if normalized == "hired" {
+			m.state = viewPipeline
+			m.pipeline, _ = m.pipeline.StartHiredFlow(msg.App)
+		}
 		return m, nil
 
 	case screens.PipelineOpenProgressMsg:
@@ -224,8 +278,51 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case screens.PipelineOpenPDFMsg:
 		return m, openCmd(msg.Path)
 
+	case screens.PipelineCopyPDFPathMsg:
+		return m, copyPathCmd(msg.Path)
+
+	case screens.PipelineClipboardResultMsg:
+		// The copy runs asynchronously and the user may have left the pipeline
+		// meanwhile; the flash belongs to the pipeline whatever screen is shown.
+		pm, cmd := m.pipeline.Update(msg)
+		m.pipeline = pm
+		return m, cmd
+
 	case screens.PipelineGeneratePDFMsg:
 		return m, runGeneratePDF(msg)
+
+	case screens.PipelineQueueEvalMsg:
+		return m, runQueueEval(msg)
+
+	case screens.PipelineQueueEvalDoneMsg:
+		// Re-read the Inbox first, so the row's status cell shows what
+		// batch-input.tsv now records, then let the screen flash the outcome.
+		m.reloadPendingRows()
+		pm, cmd := m.pipeline.Update(msg)
+		m.pipeline = pm
+		return m, cmd
+
+	case screens.PipelineSkipMsg:
+		return m, runInboxSkip(msg)
+
+	case screens.PipelineRankMsg:
+		return m, runInboxRank(msg)
+
+	case screens.PipelineRankDoneMsg:
+		// Re-read the Inbox first, so the new scores show and the screen can
+		// count what the run ranked, then let it flash the outcome.
+		m.reloadPendingRows()
+		pm, cmd := m.pipeline.Update(msg)
+		m.pipeline = pm
+		return m, cmd
+
+	case screens.PipelineSkipDoneMsg:
+		// Re-read the Inbox first, so a skipped row leaves it and a restored
+		// row comes back, then let the screen flash the outcome.
+		m.reloadPendingRows()
+		pm, cmd := m.pipeline.Update(msg)
+		m.pipeline = pm
+		return m, cmd
 
 	default:
 		if m.state == viewReport {
@@ -250,7 +347,7 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // openCmd wraps openWithDefaultApp (OS-specific) as a tea.Cmd. Shared by the
-// job-URL (`o`) and CV-PDF (`d`) actions.
+// job-URL (`o`, pipeline and report viewer) and CV-PDF (`d`) actions.
 func openCmd(target string) tea.Cmd {
 	return func() tea.Msg {
 		if err := openWithDefaultApp(target); err != nil {
@@ -263,13 +360,22 @@ func openCmd(target string) tea.Cmd {
 	}
 }
 
-// runGeneratePDF shells out to node generate-pdf.mjs in the career-ops root,
+// runGeneratePDF runs the checkout's generate-pdf.mjs against the selected data root,
 // opens the resulting PDF on success, and reports the outcome back to the
 // pipeline screen as a PipelinePDFGeneratedMsg. Runs in a tea.Cmd goroutine,
 // so the UI stays responsive while Chromium renders.
 func runGeneratePDF(msg screens.PipelineGeneratePDFMsg) tea.Cmd {
 	return func() tea.Msg {
-		args := []string{"generate-pdf.mjs", msg.HTMLPath, msg.PDFPath}
+		script, err := data.CheckoutScriptPath("generate-pdf.mjs")
+		if err != nil {
+			return screens.PipelinePDFGeneratedMsg{Err: err.Error()}
+		}
+		root, err := filepath.Abs(msg.CareerOpsPath)
+		if err != nil {
+			return screens.PipelinePDFGeneratedMsg{Err: err.Error()}
+		}
+		pdfAbs := filepath.Join(root, filepath.FromSlash(msg.PDFPath))
+		args := []string{script, filepath.Join(root, filepath.FromSlash(msg.HTMLPath)), pdfAbs}
 		if msg.Format != "" {
 			args = append(args, "--format="+msg.Format)
 		}
@@ -277,17 +383,264 @@ func runGeneratePDF(msg screens.PipelineGeneratePDFMsg) tea.Cmd {
 			args = append(args, "--report="+msg.ReportNumber)
 		}
 		cmd := exec.Command("node", args...)
-		cmd.Dir = msg.CareerOpsPath
+		cmd.Dir = filepath.Dir(script)
+		cmd.Env = append(cmd.Environ(), "CAREER_OPS_ROOT="+root)
+		// Preserve relative overrides before changing the child's working directory.
+		if tracker := resolveEnvPath(os.Getenv("CAREER_OPS_TRACKER")); tracker != "" {
+			cmd.Env = append(cmd.Env, "CAREER_OPS_TRACKER="+tracker)
+		}
+		if index := os.Getenv("CAREER_OPS_PDF_INDEX"); index != "" {
+			absolute, err := filepath.Abs(index)
+			if err != nil {
+				return screens.PipelinePDFGeneratedMsg{Err: err.Error()}
+			}
+			cmd.Env = append(cmd.Env, "CAREER_OPS_PDF_INDEX="+absolute)
+		}
+		// A render over a warn-only page budget exits 0 but writes nothing to
+		// the PDF path: the PDF went to a sibling .overflow.pdf draft (#6377).
+		// Opening the path would then show the previous PDF, or nothing, as
+		// "generated". A PDF this render wrote is a new file there.
+		// Only a missing file is an expected absence; any other stat error is
+		// reported as itself rather than read as "no previous PDF" (which
+		// would open whatever the render left) or "wrote nothing".
+		before, beforeErr := os.Stat(pdfAbs)
+		if beforeErr != nil && !errors.Is(beforeErr, fs.ErrNotExist) {
+			return screens.PipelinePDFGeneratedMsg{Err: fmt.Sprintf("cannot read the PDF path: %v", beforeErr)}
+		}
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return screens.PipelinePDFGeneratedMsg{Err: summarizeCmdError(err, out)}
 		}
-		pdfAbs := filepath.Join(msg.CareerOpsPath, filepath.FromSlash(msg.PDFPath))
+		after, afterErr := os.Stat(pdfAbs)
+		if afterErr != nil && !errors.Is(afterErr, fs.ErrNotExist) {
+			return screens.PipelinePDFGeneratedMsg{Err: fmt.Sprintf("cannot read the PDF path: %v", afterErr)}
+		}
+		if afterErr != nil || !pdfWrittenBetween(before, after) {
+			return screens.PipelinePDFGeneratedMsg{Err: summarizeUndelivered(out, pdfAbs)}
+		}
 		if err := openWithDefaultApp(pdfAbs); err != nil {
 			return screens.PipelinePDFGeneratedMsg{Err: fmt.Sprintf("PDF generated but could not open: %v", err)}
 		}
 		return screens.PipelinePDFGeneratedMsg{Path: pdfAbs}
 	}
+}
+
+// Exit statuses the Inbox scripts give besides 0 and 1. They must equal
+// URL_EXIT in sync-batch-input.mjs, SKIP_EXIT in inbox-skip.mjs and RANK_EXIT
+// in rank-pipeline.mjs; inbox_exit_codes_test.go reads the scripts and fails
+// when they differ.
+const (
+	queueExitAlreadyQueued = 3 // URL_EXIT.ALREADY_QUEUED
+	queueExitNotPending    = 4 // URL_EXIT.NOT_PENDING
+	skipExitUnchanged      = 3 // SKIP_EXIT.UNCHANGED
+	skipExitNotPending     = 4 // SKIP_EXIT.NOT_PENDING
+	rankExitNotPending     = 4 // RANK_EXIT.NOT_PENDING
+)
+
+// queueEvalTimeout bounds a queue request. The script takes the batch-input
+// lock, which a running full sync can hold for a moment, and nothing else.
+var queueEvalTimeout = 30 * time.Second
+
+// runQueueEval queues one Inbox row (#5269) by running the checkout's
+// sync-batch-input.mjs with --url. It appends that row to batch-input.tsv and
+// nothing else: it starts no evaluation, and the dashboard never runs
+// batch/batch-runner.sh. --input and --state are left to the script's
+// defaults, beside batch-runner.sh in the checkout, because those are the
+// files the runner reads. --pipeline is the file the Inbox shows.
+func runQueueEval(msg screens.PipelineQueueEvalMsg) tea.Cmd {
+	return func() tea.Msg {
+		done := screens.PipelineQueueEvalDoneMsg{URL: msg.URL}
+		script, err := data.CheckoutScriptPath("sync-batch-input.mjs")
+		if err != nil {
+			done.Err = err.Error()
+			return done
+		}
+		root, err := filepath.Abs(msg.CareerOpsPath)
+		if err != nil {
+			done.Err = err.Error()
+			return done
+		}
+		// The equals form keeps a value that starts with "-" from being read
+		// as a flag.
+		args := []string{script, "--url=" + msg.URL, "--pipeline=" + data.PendingPipelinePath(root)}
+		ctx, cancel := context.WithTimeout(context.Background(), queueEvalTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "node", args...)
+		cmd.Dir = filepath.Dir(script)
+		cmd.Env = append(cmd.Environ(), "CAREER_OPS_ROOT="+root)
+		out, err := cmd.CombinedOutput()
+		if ctx.Err() != nil {
+			done.Err = "sync-batch-input.mjs timed out; reload to check whether the row was queued"
+			return done
+		}
+		// The script's --url exit statuses (URL_EXIT in sync-batch-input.mjs):
+		// 3 nothing to queue, 4 not a Pending row it can read.
+		var exitErr *exec.ExitError
+		switch {
+		case err == nil:
+		case errors.As(err, &exitErr) && exitErr.ExitCode() == queueExitAlreadyQueued:
+			done.Already = true
+		case errors.As(err, &exitErr) && exitErr.ExitCode() == queueExitNotPending:
+			done.Unreadable = true
+		default:
+			done.Err = summarizeCmdError(err, out)
+		}
+		return done
+	}
+}
+
+// inboxSkipTimeout bounds a skip or undo. The script waits for the pipeline
+// lock, which a running scan can hold for a moment, and nothing else.
+var inboxSkipTimeout = 30 * time.Second
+
+// runInboxSkip skips one Inbox row (#5269), or with msg.Undo puts it back, by
+// running the checkout's inbox-skip.mjs. Its write is lib/inbox-skip.mjs, the
+// code the web inbox's Skip runs, so both change data/pipeline.md the same way
+// under the same lock. --pipeline is the file the Inbox shows.
+func runInboxSkip(msg screens.PipelineSkipMsg) tea.Cmd {
+	return func() tea.Msg {
+		done := screens.PipelineSkipDoneMsg{URL: msg.URL, Undo: msg.Undo}
+		script, err := data.CheckoutScriptPath("inbox-skip.mjs")
+		if err != nil {
+			done.Err = err.Error()
+			return done
+		}
+		root, err := filepath.Abs(msg.CareerOpsPath)
+		if err != nil {
+			done.Err = err.Error()
+			return done
+		}
+		// The equals form keeps a value that starts with "-" from being read
+		// as a flag.
+		args := []string{script, "--url=" + msg.URL, "--pipeline=" + data.PendingPipelinePath(root)}
+		if msg.Undo {
+			args = append(args, "--undo")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), inboxSkipTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "node", args...)
+		cmd.Dir = filepath.Dir(script)
+		cmd.Env = append(cmd.Environ(), "CAREER_OPS_ROOT="+root)
+		out, err := cmd.CombinedOutput()
+		if ctx.Err() != nil {
+			done.Err = "inbox-skip.mjs timed out; reload to check the row"
+			return done
+		}
+		// The script's exit statuses (SKIP_EXIT in inbox-skip.mjs): 3 nothing
+		// to change, 4 no Pending row with that URL as its first cell.
+		var exitErr *exec.ExitError
+		switch {
+		case err == nil:
+		case errors.As(err, &exitErr) && exitErr.ExitCode() == skipExitUnchanged:
+			done.Unchanged = true
+		case errors.As(err, &exitErr) && exitErr.ExitCode() == skipExitNotPending:
+			done.Unreadable = true
+		default:
+			done.Err = summarizeCmdError(err, out)
+		}
+		return done
+	}
+}
+
+// inboxRankTimeout bounds a rank run. rank-pipeline.mjs calls the CLI once per
+// ten rows, each call bounded by CAREER_OPS_RANK_TIMEOUT_MS (180 s by
+// default), so twenty rows take two calls.
+var inboxRankTimeout = 15 * time.Minute
+
+// runInboxRank ranks Inbox rows (#5269) by running the checkout's
+// rank-pipeline.mjs: with --url the one row, otherwise up to msg.Limit
+// unranked rows. The script asks the agent CLI for one answer, with tools
+// off where the CLI has a switch for it, and writes each `rank:` cell into data/pipeline.md under the pipeline lock. The
+// screen has asked before sending this, because the run spends tokens.
+func runInboxRank(msg screens.PipelineRankMsg) tea.Cmd {
+	return func() tea.Msg {
+		done := screens.PipelineRankDoneMsg{URL: msg.URL}
+		script, err := data.CheckoutScriptPath("rank-pipeline.mjs")
+		if err != nil {
+			done.Err = err.Error()
+			return done
+		}
+		root, err := filepath.Abs(msg.CareerOpsPath)
+		if err != nil {
+			done.Err = err.Error()
+			return done
+		}
+		// The equals form keeps a value that starts with "-" from being read
+		// as a flag. The script reads data/pipeline.md under CAREER_OPS_ROOT,
+		// the file the Inbox shows.
+		args := []string{script}
+		if msg.URL != "" {
+			args = append(args, "--url="+msg.URL)
+		} else {
+			args = append(args, fmt.Sprintf("--limit=%d", msg.Limit))
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), inboxRankTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "node", args...)
+		cmd.Dir = filepath.Dir(script)
+		cmd.Env = append(cmd.Environ(), "CAREER_OPS_ROOT="+root)
+		out, err := cmd.CombinedOutput()
+		if ctx.Err() != nil {
+			done.Err = "rank-pipeline.mjs timed out; reload to see which rows were ranked"
+			return done
+		}
+		// The script's --url exit status (RANK_EXIT in rank-pipeline.mjs): 4
+		// no unranked Pending row has that URL as its first cell.
+		var exitErr *exec.ExitError
+		switch {
+		case err == nil:
+		case msg.URL != "" && errors.As(err, &exitErr) && exitErr.ExitCode() == rankExitNotPending:
+			done.NotPending = true
+		default:
+			done.Err = summarizeCmdError(err, out)
+		}
+		return done
+	}
+}
+
+// pdfWrittenBetween reports whether the PDF at the path is a file the render
+// left there: generate-pdf.mjs writes a temp file and renames it into place,
+// so a delivered PDF is a different file (and has a new modification time and
+// usually a new size), while a kept previous PDF is the same file as before.
+// The identity check covers a filesystem whose timestamps are too coarse to
+// tell a same-sized rerender apart.
+func pdfWrittenBetween(before, after fs.FileInfo) bool {
+	if after == nil {
+		return false
+	}
+	if before == nil {
+		return true
+	}
+	return !os.SameFile(before, after) || !after.ModTime().Equal(before.ModTime()) || after.Size() != before.Size()
+}
+
+// reOverflowDraftLine finds the draft generate-pdf.mjs names when a render
+// ran over its page budget, so the help bar can point at the file to inspect.
+var reOverflowDraftLine = regexp.MustCompile(`Overflow draft: (.*?\.overflow(?:-\d+)?\.pdf) \(`)
+
+// rePageBudgetLine is the page-count sentence of the same warning.
+var rePageBudgetLine = regexp.MustCompile(`CV is \d+ pages?; the allowed maximum is \d+ pages?\.`)
+
+// summarizeUndelivered is the help-bar line for a render that exited 0 but
+// wrote nothing to the PDF path. It leads with the page counts and the
+// outcome, and names the draft this render wrote, so the user does not open an
+// older one.
+func summarizeUndelivered(out []byte, pdfAbs string) string {
+	budget := rePageBudgetLine.FindString(string(out))
+	draft := ""
+	if m := reOverflowDraftLine.FindStringSubmatch(string(out)); m != nil {
+		draft = filepath.Base(m[1])
+	}
+	if budget == "" && draft == "" {
+		return fmt.Sprintf("generate-pdf.mjs reported success but wrote nothing to %s", filepath.Base(pdfAbs))
+	}
+	if budget == "" {
+		budget = "The CV is over its page budget."
+	}
+	if draft == "" {
+		return budget + " No PDF was written; the over-budget render was kept as an .overflow.pdf draft beside it."
+	}
+	return fmt.Sprintf("%s No PDF was written; the over-budget draft is %s.", budget, draft)
 }
 
 // summarizeCmdError condenses a failed command into one help-bar-sized line:
@@ -316,17 +669,26 @@ func (m appModel) View() string {
 	}
 }
 
+// getRepoRoot defers to internal/data, which already walks up from cwd looking
+// for path-resolver.mjs and is the function a relative CAREER_OPS_TRACKER
+// resolves through.
+//
+// This used to be a second, shorter search — cwd and cwd's PARENT, then a
+// silent fallback to cwd — so from anywhere deeper the data root and the
+// tracker could anchor to different directories. One walker, one answer.
 func getRepoRoot() string {
-	cwd, err := os.Getwd()
+	root, err := data.FindRepoRoot()
 	if err != nil {
+		// The checkout could not be examined, which is not the same as not
+		// being there. Say so: everything below resolves against this.
+		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+	}
+	if root != "" {
+		return root
+	}
+	cwd, wdErr := os.Getwd()
+	if wdErr != nil {
 		return "."
-	}
-	if _, err := os.Stat(filepath.Join(cwd, "path-resolver.mjs")); err == nil {
-		return cwd
-	}
-	parent := filepath.Dir(cwd)
-	if _, err := os.Stat(filepath.Join(parent, "path-resolver.mjs")); err == nil {
-		return parent
 	}
 	return cwd
 }
@@ -339,7 +701,31 @@ func resolveEnvPath(envVal string) string {
 	if filepath.IsAbs(trimmed) {
 		return filepath.Clean(trimmed)
 	}
-	return filepath.Clean(filepath.Join(getRepoRoot(), trimmed))
+	root, err := data.FindRepoRoot()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+	}
+	if root == "" {
+		// Anchoring to cwd here is a guess, and what is being guessed at is
+		// which tracker to read. Getting it wrong is invisible: the dashboard
+		// shows one file while every .mjs writer uses another, and neither side
+		// reports anything. The guess is still made — exiting would be worse
+		// for a user whose layout we cannot see — but it is said out loud, with
+		// the absolute path the reader can check.
+		cwd, wdErr := os.Getwd()
+		if wdErr != nil {
+			return filepath.Clean(trimmed)
+		}
+		resolved := filepath.Clean(filepath.Join(cwd, trimmed))
+		fmt.Fprintf(os.Stderr,
+			"Warning: no career-ops checkout found above the working directory or the executable, "+
+				"so the relative path %q was resolved against the working directory: %s\n"+
+				"         The .mjs scripts resolve it against the repository root, so they may be using a "+
+				"different tracker. Pass an absolute path or --path to be sure.\n",
+			trimmed, resolved)
+		return resolved
+	}
+	return filepath.Clean(filepath.Join(root, trimmed))
 }
 
 func main() {
@@ -374,15 +760,28 @@ func main() {
 	careerOpsPath := *pathFlag
 
 	// Load applications
-	apps := data.ParseApplications(careerOpsPath)
-	if apps == nil {
-		fmt.Fprintf(os.Stderr, "Error: could not find applications.md in %s or %s/data/\n", careerOpsPath, careerOpsPath)
+	apps, trackerErr := data.ParseApplications(careerOpsPath)
+	if trackerErr != nil {
+		// Absent is a first run and keeps the original wording. Anything else is
+		// a file that IS there and could not be opened, and saying "could not
+		// find" sent the user looking for a file sitting in front of them.
+		if errors.Is(trackerErr, fs.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "Error: could not find applications.md in %s or %s/data/\n", careerOpsPath, careerOpsPath)
+		} else {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", trackerErr)
+		}
 		os.Exit(1)
 	}
 
 	// Compute metrics
+	ledger, err := data.ReadStatusLedger(careerOpsPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	data.ApplyStatusDates(apps, ledger.LatestDate)
 	metrics := data.ComputeMetrics(apps)
-	progressMetrics := data.ComputeProgressMetrics(apps)
+	progressMetrics := data.ComputeProgressMetrics(apps, ledger.Reached)
 
 	// Batch-load all report summaries
 	t := theme.NewTheme("auto")
@@ -397,7 +796,7 @@ func main() {
 		theme:           t,
 		progressMetrics: progressMetrics,
 		statsMetrics:    statsMetrics,
-		evaluatedCount:  func() int {
+		evaluatedCount: func() int {
 			n := 0
 			for _, a := range apps {
 				if a.Score > 0 {
@@ -407,6 +806,7 @@ func main() {
 			return n
 		}(),
 	}
+	m.reloadPendingRows()
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {

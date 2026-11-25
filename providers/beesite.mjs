@@ -36,6 +36,7 @@
 // vetoes "Sales &amp; Marketing Lead". Shared decoder, same as softgarden and
 // radancy (#2487, #2921).
 import { decodeEntities } from './_html-entities.mjs';
+import { sleep } from './_http.mjs';
 
 const PAGE_SIZE = 100; // verified: the endpoint happily serves 100+/page
 const MAX_PAGES = 40; // safety cap on request count (40*100 = 4000 postings)
@@ -111,7 +112,7 @@ export function parseSearchResult(json) {
     const d = item?.MatchedObjectDescriptor;
     if (!d) continue;
     const id = item.MatchedObjectId != null ? String(item.MatchedObjectId) : String(d.PositionID || '');
-    const title = decodeEntities(String(d.PositionTitle || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+    const title = decodeEntities(String(d.PositionTitle || '').replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
     const url = String(d.PositionURI || '').trim();
     if (!id || !title || !/^https?:\/\//i.test(url)) continue;
     const locs = Array.isArray(d.PositionLocation) ? d.PositionLocation : [];
@@ -152,14 +153,13 @@ export default {
     const cfg = resolveConfig(entry);
     if (!cfg) throw new Error(`beesite: cannot resolve search host for ${entry.name}`);
 
-    const wait = (ms) => (ctx.sleep ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     const maxPages = resolveMaxPages(entry);
     const jobs = [];
     const seen = new Set();
     let total = null;
 
     for (let page = 0; page < maxPages; page++) {
-      if (page > 0) await wait(PAGE_DELAY_MS);
+      if (page > 0) await sleep(PAGE_DELAY_MS, ctx);
       const json = await ctx.fetchJson(buildSearchUrl(cfg, page * PAGE_SIZE + 1), {
         redirect: 'error',
         headers: { accept: 'application/json' },

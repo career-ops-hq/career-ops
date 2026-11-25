@@ -13,6 +13,11 @@ version: 1.0.0
      Keep each surface's existing font and color as its fallback: this template
      has different defaults from the standard CV, including within its own
      typography and palette. With no profile override those defaults stay put. */
+  :root {
+    --tag-color: hsl(187, 74%, 28%);
+    --tag-bg: hsl(187, 40%, 95%);
+    --tag-border: hsl(187, 40%, 88%);
+  }
 
   /* ATS-safe typography (#font-extraction fix):
      The bundled variable woff2 fonts (Space Grotesk / DM Sans) render with
@@ -44,7 +49,7 @@ version: 1.0.0
   }
 
   body {
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', 'Arial Unicode MS', sans-serif;
     font-size: var(--font-size, 11px);
     line-height: 1.5;
     color: #1a1a2e;
@@ -69,13 +74,28 @@ version: 1.0.0
   }
 
   .header h1 {
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', 'Arial Unicode MS', sans-serif;
     font-size: 28px;
     font-weight: 700;
     color: #1a1a2e;
     letter-spacing: -0.02em;
     margin-bottom: 6px;
     line-height: 1.1;
+  }
+
+  .header-title {
+    /* No own font-family: inherits from .header/body, so every locale
+       override below (ar, ja, AND zh/zh-CN/zh-TW, which only override body
+       and never declare an explicit .header h1 rule) reaches it for free.
+       Default value is identical to the stack this replaced, so unlocalized
+       output is unchanged (CodeRabbit, #3763). */
+    font-size: 16px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent-color, #1a1a2e);
+    margin-bottom: 8px;
+    line-height: 1.2;
   }
 
   .header-gradient {
@@ -89,7 +109,7 @@ version: 1.0.0
     display: flex;
     flex-wrap: wrap;
     gap: 8px 14px;
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', 'Arial Unicode MS', sans-serif;
     font-size: var(--font-size, 10.5px);
     line-height: 1.4;
     color: #555;
@@ -100,8 +120,12 @@ version: 1.0.0
     text-decoration: none;
   }
 
-  .contact-row .separator {
+  /* Generated on the item BEFORE it, so a wrap cannot start a line with the
+     separator. See cv-template.html for the full rationale. */
+  .contact-row > *:not(:last-child)::after {
+    content: "|";
     color: #ccc;
+    margin-inline-start: 14px;   /* matches the 14px column gap above */
   }
 
   /* === OPTIONAL PROFILE PHOTO (opt-in, DACH/European markets — #264) ===
@@ -126,7 +150,7 @@ version: 1.0.0
   }
 
   .section-title {
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', 'Arial Unicode MS', sans-serif;
     font-size: 12px;
     font-weight: 700;
     text-transform: uppercase;
@@ -164,14 +188,14 @@ version: 1.0.0
   }
 
   .competency-tag {
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', 'Arial Unicode MS', sans-serif;
     font-size: 10px;
     font-weight: 500;
-    color: hsl(187, 74%, 28%);
-    background: hsl(187, 40%, 95%);
+    color: var(--tag-color);
+    background: var(--tag-bg);
     padding: 4px 10px;
     border-radius: 3px;
-    border: 1px solid hsl(187, 40%, 88%);
+    border: 1px solid var(--tag-border);
   }
 
   /* === WORK EXPERIENCE === */
@@ -180,15 +204,14 @@ version: 1.0.0
   }
 
   .job-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 12px;
+    /* Normal flow preserves company -> period -> role order in ATS extraction.
+       Flex can group several headers before their role and bullet text. */
+    display: block;
     margin-bottom: 4px;
   }
 
   .job-company {
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', 'Arial Unicode MS', sans-serif;
     font-size: 12.5px;
     font-weight: 600;
     color: var(--secondary-color, hsl(270, 70%, 45%));
@@ -198,6 +221,7 @@ version: 1.0.0
     font-size: var(--font-size, 10.5px);
     color: #777;
     white-space: nowrap;
+    margin-left: 10px;
   }
 
   .job-role {
@@ -210,6 +234,14 @@ version: 1.0.0
   .job-location {
     font-size: 10px;
     color: #888;
+  }
+
+  .job-context {
+    font-style: italic;
+    font-size: 10.5px;
+    line-height: 1.55;
+    color: #555;
+    margin-top: 3px;
   }
 
   .job ul {
@@ -234,7 +266,7 @@ version: 1.0.0
   }
 
   .project-title {
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', sans-serif;
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'DejaVu Sans', 'Arial Unicode MS', sans-serif;
     font-size: 11.5px;
     font-weight: 600;
     color: var(--secondary-color, hsl(270, 70%, 45%));
@@ -244,7 +276,7 @@ version: 1.0.0
     font-size: 9px;
     font-weight: 500;
     color: hsl(187, 74%, 32%);
-    background: hsl(187, 40%, 95%);
+    background: var(--tag-bg);
     padding: 1px 6px;
     border-radius: 2px;
     margin-left: 6px;
@@ -269,13 +301,11 @@ version: 1.0.0
   }
 
   .edu-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 12px;
+    display: block;
   }
 
   .edu-title {
+    display: inline;
     font-weight: 600;
     font-size: var(--font-size, 11px);
     color: #333;
@@ -287,9 +317,11 @@ version: 1.0.0
   }
 
   .edu-year {
+    display: inline;
     font-size: 10px;
     color: #777;
     white-space: nowrap;
+    margin-left: 10px;
   }
 
   .edu-location {
@@ -425,13 +457,32 @@ version: 1.0.0
     page-break-inside: avoid;
   }
 
+  /* #3242: opt-in, unchanged default (see templates/cv-template.html). This
+     template's :root block (its --zhm-* palette) does not declare
+     --job-break-inside, so the fallback below is the only default; a
+     config/profile.yml style.job_break_inside override still reaches it via
+     the injected :root block. */
+  .job {
+    page-break-inside: var(--job-break-inside, auto);
+    break-inside: var(--job-break-inside, auto);
+  }
+
+  /* Opt-in — unchanged default (a project may split across a page break).
+     Override via config/profile.yml style.project_break_inside: avoid. This
+     template's :root token block does not declare --project-break-inside, so
+     the fallback below is the only default. */
+  .project {
+    page-break-inside: var(--project-break-inside, auto);
+    break-inside: var(--project-break-inside, auto);
+  }
+
   /* Keep a heading attached to the content that follows it, so headings are not
      orphaned at the bottom of a page. */
   .section-title,
   .job-company,
   .job-role,
   .job-location,
-  .edu-location,
+  .job-context,
   .project-title {
     break-after: avoid;
     page-break-after: avoid;
@@ -497,7 +548,7 @@ version: 1.0.0
      browser's per-glyph fallback picks the first installed CJK face for kana
      and kanji. Mirrors the lang="ar" precedent above. */
   html[lang="ja"] body {
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'Arial Unicode MS', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
       'Yu Gothic', 'YuGothic', 'Noto Sans CJK JP', 'Noto Sans JP',
       Meiryo, 'MS PGothic', sans-serif;
   }
@@ -508,7 +559,7 @@ version: 1.0.0
   html[lang="ja"] .project-title,
   html[lang="ja"] .competency-tag,
   html[lang="ja"] .skill-category {
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'Arial Unicode MS', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN',
       'Yu Gothic', 'YuGothic', 'Noto Sans CJK JP', 'Noto Sans JP',
       Meiryo, 'MS PGothic', sans-serif;
   }
@@ -527,9 +578,15 @@ version: 1.0.0
   body,
   html[lang="zh-CN"] body,
   html[lang="zh"] body {
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'PingFang SC',
-      'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC',
-      'Noto Sans SC', 'Source Han Sans SC', sans-serif;
+    /* Keep Chinese and Latin text in one font run where possible. Splitting
+       mixed-language lines across Liberation Sans plus a CJK fallback makes
+       Chromium PDFs look correct while text extractors reorder Latin tokens.
+       A profile font replaces only the var() default. Arial Unicode MS comes
+       before PingFang, because headless Chromium embeds that face and does not
+       embed PingFang when it is only named. */
+    font-family: var(--font-family, 'Arial Unicode MS'), 'Arial Unicode MS', 'PingFang SC', 'Hiragino Sans GB',
+      'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC',
+      sans-serif;
     color: var(--zhm-text);
     line-break: strict;
     word-break: normal;
@@ -543,7 +600,7 @@ version: 1.0.0
      minimal template, not a general one.) */
   html[lang="zh-TW"] body,
   html[lang="zh-TW"] .contact-row {
-    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'PingFang TC',
+    font-family: var(--font-family, 'Liberation Sans'), 'Helvetica Neue', Arial, 'Arial Unicode MS', 'PingFang TC',
       'Microsoft JhengHei', 'Noto Sans CJK TC',
       'Noto Sans TC', 'Source Han Sans TC', sans-serif;
   }
@@ -701,16 +758,13 @@ version: 1.0.0
   <!-- HEADER -->
   <div class="header">
     <h1>{{NAME}}</h1>
+    {{TITLE_BLOCK}}
     <div class="header-gradient"></div>
     <div class="contact-row">
       <a href="tel:{{PHONE}}">{{PHONE}}</a>
-      <span class="separator">|</span>
       <a href="mailto:{{EMAIL}}">{{EMAIL}}</a>
-      <span class="separator">|</span>
       <a href="{{LINKEDIN_URL}}">{{LINKEDIN_DISPLAY}}</a>
-      <span class="separator">|</span>
       <a href="{{PORTFOLIO_URL}}">{{PORTFOLIO_DISPLAY}}</a>
-      <span class="separator">|</span>
       <span>{{LOCATION}}</span>
     </div>
   </div>

@@ -10,6 +10,7 @@
  *   node clean-markers.mjs audit  <file...>                 # report only, never modifies
  *   node clean-markers.mjs clean  <file...>                 # strip markers, then report
  *   node clean-markers.mjs clean  --ascii cover-letter.md   # also force plain-ASCII punctuation
+ *   node clean-markers.mjs audit  --keep-script-joiners f.md  # keep joiners emoji/Persian/Indic spelling needs
  *   node clean-markers.mjs --help                           # show this message (-h is an alias)
  *
  * Exit code 1 if any file FAILS audit — usable as a pre-send gate. Dependency-free: text only,
@@ -32,12 +33,48 @@ const label = cp => NAMED[cp] || (isTag(cp) ? `TAG U+${cp.toString(16).toUpperCa
 
 const TEXT_EXT = new Set(['.html','.htm','.md','.txt','.json','.csv','.svg','.xml','.tex']);
 
-function scanText(t){ const f={}; for(const ch of t){const l=label(ch.codePointAt(0)); if(l)f[l]=(f[l]||0)+1;} return f; }
-function cleanText(t, ascii){
-  let out='';
-  for(const ch of t){ const cp=ch.codePointAt(0);
+// --keep-script-joiners (#5268): ZWJ, ZWNJ and VS16 are part of the spelling in emoji sequences,
+// Persian and Brahmic scripts. A single joiner is kept only between the characters that need it;
+// anything else — next to Latin letters or spaces, at a line edge, or in a run of two or more,
+// the shape a zero-width payload takes — is still stripped and reported. audit and clean both
+// call this one predicate, so they cannot disagree about a character.
+const ZWNJ = 0x200C, ZWJ = 0x200D, VS16 = 0xFE0F;
+const PICTO = /\p{Extended_Pictographic}/u;
+const SKIN_TONE = /\p{Emoji_Modifier}/u;
+// Letters only (with combining marks for the Brahmic virama): Arabic-Indic and Devanagari digits
+// share the script, and a joiner between two digits spells nothing.
+const ARABIC = /(?=\p{L})\p{Script=Arabic}/u;
+const BRAHMIC = ['Devanagari','Bengali','Gurmukhi','Gujarati','Oriya','Tamil','Telugu','Kannada','Malayalam','Sinhala']
+  .map(s => new RegExp(`(?=[\\p{L}\\p{M}])\\p{Script=${s}}`, 'u'));
+const is = (re, ch) => ch !== undefined && re.test(ch);
+const sameBrahmic = (a, b) => BRAHMIC.some(re => is(re, a) && is(re, b));
+// The emoji a ZWJ continues: a pictograph, optionally followed by one skin tone or one VS16.
+function endsWithPictograph(chars, i){
+  if(is(SKIN_TONE, chars[i]) || chars[i]?.codePointAt(0) === VS16) i--;
+  return is(PICTO, chars[i]);
+}
+function isScriptJoiner(chars, i){
+  const cp = chars[i].codePointAt(0), prev = chars[i-1], next = chars[i+1];
+  if(cp === VS16) return is(PICTO, prev);
+  if(cp === ZWJ && is(PICTO, next) && endsWithPictograph(chars, i-1)) return true;
+  if(cp === ZWNJ && is(ARABIC, prev) && is(ARABIC, next)) return true;
+  return (cp === ZWJ || cp === ZWNJ) && sameBrahmic(prev, next);
+}
+
+function scanText(t, keepJoiners){
+  const f={}; let kept=0; const chars=[...t];
+  for(let i=0; i<chars.length; i++){
+    const l=label(chars[i].codePointAt(0)); if(!l) continue;
+    if(keepJoiners && isScriptJoiner(chars, i)){ kept++; continue; }
+    f[l]=(f[l]||0)+1;
+  }
+  return { found:f, kept };
+}
+function cleanText(t, ascii, keepJoiners){
+  let out=''; const chars=[...t];
+  for(let i=0; i<chars.length; i++){ const ch=chars[i], cp=ch.codePointAt(0);
     if(cp===0x00AD) continue;
-    if((cp in NAMED)||isTag(cp)||isVS(cp)) continue;
+    if(((cp in NAMED)||isTag(cp)||isVS(cp)) && !(keepJoiners && isScriptJoiner(chars, i))) continue;
     out+=ch;
   }
   if(ascii) out=out.replace(/[‘’‚‛]/g,"'").replace(/[“”„‟]/g,'"').replace(/[–—―]/g,'-').replace(/…/g,'...');
@@ -61,20 +98,22 @@ function processFile(file, mode, opts){
     const t = readFileSync(file,'utf8');
     const isHtml = ext==='.html'||ext==='.htm';
     // For HTML, exclude BOTH <style> and <script> from scanning AND cleaning (mask, then restore).
-    const found = scanText(isHtml ? maskCode(t).masked : t);
+    const { found, kept } = scanText(isHtml ? maskCode(t).masked : t, opts.keepJoiners);
+    // Kept joiners are named on every line, so the exception stays visible rather than silent.
+    const keptNote = opts.keepJoiners ? `; kept ${kept} script joiner${kept===1?'':'s'}` : '';
     if(mode==='clean' && (Object.keys(found).length || opts.ascii)){
       let cleaned;
-      if(isHtml){ const { masked, masks } = maskCode(t); cleaned = restoreCode(cleanText(masked, opts.ascii), masks); }
-      else { cleaned = cleanText(t, opts.ascii); }
+      if(isHtml){ const { masked, masks } = maskCode(t); cleaned = restoreCode(cleanText(masked, opts.ascii, opts.keepJoiners), masks); }
+      else { cleaned = cleanText(t, opts.ascii, opts.keepJoiners); }
       writeFileSync(file, cleaned);
       const after = readFileSync(file,'utf8');
-      const re = scanText(isHtml ? maskCode(after).masked : after);
+      const re = scanText(isHtml ? maskCode(after).masked : after, opts.keepJoiners).found;
       const ok = Object.keys(re).length===0;
-      console.log(`  ${ok?'✅':'⚠️ '} ${file}: cleaned text (${Object.keys(found).length?JSON.stringify(found):'no hidden chars'}${opts.ascii?', ASCII-normalized':''})`);
+      console.log(`  ${ok?'✅':'⚠️ '} ${file}: cleaned text (${Object.keys(found).length?JSON.stringify(found):'no hidden chars'}${opts.ascii?', ASCII-normalized':''}${keptNote})`);
       return ok;
     }
     const ok = Object.keys(found).length===0;
-    console.log(`  ${ok?'✅ PASS':'❌ FAIL'} ${file}: hidden chars: ${ok?'none':JSON.stringify(found)}`);
+    console.log(`  ${ok?'✅ PASS':'❌ FAIL'} ${file}: hidden chars: ${ok?'none':JSON.stringify(found)}${keptNote}`);
     return ok;
   }
 
@@ -82,11 +121,14 @@ function processFile(file, mode, opts){
   return true;
 }
 
-const KNOWN_FLAGS = ['--ascii', '--help', '-h'];
+const KNOWN_FLAGS = ['--ascii', '--keep-script-joiners', '--help', '-h'];
 const USAGE = `Usage:
   node clean-markers.mjs audit <file...>            # report only, never modifies
   node clean-markers.mjs clean <file...>            # strip markers, then report
   node clean-markers.mjs clean --ascii <file...>    # also force plain-ASCII punctuation
+  node clean-markers.mjs audit --keep-script-joiners <file...>
+  node clean-markers.mjs clean --keep-script-joiners <file...>
+                                                    # keep single joiners that emoji, Persian and Indic text need
   node clean-markers.mjs audit -- -draft.md         # -- ends the flags, for a path starting with a dash
   node clean-markers.mjs --help                     # print this usage block and exit`;
 
@@ -95,11 +137,12 @@ const argv = process.argv.slice(2);
 const endOfOptions = argv.indexOf('--');
 validateFlags(endOfOptions === -1 ? argv : argv.slice(0, endOfOptions), KNOWN_FLAGS, USAGE);
 const mode = argv[0]==='clean' ? 'clean' : 'audit';
-const opts = { ascii:false };
+const opts = { ascii:false, keepJoiners:false };
 const files = [];
 for(let i=(argv[0]==='clean'||argv[0]==='audit')?1:0; i<argv.length; i++){
   if(i===endOfOptions){ files.push(...argv.slice(i+1)); break; }
   if(argv[i]==='--ascii') opts.ascii = true;
+  else if(argv[i]==='--keep-script-joiners') opts.keepJoiners = true;
   else files.push(argv[i]);
 }
 if(!files.length){ console.log(USAGE); process.exit(2); }

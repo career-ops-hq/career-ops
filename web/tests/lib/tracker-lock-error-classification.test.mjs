@@ -1,18 +1,12 @@
-// tracker-lock.ts imports `@/lib/career-ops` (the path alias), which plain
-// `node --test` cannot resolve without the Next.js build — same constraint as
-// pipeline.ts, same workaround already established in
-// tests/lib/pipeline-local-today.test.mjs: read the source and assert the
-// shape of the catch block directly.
+// The core tracker lock's error classification: acquireTrackerLock
+// (tracker-utils.mjs) tags ONLY genuine contention with `.code = 'LOCK_TIMEOUT'`.
+// A filesystem failure such as an ENOENT from a missing lock-dir parent must
+// surface as itself, because retrying never resolves it (#3138).
 //
-// Covers: withTrackerLock's acquire-failure catch used to be unconditional
-// (`catch { throw new TrackerBusyError(); }`), converting EVERY error from
-// acquiring the lock — including a genuine ENOENT from a missing lock-dir
-// parent, or EACCES — into "tracker is being written by another process,
-// retry". That is false for those cases: they never resolve by retrying. The
-// sibling followups-lock.ts already gets this right (discriminates on the
-// core's SeedError('LOCK_TIMEOUT')); tracker-lock.ts's core equivalent tags a
-// plain Error with `.code = 'LOCK_TIMEOUT'` instead (tracker-utils.mjs), so
-// the discriminator here is `err.code === 'LOCK_TIMEOUT'`.
+// The web used to wrap this lock in lib/core/tracker-lock.ts and reported a
+// LOCK_TIMEOUT as "busy, retry". The web now writes the tracker only by running
+// set-status.mjs (#2901), which takes the lock itself, so the wrapper is gone;
+// the contract below is what that core writer relies on.
 //
 // Run:  node --test tests/lib/tracker-lock-error-classification.test.mjs
 
@@ -21,59 +15,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SRC = path.join(HERE, "..", "..", "src", "lib", "core", "tracker-lock.ts");
-const src = readFileSync(SRC, "utf8");
-
-function acquireCatchBlock() {
-  // The catch immediately after the `acquire(...)` call, up to its closing
-  // brace before the `try { return await fn(); }` that follows.
-  const m = src.match(/lock = await acquire\([\s\S]*?\}\)\s*;\s*\}\s*catch[\s\S]*?\n {2}\}/);
-  assert.ok(m, `${SRC}: could not find the acquire()/catch block — the function was restructured. Update this extractor.`);
-  return m[0];
-}
-
-test("the acquire-failure catch block still exists at the shape this test extracts", () => {
-  assert.ok(acquireCatchBlock().length > 0);
-});
-
-test("a bare catch-all that converts every acquire error to TrackerBusyError is gone", () => {
-  const block = acquireCatchBlock();
-  assert.doesNotMatch(
-    block,
-    /catch\s*\{\s*throw new TrackerBusyError\(\);\s*\}/,
-    `${SRC}: the acquire-failure catch is unconditional again — every error (ENOENT, EACCES, a broken ` +
-      `checkout) gets reported as transient lock contention, which is false for anything that isn't ` +
-      `LOCK_TIMEOUT. Discriminate on err.code before converting.`,
-  );
-});
-
-test("TrackerBusyError is thrown only for the core's LOCK_TIMEOUT tag", () => {
-  const block = acquireCatchBlock();
-  assert.match(
-    block,
-    /err\s*&&\s*err\.code\s*===\s*["']LOCK_TIMEOUT["']/,
-    `${SRC}: expected the catch to check err.code === 'LOCK_TIMEOUT' before throwing TrackerBusyError.`,
-  );
-});
-
-test("anything not tagged LOCK_TIMEOUT propagates as-is, not swallowed", () => {
-  const block = acquireCatchBlock();
-  assert.match(
-    block,
-    /throw e;\s*\}\s*$/,
-    `${SRC}: expected a final "throw e;" so a non-timeout error (e.g. ENOENT) reaches the caller ` +
-      `unchanged instead of being converted or dropped.`,
-  );
-});
-
-// --- Pins the underlying contract this fix depends on: the core function
-// tracker-lock.ts wraps must NOT tag a non-contention failure as LOCK_TIMEOUT.
 // Same core-resolution / skip-if-absent pattern as tracker-lock.test.mjs.
-
 const CORE =
   process.env.CAREER_OPS_ROOT ||
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -131,8 +75,7 @@ test(
     // contention looks like. So a persistent (non-transient) permission problem
     // is retried like real contention would be, and only surfaces once the
     // overall timeout elapses — as LOCK_TIMEOUT, not as the raw EACCES/EPERM.
-    // withTrackerLock's catch then reports that as TrackerBusyError, same as
-    // genuine contention. Known, accepted, not a gap this fix introduces.
+    // A caller then reports it the same as genuine contention. Known, accepted.
     const base = fs.mkdtempSync(path.join(os.tmpdir(), "trklock-eacces-"));
     const sealed = path.join(base, "sealed");
     fs.mkdirSync(sealed);

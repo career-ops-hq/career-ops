@@ -22,13 +22,16 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { Worker } from 'node:worker_threads';
+import { execFileSync, spawn } from 'node:child_process';
+import { tryAcquireDirLockSync } from '../lib/dir-lock.mjs';
 import {
   acquirePipelineLock, LockTimeoutError, OWNERLESS_GRACE_MS,
   lockRecoveryVerdict, RECOVER_STALE, RECOVER_VANISHED, RECOVER_LIVE,
   createLockWaitPolicy,
 } from '../pipeline-lock.mjs';
-import { collectMjsFiles } from '../lib/mjs-files.mjs';
+import { trackedFiles } from '../lib/mjs-files.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SELF = fileURLToPath(import.meta.url);
@@ -58,6 +61,70 @@ function churnLock(lockDir, everyMs) {
     },
   };
 }
+
+// churnLock's handoffs, made on a worker thread's own event loop. A test whose
+// subject is the extension rule needs a holder that keeps making progress even
+// when the main thread stalls. The in-process timer above cannot promise that:
+// a stall keeps it from firing between the two fingerprint samples the wait
+// policy compares, the lock then reads as wedged, and the caller gives up early.
+// Real holders are other processes, so this is the closer model.
+//
+// The directory is created once and never removed. Each handoff swaps in a new
+// owner.json by rename, retried through Windows contention. A rename is atomic,
+// so the waiter never sees a free lock.
+// A remove-then-create swap would leave a gap another thread can slip through.
+// Resolves once the first owner is on disk; stop() is async because it ends the
+// worker, and resolves to the handoff count, read once nothing is renaming the
+// file.
+async function churnLockInWorker(lockDir, everyMs) {
+  const worker = new Worker(`
+    const { mkdirSync, writeFileSync } = require('node:fs');
+    const { join } = require('node:path');
+    const { workerData, parentPort } = require('node:worker_threads');
+    (async () => {
+      const { renameSyncWithRetry } = await import(workerData.trackerUtilsUrl);
+      const owner = join(workerData.lockDir, 'owner.json');
+      const staged = join(workerData.lockDir, 'owner.json.next');
+      let handoffs = 0;
+      const stamp = () => JSON.stringify({
+        pid: process.pid, token: 'handoff-' + handoffs++, started_at: new Date().toISOString(),
+      });
+      mkdirSync(workerData.lockDir, { recursive: true });
+      writeFileSync(owner, stamp(), 'utf-8');
+      parentPort.postMessage('ready');
+      setInterval(() => {
+        writeFileSync(staged, stamp(), 'utf-8');
+        renameSyncWithRetry(staged, owner);
+      }, workerData.everyMs);
+    })();
+  `, {
+    eval: true,
+    workerData: {
+      lockDir,
+      everyMs,
+      trackerUtilsUrl: pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), '..', 'tracker-utils.mjs')).href,
+    },
+  });
+  await new Promise((resolve, reject) => {
+    worker.once('message', resolve);
+    worker.once('error', reject);
+  });
+  return {
+    async stop() {
+      await worker.terminate();
+      const { token } = JSON.parse(readFileSync(join(lockDir, 'owner.json'), 'utf-8'));
+      rmSync(lockDir, { recursive: true, force: true });
+      return Number(token.replace('handoff-', ''));
+    },
+  };
+}
+
+// The per-holder window for the tests of the extension rule. A window that sees
+// no handoff reads as wedged, so it has to outlast the longest gap a stalled
+// runner can leave between two handoffs, not just the handoff period. On
+// windows-latest gaps over 100ms failed these tests at windows of 100ms and
+// 150ms, from a worker thread as well.
+const EXTENSION_WINDOW_MS = 500;
 
 function fixtureRoot() {
   const root = mkdtempSync(join(tmpdir(), 'career-ops-pipeline-lock-'));
@@ -301,18 +368,43 @@ test('lockRecoveryVerdict: an absent directory is VANISHED, never STALE — "gon
 
 test('lockRecoveryVerdict: STALE, LIVE and the grace floor keep their existing meanings', () => {
   const root = fixtureRoot();
+  const liveChild = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { stdio: 'ignore' });
   try {
     const dead = join(root, 'data', 'dead.lock');
     writeCrashedHolder(dead);
     assert.equal(lockRecoveryVerdict(dead, 1), RECOVER_STALE, 'a crashed holder is still reclaimable');
 
+    // A live owner is ANOTHER live process. This process's own pid no longer
+    // stands in for one: without a handle behind it, it is a leftover (#5390).
     const live = join(root, 'data', 'live.lock');
     mkdirSync(live, { recursive: true });
     writeFileSync(join(live, 'owner.json'), JSON.stringify({
-      pid: process.pid, token: 'live', started_at: new Date().toISOString(),
+      pid: liveChild.pid, token: 'live', started_at: new Date().toISOString(),
     }), 'utf-8');
     backdate(live, OWNERLESS_GRACE_MS * 50);
     assert.equal(lockRecoveryVerdict(live, 1), RECOVER_LIVE, 'a live owner is never stale, however old');
+
+    // Our own pid with a token no handle of ours holds: a release whose rm was
+    // swallowed, or a stamp we could not confirm. Judged by age, so a long-lived
+    // process (the web server) does not keep it LIVE until it restarts.
+    const leftover = join(root, 'data', 'leftover.lock');
+    mkdirSync(leftover, { recursive: true });
+    writeFileSync(join(leftover, 'owner.json'), JSON.stringify({
+      pid: process.pid, token: 'no-handle', started_at: new Date().toISOString(),
+    }), 'utf-8');
+    assert.equal(lockRecoveryVerdict(leftover, 1), RECOVER_LIVE, 'our own leftover is respected while young');
+    backdate(leftover, OWNERLESS_GRACE_MS * 50);
+    assert.equal(lockRecoveryVerdict(leftover, 1), RECOVER_STALE, 'our own leftover ages out once old');
+
+    // Our own pid with a handle we really hold: live, however old.
+    const held = join(root, 'data', 'held.lock');
+    const handle = tryAcquireDirLockSync(held, { staleMs: 1 });
+    try {
+      backdate(held, OWNERLESS_GRACE_MS * 50);
+      assert.equal(lockRecoveryVerdict(held, 1), RECOVER_LIVE, 'a lock this process holds is never stale');
+    } finally {
+      handle.release();
+    }
 
     const fresh = join(root, 'data', 'fresh.lock');
     mkdirSync(fresh, { recursive: true });
@@ -331,6 +423,7 @@ test('lockRecoveryVerdict: STALE, LIVE and the grace floor keep their existing m
     backdate(opaque, OWNERLESS_GRACE_MS * 5);
     assert.equal(lockRecoveryVerdict(opaque, 1), RECOVER_LIVE, 'a stamp we could not read protects the lock');
   } finally {
+    liveChild.kill();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -407,47 +500,58 @@ async function settleOrGiveUp(promise, ms) {
 
 test('acquirePipelineLock: a lock that keeps changing hands does not time out a waiting caller', async () => {
   const root = fixtureRoot();
+  const p = join(root, 'data', 'pipeline.md');
+  const churn = await churnLockInWorker(`${p}.lock`, 40);
+  // Let the lock change hands for several times the caller's timeout, then
+  // free it. The caller must still be waiting, not dead.
+  const freeItLater = sleep(EXTENSION_WINDOW_MS * 2.6).then(() => churn.stop());
   try {
-    const p = join(root, 'data', 'pipeline.md');
-    const churn = churnLock(`${p}.lock`, 40);
-    // Let the lock change hands for several times the caller's timeout, then
-    // free it. The caller must still be waiting, not dead.
-    const freeItLater = sleep(600).then(() => churn.stop());
-
     const startedAt = Date.now();
-    // The old absolute deadline killed this caller at 150ms with
+    // The old absolute deadline killed this caller at its timeoutMs with
     // LockTimeoutError even though the lock was healthy and briskly shared —
     // which for agent-inbox.mjs meant its request was silently dropped. The
     // timeout is for a WEDGED holder, not for losing the retry lottery.
-    const lock = await acquirePipelineLock(p, { timeoutMs: 150, retryMs: 15 });
+    //
+    // maxWaitMs is explicit, not inherited: without it the ceiling comes from
+    // CAREER_OPS_PIPELINE_LOCK_MAX_WAIT_MS, and a shell exporting less than the
+    // churn below (~2.6 windows) fails this case for a reason that has nothing
+    // to do with the code under test. 10 windows is the module's own default.
+    const lock = await acquirePipelineLock(p, {
+      timeoutMs: EXTENSION_WINDOW_MS,
+      retryMs: 15,
+      maxWaitMs: EXTENSION_WINDOW_MS * 10,
+    });
     const elapsed = Date.now() - startedAt;
     lock.release();
-    await freeItLater;
+    const handoffs = await freeItLater;
 
-    assert.ok(elapsed > 400, `acquired after only ${elapsed}ms — the lock was not actually contended`);
-    assert.ok(churn.handoffs() > 5, `only ${churn.handoffs()} handoffs — the deadline was never crossed mid-contention`);
+    assert.ok(elapsed > EXTENSION_WINDOW_MS * 2, `acquired after only ${elapsed}ms — the lock was not actually contended`);
+    assert.ok(handoffs > 5, `only ${handoffs} handoffs — the deadline was never crossed mid-contention`);
   } finally {
+    await freeItLater;
     rmSync(root, { recursive: true, force: true });
   }
 });
 
 test('acquirePipelineLock: extended waiting is still bounded by maxWaitMs, so endless churn cannot hang a caller', async () => {
   const root = fixtureRoot();
-  const churn = churnLock(`${root}/data/pipeline.md.lock`, 30);
+  const churn = await churnLockInWorker(`${root}/data/pipeline.md.lock`, 30);
   try {
     const p = join(root, 'data', 'pipeline.md');
     // Progress must buy patience, never immortality: a lock handed round for
     // ever still has to fail the caller rather than block it indefinitely.
+    const maxWaitMs = EXTENSION_WINDOW_MS * 2.4;
     const startedAt = Date.now();
     await assert.rejects(
-      () => acquirePipelineLock(p, { timeoutMs: 100, retryMs: 10, maxWaitMs: 400 }),
+      () => acquirePipelineLock(p, { timeoutMs: EXTENSION_WINDOW_MS, retryMs: 10, maxWaitMs }),
       (err) => err instanceof LockTimeoutError,
     );
     const elapsed = Date.now() - startedAt;
-    assert.ok(elapsed >= 400, `gave up after ${elapsed}ms, before the caller's maxWaitMs`);
-    assert.ok(elapsed < 3000, `waited ${elapsed}ms — maxWaitMs did not bound the extension`);
+    assert.ok(elapsed >= maxWaitMs, `gave up after ${elapsed}ms, before the caller's maxWaitMs`);
+    // Under the default ceiling of ten windows, so an ignored maxWaitMs fails here.
+    assert.ok(elapsed < EXTENSION_WINDOW_MS * 8, `waited ${elapsed}ms — maxWaitMs did not bound the extension`);
   } finally {
-    churn.stop();
+    await churn.stop();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -529,7 +633,7 @@ test('acquirePipelineLock: a maxWaitMs of 0 means no waiting, not the default ce
 
 test('acquirePipelineLock: a negative or -Infinity ceiling takes the default rather than becoming zero', async () => {
   const root = fixtureRoot();
-  const churn = churnLock(`${root}/data/pipeline.md.lock`, 20);
+  let held;
   try {
     const p = join(root, 'data', 'pipeline.md');
     // A negative ceiling is a mistake, not a request for no waiting. Clamping it
@@ -537,17 +641,28 @@ test('acquirePipelineLock: a negative or -Infinity ceiling takes the default rat
     // different behaviour; the default is at least bounded and obvious. Paired
     // with the zero test above on purpose — together they pin that 0 and "less
     // than 0" are NOT the same input.
+    //
+    // The blocker is one live holder that never changes hands, not churnLock.
+    // churnLock's progress comes from a timer on the same event loop as the code
+    // under test. A stall on that loop (a slow filesystem call on a busy runner)
+    // can keep the timer from firing between two fingerprint samples. The lock
+    // then looks wedged and the caller gives up well before the default ceiling.
+    // In production the holder is another process, so that stall never starves
+    // it. An unchanging holder makes the lower bound independent of scheduling.
+    // The wedged-holder rule cannot fire before timeoutMs, and a zero clamp
+    // still throws within milliseconds.
+    held = await acquirePipelineLock(p, { timeoutMs: 300, retryMs: 20 });
     for (const bad of [-5, -Infinity]) {
       const startedAt = Date.now();
       const outcome = await settleOrGiveUp(
-        acquirePipelineLock(p, { timeoutMs: 50, retryMs: 20, maxWaitMs: bad }), 3000,
+        acquirePipelineLock(p, { timeoutMs: 300, retryMs: 20, maxWaitMs: bad }), 3000,
       );
       const elapsed = Date.now() - startedAt;
       assert.ok(outcome instanceof LockTimeoutError, `maxWaitMs=${bad}: expected a timeout, got: ${outcome}`);
       assert.ok(elapsed >= 300, `maxWaitMs=${bad} gave up after ${elapsed}ms — clamped to zero instead of defaulting`);
     }
   } finally {
-    churn.stop();
+    held?.release();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -621,9 +736,12 @@ test('createLockWaitPolicy: the wait ceiling is the policy\'s own, so a caller n
   try {
     const lockDir = join(root, 'data', 'pipeline.md.lock');
     // retryMs far above the ceiling, so the jittered retry never wins the
-    // Math.min and backoffMs() reports the remaining ceiling itself.
+    // Math.min and backoffMs() reports the remaining ceiling itself. The
+    // per-holder deadline is pushed out past the ceiling for the same reason:
+    // backoffMs() is clamped by both, and this test reads the ceiling through
+    // it, so the other clamp has to stay out of the way.
     const policy = createLockWaitPolicy(lockDir, {
-      timeoutMs: 200, retryMs: 1_000_000, deadline: Date.now() + 200,
+      timeoutMs: 200, retryMs: 1_000_000, deadline: Date.now() + 60_000,
     });
 
     const remaining = policy.backoffMs();
@@ -697,24 +815,51 @@ test('createLockWaitPolicy: a hardDeadline that is not a number is refused, not 
   }
 });
 
+// Comments are stripped first: naming the parameter while explaining why it is
+// NOT passed is exactly what the three call sites now do, and a guard that fires
+// on prose gets silenced rather than obeyed.
+const withoutComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+
+/**
+ * Every TRACKED `.mjs` under `root` that names hardDeadline in code, as
+ * repo-relative POSIX paths. `exclude` holds absolute paths that are allowed to.
+ *
+ * Tracked, not the working tree (#6836). This walked the tree with
+ * collectMjsFiles and then read every file it listed, so a file another suite
+ * created and removed under the repository root while the scan ran was listed
+ * and then gone: plugins-cli-usage.test.mjs installs a fixture into the
+ * gitignored plugins.local/, and the read threw ENOENT and failed this suite in
+ * a full run. A gitignored plugin is not repository source either, so it was
+ * never this guard's to grade. trackedFiles reads the index, which a parallel
+ * suite does not touch, and skips an indexed path that is missing on disk.
+ */
+function hardDeadlineOffenders(root, exclude = []) {
+  const sources = trackedFiles(root, (rel) => rel.endsWith('.mjs'))
+    .filter((f) => !exclude.includes(f));
+  const offenders = sources
+    .filter((f) => withoutComments(readFileSync(f, 'utf-8')).includes('hardDeadline'))
+    .map((f) => f.slice(root.length + 1).replace(/\\/g, '/'));
+  return { scanned: sources.length, offenders };
+}
+
 test('no lock module re-derives the wait ceiling — the policy holds the only copy (#3895)', () => {
-  const policyModule = join(REPO_ROOT, 'pipeline-lock.mjs');
-  const sources = collectMjsFiles(REPO_ROOT).filter((f) => f !== SELF && f !== policyModule);
+  const policyModule = join(REPO_ROOT, 'lib', 'dir-lock.mjs');
+  // The web's copy of the policy module is the policy, not a re-derivation of
+  // it, for exactly as long as it is byte-identical (#5358). A drifted copy is
+  // scanned like any other file.
+  const webMirror = join(REPO_ROOT, 'web', 'src', 'lib', 'core', 'dir-lock.mjs');
+  const mirrorIsPolicy = existsSync(webMirror) && readFileSync(webMirror).equals(readFileSync(policyModule));
+  const { scanned, offenders } = hardDeadlineOffenders(
+    REPO_ROOT,
+    [SELF, policyModule, ...(mirrorIsPolicy ? [webMirror] : [])],
+  );
 
   // A guard that cannot look must never pass: an empty or tiny scan means the
   // walk failed, not that the repository is clean.
   assert.ok(
-    sources.length > 100,
-    `only ${sources.length} .mjs files scanned — this guard could not inspect the tree`,
+    scanned > 100,
+    `only ${scanned} .mjs files scanned — this guard could not inspect the tree`,
   );
-
-  // Comments are stripped first: naming the parameter while explaining why it
-  // is NOT passed is exactly what the three call sites now do, and a guard that
-  // fires on prose gets silenced rather than obeyed.
-  const withoutComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
-  const offenders = sources
-    .filter((f) => withoutComments(readFileSync(f, 'utf-8')).includes('hardDeadline'))
-    .map((f) => f.slice(REPO_ROOT.length + 1).replace(/\\/g, '/'));
 
   assert.deepEqual(
     offenders, [],
@@ -722,4 +867,302 @@ test('no lock module re-derives the wait ceiling — the policy holds the only c
     + 'instead of letting createLockWaitPolicy do it — the duplicated invariant #3895 removed. '
     + 'A ceiling belongs to the policy; a copy of it stays correct only until someone edits one side',
   );
+});
+
+test('the wait-ceiling guard grades tracked files only, not a plugin in plugins.local/ (#6836)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'co-ceiling-tracked-'));
+  try {
+    const git = (...args) => execFileSync('git', ['-C', dir, ...args], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    git('init', '-q');
+    const rederives = 'export const policy = { hardDeadline: Date.now() + 1000 };\n';
+    writeFileSync(join(dir, '.gitignore'), 'plugins.local/\n');
+    mkdirSync(join(dir, 'plugins.local', 'probe'), { recursive: true });
+    writeFileSync(join(dir, 'plugins.local', 'probe', 'index.mjs'), rederives);
+    writeFileSync(join(dir, 'shipped.mjs'), rederives);
+    writeFileSync(join(dir, 'vanished.mjs'), 'export {};\n');
+    git('add', '-A');
+    // Indexed but gone from disk: the shape of a file a parallel suite removed
+    // mid-scan. It must be skipped, not read.
+    rmSync(join(dir, 'vanished.mjs'));
+
+    // The tracked copy of the same source IS reported, so the empty result for
+    // plugins.local/ is the enumeration excluding it, not the fixture failing to
+    // look like an offender.
+    assert.deepEqual(hardDeadlineOffenders(dir), { scanned: 1, offenders: ['shipped.mjs'] });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The backoff is clamped to the per-holder window too, not only to the ceiling
+// ---------------------------------------------------------------------------
+//
+// backoffMs() clamped the jittered retry against the ceiling alone, so a sleep
+// could run straight past the per-holder deadline. That deadline is the only
+// thing holderStillWedged() can fire on, and it is only ever checked at the top
+// of the loop, so a caller's timeoutMs was observed at whatever instant the
+// sleep happened to end. With retryMs above timeoutMs the overshoot is the
+// whole retry: a 150ms timeout waited five seconds.
+
+test('createLockWaitPolicy: the backoff never sleeps past the per-holder deadline', () => {
+  const root = fixtureRoot();
+  try {
+    const lockDir = join(root, 'data', 'pipeline.md.lock');
+    const now = Date.now();
+    // retryMs far above timeoutMs, and a ceiling far above both, so the only
+    // bound that can produce a correct answer here is the per-holder window.
+    const policy = createLockWaitPolicy(lockDir, {
+      timeoutMs: 100, retryMs: 5_000, deadline: now + 100, hardDeadline: now + 30_000,
+    });
+
+    const slept = policy.backoffMs();
+    assert.ok(
+      slept <= 150,
+      `backoffMs() returned ${Math.round(slept)}ms against a 100ms per-holder window: the caller `
+      + 'wakes long after the deadline its timeout is measured against, so timeoutMs is enforced '
+      + 'at whatever moment the sleep ends',
+    );
+
+    // The same read taken LATE in the window, which is where every retry after
+    // the first takes it. The bound is the time actually remaining, so the
+    // clamp has to keep tightening as the window drains. A clamp that floors
+    // at some fraction of timeoutMs satisfies the t=0 read above and still
+    // sleeps the caller past the deadline on every later pass.
+    const lateNow = Date.now();
+    const late = createLockWaitPolicy(lockDir, {
+      timeoutMs: 1_000, retryMs: 5_000, deadline: lateNow + 40, hardDeadline: lateNow + 60_000,
+    });
+
+    // Bound it by the time the window ACTUALLY has left, read immediately
+    // before the call. A fixed midpoint of 250ms separates a remaining-window
+    // clamp from a half-of-timeoutMs floor (500ms), but it still passes a
+    // clamp that returns 200ms with 40ms left — the same overshoot one order
+    // down, and invisible to the assertion meant to catch it.
+    //
+    // The tight bound is derivable rather than empirical. backoffMs() returns
+    // min(jitter, ceiling - now, perHolderDeadline - now) read at call time,
+    // and that read happens no earlier than `beforeCall`, so the result can
+    // never exceed windowLeft. The 5ms slack covers Date.now() granularity
+    // only; a 200ms answer misses it by 40x.
+    const lateDeadline = lateNow + 40;
+    const beforeCall = Date.now();
+    const lateSleep = late.backoffMs();
+    const windowLeft = Math.max(0, lateDeadline - beforeCall);
+    assert.ok(
+      lateSleep <= windowLeft + 5,
+      `backoffMs() returned ${Math.round(lateSleep)}ms with ${windowLeft}ms left of a 1000ms `
+      + 'per-holder window: the clamp stopped tracking the time left, so the caller overshoots '
+      + 'its own deadline on every retry but the first',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('acquirePipelineLock: a caller gives up near its timeoutMs even when retryMs is larger', async () => {
+  const root = fixtureRoot();
+  try {
+    const p = join(root, 'data', 'pipeline.md');
+    // maxWaitMs is set high on purpose. The ceiling would otherwise cap the
+    // overshoot at 10 x timeoutMs and hide how far past its own deadline the
+    // waiter sleeps.
+    const timing = { timeoutMs: 150, retryMs: 5_000, maxWaitMs: 30_000 };
+    const held = await acquirePipelineLock(p, timing);
+    try {
+      // What the policy ASKS the timer for, recorded rather than timed. A
+      // stopwatch around this call measures the runner as much as the clamp,
+      // and this suite already has a slow-runner flake (#4017). The real
+      // acquirePipelineLock() path is untouched: the wrapper hands every call
+      // straight to the timer it replaced.
+      const requestedDelays = [];
+      const realSetTimeout = globalThis.setTimeout;
+      globalThis.setTimeout = (callback, delay, ...args) => {
+        requestedDelays.push(delay);
+        return realSetTimeout(callback, delay, ...args);
+      };
+      try {
+        await assert.rejects(() => acquirePipelineLock(p, timing), (err) => err instanceof LockTimeoutError);
+      } finally {
+        globalThis.setTimeout = realSetTimeout;
+      }
+
+      // A clamped waiter sleeps the time its window has left, which is at most
+      // timeoutMs. An unclamped one asks for the whole jittered retry, 2500ms
+      // at its floor here, so one overshooting delay is the bug itself.
+      const sleeps = requestedDelays.filter((ms) => typeof ms === 'number' && ms > 0);
+      assert.ok(
+        sleeps.length > 0,
+        'no retry delay was recorded, so this assertion proves nothing about the clamp',
+      );
+      assert.deepEqual(
+        sleeps.filter((ms) => ms > timing.timeoutMs).map((ms) => Math.round(ms)), [],
+        `retry delays ${JSON.stringify(sleeps.map((ms) => Math.round(ms)))} against a `
+        + `${timing.timeoutMs}ms per-holder window: a backoff carries the caller past its own `
+        + 'deadline, and the loop only decides after the sleep returns',
+      );
+    } finally {
+      held.release();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+// ---------------------------------------------------------------------------
+// The clamp is the RE-ARMED window, so it cannot collapse into a busy-wait
+// ---------------------------------------------------------------------------
+//
+// holderStillWedged() re-arms perHolderDeadline whenever the lock changes
+// hands. It runs immediately before every backoffMs() on both sleep paths.
+// Clamping to the `deadline` parameter looks identical at t=0. It diverges on
+// the first handoff: that bound has already passed, so every later sleep
+// floors at 0. The loop still runs to the ceiling, now spinning at the
+// setTimeout floor and re-racing every waiter at once. That's the thundering
+// herd the jitter above exists to prevent. So the two clamps have to be told
+// apart, and only the re-armed one keeps the jitter alive.
+//
+// No timers here, and no elapsed-time reads. The sequence is computed
+// synchronously, and a frozen clamp yields exactly 0 every round.
+
+test('createLockWaitPolicy: a re-armed per-holder window still sleeps a full jittered retry', () => {
+  const root = fixtureRoot();
+  try {
+    const lockDir = join(root, 'data', 'pipeline.md.lock');
+    mkdirSync(lockDir, { recursive: true });
+    // One handoff, stamped the way churnLock() stamps them. A fresh token is
+    // all lockFingerprint() needs to read the lock as having moved.
+    const handOff = (n) => writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({
+      pid: process.pid, token: `handoff-${n}`, started_at: new Date().toISOString(),
+    }), 'utf-8');
+    handOff(0);
+
+    const now = Date.now();
+    // The window opens already spent, so the handoff is what the first
+    // holderStillWedged() decides on. timeoutMs dwarfs retryMs and the ceiling
+    // sits far out, leaving the jitter alone to set every sleep.
+    const policy = createLockWaitPolicy(lockDir, {
+      timeoutMs: 60_000, retryMs: 80, deadline: now - 1, hardDeadline: now + 600_000,
+    });
+    policy.noteWaiting();
+
+    const sleeps = [];
+    for (let round = 1; round <= 5; round += 1) {
+      handOff(round);
+      assert.equal(
+        policy.holderStillWedged(), false,
+        `round ${round}: the lock changed hands, so this is progress and the window re-arms`,
+      );
+      sleeps.push(policy.backoffMs());
+    }
+
+    // 40ms is the jitter floor itself, retryMs * 0.5, so the bound is exact.
+    // A clamp to the frozen `deadline` reports 0.
+    assert.ok(
+      sleeps.every((ms) => ms >= 40),
+      `backoff sequence [${sleeps.map((ms) => Math.round(ms)).join(', ')}] across five handoffs. `
+      + 'A re-armed window still owes the caller a real jittered retry. A sleep of 0 is the '
+      + 'busy-wait a clamp against the frozen deadline would produce.',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── #4537: the ownerless grace floor must be reachable from the environment ──
+//
+// Its three siblings all read it, and
+// followup-seed.mjs layers a second set on top. This one is a bare constant,
+// so the single window whose budget process startup spends is the one window a
+// caller cannot widen. followup-seed-tests.mjs test 16 backdates a lock 100ms
+// into that 1s floor and then hands the rest to execFileSync plus Node startup;
+// on a slow runner the lock reads reclaimable, the child steals it and exits 0,
+// and both of test 16's assertions fail together. That is the macOS CI flake.
+//
+// The import is dynamic and cache-busted on purpose. This file's static import
+// above already evaluated the module, and ESM hoists it over any assignment
+// written here, so a plain re-import would read the value captured at load.
+// A value that is not a floor must not be accepted as one. The `|| default`
+// idiom refuses only the falsy ones, so '' and '0' and 'abc' were already safe
+// while '-5' and 'Infinity' were not, and the two fail in opposite directions:
+// a negative collapses Math.max(staleMs, floor) to staleMs, making a directory
+// created microseconds ago reclaimable, and Infinity makes nothing reclaimable
+// ever. Both assertions per case on purpose. Reading the constant back proves
+// the parse; the verdict proves the constant is what the comparison uses, which
+// a fix that validated the export but left a captured 1000 behind would not.
+for (const [label, value] of [
+  ['a negative', '-5'],
+  ['a zero', '0'],
+  ['a non-numeric', 'soon'],
+  ['an empty', ''],
+  ['an infinite', 'Infinity'],
+]) {
+  test(`${label} CAREER_OPS_OWNERLESS_GRACE_MS is refused, not used as the floor`, async () => {
+    const root = mkdtempSync(join(tmpdir(), `grace-bad-${label.replace(/\s/g, '-')}-`));
+    const prior = process.env.CAREER_OPS_OWNERLESS_GRACE_MS;
+    process.env.CAREER_OPS_OWNERLESS_GRACE_MS = value;
+    try {
+      const lock = await import(`../lib/dir-lock.mjs?grace-bad-${label.replace(/\s/g, '-')}`);
+      assert.equal(
+        lock.OWNERLESS_GRACE_MS, 1_000,
+        `${label} is not a floor, so the 1000ms default must stand`,
+      );
+      const dir = join(root, 'x.lock');
+      mkdirSync(dir, { recursive: true });
+      backdate(dir, 10); // ownerless and 10ms old: inside any real floor
+      assert.equal(
+        lock.lockRecoveryVerdict(dir, 0), lock.RECOVER_LIVE,
+        `staleMs 0 with a ${label} floor must still refuse to condemn a 10ms-old lock`,
+      );
+    } finally {
+      if (prior === undefined) delete process.env.CAREER_OPS_OWNERLESS_GRACE_MS;
+      else process.env.CAREER_OPS_OWNERLESS_GRACE_MS = prior;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+// Control. Without it every case above would pass on a build that ignored the
+// environment entirely and hard-coded 1000.
+test('a valid CAREER_OPS_OWNERLESS_GRACE_MS is still honored (control)', async () => {
+  const prior = process.env.CAREER_OPS_OWNERLESS_GRACE_MS;
+  process.env.CAREER_OPS_OWNERLESS_GRACE_MS = '2500';
+  try {
+    const lock = await import('../lib/dir-lock.mjs?grace-good');
+    assert.equal(lock.OWNERLESS_GRACE_MS, 2_500, 'a finite positive override must reach the floor');
+  } finally {
+    if (prior === undefined) delete process.env.CAREER_OPS_OWNERLESS_GRACE_MS;
+    else process.env.CAREER_OPS_OWNERLESS_GRACE_MS = prior;
+  }
+});
+
+test('the ownerless grace floor honors CAREER_OPS_OWNERLESS_GRACE_MS', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'grace-env-'));
+  const prior = process.env.CAREER_OPS_OWNERLESS_GRACE_MS;
+  process.env.CAREER_OPS_OWNERLESS_GRACE_MS = '30000';
+  try {
+    const lock = await import('../lib/dir-lock.mjs?grace-env');
+    const dir = join(root, 'x.lock');
+    mkdirSync(dir, { recursive: true });
+    backdate(dir, 5_000); // ownerless and 5s old: past the 1s default floor
+
+    assert.equal(
+      lock.OWNERLESS_GRACE_MS, 30_000,
+      'the floor is a bare constant, so a caller cannot widen the one window whose budget process startup spends',
+    );
+    // Two assertions on purpose. A fix that exports the number but leaves the
+    // comparison against a captured 1000 would satisfy the first and fail this.
+    assert.equal(
+      lock.lockRecoveryVerdict(dir, 10), lock.RECOVER_LIVE,
+      'a 5s-old ownerless lock is inside a 30s configured floor and must not be reclaimable',
+    );
+  } finally {
+    if (prior === undefined) delete process.env.CAREER_OPS_OWNERLESS_GRACE_MS;
+    else process.env.CAREER_OPS_OWNERLESS_GRACE_MS = prior;
+    rmSync(root, { recursive: true, force: true });
+  }
 });

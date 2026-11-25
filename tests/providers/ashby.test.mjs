@@ -34,6 +34,19 @@ try {
     fail('ashby.detect() should return null for non-ashby URLs');
   }
 
+  // A careers_url that only MENTIONS an Ashby board names none. A regex over the
+  // raw string read the slug out of another site's path or query and scanned
+  // othercorp's board under this entry's name.
+  const mentions = [
+    'https://careers.acme.com/apply/jobs.ashbyhq.com/othercorp',
+    'https://example.com/?next=https://jobs.ashbyhq.com/othercorp',
+  ].filter((careers_url) => ashby.detect({ name: 'Acme', careers_url }) !== null);
+  if (mentions.length === 0) {
+    pass('ashby.detect() ignores a jobs.ashbyhq.com/<slug> that only appears inside another site\'s URL');
+  } else {
+    fail(`ashby.detect() resolved a board from another site's URL: ${JSON.stringify(mentions)}`);
+  }
+
   if (ashby.detect({ name: 'X' }) === null && ashby.detect({ name: 'X', careers_url: null }) === null) {
     pass('ashby.detect() returns null for missing / null careers_url');
   } else {
@@ -130,11 +143,54 @@ try {
     fail(`parseCompensation(swapped) = ${JSON.stringify(swapped)}`);
   }
 
+  // Issue #6912: keep pay period and posted bounds next to annualized salary
+  const hourlyWithPeriod = parseCompensation({ compensation: { interval: '1 HOUR', minValue: 50, maxValue: 65, currency: 'USD' } });
+  if (
+    hourlyWithPeriod &&
+    hourlyWithPeriod.min === 104000 &&
+    hourlyWithPeriod.max === 135200 &&
+    hourlyWithPeriod.period === 'hour' &&
+    hourlyWithPeriod.posted?.min === 50 &&
+    hourlyWithPeriod.posted?.max === 65
+  ) {
+    pass('parseCompensation() keeps period "hour" and posted {min:50, max:65} for 1 HOUR');
+  } else {
+    fail(`parseCompensation(1 HOUR with period/posted) = ${JSON.stringify(hourlyWithPeriod)}`);
+  }
+
+  const oneSidedAnnual = parseCompensation({ compensation: { interval: '1 YEAR', minValue: 120000, maxValue: null, currency: 'EUR' } });
+  if (
+    oneSidedAnnual &&
+    oneSidedAnnual.min === 120000 &&
+    oneSidedAnnual.max === 120000 &&
+    oneSidedAnnual.period === 'year' &&
+    oneSidedAnnual.posted?.min === 120000 &&
+    !('max' in (oneSidedAnnual.posted ?? {}))
+  ) {
+    pass('parseCompensation() keeps period "year" and posted {min:120000} with no max key for one-sided min');
+  } else {
+    fail(`parseCompensation(1 YEAR min-only) = ${JSON.stringify(oneSidedAnnual)}`);
+  }
+
+  const biweekly = parseCompensation({ compensation: { interval: '2 WEEK', minValue: 4000, maxValue: 5000, currency: 'USD' } });
+  if (
+    biweekly &&
+    biweekly.min === 4000 * 26 &&
+    biweekly.max === 5000 * 26 &&
+    biweekly.period === undefined &&
+    biweekly.posted === undefined
+  ) {
+    pass('parseCompensation() omits period and posted for multi-unit interval (2 WEEK)');
+  } else {
+    fail(`parseCompensation(2 WEEK) = ${JSON.stringify(biweekly)}`);
+  }
+
   // fetch() — request shape and normalization from the real posting-api
   // payload: { jobs: [{ title, jobUrl, location, secondaryLocations, publishedAt, compensation }] }.
   const sample = {
     jobs: [
       {
+        id: 'ashby-posting-1234',
         title: 'Head of Applied AI',
         jobUrl: 'https://jobs.ashbyhq.com/acme/1234',
         location: 'Canada',
@@ -179,14 +235,104 @@ try {
   if (fetched[0]?.title === 'Head of Applied AI'
       && fetched[0]?.url === 'https://jobs.ashbyhq.com/acme/1234'
       && fetched[0]?.company === 'Acme'
+      && fetched[0]?.listingIdentity?.ats_provider === 'ashby'
+      && fetched[0]?.listingIdentity?.board_slug === 'acme'
+      && fetched[0]?.listingIdentity?.posting_id === 'ashby-posting-1234'
       && fetched[0]?.postedAt === Date.parse('2026-07-02T00:00:00.000Z')
       && fetched[0]?.salary && fetched[0].salary.min === 150000 && fetched[0].salary.max === 180000 && fetched[0].salary.currency === 'USD')
-    pass('ashby.fetch() maps title/jobUrl/entry.name/publishedAt/compensation');
+    pass('ashby.fetch() maps ATS identity, title/URL/company/date/compensation');
   else fail(`ashby.fetch() row 0 = ${JSON.stringify(fetched[0])}`);
 
   if (fetched[0]?.location === 'Canada · Europe · Berlin · Germany')
     pass('ashby.fetch() folds secondaryLocations (region/locality/country) into location, deduped, " · "-joined');
   else fail(`ashby.fetch() row 0 location = ${JSON.stringify(fetched[0]?.location)}`);
+
+  // Primary-location address block — added 2026-09-29. Ashby's `location`
+  // field is often a first-level subdivision name ("England", "Scotland")
+  // rather than the country a location_filter matches on; the country lives
+  // in `address.postalAddress.addressCountry` instead, and only the
+  // SECONDARY-location version of that field was being folded in (test
+  // above). A UK-primary + US-secondary posting composed to
+  // "England · United States · Remote" — no "United Kingdom" substring
+  // anywhere — which silently dropped two live Docker reqs behind a
+  // location_filter.block entry meant only for US-only postings.
+  const primaryAddr = await ashby.fetch(
+    { name: 'Acme', careers_url: 'https://jobs.ashbyhq.com/acme' },
+    {
+      fetchJson: async () => ({
+        jobs: [
+          {
+            title: 'UK role with US as a secondary hiring region',
+            location: 'England',
+            address: { postalAddress: { addressCountry: 'United Kingdom' } },
+            secondaryLocations: [{ location: 'United States' }],
+            isRemote: true,
+          },
+          {
+            title: 'No address block at all',
+            location: 'Remote',
+          },
+        ],
+      }),
+    },
+  );
+  if (primaryAddr[0]?.location === 'England · United Kingdom · United States · Remote') {
+    pass("ashby.fetch() folds the PRIMARY location's own address.postalAddress.addressCountry into location");
+  } else {
+    fail(`ashby.fetch() primary-address location = ${JSON.stringify(primaryAddr[0]?.location)}`);
+  }
+  if (JSON.stringify(primaryAddr[0]?.locations) === JSON.stringify(['England', 'United States'])
+      && !('locations' in primaryAddr[1])) {
+    pass('ashby.fetch() gives locations without "Remote" and without folded country, omitting when empty');
+  } else {
+    fail(`ashby.fetch() locations row 0 = ${JSON.stringify(primaryAddr[0]?.locations)}, row 1 = ${JSON.stringify(primaryAddr[1]?.locations)}`);
+  }
+
+  const wmJobs = await ashby.fetch(
+    { name: 'Acme', careers_url: 'https://jobs.ashbyhq.com/acme' },
+    {
+      fetchJson: async () => ({
+        jobs: [
+          { title: 'Hybrid Job', location: 'Hybrid' },
+          { title: 'Distributed Hybrid Job', location: 'Distributed; Hybrid' },
+          { title: 'Austin Job', location: 'Austin', secondaryLocations: [{ location: 'Remote' }] },
+        ],
+      }),
+    },
+  );
+  if (!('locations' in wmJobs[0])
+      && !('locations' in wmJobs[1])
+      && JSON.stringify(wmJobs[2]?.locations) === JSON.stringify(['Austin'])) {
+    pass("ashby.fetch() omits 'Hybrid', 'Distributed; Hybrid', and secondaryLocations 'Remote' from locations");
+  } else {
+    fail(`ashby.fetch() work models in locations = ${JSON.stringify(wmJobs.map(j => [j.title, j.locations]))}`);
+  }
+  // A primary location that already names its country must not repeat it.
+  const namedCountry = await ashby.fetch(
+    { name: 'Acme', careers_url: 'https://jobs.ashbyhq.com/acme' },
+    {
+      fetchJson: async () => ({
+        jobs: [
+          {
+            title: 'London role',
+            location: 'London, United Kingdom',
+            address: { postalAddress: { addressCountry: 'United Kingdom' } },
+            isRemote: true,
+          },
+        ],
+      }),
+    },
+  );
+  if (namedCountry[0]?.location === 'London, United Kingdom · Remote') {
+    pass('ashby.fetch() does not append a primary addressCountry the location already names');
+  } else {
+    fail(`ashby.fetch() named-country location = ${JSON.stringify(namedCountry[0]?.location)}`);
+  }
+  if (primaryAddr[1]?.location === 'Remote') {
+    pass('ashby.fetch() tolerates a job with no address block at all (no crash, no stray fields)');
+  } else {
+    fail(`ashby.fetch() no-address-block location = ${JSON.stringify(primaryAddr[1]?.location)}`);
+  }
 
   // Remote work model — `workplaceType` / `isRemote` live outside `location`,
   // which keeps naming the office city on a fully remote posting. Without
@@ -224,22 +370,75 @@ try {
     fail(`ashby.fetch() work-model locations = ${JSON.stringify(workModelActual)} (expected ${JSON.stringify(workModelExpected)})`);
   }
 
+  // workplaceType (#6909): dedicated field mapped to 'remote' | 'hybrid' | 'onsite'.
+  // Whitespace and case are trimmed/folded, 'on-site' mapped to 'onsite'.
+  // Blank, unspecified, or unknown values are omitted. isRemote alone never sets it.
+  const ashbyWtJobs = await ashby.fetch(
+    { name: 'Acme', careers_url: 'https://jobs.ashbyhq.com/acme' },
+    {
+      fetchJson: async () => ({
+        jobs: [
+          { title: 'Remote', workplaceType: 'Remote', isRemote: true },
+          { title: 'Hybrid', workplaceType: '  hybrid  ', isRemote: false },
+          { title: 'Onsite', workplaceType: 'Onsite', isRemote: false },
+          { title: 'On-site hyphen', workplaceType: 'on-site', isRemote: false },
+          { title: 'isRemote alone', isRemote: true },
+          { title: 'Blank workplaceType', workplaceType: '   ', isRemote: true },
+          { title: 'Unspecified', workplaceType: 'unspecified' },
+          { title: 'Unknown value', workplaceType: 'flexible' },
+        ],
+      }),
+    },
+  );
+  if (
+    ashbyWtJobs[0]?.workplaceType === 'remote'
+    && ashbyWtJobs[1]?.workplaceType === 'hybrid'
+    && ashbyWtJobs[2]?.workplaceType === 'onsite'
+    && ashbyWtJobs[3]?.workplaceType === 'onsite'
+    && !('workplaceType' in ashbyWtJobs[4])
+    && !('workplaceType' in ashbyWtJobs[5])
+    && !('workplaceType' in ashbyWtJobs[6])
+    && !('workplaceType' in ashbyWtJobs[7])
+  ) {
+    pass('ashby.fetch() maps workplaceType (remote/hybrid/onsite), trims/lowercases, normalizes on-site, omits unknown/blank, and ignores isRemote');
+  } else {
+    fail(`ashby.fetch() workplaceType = ${JSON.stringify(ashbyWtJobs.map(j => [j.title, j.workplaceType]))}`);
+  }
+
   if (fetched[1]?.title === '' && fetched[1]?.url === '' && fetched[1]?.location === ''
       && fetched[1]?.salary === null && fetched[1]?.postedAt === undefined)
     pass('ashby.fetch() tolerates a sparse job (empty strings, null salary, undefined postedAt for a bad date)');
   else fail(`ashby.fetch() row 1 = ${JSON.stringify(fetched[1])}`);
 
-  // Malformed response bodies → [], no crash.
-  const emptyCases = [null, {}, { jobs: null }, { jobs: 'nope' }];
-  let emptyOk = true;
-  for (const body of emptyCases) {
-    const out = await ashby.fetch(
-      { name: 'Acme', careers_url: 'https://jobs.ashbyhq.com/acme' },
-      { fetchJson: async () => body },
-    );
-    if (!Array.isArray(out) || out.length !== 0) { emptyOk = false; fail(`ashby.fetch() body=${JSON.stringify(body)} → ${JSON.stringify(out)}`); break; }
+  // Empty vs broken (#6906, ADDING_A_PROVIDER.md "Defensive parsing"): only
+  // { jobs: [] } is an empty board. Any other envelope throws, naming the keys
+  // (or the type) it got, instead of reading as "no open roles".
+  const ashbyEntry = { name: 'Acme', careers_url: 'https://jobs.ashbyhq.com/acme' };
+  const ashbyEmpty = await ashby.fetch(ashbyEntry, { fetchJson: async () => ({ jobs: [] }) });
+  if (Array.isArray(ashbyEmpty) && ashbyEmpty.length === 0) pass('ashby.fetch() returns [] for { jobs: [] }');
+  else fail(`ashby.fetch() { jobs: [] } → ${JSON.stringify(ashbyEmpty)}`);
+
+  const ashbyBroken = [
+    [{}, '[]'],
+    [{ error: 'rate limited' }, '[error]'],
+    [{ jobs: null }, '[jobs]'],
+    [{ jobs: {} }, '[jobs]'],
+    ['oops', '[string]'],
+    [null, '[null]'],
+  ];
+  let ashbyBrokenOk = true;
+  for (const [body, got] of ashbyBroken) {
+    let out;
+    let err = null;
+    try { out = await ashby.fetch(ashbyEntry, { fetchJson: async () => body }); } catch (e) { err = e; }
+    const msg = String(/** @type {any} */ (err)?.message || '');
+    if (!err || !msg.startsWith('ashby: unexpected response for Acme') || !msg.includes(`got: ${got}`)) {
+      ashbyBrokenOk = false;
+      fail(`ashby.fetch() body=${JSON.stringify(body)} should throw naming ${got}; got ${err ? JSON.stringify(msg) : `a return of ${JSON.stringify(out)}`}`);
+      break;
+    }
   }
-  if (emptyOk) pass('ashby.fetch() returns [] for null / {} / non-array jobs response bodies');
+  if (ashbyBrokenOk) pass('ashby.fetch() throws, naming what it got, for a body that is not { jobs: [...] }');
 
   // Retry loop — a transient failure on the first attempt recovers
   // transparently on the second (ASHBY_RETRIES=2 allows up to 3 attempts).
@@ -349,6 +548,297 @@ try {
     pass('ashby.fetch() emits "" for a missing / non-string descriptionPlain');
   } else {
     fail(`descriptions = ${JSON.stringify([withDesc[1]?.description, withDesc[2]?.description])}`);
+  }
+
+  // ── opt-in embed source (ashby: { embed: true }) ──────────────────────────
+  // Some companies disable the public posting API while the board stays
+  // published — api.ashbyhq.com answers 404, and the embed page every careers
+  // site loads still serves the whole board.
+  const embedHtml = (appData) => `<!doctype html><script>window.__appData = ${JSON.stringify(appData)}; // trailing comment\n</script>`;
+  const POSTING = {
+    id: 'c7509615-34bb-4ca8-b6a0-adbdb63f6c1a',
+    title: 'Business Operations Manager',
+    locationName: 'Los Angeles, CA',
+    workplaceType: 'Hybrid',
+    employmentType: 'FullTime',
+    secondaryLocations: [{ locationName: 'New York, NY' }, { locationName: 'Los Angeles, CA' }],
+    compensationTierSummary: null,
+  };
+  const recording = (respond) => {
+    const calls = [];
+    return { calls, ctx: { transport: 'http', sleep: async () => {}, fetchText: async (url, opts) => { const c = { url, opts, n: calls.length }; calls.push(c); return respond(c); }, fetchJson: async (url, opts) => { const c = { url, opts, n: calls.length, json: true }; calls.push(c); return respond(c); } } };
+  };
+  const EMBED_ENTRY = { name: 'Whatnot', careers_url: 'https://jobs.ashbyhq.com/whatnot', ashby: { embed: true } };
+
+  {
+    const { ctx, calls } = recording(() => embedHtml({ organization: { name: 'Whatnot' }, jobBoard: { jobPostings: [POSTING] } }));
+    const jobs = await ashby.fetch(EMBED_ENTRY, ctx);
+    const j = jobs[0];
+    jobs.length === 1
+      && j.title === 'Business Operations Manager'
+      && j.url === 'https://jobs.ashbyhq.com/whatnot/c7509615-34bb-4ca8-b6a0-adbdb63f6c1a'
+      && j.company === 'Whatnot'
+      && j.location === 'Los Angeles, CA · New York, NY'
+      ? pass('ashby embed source maps title/url/company and dedupes the location list')
+      : fail(`ashby embed mapping: ${JSON.stringify(jobs)}`);
+
+    calls.length === 1
+      && calls[0].url === 'https://jobs.ashbyhq.com/whatnot?embed=js'
+      && calls[0].opts?.redirect === 'error'
+      && !calls[0].json
+      ? pass('ashby embed source reads the board in one fetchText with redirect:"error"')
+      : fail(`ashby embed request: ${JSON.stringify(calls.map((c) => [c.url, c.opts?.redirect, !!c.json]))}`);
+  }
+
+  // The embed path renders location exactly as the posting API path does,
+  // including the "Remote" marker scan.mjs's location_filter matches on: a
+  // remote posting whose locationName is a city must not fail allow: ["Remote"].
+  {
+    const postings = [
+      { ...POSTING, id: 'a1', title: 'Remote role', locationName: 'San Francisco, CA', workplaceType: 'Remote', secondaryLocations: [] },
+      { ...POSTING, id: 'a2', title: 'Hybrid role', locationName: 'New York, NY', workplaceType: 'Hybrid', secondaryLocations: [] },
+      { ...POSTING, id: 'a3', title: 'Already remote', locationName: 'Remote - US', workplaceType: 'Remote', secondaryLocations: [] },
+    ];
+    const { ctx } = recording(() => embedHtml({ organization: { name: 'Whatnot' }, jobBoard: { jobPostings: postings } }));
+    const byTitle = Object.fromEntries((await ashby.fetch(EMBED_ENTRY, ctx)).map((j) => [j.title, j.location]));
+    byTitle['Remote role'] === 'San Francisco, CA · Remote'
+      && byTitle['Hybrid role'] === 'New York, NY'
+      && byTitle['Already remote'] === 'Remote - US'
+      ? pass('ashby embed source appends "Remote" from workplaceType, as the posting API path does')
+      : fail(`ashby embed remote marker: ${JSON.stringify(byTitle)}`);
+  }
+
+  {
+    const postings = [
+      { ...POSTING, id: 'w1', title: 'Remote', workplaceType: 'Remote' },
+      { ...POSTING, id: 'w2', title: 'Hybrid', workplaceType: '  Hybrid  ' },
+      { ...POSTING, id: 'w3', title: 'On-site', workplaceType: 'on-site' },
+      { ...POSTING, id: 'w4', title: 'isRemote only', workplaceType: undefined, isRemote: true },
+      { ...POSTING, id: 'w5', title: 'Unspecified', workplaceType: 'unspecified' },
+    ];
+    const { ctx } = recording(() => embedHtml({ organization: { name: 'Whatnot' }, jobBoard: { jobPostings: postings } }));
+    const embedJobs = await ashby.fetch(EMBED_ENTRY, ctx);
+    if (
+      embedJobs[0]?.workplaceType === 'remote'
+      && embedJobs[1]?.workplaceType === 'hybrid'
+      && embedJobs[2]?.workplaceType === 'onsite'
+      && !('workplaceType' in embedJobs[3])
+      && !('workplaceType' in embedJobs[4])
+    ) {
+      pass('ashby embed source maps workplaceType from dedicated field and omits when absent/unspecified');
+    } else {
+      fail(`ashby embed workplaceType = ${JSON.stringify(embedJobs.map(j => [j.title, j.workplaceType]))}`);
+    }
+  }
+
+  // A mangled row is dropped on its own: a null entry must not throw, and a row
+  // with no usable id must not mint a ".../undefined" link (CodeRabbit, #4298).
+  {
+    const postings = [null, { ...POSTING, id: undefined, title: 'No id' }, { ...POSTING, id: '', title: 'Blank id' }, POSTING];
+    const { ctx } = recording(() => embedHtml({ organization: { name: 'Whatnot' }, jobBoard: { jobPostings: postings } }));
+    let jobs = null; let err = null;
+    try { jobs = await ashby.fetch(EMBED_ENTRY, ctx); } catch (e) { err = e; }
+    !err && jobs.length === 1 && jobs[0].url.endsWith(`/${POSTING.id}`) && !jobs.some((j) => /undefined/.test(j.url))
+      ? pass('ashby embed source drops null rows and rows without a usable id, keeps the rest')
+      : fail(`ashby embed bad rows: err=${err && err.message} jobs=${JSON.stringify(jobs)}`);
+  }
+
+  // detect() claims an opted-in embed entry whose careers_url is a corporate
+  // page, via ashby.board, and names the page fetch() will read.
+  {
+    const corporate = { name: 'Whatnot', careers_url: 'https://www.whatnot.com/careers', ashby: { embed: true, board: 'whatnot' } };
+    const hit = ashby.detect(corporate);
+    hit?.url === 'https://jobs.ashbyhq.com/whatnot?embed=js'
+      && ashby.detect({ name: 'Whatnot', careers_url: 'https://www.whatnot.com/careers' }) === null
+      ? pass('ashby.detect() routes an embed entry with a corporate careers_url via ashby.board')
+      : fail(`ashby.detect() embed routing: ${JSON.stringify(hit)}`);
+  }
+
+  // Without the flag nothing changes: the posting API path must not gain an
+  // embed request (that is the whole reason this is opt-in).
+  {
+    const { ctx, calls } = recording((c) => {
+      if (!c.json) fail('ashby made an embed request without the opt-in flag');
+      const err = new Error('HTTP 404'); /** @type {any} */ (err).status = 404; throw err;
+    });
+    await ashby.fetch({ name: 'Gone', careers_url: 'https://jobs.ashbyhq.com/gone' }, ctx).catch(() => {});
+    calls.every((c) => c.json)
+      ? pass('ashby without embed:true makes zero embed requests, even on a 404')
+      : fail(`unflagged entry made an embed request: ${calls.map((c) => c.url).join(' ')}`);
+  }
+
+  // A slug that does not exist renders with jobBoard: null. That must stay a
+  // loud 404, or a typo reads as "no open roles" forever — and scan-ats-full's
+  // dead-board cache only counts a real 404.
+  {
+    const { ctx } = recording(() => embedHtml({ organization: null, posting: null, jobBoard: null }));
+    let caught = null;
+    await ashby.fetch({ ...EMBED_ENTRY, careers_url: 'https://jobs.ashbyhq.com/zz-no-such-co' }, ctx).catch((e) => { caught = e; });
+    caught && caught.status === 404 && /does not exist/.test(caught.message)
+      ? pass('ashby embed source throws a 404-shaped error when jobBoard is null')
+      : fail(`ashby embed missing board: ${caught && caught.message} status=${caught && caught.status}`);
+  }
+
+  // Markup changes must be loud, not empty.
+  {
+    const { ctx } = recording(() => '<!doctype html><p>nothing here</p>');
+    let msg = '';
+    await ashby.fetch(EMBED_ENTRY, ctx).catch((e) => { msg = e.message; });
+    /carried no window\.__appData/.test(msg)
+      ? pass('ashby embed source throws when __appData is gone')
+      : fail(`ashby embed no-appData error: ${JSON.stringify(msg)}`);
+  }
+  {
+    const { ctx } = recording(() => embedHtml({ jobBoard: { jobPostings: 'not-an-array' } }));
+    let msg = '';
+    await ashby.fetch(EMBED_ENTRY, ctx).catch((e) => { msg = e.message; });
+    /no jobPostings array/.test(msg)
+      ? pass('ashby embed source throws when jobPostings is not an array')
+      : fail(`ashby embed bad-payload error: ${JSON.stringify(msg)}`);
+  }
+
+  // An explicit board slug wins over the careers_url, for an entry that keeps a
+  // corporate careers page as its human-facing link.
+  {
+    const { ctx, calls } = recording(() => embedHtml({ jobBoard: { jobPostings: [POSTING] } }));
+    await ashby.fetch({ name: 'Whatnot', careers_url: 'https://www.whatnot.com/careers', ashby: { embed: true, board: 'whatnot' } }, ctx);
+    calls[0]?.url === 'https://jobs.ashbyhq.com/whatnot?embed=js'
+      ? pass('ashby embed source honours an explicit ashby.board slug over careers_url')
+      : fail(`ashby embed slug resolution: ${calls[0]?.url}`);
+  }
+
+  // The embed payload is host-controlled, so a lone surrogate in an id must cost
+  // that one posting, not abort the map and lose the whole board.
+  {
+    const { ctx } = recording(() => embedHtml({ jobBoard: { jobPostings: [
+      { ...POSTING, id: 'bad-\ud800-id', title: 'Dropped' },
+      { ...POSTING, id: 'fine-id', title: 'Kept' },
+    ] } }));
+    const jobs = await ashby.fetch(EMBED_ENTRY, ctx);
+    jobs.length === 1 && jobs[0].title === 'Kept'
+      ? pass('ashby embed source drops a posting whose id cannot be URI-encoded and keeps the rest')
+      : fail(`ashby embed surrogate id: ${JSON.stringify(jobs)}`);
+  }
+
+  // An empty-but-real board is a legitimate answer.
+  {
+    const { ctx } = recording(() => embedHtml({ jobBoard: { jobPostings: [] } }));
+    const jobs = await ashby.fetch(EMBED_ENTRY, ctx);
+    Array.isArray(jobs) && jobs.length === 0
+      ? pass('ashby embed source returns [] for a real board with no open postings')
+      : fail(`ashby embed empty board: ${JSON.stringify(jobs)}`);
+  }
+
+  // __appData is JSON, so a "};" inside a string value (a title, a team name,
+  // custom CSS) is data. A lazy regex up to the first "};" cut the object
+  // there and the whole board threw "Ashby changed the embed markup".
+  {
+    const { parseEmbedAppData } = ashbyModule;
+    const tricky = { ...POSTING, id: 'b1', title: 'Engineer, C++ {templates}; "quoted" \\ path' };
+    const html = embedHtml({ organization: { name: 'Whatnot', theme: { css: '.a{color:red};' } }, jobBoard: { jobPostings: [tricky, POSTING] } });
+    let board = null; let err = null;
+    try { board = parseEmbedAppData(html); } catch (e) { err = e; }
+    !err && board?.jobPostings.length === 2 && board.jobPostings[0].title === tricky.title
+      ? pass('ashby embed parser keeps "};", quotes and backslashes inside JSON string values')
+      : fail(`ashby embed "};" in value: ${err && err.message} ${JSON.stringify(board)}`);
+
+    let unterminated = null;
+    try { parseEmbedAppData('<script>window.__appData = {"jobBoard": {"jobPostings": ['); } catch (e) { unterminated = e; }
+    /did not parse as JSON/.test(unterminated?.message || '')
+      ? pass('ashby embed parser reports an unterminated __appData as unparseable')
+      : fail(`ashby embed unterminated: ${unterminated && unterminated.message}`);
+  }
+
+  // Liveness: Ashby's posting API is board-level. An embed-only board answers
+  // 404 there for every posting (Whatnot, live 2026-10-07) while the postings
+  // are live on the embed page, so the 404 says "API off for this org", never
+  // "posting gone". Reading it as authoritative marked live roles expired.
+  {
+    const { checkLivenessViaApi, resolveAtsApi } = await import(pathToFileURL(join(ROOT, 'liveness-api.mjs')).href);
+    const url = 'https://jobs.ashbyhq.com/whatnot/cf5ce9e0-d595-46f8-981e-c7f95778e6fa';
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response('Not Found', { status: 404 });
+    let r;
+    try { r = await checkLivenessViaApi(url); } finally { globalThis.fetch = realFetch; }
+    r === null && resolveAtsApi(url)?.api404Authoritative === false
+      ? pass('ashby liveness treats a board-level 404 as inconclusive, not expired')
+      : fail(`ashby board 404 liveness: ${JSON.stringify(r)}`);
+  }
+
+  // verify-portals: an embed-only board's posting API answers 404 by design, so
+  // tier 1's direct API probe reported Whatnot as "slug not found" (and failed
+  // --strict). An entry that opts into the embed source must be verified
+  // through the provider, which reads the embed page.
+  {
+    const { verifyCompanies } = await import(pathToFileURL(join(ROOT, 'verify-portals.mjs')).href);
+    const apiCalls = [];
+    const fetchJson = async (url) => { apiCalls.push(url); throw Object.assign(new Error('HTTP 404'), { status: 404 }); };
+    const fetchText = async () => '';
+    const httpCtx = {
+      transport: 'http',
+      sleep: async () => {},
+      fetchJson,
+      fetchText: async (url) => (url.includes('?embed=js')
+        ? embedHtml({ organization: { name: 'Whatnot' }, jobBoard: { jobPostings: [POSTING] } })
+        : ''),
+    };
+    const rows = await verifyCompanies([EMBED_ENTRY], { fetchJson, fetchText, providers: new Map([['ashby', ashby]]), httpCtx });
+    rows[0]?.status === 'live' && rows[0]?.provider === 'ashby' && apiCalls.every((u) => !u.includes('posting-api'))
+      ? pass('verify-portals reads an embed-only Ashby board through the provider, not the disabled posting API')
+      : fail(`verify-portals embed board: ${JSON.stringify(rows)} apiCalls=${JSON.stringify(apiCalls)}`);
+  }
+
+  // Oversized posting-API body → embed listing, never a lost board.
+  {
+    const { ASHBY_MAX_BYTES } = ashbyModule;
+    const embedHtml = '<script>window.__appData = ' + JSON.stringify({ jobBoard: { jobPostings: [
+      { id: 'p1', title: 'Strategy Lead', locationName: 'San Francisco' },
+    ] } }) + ';</script>';
+    let apiOpts = null;
+    const rows = await ashby.fetch(
+      { name: 'Big', careers_url: 'https://jobs.ashbyhq.com/big' },
+      {
+        fetchJson: async (url, opts) => { apiOpts = opts; throw Object.assign(new Error('HTTP body exceeded maxBytes'), { code: 'response_too_large', maxBytes: ASHBY_MAX_BYTES }); },
+        fetchText: async () => embedHtml,
+      },
+    );
+    if (apiOpts?.maxBytes === ASHBY_MAX_BYTES && rows.length === 1 && rows[0].title === 'Strategy Lead') {
+      pass('ashby.fetch() asks for the posting API with its own body ceiling and falls back to the embed listing past it');
+    } else {
+      fail(`ashby oversized fallback opts=${JSON.stringify(apiOpts)} rows=${JSON.stringify(rows)}`);
+    }
+
+    // api: pins the board while careers_url is a corporate site: the
+    // fallback takes its slug from the api URL.
+    let embedUrl = null;
+    const pinnedRows = await ashby.fetch(
+      { name: 'Pinned', careers_url: 'https://www.example.com/careers', api: 'https://api.ashbyhq.com/posting-api/job-board/big?includeCompensation=true' },
+      {
+        fetchJson: async () => { throw Object.assign(new Error('HTTP body exceeded maxBytes'), { code: 'response_too_large', maxBytes: ASHBY_MAX_BYTES }); },
+        fetchText: async (url) => { embedUrl = url; return embedHtml; },
+      },
+    );
+    if (pinnedRows.length === 1 && /^https:\/\/jobs\.ashbyhq\.com\/big\?/.test(String(embedUrl))) {
+      pass('ashby.fetch() falls back to the embed listing of an api:-pinned board');
+    } else {
+      fail(`ashby api-pinned fallback embedUrl=${embedUrl} rows=${JSON.stringify(pinnedRows)}`);
+    }
+
+    // api: and careers_url name DIFFERENT Ashby boards: the fallback reads the
+    // board the posting API was asked for, never the careers_url one.
+    let twoBoardUrl = null;
+    await ashby.fetch(
+      { name: 'Two boards', careers_url: 'https://jobs.ashbyhq.com/other', api: 'https://api.ashbyhq.com/posting-api/job-board/big?includeCompensation=true' },
+      {
+        fetchJson: async () => { throw Object.assign(new Error('HTTP body exceeded maxBytes'), { code: 'response_too_large', maxBytes: ASHBY_MAX_BYTES }); },
+        fetchText: async (url) => { twoBoardUrl = url; return embedHtml; },
+      },
+    );
+    if (/^https:\/\/jobs\.ashbyhq\.com\/big\?/.test(String(twoBoardUrl))) {
+      pass('ashby.fetch() falls back to the api: board, not a different careers_url board');
+    } else {
+      fail(`ashby two-board fallback read ${twoBoardUrl}`);
+    }
   }
 
 } catch (e) {

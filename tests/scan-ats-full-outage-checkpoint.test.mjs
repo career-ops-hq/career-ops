@@ -25,7 +25,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { pass, fail, run, formatRunFailure, NODE, ROOT } from './helpers.mjs';
+import { pass, fail, run, formatRunFailure, lastRunFailure, NODE, ROOT } from './helpers.mjs';
 
 console.log('\nscan-ats-full — a resolver-outage stop keeps its checkpoint (#2283)');
 
@@ -114,6 +114,15 @@ function sweep(dir, dnsCode, extraArgs = []) {
 {
   const dir = makeSandbox();
   try {
+    // A history-derived Greenhouse board is present, but the directory sweep's
+    // resolver breaker must stop the run before this second network phase.
+    mkdirSync(join(dir, 'data'), { recursive: true });
+    writeFileSync(
+      join(dir, 'data', 'scan-history.tsv'),
+      'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\n'
+        + 'https://job-boards.greenhouse.io/history-co/jobs/1\t2026-09-01\tgreenhouse\tEngineer\tHistory Co\tadded\tRemote\n',
+      'utf-8',
+    );
     const out = sweep(dir, 'EAI_AGAIN');
     const cpPath = join(dir, CHECKPOINT_REL);
     let resumeAt = null;
@@ -154,10 +163,10 @@ function sweep(dir, dnsCode, extraArgs = []) {
       // A caller that reads only the JSON (the web UI does) must be able to
       // tell a resumable stop from a finished sweep without stat'ing the
       // checkpoint file itself.
-      if (result.stoppedByOutage === true) {
-        pass('--json reports the run as stopped by the resolver breaker');
+      if (result.stoppedByOutage === true && result.outageCheckpointWritten === true) {
+        pass('--json reports the run as stopped by the resolver breaker, with a checkpoint written');
       } else {
-        fail(`--json hides the outage stop: stoppedByOutage=${result.stoppedByOutage}`);
+        fail(`--json hides the outage stop: stoppedByOutage=${result.stoppedByOutage} outageCheckpointWritten=${result.outageCheckpointWritten}`);
       }
     }
 
@@ -166,6 +175,10 @@ function sweep(dir, dnsCode, extraArgs = []) {
     // A checkpoint that stored the full slice instead of the attempted part
     // would double-count the portion the first run completed.
     if (resumeAt !== null) {
+      // This second run tests checkpoint accounting, not history seeding. The
+      // history fixture above exists only to prove the outage-stopped run never
+      // starts that network phase; remove it before the clean resume.
+      rmSync(join(dir, 'data', 'scan-history.tsv'), { force: true });
       const resumed = sweep(dir, 'ENOTFOUND', ['--resume']);
       if (resumed === null) {
         fail(`--resume after an outage stop failed${formatRunFailure()}`);
@@ -187,18 +200,49 @@ function sweep(dir, dnsCode, extraArgs = []) {
   }
 }
 
+// --- a filter edited since the checkpoint refuses --resume, by name ---
+// The boards swept before the stop were filtered under the old portals.yml, so
+// finishing the sweep under a new one would mix two configurations in one run.
+{
+  const dir = makeSandbox();
+  try {
+    const out = sweep(dir, 'EAI_AGAIN');
+    const cpPath = join(dir, CHECKPOINT_REL);
+    if (out === null || !existsSync(cpPath)) {
+      fail(`filter-change arm has no outage checkpoint to resume${formatRunFailure()}`);
+    } else {
+      const before = readFileSync(cpPath, 'utf-8');
+      writeFileSync(join(dir, 'portals.yml'), 'title_filter:\n  positive:\n    - director\n    - head of\n', 'utf-8');
+      const resumed = sweep(dir, 'ENOTFOUND', ['--resume']);
+      const failure = lastRunFailure();
+      if (resumed !== null) {
+        fail('--resume ran under a title_filter edited since the checkpoint');
+      } else if (failure?.status !== 1 || !/portals\.yml title_filter changed since the checkpoint/.test(failure.stderr)) {
+        fail(`filter-change refusal unclear: status=${failure?.status} stderr=${failure?.stderr?.slice(0, 300)}`);
+      } else if (readFileSync(cpPath, 'utf-8') !== before) {
+        fail('a refused --resume rewrote the checkpoint');
+      } else {
+        pass('--resume refuses a title_filter edited since the checkpoint, names it, and keeps the checkpoint');
+      }
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // --- a sweep that merely hit dead boards still cleans up after itself ---
 {
   const dir = makeSandbox();
   try {
     const out = sweep(dir, 'ENOTFOUND');
     const cpPath = join(dir, CHECKPOINT_REL);
+    const parsed = out === null ? null : JSON.parse(out);
     if (out === null) {
       fail(`clean sweep did not complete${formatRunFailure()}`);
     } else if (existsSync(cpPath)) {
       fail('a completed sweep left its checkpoint behind — the next run will demand --resume');
-    } else if (JSON.parse(out).stoppedByOutage !== false) {
-      fail(`a completed sweep reported stoppedByOutage=${JSON.parse(out).stoppedByOutage}`);
+    } else if (parsed.stoppedByOutage !== false || parsed.outageCheckpointWritten !== false) {
+      fail(`a completed sweep reported stoppedByOutage=${parsed.stoppedByOutage} outageCheckpointWritten=${parsed.outageCheckpointWritten}`);
     } else {
       pass('a completed sweep still deletes its checkpoint and reports no outage stop');
     }

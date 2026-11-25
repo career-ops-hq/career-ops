@@ -1,1 +1,0 @@
-../../../.agents/skills/career-ops/SKILL.md

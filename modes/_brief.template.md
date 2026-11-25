@@ -1,8 +1,8 @@
 # {Your Name} — Triage Brief
 
 <!-- ============================================================
-     THIS FILE IS YOURS. Copy it to `modes/_brief.md` (doctor.mjs
-     auto-copies it on first run) and fill in the placeholders.
+     THIS FILE IS YOURS. Copy it to `modes/_brief.md` and fill in the placeholders.
+     Onboarding can copy it with `node doctor.mjs --json --init-templates`.
      It is USER LAYER — never auto-updated by `node update-system.mjs`.
 
      PURPOSE: Compact context for first-pass triage agents
@@ -69,8 +69,8 @@ hard gaps you cannot bridge — be specific so triage can pattern-match them.
 ## Quick Scoring Guide
 
 Bands are relative to `triage_threshold` (`config/profile.yml → pipeline.triage_threshold`,
-default **3.5**), matching the verdict table in `modes/triage.md` — so a score at or
-above the threshold is PASS, and only the band below it is MARGINAL.
+default **3.5**, which is `TRIAGE_PASS_MIN` in `lib/score-action.mjs`), matching the verdict table in `modes/triage.md`. A score at or
+above the threshold is PASS. From the Maybe floor (3.0) up to that line is MARGINAL.
 
 | Score | Verdict | What it means |
 |-------|---------|---------------|

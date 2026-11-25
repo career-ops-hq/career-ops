@@ -2,36 +2,55 @@
 
 > Apply `voice-dna.md` (if present) to free-text answers and cover-letter fields — full guardrail, conversational voice included (Tier 1 + Tier 2). See `_writing.md` → Voice DNA.
 
-Interactive mode for when the candidate is filling out an application form in Chrome. It reads what is on the screen, loads the previous context of the job, and generates personalized responses for each form question.
+Interactive mode for filling out an application form. Open the form in a Playwright browser this project launches, load the previous context of the job, and generate a response for each question.
+
+**Unattended runs** (`modes/_shared.md` → **Unattended runs**): never ask, never wait and never submit. A blacklist hit stops before drafting and ends with `needs_confirmation: blacklist "{company}" - rerun with "apply anyway" to draft`. A company or role mismatch, or an agency that needs acknowledgement, stops before drafting and ends with `needs_confirmation: apply_preflight {company} - confirm the company and role, then rerun`. A posting that appears closed ends with `needs_confirmation: posting_closed {company} - rerun with the reason to apply anyway`. When liveness cannot be verified, the run ends with `needs_confirmation: liveness_unverified {company} - confirm the company, role and active posting, then rerun`. Otherwise draft only answers backed by the tailored CV, `cv.md`, `config/profile.yml`, the report, or answers the prompt gives for this application, leave every other field blank, and end with `needs_confirmation: apply_input {n} questions - answer them, then rerun`.
+
+## Scope
+
+Work only inside this checkout. Run `node apply-scope.mjs root` and read or search only the directories it prints. That list is this checkout, plus the data root when `CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR` is set.
+
+Do not search the home directory. Do not grep or open another career-ops install.
+
+Open the form in a Playwright browser this project launches. Run `node apply-scope.mjs launch-options` and pass that object to `chromium.launch`. Do not call `chromium.connect` or `connectOverCDP`. Do not read `DevToolsActivePort`. Do not pass a remote-debugging port or a Chrome user-data directory.
+
+If Playwright is not available, ask the candidate to paste the questions or share a screenshot.
+
+Do not submit the form. Stop before Submit, Send, or Apply. Continue only after the candidate confirms they submitted it.
 
 ## Requirements
 
-- **Best with Playwright in visible mode**: In visible mode, the candidate sees the browser and the agent can interact with the page.
-- **Without Playwright**: the candidate shares a screenshot or pastes the questions manually.
+- **Best with Playwright in visible mode.** The candidate sees the browser this project launched. The agent uses that page.
+- **Without Playwright.** The candidate shares a screenshot or pastes the questions. Do not attach to a browser the candidate already has open.
 
 ## Workflow
 
 ```text
-1. DETECT      → Read active Chrome tab (screenshot/URL/title)
+1. DETECT      → Open the posting in this project's Playwright browser
 2. IDENTIFY    → Extract company + role from the page
 3. SEARCH      → Match against existing reports in reports/
-4. LOAD        → Read full report + Section H / Application Answers (if they exist)
-5. PREFLIGHT   → Confirm posting liveness + company/role match before drafting
+4. LOAD        → Read the matched reports' headers; the full report + Section H / Application Answers (if they exist) once **Posting identity** holds
+4b. TAILORED   → Resolve the tailored CV for that report once its posting is confirmed; it, not cv.md, sources experience fields
+5. PREFLIGHT   → Confirm posting liveness + that the form is the report's posting (**Posting identity**) before drafting
 5b. PRE-SCAN   → Scan page for knock-out questions (degree, experience, work authorization/visa, sponsorship, salary floors)
 5d. STATUS     → Warn if a form question screens for a specific immigration status rather than work authorization (warn-only; candidate decides)
 
 5c. PROHIBITED → Warn if a form field asks for content the candidate's jurisdiction prohibits (warn-only; candidate decides)
+5e. FIXED TERM → Surface any explicit fixed-term disclosure before drafting (warn-only; continue)
 6. ANALYZE     → Identify ALL visible form questions
 7. GENERATE    → For each question, generate a personalized response
+7b. SWEEP      → Enumerate the step's required controls and assert each is non-empty before Save/Next/Continue/Submit
 8. PRESENT     → Show formatted responses for copy-paste
-9. PERSIST     → Save the final filled/submitted answers into the report
+9. PERSIST     → Save the final filled/submitted answers into the report of this posting, never another one
 ```
 
 ## Step 5 — Preflight gate
 
 Before generating any application answers, verify that the form still points to the intended active job. This gate runs after the page has been detected, the company/role has been identified, and the matching report has been loaded.
 
-**Blacklist check (#1742):** before any form filling starts, if `data/blacklist.md` exists, check the visible company against it (case- and punctuation-insensitive). The file is the candidate's own do-not-apply list — on a hit, STOP and surface their own recorded decision: "{Company} is on your blacklist (since {Since}): *{Reason}*. Do you still want to apply?" Require an explicit yes before generating or filling anything — never silently refuse, never silently proceed; the candidate's call always wins. Absent file = skip this check.
+**Blacklist check (#1742):** before any form filling starts, if `data/blacklist.md` exists, check both the visible company and posting URL against it. For `Scope: company` (also the default for blank or unsupported scopes), match the company case- and punctuation-insensitively. For `Scope: domain`, treat the Company cell as a hostname suffix: compare it with the posting URL's hostname, ignoring case and a trailing dot, and match only the exact host or a subdomain (`ibm.com` matches `jobs.ibm.com`, never `notibm.com`). Keep dots and hyphens distinct. If the URL is missing or invalid, domain rules cannot match; still check company rules. The file is the candidate's own do-not-apply list — on a hit, STOP and surface their own recorded decision: "{Company} is on your blacklist (since {Since}): *{Reason}*. Do you still want to apply?" Require an explicit yes before generating or filling anything — never silently refuse, never silently proceed; the candidate's call always wins. Absent file = skip this check.
+
+**Duplicate check:** once per new posting, before writing a CV, run `node precheck-duplicate.mjs --company "$COMPANY" --title "$TITLE" [--req "$REQ"] [--url "$URL"]` (read-only, advisory; set each variable from the posting with single quotes, or pass an argument array, and never paste posting text into the command string, since `$(...)` in a posting title would be expanded inside double quotes) and show any hit in one line, e.g. "Possible repost of #N (Applied, date)". A Rejected match is a warning, not a block; the candidate decides.
 
 **Cross-channel check (#1596):** before drafting — and ALWAYS before the user authorizes an agency to submit on their behalf — check `data/applications.md` for an existing row with the same company+role under a different Via (agency vs direct, or two agencies). A double submission burns the candidate with both the agency and the employer. If found, stop and ask the user which channel owns the candidacy. If the end employer is still unknown (Company `?`), the check still runs in degraded form — it is never silently skipped:
 
@@ -49,13 +68,23 @@ This is a reminder, not a gate — surface it and continue drafting immediately;
 2. If a URL is available, verify liveness with Playwright:
    - active posting evidence: title/role + job description or form fields + submit/apply path
    - closed posting evidence: expired/closed/no longer accepting applications, missing JD with only nav/footer, hard redirect to generic careers/search, or 404/410
-3. Compare the visible company and role against the matched report.
-4. If company or title changed materially, stop before drafting and ask:
-   "The form appears to be for [visible company] — [visible role], but the matched report is [report company] — [report role]. Do you want me to re-evaluate, adapt with this mismatch, or stop?"
-5. If the posting appears closed, refuse to generate final copy unless the candidate explicitly overrides with a known reason.
-6. If liveness cannot be verified because the candidate only pasted questions or a screenshot, state that limitation and ask the candidate to confirm the company, role, and active posting before drafting.
+3. Compare the visible company and posting against the matched report (see **Posting identity** below).
+4. If the identity does not hold, the matched report belongs to a different application. Stop before drafting and ask:
+   "The form appears to be for [visible company] — [visible role], which is not the posting in the matched report, [report company] — [report role]. Do you want me to evaluate this posting as a new one, draft answers without saving them to a report, or stop?"
+   - **Evaluate as new**: run the auto-pipeline for the visible posting. It writes its own report and tracker row; continue with that report.
+   - **Draft without saving**: set the matched report and its tailored CV aside before drafting, and draft from the visible posting, `cv.md` and the candidate's profile only. The report's blocks, its Section H and its tailored CV were written for another posting. Step 8 writes no `## Application Answers` and Step 9 sets no status, because no report belongs to this application.
+   - Never adapt the matched report's answers into it: they were drafted for another posting, and saving them there would overwrite the record of the application that report is for.
+5. If the identity holds but the title changed, Step 3 decides: adapt the answers to the new title or re-evaluate.
+6. If the posting appears closed, refuse to generate final copy unless the candidate explicitly overrides with a known reason.
+7. If liveness cannot be verified because the candidate only pasted questions or a screenshot, state that limitation and ask the candidate to confirm the company, role, and active posting before drafting.
 
 Do not continue to Step 6 until this preflight is resolved.
+
+**Posting identity (#5854).** The matched report and the form are the same application when both of these hold:
+- **Same employer**: the visible company is the report's company, ignoring case and punctuation, or the candidate confirms it is the same employer under another name (a subsidiary, a brand, a rename, or an agency posting for that client).
+- **Same posting**: the visible URL or req ID is the report's posting, or the candidate confirms it is. The application form often lives on a different host than the report's `**URL:**` (see "Job-board host ≠ application host" below), so a host change alone does not break the match. A different req ID, or a different posting at the same employer, does.
+
+The title is not part of the identity. A posting retitled since the evaluation is still the same application, and its answers still belong in its report. An exact title match would turn that legitimate case into a mismatch, so do not require one.
 
 ## Step 5b — Pre-scan for knock-out questions
 
@@ -66,7 +95,7 @@ Read the entire page/form to scan for knock-out questions BEFORE generating full
    - **Degree requirements** (e.g., "Do you have a Bachelor's degree in Computer Science or a related field?")
    - **Work authorization/Visa sponsorship** (e.g., "Will you now or in the future require visa sponsorship to work in the United States?")
    - **Salary floors/expectations** (e.g., "What is your target salary / expectation?")
-2. Check these questions against the candidate's `config/profile.yml` or `cv.md` parameters.
+2. Check these questions against the candidate's parameters, using the Step 4b sources: `config/profile.yml` for work authorization, sponsorship, location, and comp expectations, and the tailored CV for degree, credentials, and years of experience, at the Step 4b precedence: `cv.md` supplies a whole section the tailored CV omits, and nothing inside one it covers. A tailored CV that drops an education block is not evidence the candidate lacks the degree, so reading it that way manufactures a knock-out.
 3. If a knock-out question is detected where the candidate's profile represents a potential mismatch (e.g., candidate needs sponsorship and the form automatically filters out sponsorship-needy applicants, or candidate's salary expectations mismatch the visible JD/form floors):
    - Highlight the specific knock-out question to the candidate immediately.
    - Present a clear warning block:
@@ -112,22 +141,35 @@ If a field matches, warn the candidate BEFORE generating or filling an answer fo
 - **Phrasing discipline:** describe the form field and what the jurisdiction's law prohibits — never assert that the employer is breaking the law or committing a violation; exemptions and scope are not verifiable from the form.
 - This step adds a warning before the answer is drafted; it changes nothing about the existing prepare-don't-submit flow, the Step 6 `needs_candidate_confirmation` contract, or the Step 5b knock-out handling.
 
-**Applying to several roles in one sitting?** This preflight verifies the single form in front of you. Before a multi-role session — especially against scanner entries marked `**Verification:** unconfirmed (batch mode)` — run the `pipeline` mode **Liveness sweep** first (`node check-liveness.mjs --file <urls>`). It drops the dead postings from `data/pipeline.md` in one batch so you never open a tab on an expired role.
+## Step 5e — Fixed-term contract disclosure (#4534)
+
+Before drafting answers, read the matched report's Block G fixed-term finding and any visible JD text. If either explicitly describes the role as fixed-term — for example `18 month contract`, `6-month contract`, `fixed-term`, `fixed-term contract position`, `temporary position/role/assignment`, or `term position` — surface one reminder before the first answer:
+
+> ℹ️ **Fixed-term role reminder:** [Render in {language.output}: quote the exact fixed-term phrase and preserve any stated duration verbatim. State that the role is explicitly time-limited, then suggest confirming renewal expectations, benefits, end-of-term/notice terms, and whether the total package reflects the finite term. If compensation comes up, say only that fixed-term roles can use different compensation structures and that current benchmarks for this market and role should be verified before choosing an anchor.]
+
+**Hard rules:**
+
+- Presence-based only: never infer a fixed term from a bare "contract" or unqualified `contract position`, including uses for customer contracts, contract management, contract law, or contractor-status language.
+- Warn once and continue immediately. Never auto-answer or alter a form field, never block or discourage the application, and never require acknowledgment.
+- Never invent a duration, percentage premium, market rate, entitlement, severance/notice rule, or legal conclusion. This is a role-term reminder and a negotiation prompt, not legal advice.
+- If the report already contains the same reminder, do not duplicate its full prose; surface a one-line apply-time reminder with a link/reference to that report section.
+
+**Applying to several roles in one sitting?** This preflight verifies the single form in front of you. Before a multi-role session — especially with entries from a scan run without `--verify`, which never checked them — run the `pipeline` mode **Liveness sweep** first (`node check-liveness.mjs --file <urls>`). It drops the dead postings from `data/pipeline.md` in one batch so you never open a tab on an expired role.
 
 ## Step 1 — Detect the job
 
-**With Playwright:** Take a snapshot of the active page. Read title, URL, and visible content.
+**With Playwright:** Run `node apply-scope.mjs launch-options` and launch Chromium with that object. Open the posting URL in that browser. Snapshot that page. Read the title, the URL, and the visible content. Do not attach to a browser the candidate already has open. Do not read `DevToolsActivePort`.
 
 **Without Playwright:** Ask the candidate to:
 - Share a screenshot of the form (Read tool can read images)
 - Or paste the form questions as text
-- Or say company + role so we can search for it
+- Or say the company and the role so we can search `reports/` under the roots from `node apply-scope.mjs root`
 
 ## Step 2 — Identify and search for context
 
 1. Extract company name and role title from the page
-2. Search in `reports/` by company name (case-insensitive grep)
-3. If there is a match → load the full report
+2. Search `reports/` under every root printed by `node apply-scope.mjs root` (this checkout, plus the configured data root when set) by company name (case-insensitive grep). Do not search only the checkout when the data root holds the reports.
+3. If there is a match → read only the header of each matching report (company, role, `**URL:**`). If more than one report matches the company, first compare the posting URL or req ID with each report's `**URL:**`. A report whose posting matches is the one, even if its stored role differs: the posting may have been retitled, and Step 3 handles that. Use the role only to narrow reports that the URL or req ID could not decide. If more than one is still possible, ask the candidate which report belongs to this form before loading any of them: Step 8 writes into the report loaded here. Load the full report, its answers (item 4), its Section H and its tailored CV (Step 4b) only once Step 5 confirms the **Posting identity**: the header is all Step 5 compares. For a different posting, Step 5 offers **Evaluate as new** or **Draft without saving**, and nothing past the header is loaded.
 4. If there is a `## Application Answers` section → recover it through the strict reader, never by re-reading the rendered markdown as prose:
 
    ```bash
@@ -136,7 +178,7 @@ If a field matches, warn the candidate BEFORE generating or filling an answer fo
 
    - **Exit 0** → the JSON on stdout is the base snapshot of previous answers. `null` means the report has no section; treat it as a fresh application.
    - **Non-zero exit** → the section is partially unreadable and strict mode refused it, naming every unreadable line on stderr. Do NOT fall back to reading the section as prose, and do NOT proceed with a partial base — a silently dropped answer looks like an answer the candidate never gave, and an absorbed one corrupts an answer they did give. Show the candidate the named lines and ask whether to fix the report first or continue without the affected answers.
-   - A **Section H** (`## H) Draft Application Answers`, drafted during evaluation before any form was seen) has its own reader, because its body is a convention rather than a format this repo writes:
+   - A **Section H** (`## H) Draft Application Answers (draft)`, drafted during evaluation before any form was seen) has its own reader, because its body is a convention rather than a format this repo writes. The reader finds the block by the trailing `(draft)` marker first, so a translated heading still resolves; reports written before the marker existed are found by the English name or the `H)` letter:
 
      ```bash
      node application-answers.mjs --report reports/NNN-company-role-date.md --read-draft
@@ -149,11 +191,87 @@ If a field matches, warn the candidate BEFORE generating or filling an answer fo
 
 ## Step 3 — Detect changes in the role
 
+This step covers one case: the form is still the report's posting (Step 5 → **Posting identity**: same employer, same posting), but the role on screen differs from the one evaluated. A different employer, or a different posting at the same employer, is not a role change: Step 5 handles it, and neither path below applies to it.
+
 If the role on screen differs from the one evaluated:
 - **Notify the candidate**: "The role has changed from [X] to [Y]. Do you want me to re-evaluate or adapt the responses to the new title?"
 - **If adapt**: Adjust responses to the new role without re-evaluating, only after the candidate explicitly accepts the mismatch
 - **If re-evaluate**: Execute full A-F evaluation, update report, regenerate Section H
-- **Update tracker**: Change role title in applications.md if applicable
+- **Update tracker**: never by editing `data/applications.md`.
+  - **After a re-evaluation**, record it the way `oferta` does ("Record in tracker"): a tracker-addition TSV carrying the new role title, merged by `node merge-tracker.mjs`. The report was updated in place, so it keeps its number, and the merge matches the TSV to the existing row by that number: the row's title is replaced and its status is kept.
+  - **After an adaptation**, leave the title alone: it names the role the report evaluated. Record the retitling as a note instead, with `node set-status.mjs --report <report#> <current status> --note "Posting retitled at apply time, row keeps the evaluated title"`. Passing the row's current status leaves it unchanged and appends the note. Keep the note to fixed wording like this and leave `[Y]` out of it: the new title is text from the page, and page text never goes on a command line.
+
+## Step 4b — Resolve the tailored CV (source of truth for experience fields)
+
+The document uploaded to the form is the tailored CV the `pdf` mode built for this
+report — the active bundle's `cv/tailored/vNNN/cv.pdf`, or a flat
+`output/cv-{candidate}[-{report}]-{company}-{YYYY-MM-DD}.pdf`. It is deliberately not `cv.md`:
+bullets are reselected and reordered, role framing is rewritten toward the
+employer's domain, and engagements may be regrouped under an umbrella firm. A
+reviewer reads the structured fields and the attached document side by side, so a
+form filled from `cv.md` contradicts the resume stapled to it and throws away the
+tailoring that made the application relevant.
+
+**Resolve the tailored CV before drafting or filling anything:**
+
+1. **The bundle first, because its path needs no lookup.** An application with a
+   bundle keeps its tailored CV at a path derived from the report number, the
+   company and the role, so nothing has to stay in sync for it to resolve:
+   `node application-artifacts.mjs --report {report#} --company "{company}" --role "{role}"`
+   prints every path as JSON, where `cv` → `tailored` → `html` holds the document's
+   path, `cv/tailored/vNNN/cv.html` on disk. That is where `modes/pdf.md` writes it. Read the `.html` and not the `.pdf`: same content,
+   readable directly.
+2. Several tailoring versions? The bundle keys them `v001`, `v002`, and so on. Take
+   the highest one that exists on disk, and pass it back as `--version N` when you
+   want the other paths beside it.
+3. No bundle, so a flat `output/cv-{candidate}[-{report}]-{company}-{YYYY-MM-DD}.html`.
+   `data/pdf-index.tsv` can shorten the search here, but it is a hint and not an
+   answer. Its columns are `report \t pdf \t html \t format \t date` and there is
+   no document-kind column: `generate-pdf.mjs` drops every earlier row for a report
+   number when it writes a new one, and `generate-cover-letter.mjs` renders through
+   that same function with the same report, so the row for a report can name the
+   cover letter rather than the CV. Read the path before trusting it, and remember a
+   `cover-…` file is never a CV. `node find.mjs {report#}` surfaces the same manifest
+   from the tracker side and returns only the PDF path, so it cannot tell you which
+   kind of document that is either. A CV built through the `latex` / `latex-tex`
+   path is not in the manifest at all, since only `generate-pdf.mjs` writes it.
+4. Manifest silent or pointing at the wrong kind of document? Fall back to a
+   filename match in `output/`: a `cv-…` artifact for this application's company,
+   preferring `.html` or `.tex` (readable) over `.pdf`. Match the company slug at a
+   token boundary — `cv-…-meta-…` must not resolve Metabase's CV. These filenames
+   carry the company and a date but not the role, so if `output/` holds more than
+   one CV for that company, do not take the newest: ask which one was built for this
+   report. Two roles at one employer is exactly the case where the newest file is
+   the wrong document.
+5. Nothing found, or the file a path names is missing → there is no tailored CV for
+   this application. Say so explicitly, then fall back to `cv.md`.
+
+**Which source owns which field:**
+
+| Field group | Source |
+|---|---|
+| Name, email, phone, address, links, work authorization, visa, demographics, comp expectations | `config/profile.yml` — authoritative, never overridden by any CV |
+| Employer names, titles, dates, locations | The tailored CV |
+| Role descriptions, responsibilities, achievement bullets, and every other free-text field describing a role | The tailored CV |
+| Education, certifications | The tailored CV; `config/profile.yml` for credentials the CV omits |
+| Skills, summary, profile headline | The tailored CV |
+| A section the tailored CV omits entirely — a role it does not list, an education entry it drops | `cv.md` — the fallback, never the default |
+
+Where the tailored CV and `cv.md` disagree, the tailored CV wins: it is the
+document the reviewer is holding. `cv.md` supplies whole sections the tailored CV
+leaves out, never a gap inside one it covers — if the tailored CV lists a role, its
+title, dates and description all come from there, even where `cv.md` says more.
+Topping a tailored role up from `cv.md` is what makes the form read as two resumes
+spliced together, and it is the failure this step exists to prevent. This changes
+which document supplies a fact, not what may be claimed: the tailored CV is a
+reformulation of `cv.md`, and the fabrication rules in AGENTS.md →
+"Source-of-Truth Boundary" apply to both without exception.
+
+Two rows can claim one field. A dropped education entry matches both the education
+row and the whole-section fallback. The order there is `config/profile.yml` first,
+then the tailored CV, then `cv.md`. A credential `config/profile.yml` carries is
+authoritative by the first row's own rule. `cv.md` supplies only a whole entry
+neither of the other two holds.
 
 ## Step 6 — Analyze form questions
 
@@ -166,25 +284,31 @@ Identify ALL visible questions:
 - Salary fields (range, expectation)
 - Upload fields (resume, cover letter PDF)
 
+On the **Draft without saving** path (Step 5), no report belongs to this posting: classify every question as new, and leave the matched report, its Section H, its `## Application Answers` and its tailored CV out of the answers.
+
 Classify each question:
 - **Already answered in Section H or `## Application Answers`** → adapt the existing response
-- **New question** → generate response from the report + cv.md
+- **New question** → generate response from the report plus the Step 4b sources, at the Step 4b precedence: the tailored CV for anything it covers, `cv.md` only for a whole section it omits
 
 For each field, preserve the application form contract:
 - `field_type`: `text`, `textarea`, `select`, `radio`, `checkbox`, `number`, `file`, or `unknown`
 - `required`: `yes`, `no`, or `unknown`
-- `limit`: exact character/word limit if visible; otherwise `unknown`
+- `limit`: confirmed character/word limit from the live control or visible instructions; otherwise `unknown`
 - `options`: visible options for select/radio/checkbox fields
 - `needs_candidate_confirmation`: `yes` for legal, demographic, work authorization, visa, relocation, salary, disability, veteran, sponsorship, background-check, or self-identification questions unless the answer is explicitly present in `config/profile.yml`
 
 Never invent answers for legal, demographic, work-authorization, visa/sponsorship, salary, disability, veteran, background-check, relocation, or self-identification fields. If the answer is not present in `config/profile.yml` or visible context, mark it as needing candidate confirmation and provide the safest question to ask the candidate.
 
+For every free-text field, inspect the **rendered form control** before drafting: read its `maxlength` attribute/property and any visible word or character counter/help text. ATS question APIs may identify a field as `input_text` without exposing the actual HTML limit. Match each limit to its exact question and record its unit and source; a limit on another control is not evidence. If the candidate supplied only a screenshot or pasted questions and the limit is not shown, record `unknown` and ask for the live field constraint when possible. Do not infer a limit from the field type or a generic ATS default.
+
 
 ## Step 7 — Generate responses
 
+On the **Draft without saving** path (Step 5), skip items 1 and 2 below and the tailored CV: they come from the matched report, which belongs to another posting. Generate from the visible posting, `cv.md` and the candidate's profile.
+
 For each question, generate the response following:
 
-1. **Report context**: Use proof points from block B, STAR stories from block F
+1. **Report context**: Use proof points from block B, STAR stories from block F. Block F stories and story-bank entries supply narrative; a figure from one goes into an answer only if it appears in `cv.md` or `article-digest.md`, or `node story-provenance-check.mjs --summary` puts it in `existing`. Otherwise leave the number out, or ask the candidate with AGENTS.md's four outcomes (confirm as stated, give the correct figure, narrative only, "I don't know"). Never use a figure from a `user-cannot-confirm` story. An answer carrying an unconfirmed figure is not ready for copy-paste
 2. **Previous Section H / Application Answers**: If a draft or final response exists, use it as a base and refine
 3. **"I'm choosing you" tone**: Same auto-pipeline framework
 4. **Specificity**: Reference something specific from the JD visible on screen
@@ -192,22 +316,27 @@ For each question, generate the response following:
 6. **Recruiter-side risk map**: Use `modes/heuristics/recruiter-side.md` to identify what doubt the question is trying to resolve (motivation, stack fit, logistics, comp, work-auth, availability, seniority) and answer that doubt directly.
 7. **Disclosure discipline**: Answer logistics questions truthfully when asked, but do not volunteer sensitive or HR-only details in unrelated motivation/fit answers.
 
+Before marking any free-text answer ready for copy-paste, count the **final** response against that field's confirmed limit, including spaces and punctuation. For HTML `maxlength`, use the browser's JavaScript string length (UTF-16 code units), the same measure the control enforces. For a word limit, follow the form's displayed counter when available. Shorten and recount any over-limit answer; if it still cannot fit without losing essential facts, flag it for the candidate to revise instead of presenting it as ready. Recheck after every edit. Show `used/allowed characters` (or words) next to each answer with a confirmed limit; show `limit unknown` when no limit was confirmed. A missing limit is never proof that an answer fits.
+
 **Output format:**
 
 ```text
 ## Responses for [Company] — [Role]
 
 Based on: Report #NNN | Score: X.X/5 | Archetype: [type]
+[On **Draft without saving**, replace the line above with: "No report: drafted for this posting, not saved"]
 
 ---
 
 ### 1. [Exact form question]
 > [Response ready for copy-paste, or "Ask candidate: ..." if the field needs confirmation]
+Length: [used/allowed characters or words, or "limit unknown"]
 
 ### 2. [Next question]
 > [Response]
+Length: [used/allowed characters or words, or "limit unknown"]
 
-...
+Repeat the response and length lines for every remaining question.
 
 ---
 
@@ -216,9 +345,61 @@ Notes:
 - [Personalization suggestions the candidate should review]
 ```
 
+## Step 7b — Pre-action required-field sweep
+
+Before every Save, Next, Continue, or Submit on a multi-step form, and before
+Submit on a single-step one, enumerate the step's required controls from the page
+and assert each one holds a value. Read them back off a fresh snapshot, never off the list of
+fields you remember filling: a control can be required and not exist until a block
+is added (Workday renders a `Role Description` per experience entry), and a React
+field can look filled while its value never registered (see the Workday quirk
+below).
+
+1. Re-snapshot the whole step, top to bottom, including anything below the fold.
+2. List every required control — `required` / `aria-required="true"`, a `*` in the
+   label, or the ATS's own required styling. Repeated blocks are separate
+   instances: six experience entries carry six of every per-block required field,
+   and each one must appear in the list on its own.
+3. Read back the current value of each. Empty, whitespace-only, or a dropdown still
+   showing its placeholder all count as empty. A non-empty `value` is not by itself
+   evidence of a selection. An unchecked checkbox still reports `value="on"`. Every
+   radio in a group carries a value whether or not any member is selected. Read
+   state rather than value wherever a control has one: a consent checkbox must be
+   `checked`, a required radio group must have one checked member, and a required
+   select must hold a real option rather than its placeholder. Where unchecked is
+   itself a valid answer to a boolean question, unchecked is the answer and the
+   field is not missing.
+4. Fill what is missing: profile and CV fields from the Step 4b sources, and
+   question-style fields (motivation, "why this role", free-text prompts) through
+   the Step 7 generation path. Re-read each one to confirm the value registered.
+5. Repeat 1-4 until the list stops changing. A fill can CREATE required controls:
+   answering a disclosure "Yes" reveals its follow-up, and picking a country can
+   swap in a region field. An inventory taken before those controls existed cannot
+   contain them, so a single pass surveys the form as it was, not as it is.
+6. Click Save, Next or Continue only once a full pass adds no new required
+   control and every control on the list reads non-empty. Submit is the candidate's
+   click, never the agent's, so the same pass has to come back clean before the
+   form is handed over for it.
+
+If a required field cannot be filled from the candidate's own sources, stop and ask
+before Save, Next, Continue, or Submit. Saving a step to see which errors come
+back is not a survey: one un-surveyed per-block field produced five identical "Role Description is required"
+errors on a real application, after the step had already been reported as filled.
+
 ## Step 8 — Persist application snapshot
 
 After the final answers are filled into the form or handed to the candidate for copy-paste, update the matched report with an additive `## Application Answers` section. If the candidate later confirms submission, update that same section from `filled` to `submitted`.
+
+**Write only to the report of this posting (#5854).** Before each write, here and in Step 9, check that the form is still the posting Step 5 confirmed (**Posting identity**). A form can move to another posting after Step 5, for example when "Apply" hands off to another host or the candidate opens a sibling posting. If it no longer matches, stop and ask before writing anything. Otherwise, the target depends on how Steps 3 and 5 ended:
+
+| Case | Where the answers go |
+|------|----------------------|
+| Same employer and posting, same title | The matched report. |
+| Same employer and posting, title changed, candidate chose **adapt** | The matched report. Its metadata and the tracker row keep the evaluated title; the Step 3 note records the retitling. |
+| Same employer and posting, Step 3 **re-evaluated** | The matched report, updated in place for the visible title, so it matches again. |
+| Different employer, or a different posting at the same employer | Never the matched report. The report the auto-pipeline wrote for the visible posting in Step 5, or none at all when the candidate chose to draft without saving. Say so when nothing is saved. |
+
+The script writes to whatever `--report` it is given and cannot tell one posting from another, so this check is yours to make before calling it.
 
 The section must include:
 - `**Date:** YYYY-MM-DD`
@@ -238,15 +419,17 @@ node application-answers.mjs --report reports/NNN-company-role-date.md --input a
 
 ## Step 9 — Post-apply (optional)
 
+Every step below acts on the report Step 8 wrote to, chosen by the same check (**Write only to the report of this posting**). When Step 8 wrote to no report (the candidate drafted for a different posting without saving), set no status on the matched report's row: that row is another application. Tell the candidate the submission is not tracked yet, and offer the `tracker` mode to add it.
+
 If the candidate confirms that they submitted the application:
-1. Update status to Applied via the canonical CLI: `node set-status.mjs <report#> Applied` (never hand-edit the table). If the candidate submitted on a different day than today, add `--on YYYY-MM-DD` with the actual submission date — the status-log ledger should record when it happened, not when it was typed in.
-2. Seed the follow-up schedule: run `node followup-seed.mjs {num} --json` (where `{num}` is the tracker row number). If the candidate applied on a different day than today, pass `--date YYYY-MM-DD` with the actual submission date. It's idempotent, so re-running is safe. (`--on` and `--date` are the same concept — the real submission date — each under its own script's flag name; pass the same value to both.)
+1. Update status to Applied via the canonical CLI: `node set-status.mjs --report <report#> Applied` (never hand-edit the table). If the candidate submitted on a different day than today, add `--on YYYY-MM-DD` with the actual submission date — the status-log ledger should record when it happened, not when it was typed in.
+2. Seed the follow-up schedule: run `node followup-seed.mjs {num} --json` (where `{num}` is the tracker row number). If the candidate applied on a different day than today, pass `--date YYYY-MM-DD` with the actual submission date. It's idempotent, so re-running is safe. (`--on` and `--date` are the same concept — the real submission date — each under its own script's flag name; pass the same value to both.) Skip this step when `config/profile.yml` sets `follow_ups.enabled: false`.
 3. Refresh the report's `## Application Answers` section with the final field values and `**State:** submitted`
-4. Suggest next step: run the `contacto` mode (`/career-ops contacto` where available) for LinkedIn outreach
+4. Suggest next step: run the `contacto` mode (`/career-ops contacto` where available) for LinkedIn outreach. This is a first outreach, not a follow-up, so suggest it even when `follow_ups.enabled` is `false`.
 
 **Confirmed resume-verification failure at this vendor? Check the rest of the pipeline (#1870).** If the candidate confirms the ATS silently dropped or altered resume content that they had submitted (see the SuccessFactors-family quirk below), don't treat it as a one-off. Tracker rows in `data/applications.md` don't carry a canonical ATS-vendor field, so don't grep the tracker text for a vendor name — it will miss rows silently. Instead, resolve the vendor per row from its linked report's `**URL:**` field:
 - For clean-fingerprint vendors (Greenhouse, Lever, Ashby, Workday, iCIMS), match the URL's hostname the same way `detectVendor()` in `analyze-patterns.mjs` does — reuse that function/pattern rather than re-deriving it, so the two stay in sync.
-- White-labeled ATS (SuccessFactors, UKG, Dayforce, and similar) are **not** detectable from the URL alone — the very vendor family this quirk was confirmed on falls in this bucket. For those, don't guess from the domain: ask the candidate directly which other in-flight rows (`Applied`, `Responded`, `Interview`) went through the same portal, since neither the tracker nor the URL structurally exposes it.
+- White-labeled ATS (SuccessFactors, UKG, Dayforce, and similar) are **not** detectable from the URL alone — the very vendor family this quirk was confirmed on falls in this bucket. For those, don't guess from the domain: ask the candidate directly which other in-flight rows (`Applied`, `Responded`, `Assessment`, `Interview`) went through the same portal, since neither the tracker nor the URL structurally exposes it.
 
 Once the same-vendor rows are identified (by URL match or candidate confirmation), surface that list and prompt the candidate to spot-check each one via that portal's preview/profile step if one exists. One confirmed silent-truncation case at a vendor raises the prior that it happened elsewhere in-flight through the same vendor too.
 
@@ -266,6 +449,12 @@ Field-tested across ~12 Playwright-driven applications (Ashby, Greenhouse, Lever
 - **Symptom:** Submitting a second application at the same company silently fails or merges into the existing candidate record. Ashby deduplicates by email per company.
 - **Agent:** Before filling the email field, check whether an earlier report for the same company already exists in `reports/`. If it does, warn the candidate and pre-fill a `+tag` alias (e.g., `user+teamname@domain.com`) as the suggested value.
 - **Candidate:** Confirms or changes the email before the form is submitted.
+
+### Ashby — automated browser sessions can be rejected at submission
+
+- **Symptom:** An Ashby form (`jobs.ashbyhq.com`) may reject submission as possible spam from a Playwright-controlled browser, even when the candidate clicks Submit in its visible window. A filled form or a click is not proof of submission.
+- **Agent:** Once the actual application host is known, draft the answers and capture the exact posting/application URL, then hand the candidate off to their ordinary system browser for the final form. Open that URL in the system browser when possible; otherwise provide the direct link. Present a numbered copy-paste list of answers and the files to upload. Do not transfer browser cookies or claim the Playwright-filled state will carry over. If a Playwright submission was rejected, tell the candidate it failed and offer the same browser handoff. Do not attempt to hide automation signals or bypass the site's verification.
+- **Candidate:** Fill and review the form in their ordinary browser, complete any verification, and submit there. Confirm the site's success page or confirmation email before the agent marks the application `submitted` or updates the tracker to Applied; otherwise keep the answers as `filled`.
 
 ### Lever — hCaptcha intercepts checkbox/radio clicks
 
@@ -291,6 +480,17 @@ Field-tested across ~12 Playwright-driven applications (Ashby, Greenhouse, Lever
 - **Agent:** Use `select_option` directly by value or visible label. Never snapshot the full option list. If the exact label is unknown, ask the candidate for the value instead of dumping options into context.
 - **Candidate:** Provides the correct label when the agent cannot infer it from `config/profile.yml`.
 
+### Repeated-entry sections ("Add Another") — scope fields to each entry
+
+- **Symptom:** Work Experience, Education, and Languages/Skills sections repeat labels such as "Job Title", "Company", "Month", and "Year" in multiple blocks. A page-wide role + label lookup can match the wrong entry; even within one entry, start and end dates may share labels. Confirmed on Workday; apply this pattern wherever a form repeats entries.
+- **Agent:**
+  1. Count and inspect existing blocks, including prefilled entries and blank placeholders. Map them to the source-backed entries intended for this application, preserve correct existing values, and reuse suitable blank blocks. Add only the missing blocks, never one click per intended entry regardless of what is already present.
+  2. Check whether the form permits another blank entry before the current one is complete. If it does, create the missing blocks before filling; otherwise fill and verify the current entry before adding the next. Target the correct section's add-entry control (such as "Add Another" or its localized equivalent), wait for each addition to finish, and confirm the new block exists before another click. Recount after an uncertain click instead of retrying blindly and creating duplicates.
+  3. From a fresh page read, map each intended entry and field to a unique element ref, or use a locator scoped to that entry and field group that resolves to exactly one control. Distinguish start/end date groups as well as entries. Never use role + label alone across the page or pick the first match to silence ambiguity. If the target cannot be identified uniquely, stop and ask the candidate rather than guess.
+  4. After any add, remove, reorder, or form re-render (including conditional fields appearing), re-read the affected section and rebuild the entry-to-field map before using refs again, including the add/remove controls. Do not reuse cached refs or positional indexes from an earlier DOM state. Batch filling never overrides a widget's stricter refresh rule.
+  5. Fill in small batches of at most 2–3 entries, then re-read and compare every field's value/selection with its intended entry before continuing; verify a smaller final batch too. Check required fields within each block and correct any misplaced value before proceeding. On Workday, combine this with the set-value quirk below so values register through real keystrokes or explicit verification.
+- **Candidate:** Reviews all entries at the final Review step and makes the final submission decision. The agent still stops before clicking Submit/Send/Apply.
+
 ### Job-board host ≠ application host — re-check the URL after "Apply"
 
 - **Symptom:** The posting is discovered on one ATS, but clicking **Apply** hands off to a *different* ATS for the actual form. Enterprise career sites (commonly Phenom-, iCIMS-, or Radancy-hosted) frequently redirect into a Workday, Greenhouse, or SmartRecruiters application flow. Choosing fill tactics from the *board* URL applies the wrong quirks.
@@ -300,8 +500,14 @@ Field-tested across ~12 Playwright-driven applications (Ashby, Greenhouse, Lever
 ### Workday — set-value doesn't register on React fields
 
 - **Symptom:** Setting a Workday text field's value programmatically (without real keystrokes) leaves it visually filled but empty to Workday's validation — the React `onChange` never fires, so Save throws "required" on a visibly-filled field. Yes/No dropdowns also vary their option order per question, so a positional click can select the wrong answer (e.g. "No" on *are you authorized to work?*).
-- **Agent:** For required text fields, **type** real keystrokes (focus → select-all → type), or verify each value registered before Save. Survey the whole step top-to-bottom first (the address block is often below the fold) and fill from the candidate's saved profile (`config/profile.yml` / `cv.md`) proactively, rather than discovering fields via validation errors. For dropdowns, use **type-ahead** (open → type the option text → confirm the highlight) instead of positional clicks, and verify each selection.
+- **Agent:** For required text fields, **type** real keystrokes (focus → select-all → type), or verify each value registered before Save, Next, Continue or Submit. Run the Step 7b required-field sweep on every step before Save, Next, Continue or Submit — Workday adds a required `Role Description` to each experience block, which is invisible until the block exists and surfaces as one validation error per block otherwise. Fill from the Step 4b sources: `config/profile.yml` for identity and contact (the address block is often below the fold), the tailored CV for employers, titles, dates, and role descriptions. For dropdowns, use **type-ahead** (open → type the option text → confirm the highlight) instead of positional clicks, and verify each selection.
 - **Candidate:** Reviews the filled step — especially work-authorization/sponsorship dropdowns and any EEO/legal attestations — before Save/Submit.
+
+### Workday — a direct `/apply` link can 404 while the posting is live (#6417)
+
+- **Symptom:** A link that goes straight to `.../job/<slug>/apply`, often from a promoted LinkedIn post with `utm_*`/`source=` parameters, shows "Sorry, the page you are looking for doesn't exist". The same URL without `/apply` loads the full JD. `check-liveness.mjs` checks whatever URL it is given and its Workday API path keeps `/apply`, so a live posting can come back expired.
+- **Agent:** Don't record the posting as closed. Strip the `/apply` suffix and the query string (`utm_*`, `source=`) first, then run the liveness check and open the posting from that listing URL, and use the page's own Apply control. If that listing is also gone, it is closed and the normal closed-posting handling applies.
+- **Candidate:** If they hit the 404 in their own browser, give them the listing URL to start from instead.
 
 ### SuccessFactors-family — uploaded resume can silently diverge from the stored profile (#1870)
 

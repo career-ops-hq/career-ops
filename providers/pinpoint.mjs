@@ -50,6 +50,25 @@ function resolveApiUrl(entry) {
   return `https://${parsed.hostname}/postings.json`;
 }
 
+/**
+ * The posting's ATS-native identity: the tenant label of the board's host
+ * (`<slug>.pinpointhq.com`, already checked by PINPOINT_HOST_RE) and the
+ * posting's `id` from the payload, which Pinpoint writes as a string of digits
+ * (never parsed out of `url` or `path`). Anything else, a number or a string
+ * with a leading zero included, gives no identity, so that one posting has one
+ * form and that row falls back to URL dedup.
+ * Exported for unit tests.
+ *
+ * @param {string | null | undefined} slug
+ * @param {unknown} id
+ * @returns {{ats_provider: 'pinpoint', board_slug: string, posting_id: string} | undefined}
+ */
+export function pinpointListingIdentity(slug, id) {
+  if (typeof slug !== 'string' || slug === '' || slug !== slug.trim() || /[\u0000-\u001f\u007f]/u.test(slug)) return undefined;
+  if (typeof id !== 'string' || !/^[1-9][0-9]*$/.test(id)) return undefined;
+  return { ats_provider: 'pinpoint', board_slug: slug, posting_id: id };
+}
+
 /** @type {Provider} */
 export default {
   id: 'pinpoint',
@@ -65,9 +84,33 @@ export default {
     assertPinpointUrl(apiUrl);
     // redirect:'error' prevents SSRF via server-side redirects
     const json = await ctx.fetchJson(apiUrl, { redirect: 'error' });
-    return parsePinpointResponse(json, entry.name);
+    return parsePinpointResponse(json, entry.name, new URL(apiUrl).hostname.split('.')[0]);
   },
 };
+
+// Certain Pinpoint tenants — apparently abandoned trial/demo accounts, not
+// every possible <slug> — still answer 200 with well-formed, plausible-
+// looking job data instead of 404ing (#4190). A genuinely nonexistent slug
+// DOES 404 normally (verified live), so this is not a blanket "any slug
+// resolves" catch-all; a cross-slug liveness probe would not detect it.
+// Verified live against 6 unrelated companies with no real Pinpoint board
+// (Telefonica, NTT Data, Michael Page, Robert Walters, Adevinta, TravelPerk):
+// each of their tenants returns one of two canned postings ("Head of DEI -
+// UK" / "Head of DEI - Belfast"), and both embed the exact same malformed
+// YouTube attachment in their description — a doubled
+// "/embed/https://www.youtube.com/embed/<id>" URL for video id pFxm6fszrpw,
+// byte-for-byte identical across every tenant probed. That specific artifact
+// is Pinpoint's own onboarding-video filler, not something any real
+// employer's job description would independently reproduce, so it is a safe,
+// low-false-positive marker for "this posting is seeded demo content, not a
+// real opening" — the title text alone ("Head of DEI - UK") is not used as
+// the signal, since a real employer could plausibly post that exact title.
+const PINPOINT_DEMO_VIDEO_MARKER = 'youtube.com/embed/https://www.youtube.com/embed/pFxm6fszrpw';
+
+function isPinpointDemoPosting(j) {
+  const description = typeof j?.description === 'string' ? j.description : '';
+  return description.includes(PINPOINT_DEMO_VIDEO_MARKER);
+}
 
 /**
  * Parse a Pinpoint /postings.json response. Exported for unit tests.
@@ -88,17 +131,29 @@ export default {
  *               mirroring the recruitee provider.
  *
  * Rows missing a usable title or a valid `https:` URL are dropped — an empty
- * URL would corrupt the scanner's URL-based dedup key.
+ * URL would corrupt the scanner's URL-based dedup key. A row identified as
+ * Pinpoint's own seeded demo content (see isPinpointDemoPosting, #4190) is
+ * dropped too, so a tenant serving only demo postings resolves as empty
+ * rather than as a live board with fake jobs.
  *
  * @param {any} json
  * @param {string} companyName
- * @returns {Array<{title: string, url: string, company: string, location: string}>}
+ * @param {string|null} [boardSlug] The tenant label the board was fetched at; without it no row carries a `listingIdentity`.
+ * @returns {Array<{title: string, url: string, company: string, location: string, listingIdentity?: {ats_provider: 'pinpoint', board_slug: string, posting_id: string}}>}
  */
-export function parsePinpointResponse(json, companyName) {
-  const postings = json?.data;
-  if (!Array.isArray(postings)) return [];
+export function parsePinpointResponse(json, companyName, boardSlug = null) {
+  // { data: [] } is an empty board. Any other envelope ({}, { error }, a bare
+  // string) is a changed or failing API and must not read as a board with no
+  // open roles (ADDING_A_PROVIDER.md, "Defensive parsing"; #6906).
+  const postings = json && Array.isArray(json.data) ? json.data : null;
+  if (!postings) {
+    const got = json && typeof json === 'object' ? Object.keys(json).join(', ') : json === null ? 'null' : typeof json;
+    throw new Error(`pinpoint: unexpected response for ${companyName} — expected data[], got: [${got}]`);
+  }
   return postings
     .map(j => {
+      if (isPinpointDemoPosting(j)) return null;
+
       const title = typeof j?.title === 'string' ? j.title.trim() : '';
       if (!title) return null;
 
@@ -122,7 +177,8 @@ export function parsePinpointResponse(json, companyName) {
       const province = typeof loc.province === 'string' ? loc.province.trim() : '';
       const location = name || [city, province].filter(Boolean).join(', ');
 
-      return { title, url, location, company: companyName };
+      const listingIdentity = pinpointListingIdentity(boardSlug, j?.id);
+      return { title, url, location, company: companyName, ...(listingIdentity ? { listingIdentity } : {}) };
     })
     .filter(Boolean);
 }

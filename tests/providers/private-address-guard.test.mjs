@@ -47,10 +47,57 @@ test('blocks loopback, private, link-local and reserved ranges', () => {
     '100.64.0.1',           // CGNAT
     '224.0.0.1', '255.255.255.255',
     '::1', '::', 'fc00::1', 'fd12::3', 'fe80::1', 'fe80::1%eth0', 'ff02::1',
+    // The unspecified address, in every spelling: it is one address written four
+    // ways, and a raw CONNECT authority reaches this classifier unparsed.
+    '::0:0',
+    '::0.0.0.0',
+    '0:0:0:0:0:0:0.0.0.0',
+    '0:0:0:0:0:0:0:0',
     '::ffff:127.0.0.1',     // IPv4-mapped loopback
     '::ffff:169.254.169.254',
+    '::ffff:7f00:1',        // the same two in hex, as the URL parser prints them
+    '::ffff:a9fe:a9fe',
+    '::7f00:1',             // IPv4-compatible loopback in hex
+    // ...and the same mapped and compatible forms written out in full, which a
+    // regex for the compressed spelling read as ordinary public literals.
+    '0:0:0:0:0:ffff:7f00:1',
+    '0:0:0:0:0:ffff:127.0.0.1',
+    '0:0:0:0:0:ffff:a9fe:a9fe',
+    '0:0:0:0:0:0:7f00:1',
+    '0:0:0:0:0:0:127.0.0.1',
+    // Transition prefixes: the same address in another coat. On a host with a
+    // translator these reach loopback and the metadata endpoint, and the URL
+    // parser keeps them as literals (`new URL('http://[64:ff9b::a9fe:a9fe]/')`
+    // has `isIP() === 6`), so nothing downstream catches them.
+    '64:ff9b::7f00:1',      // NAT64 well-known prefix -> 127.0.0.1
+    '64:ff9b::a9fe:a9fe',   // NAT64 well-known prefix -> 169.254.169.254
+    '64:ff9b:1::a9fe:a9fe', // NAT64 local-use prefix
+    '2002:7f00:1::',        // 6to4 -> 127.0.0.1
+    '2002:a9fe:a9fe::',     // 6to4 -> 169.254.169.254
+    // The same prefixes with the embedded IPv4 written as a dotted tail: the
+    // tail used to be judged on its own, so the prefix these start with was
+    // never looked at and `2002:7f00:1::1.2.3.4` read as the public 1.2.3.4.
+    '2002:7f00:1::1.2.3.4', // 6to4 with a dotted tail -> 127.0.0.1
+    '2002:a9fe:a9fe::10.0.0.1',
+    '64:ff9b::10.0.0.1',    // NAT64 with a dotted tail
+    '::ffff:0:169.254.169.254',
+    '::ffff:0:a9fe:a9fe',   // IPv4-translated -> 169.254.169.254
+    '::ffff:0:7f00:1',      // IPv4-translated -> 127.0.0.1
   ]) {
     assert.equal(isBlockedAddress(address), true, `${address} should be blocked`);
+  }
+});
+
+test('a transition prefix carrying a PUBLIC IPv4 is still allowed', () => {
+  // The rule is "judge the IPv4 it carries", not "refuse the prefix": a 6to4
+  // tunnel to an ordinary public host must keep working, or a whole class of
+  // legitimate boards becomes unreachable.
+  for (const address of [
+    '2002:808:808::',    // 6to4 -> 8.8.8.8
+    '2002:101:101::',    // 6to4 -> 1.1.1.1
+    '2002:808:808::8.8.8.8', // the same, with the dotted tail
+  ]) {
+    assert.equal(isBlockedAddress(address), false, `${address} should be allowed`);
   }
 });
 
@@ -61,6 +108,7 @@ test('allows ordinary public addresses, including the range boundaries', () => {
     '100.63.255.255',                  // just below 100.64.0.0/10
     '192.169.0.1',                     // just above 192.168.0.0/16
     '2606:4700::1111', '2001:4860:4860::8888', '::ffff:8.8.8.8',
+    '::ffff:808:808',                  // 8.8.8.8, IPv4-mapped in hex
   ]) {
     assert.equal(isBlockedAddress(address), false, `${address} should be allowed`);
   }
@@ -83,6 +131,42 @@ test('a provider fetch to a name resolving to loopback is refused', async () => 
       (err) => codeOf(err) === 'ECAREEROPS_BLOCKED_ADDRESS',
       'localhost resolved to loopback and was connected to anyway',
     );
+  } finally { srv.close(); }
+});
+
+test('a provider fetch to a LITERAL private address is refused, in every spelling', async () => {
+  // A numeric host never reaches dns.lookup, so the lookup-time guard cannot
+  // see it. These were all fetched on the direct path while `localhost` was
+  // refused (reported privately by Greg Tyree).
+  const srv = await localServer();
+  try {
+    for (const host of ['127.0.0.1', '[::ffff:127.0.0.1]', '[::1]', '2130706433', '0x7f000001', '0177.0.0.1', '127.1']) {
+      await assert.rejects(
+        () => fetchText(`http://${host}:${srv.port}/`, { timeoutMs: 4000 }),
+        (err) => codeOf(err) === 'ECAREEROPS_BLOCKED_ADDRESS',
+        `http://${host}/ is loopback and was connected to anyway`,
+      );
+    }
+  } finally { srv.close(); }
+});
+
+test('a literal metadata or RFC1918 address is refused before any connection', async () => {
+  for (const host of ['169.254.169.254', '10.0.0.1', '192.168.1.1', '172.16.0.1', '[fe80::1]', '[fd00::1]']) {
+    const started = Date.now();
+    await assert.rejects(
+      () => fetchText(`http://${host}/latest/meta-data/`, { timeoutMs: 4000 }),
+      (err) => codeOf(err) === 'ECAREEROPS_BLOCKED_ADDRESS',
+      `http://${host}/ was dialled`,
+    );
+    assert.ok(Date.now() - started < 1000, `${host}: refused by the guard, not by a connect timeout`);
+  }
+});
+
+test('a NON-provider fetch to a literal loopback address still works', async () => {
+  const srv = await localServer();
+  try {
+    const res = await fetch(`http://127.0.0.1:${srv.port}/`);
+    assert.equal(await res.text(), 'SECRET-LOCAL-DATA');
   } finally { srv.close(); }
 });
 
@@ -126,6 +210,22 @@ test('the block code is not a resolver-failure code', () => {
   assert.equal(RESOLVER_FAILURE_CODES.has(err.code), false);
   assert.match(err.message, /evil\.example/);
   assert.match(err.message, /127\.0\.0\.1/);
+});
+
+test('a name that resolves only to a sinkhole address gets the DNS-filter hint', () => {
+  for (const address of ['0.0.0.0', '::']) {
+    const err = blockedAddressError('jobs.example', address);
+    assert.match(err.message, /likely a DNS filter or sandbox/, address);
+    assert.equal(err.code, 'ECAREEROPS_BLOCKED_ADDRESS');
+  }
+  // Public addresses in the same answer don't stop it reading as a filter.
+  assert.match(blockedAddressError('jobs.example', '0.0.0.0', ['0.0.0.0', '203.0.113.7']).message, /DNS filter/);
+});
+
+test('a real private address or a literal 0.0.0.0 gets no DNS-filter hint', () => {
+  assert.doesNotMatch(blockedAddressError('evil.example', '127.0.0.1').message, /DNS filter/);
+  assert.doesNotMatch(blockedAddressError('mixed.example', '0.0.0.0', ['0.0.0.0', '10.0.0.5']).message, /DNS filter/);
+  assert.doesNotMatch(blockedAddressError('0.0.0.0', '0.0.0.0').message, /DNS filter/);
 });
 
 test('the context is entered only for provider requests', async () => {

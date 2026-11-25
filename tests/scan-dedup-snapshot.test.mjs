@@ -17,6 +17,17 @@
 // `recheckAfterDays: undefined` and dedups aged rows forever), a permanent
 // status, an active and an expired cooldown, a legacy 7-column row, and a
 // cosmetic utm query param.
+//
+// One golden value has moved since capture, deliberately and by hand: the
+// `skipped_expired` row is now released by `scan_history.recheck_after_days`
+// rather than pinned forever (#3891 follow-up, requested in review on #3905).
+// `seen` loses that URL and `recheckEligible` goes 2 -> 3.
+//
+// A second hand edit: the two Greenhouse board URLs are now the same-job key
+// `greenhouse:{id}` (boards.greenhouse.io/acme/jobs/1 and the PipeCo pipeline
+// row). The other four keys, the role keys, the fingerprints and the
+// policy-liveness assertions are untouched. The values were NOT regenerated
+// from the code under test.
 import { pass, fail } from './helpers.mjs';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
@@ -33,7 +44,9 @@ const HISTORY = [
   'https://boards.greenhouse.io/acme/jobs/1?utm_source=x\t2026-08-01\tgreenhouse\tPlatform Engineer\tAcme\tadded\tRemote\tfp-acme-1\t2026-07-30\t\t\tacme',
   // recheck-aged `added` (recheckAfterDays=30, today=2026-08-07): NOT deduped, recheck-eligible
   'https://jobs.lever.co/beta/2\t2026-01-01\tlever\tData Engineer\tBeta\tadded\tBerlin\tfp-beta-2\t2025-12-28\t\t\tbeta',
-  // permanent status: dedups the URL forever, never seeds a role key, fingerprint still recorded
+  // retired posting, aged past the recheck TTL (2026-07-01 + 30d < 2026-08-07):
+  // NOT deduped and recheck-eligible, so a relisting can be found again. Still
+  // never seeds a role key; fingerprint still recorded.
   'https://boards.greenhouse.io/gamma/3\t2026-07-01\tgreenhouse\tML Engineer\tGamma\tskipped_expired\tRemote\tfp-gamma-3\t2026-06-28\t\t\tgamma',
   // active cooldown (until 2026-12-31 > today): dedups, no role key, no fingerprint
   'https://jobs.example.com/delta/4\t2026-07-15\tashby\tBackend Engineer\tDelta\tcooldown:refused:2026-12-31\tRemote\t\t\t\t\tdelta',
@@ -66,15 +79,14 @@ const POLICY = { recheckAfterDays: 30, today: '2026-08-07' };
 // Golden outputs from the pre-refactor loaders (see header comment).
 const GOLDEN = {
   seen: [
-    'https://boards.greenhouse.io/acme/jobs/1',
-    'https://boards.greenhouse.io/gamma/3',
-    'https://boards.greenhouse.io/pipeco/jobs/7',
+    'greenhouse:1',
+    'greenhouse:7',
     'https://jobs.example.com/delta/4',
     'https://jobs.lever.co/doneco/8',
     'https://old.example.com/zeta/6',
     'https://trackco.example.com/careers/9',
   ],
-  recheckEligible: 2,
+  recheckEligible: 3,
   companyRoles: [
     'acme::platform engineer',
     'doneco::principal engineer',

@@ -11,6 +11,8 @@
 - आपको **natural Hindi tech language** में responses और cover letters चाहिए — machine translation नहीं
 - आपको **India-specific contractual terms** handle करने हैं: CTC vs. In-hand salary, PF/EPF, Gratuity, Notice period/buyout, Bond clause, ESOPs, HRA/LTA
 
+> **English में:** यही भारतीय market rules English में, freshers के लिए batch, joining date और CGPA/backlog checks के साथ, `modes/in/` में हैं। देखें `modes/in/README.md`।
+
 यदि आपकी ज़्यादातर listings English में हैं, तो standard `modes/` folder use करते रहें।
 
 ## कैसे Enable करें?
@@ -33,7 +35,7 @@ Claude फिर `modes/` की जगह इस folder की files पढ़�
 
 ```yaml
 language:
-  primary: hi
+  output: hi
   modes_dir: modes/hi
 ```
 
@@ -44,7 +46,7 @@ language:
 | File | Translated From | Purpose |
 |------|-----------------|---------|
 | `_shared.md` | `modes/_shared.md` (EN) | Shared context, archetypes, global rules, India market specifics |
-| `naukri.md` | `modes/oferta.md` (ES) | Single job offer का complete evaluation (Blocks A-F) |
+| `naukri.md` | `modes/oferta.md` (ES) | Single job offer का complete evaluation (Blocks A-H) |
 | `aavedan.md` | `modes/apply.md` (EN) | Application form के लिए live assistant |
 | `pipeline.md` | `modes/pipeline.md` (ES) | URL inbox / collected offers के लिए second brain |
 
@@ -129,5 +131,5 @@ Modes customize या extend करते समय इस vocabulary का �
 1. `CONTRIBUTING.md` के अनुसार Issue खोलें
 2. ऊपर के vocabulary का follow करें — consistent tone के लिए
 3. Word-for-word translation नहीं — idiomatic और natural Hindi
-4. Structural elements (Blocks A-F, tables, code blocks, tool instructions) exactly वैसे ही रखें
+4. Structural elements (Blocks A-H, tables, code blocks, tool instructions) exactly वैसे ही रखें
 5. PR खोलने से पहले एक real Indian job offer (Naukri.com, Instahyre, या LinkedIn India) से test करें

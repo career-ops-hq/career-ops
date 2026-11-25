@@ -20,7 +20,10 @@
  * Usage:
  *   node verify-portals.mjs                 # sweep tracked_companies + job_boards in portals.yml
  *   node verify-portals.mjs --add cursor    # probe slug variants for one name
+ *   node verify-portals.mjs --unmined       # companies stuck in search_queries
+ *                                           #   that actually have a scannable board
  *   node verify-portals.mjs --strict        # exit non-zero if any slug is unresolved
+ *                                           #   (with --unmined: if any board is unmined)
  *   node verify-portals.mjs --file <path>   # use a specific portals file
  *   node verify-portals.mjs --help          # print this usage block and exit
  *
@@ -38,11 +41,56 @@
  */
 
 import { existsSync, readFileSync } from 'fs';
+import { isIP } from 'net';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
+import { applyEntryResponseCap } from './lib/entry-response-cap.mjs';
+import { applyEntryTimeout } from './lib/entry-timeout.mjs';
 
-import { fetchJson as defaultFetchJson, fetchTextHead as defaultFetchText, makeHttpCtx } from './providers/_http.mjs';
+import { fetchJson as defaultFetchJson, fetchText as defaultFetchFullText, fetchTextHead as defaultFetchText, makeHttpCtx } from './providers/_http.mjs';
+import { ASHBY_MAX_BYTES, ASHBY_TIMEOUT_MS, buildEmbedUrl as ashbyEmbedUrl, parseEmbedAppData as parseAshbyEmbed } from './providers/ashby.mjs';
+import { LEVER_TIMEOUT_MS } from './providers/lever.mjs';
+import { isBlockedAddress } from './providers/_ip-guard.mjs';
+
+// The portal probes are the one place that keeps following redirects: they hit
+// the ATS vendors' own hosts, and a moved board answers with a 3xx. `_http.mjs`
+// refuses redirects by default (#4079), so the probes follow them here, one hop
+// at a time under redirect:'manual', and each hop is checked like the first
+// request. A hostname is checked where it resolves (providers/_ip-guard.mjs),
+// but a literal address is dialled without a lookup, so it is checked here.
+const MAX_PROBE_REDIRECTS = 5;
+
+/** Where a refused 3xx points, or null when the probe must not go there. */
+function probeRedirectTarget(err, from) {
+  const status = err?.status;
+  if (typeof status !== 'number' || status < 300 || status >= 400 || !err.location) return null;
+  let next;
+  try {
+    next = new URL(err.location, from);
+  } catch {
+    return null;
+  }
+  if (next.protocol !== 'https:' && next.protocol !== 'http:') return null;
+  const host = next.hostname.replace(/^\[|\]$/g, '');
+  if (isIP(host) && isBlockedAddress(host)) return null;
+  return next.href;
+}
+
+const followRedirects = (fetchFn) => async (url, opts = {}) => {
+  let current = url;
+  for (let hop = 0; ; hop++) {
+    try {
+      return await fetchFn(current, { ...opts, redirect: 'manual' });
+    } catch (err) {
+      const next = hop < MAX_PROBE_REDIRECTS ? probeRedirectTarget(err, current) : null;
+      if (next === null) throw err;
+      current = next;
+    }
+  }
+};
+const probeFetchJson = followRedirects(defaultFetchJson);
+const probeFetchText = followRedirects(defaultFetchText);
 import { decodeEntities } from './providers/_html-entities.mjs';
 import { asciiFold } from './lib/ascii-fold.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
@@ -67,6 +115,8 @@ const PROVIDERS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'provider
 // How to turn a slug into a probe URL, and where the job list lives in the
 // response, for each supported ATS. Greenhouse/Ashby wrap jobs in `{ jobs }`;
 // Lever returns a bare array. `includeCompensation` mirrors the ashby provider.
+// `timeoutMs` is the one the provider fetches the same board with, so a board
+// `scan` reads is not reported unreachable here (none: _http.mjs's default).
 export const ATS = {
   greenhouse: {
     probeUrl: (slug) =>
@@ -82,6 +132,18 @@ export const ATS = {
   ashby: {
     probeUrl: (slug) =>
       `https://api.ashbyhq.com/posting-api/job-board/${slug}?includeCompensation=true`,
+    timeoutMs: ASHBY_TIMEOUT_MS,
+    // The same body ceiling the provider reads this endpoint with, so a board
+    // the scan can read is never reported missing here.
+    maxBytes: ASHBY_MAX_BYTES,
+    // Past even that ceiling the provider reads the embed listing instead
+    // (providers/ashby.mjs), so the probe counts the board the same way rather
+    // than reporting a board the scan can read as missing.
+    oversized: async (slug, { fetchEmbed }) => {
+      const html = await fetchEmbed(ashbyEmbedUrl(slug), { timeoutMs: ASHBY_TIMEOUT_MS, redirect: 'error' });
+      const board = parseAshbyEmbed(String(html));
+      return board ? board.jobPostings.length : null;
+    },
     jobCount: (json) => (Array.isArray(json?.jobs) ? json.jobs.length : null),
     // The posting API returns only {jobs, apiVersion}; the board page titles
     // itself with the owner ('deepset Jobs'), which is the only name either
@@ -94,6 +156,7 @@ export const ATS = {
     // EU boards (jobs.eu.lever.co) resolve to api.eu.lever.co, mirroring the
     // provider's resolveApiUrl; the default is the base instance.
     probeUrl: (slug, { eu = false } = {}) => `https://api.${eu ? 'eu.' : ''}lever.co/v0/postings/${slug}`,
+    timeoutMs: LEVER_TIMEOUT_MS,
     jobCount: (json) => (Array.isArray(json) ? json.length : null),
     ownerUrl: (slug, { eu = false } = {}) => `https://jobs.${eu ? 'eu.' : ''}lever.co/${slug}`,
     ownerKind: 'html',
@@ -101,22 +164,19 @@ export const ATS = {
   },
 };
 
-// Recognize an ATS + slug from a careers_url OR an `api:` URL. The careers_url
-// patterns mirror the provider `resolveApiUrl` regexes; the api-URL patterns
-// cover entries that pin the resolved endpoint directly. First match wins.
+const GREENHOUSE_BOARD_HOSTS = new Set([
+  'job-boards.greenhouse.io',
+  'job-boards.eu.greenhouse.io',
+  'boards.greenhouse.io',
+  'boards.eu.greenhouse.io',
+]);
+
+// Recognize an ATS + slug from a careers_url OR an `api:` URL. Every entry pins
+// its exact host via new URL(), matching the providers' resolveApiUrl guards.
 const ATS_URL_PATTERNS = [
-  {
-    ats: 'greenhouse',
-    re: /boards-api\.greenhouse\.io\/v1\/boards\/([^/?#]+)/,
-  },
-  { ats: 'greenhouse', re: /job-boards(?:\.eu)?\.greenhouse\.io\/([^/?#]+)/ },
-  { ats: 'greenhouse', re: /boards\.greenhouse\.io\/([^/?#]+)/ },
-  { ats: 'ashby', re: /api\.ashbyhq\.com\/posting-api\/job-board\/([^/?#]+)/ },
-  { ats: 'ashby', re: /jobs\.ashbyhq\.com\/([^/?#]+)/ },
-  // Lever entries pin an exact `host` (checked via new URL(), like
-  // providers/lever.mjs's resolveApiUrl) instead of matching the hostname as a
-  // loose substring anywhere in the URL — otherwise a crafted
-  // https://evil.com/jobs.lever.co/x careers_url would falsely resolve as Lever.
+  { ats: 'greenhouse', host: 'boards-api.greenhouse.io', re: /^\/v1\/boards\/([^/?#]+)/ },
+  { ats: 'ashby', host: 'api.ashbyhq.com', re: /^\/posting-api\/job-board\/([^/?#]+)/ },
+  { ats: 'ashby', host: 'jobs.ashbyhq.com', re: /^\/([^/?#]+)/ },
   { ats: 'lever', host: 'api.eu.lever.co', re: /^\/v0\/postings\/([^/?#]+)/, eu: true },
   { ats: 'lever', host: 'jobs.eu.lever.co', re: /^\/([^/?#]+)/, eu: true },
   { ats: 'lever', host: 'api.lever.co', re: /^\/v0\/postings\/([^/?#]+)/ },
@@ -132,22 +192,23 @@ const ATS_URL_PATTERNS = [
  *   tool skips. `eu` is set for Lever's EU data-residency instance.
  */
 export function parseAtsSlug(url) {
-  const text = String(url || '');
-  let hostname = null;
-  let pathname = null;
+  let parsed;
   try {
-    ({ hostname, pathname } = new URL(text));
+    parsed = new URL(String(url || ''));
   } catch {
-    // Not a parseable absolute URL — host-scoped patterns below simply won't match.
+    return null;
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+  const { hostname, pathname, searchParams } = parsed;
+  if (GREENHOUSE_BOARD_HOSTS.has(hostname)) {
+    let slug = pathname.match(/^\/([^/?#]+)/)?.[1] ?? '';
+    if (!slug || slug === 'embed') slug = (searchParams.get('for') || '').trim();
+    if (!slug || slug === 'embed' || /[/?#\\\s]/.test(slug) || slug.includes('..')) return null;
+    return { ats: 'greenhouse', slug };
   }
   for (const { ats, re, eu, host } of ATS_URL_PATTERNS) {
-    if (host) {
-      if (hostname !== host) continue;
-      const m = pathname.match(re);
-      if (m && m[1]) return eu ? { ats, slug: m[1], eu: true } : { ats, slug: m[1] };
-      continue;
-    }
-    const m = text.match(re);
+    if (hostname !== host) continue;
+    const m = pathname.match(re);
     if (m && m[1]) return eu ? { ats, slug: m[1], eu: true } : { ats, slug: m[1] };
   }
   return null;
@@ -214,11 +275,234 @@ export function deriveSlugCandidates(name, { firstWordSuffixes = true } = {}) {
   return [...new Set(candidates)].filter(Boolean);
 }
 
+// ── Unmined search_queries ───────────────────────────────────────────────────
+//
+// A `search_queries` entry only produces links for a human to open; it never
+// feeds the zero-LLM scanner. So a company that exists ONLY inside a query
+// string is invisible to every scan, and until now nothing said so. Groq and
+// Cerebras sat in one such entry with live ATS boards the scanner would have
+// read for free — the miss was silent because both the entry and the scan
+// looked healthy.
+//
+// The check below extracts the companies a query names, discards the ones that
+// are really role/skill/location vocabulary, and probes what survives. The
+// probe is the final arbiter: a bogus hint just resolves to no board, so the
+// extraction is allowed to be generous.
+//
+// Scope: only the three slug-addressable ATSs (Greenhouse/Ashby/Lever) are
+// probed, because a slug is the whole address there. Workday needs a tenant AND
+// a site, Gem a board id — not guessable from a company name, so this reports
+// "no Greenhouse/Ashby/Lever board" rather than "no board". Concretely, it
+// would have caught Cerebras from that Tesla/Groq/Cerebras query but NOT Groq,
+// whose board is on Gem. A silent partial answer would be worse than a stated
+// one, hence the wording in the output.
+
+/** Hosts that aggregate many employers. `site:jobs.ashbyhq.com` is a
+ *  cross-company search — its host names no company worth promoting.
+ *
+ *  One host per line, in alphabetical order: PRs that add different hosts then
+ *  touch different lines, which reduces merge conflicts. */
+const AGGREGATOR_HOSTS = [
+  'ashbyhq.com',
+  'bamboohr.com',
+  'breezy.hr',
+  'careers.hibob.com',
+  'gem.com',
+  'glassdoor.com',
+  'greenhouse.io',
+  'hirehive.com',
+  'icims.com',
+  'indeed.com',
+  'jobvite.com',
+  'join.com',
+  'lever.co',
+  'linkedin.com',
+  'myworkdayjobs.com',
+  'paylocity.com',
+  'personio.com',
+  'recruitee.com',
+  'recruitmentplatform.com',
+  'smartrecruiters.com',
+  'teamtailor.com',
+  'wellfound.com',
+  'workable.com',
+  'workday.com',
+  'ycombinator.com',
+];
+
+/** Subdomain labels that describe a careers site rather than the company. */
+const CAREERS_SUBDOMAINS = new Set([
+  'careers', 'career', 'jobs', 'job', 'job-boards', 'boards', 'apply', 'hire',
+  'hiring', 'talent', 'work', 'working', 'recruiting', 'join', 'www',
+]);
+
+/** Two-label public suffixes we care about; anything else drops one label. */
+const MULTI_LABEL_SUFFIXES = new Set([
+  'co.uk', 'com.au', 'co.jp', 'com.br', 'co.in', 'com.cn', 'co.nz', 'com.mx',
+]);
+
+/** Recruiting boilerplate that is never a company. Role, skill and city
+ *  vocabulary is deliberately NOT hardcoded here — buildHintStopwords pulls it
+ *  from the user's own title_filter / location_filter, so this list stays small
+ *  and does not rot as they retune their search. */
+const GENERIC_QUERY_TERMS = [
+  'visa sponsorship', 'will sponsor', 'sponsorship', 'h-1b', 'h1b', 'green card',
+  'careers', 'career', 'jobs', 'job', 'hiring', 'apply', 'openings', 'engineer',
+  'engineering', 'research', 'remote', 'onsite', 'on-site', 'hybrid', 'senior',
+  'staff', 'principal', 'lead', 'intern', 'internship', 'new grad', 'usa',
+  'united states', 'california', 'us', 'full-time', 'contract',
+];
+
+/**
+ * Search vocabulary a query may quote, which is never a company name.
+ *
+ * Sourced from the user's own config rather than a fixed list: whatever they
+ * put in title_filter is by definition role/skill language, and whatever is in
+ * location_filter is by definition a place. Retuning the search therefore
+ * retunes this automatically.
+ *
+ * Returns phrases AND their individual words, because queries quote fragments
+ * of a keyword rather than the keyword itself — `"Verification"` against a
+ * `Design Verification` filter, `"AI"` against `AI Engineer`. Matching only
+ * whole phrases let both through as company names.
+ *
+ * @param {Record<string, any>|null|undefined} cfg - Parsed portals.yml.
+ * @returns {{phrases: Set<string>, words: Set<string>}} Lowercased.
+ */
+export function buildHintStopwords(cfg) {
+  const phrases = new Set(GENERIC_QUERY_TERMS);
+  const words = new Set();
+  const tf = cfg?.title_filter ?? {};
+  const lf = cfg?.location_filter ?? {};
+  for (const list of [tf.positive, tf.negative, lf.allow, lf.block, lf.always_allow]) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      if (typeof item !== 'string' || !item.trim()) continue;
+      phrases.add(item.trim().toLowerCase());
+    }
+  }
+  for (const phrase of phrases) {
+    for (const w of phrase.split(/[^a-z0-9+#]+/i)) if (w) words.add(w);
+  }
+  return { phrases, words };
+}
+
+/**
+ * The company name behind a `site:` host, or null for aggregators.
+ *
+ * careers.amd.com → amd · google.com/about/careers → google · cerebras.ai →
+ * cerebras · job-boards.greenhouse.io → null (aggregator).
+ *
+ * @param {string} host - Host, optionally with a trailing path.
+ * @returns {string|null}
+ */
+export function companyFromHost(host) {
+  const bare = String(host || '').toLowerCase().split('/')[0].replace(/^www\./, '').trim();
+  if (!bare || !bare.includes('.')) return null;
+  if (AGGREGATOR_HOSTS.some((h) => bare === h || bare.endsWith(`.${h}`))) return null;
+
+  const labels = bare.split('.').filter(Boolean);
+  const lastTwo = labels.slice(-2).join('.');
+  const withoutSuffix = MULTI_LABEL_SUFFIXES.has(lastTwo) ? labels.slice(0, -2) : labels.slice(0, -1);
+  // Walk in from the right: the registrable label sits just left of the suffix,
+  // and anything further left is a subdomain like "careers".
+  const meaningful = withoutSuffix.filter((l) => !CAREERS_SUBDOMAINS.has(l));
+  const name = meaningful.length ? meaningful[meaningful.length - 1] : '';
+  return name || null;
+}
+
+/**
+ * Company names a websearch query mentions.
+ *
+ * Two sources: `site:` hosts (deterministic) and quoted proper nouns (fuzzy,
+ * filtered by `stopwords`). Both are candidates only — probeSlug decides.
+ *
+ * @param {string} query
+ * @param {{phrases: Set<string>, words: Set<string>}} [stopwords] - From buildHintStopwords().
+ * @returns {string[]} Distinct hints, lowercased.
+ */
+export function companyHintsFromQuery(query, stopwords) {
+  const phrases = stopwords?.phrases ?? new Set();
+  const words = stopwords?.words ?? new Set();
+  const q = String(query || '');
+  const hints = [];
+
+  /** Search vocabulary if every word of it is search vocabulary. A partial
+   *  overlap is kept: "Physical Intelligence" survives a `Physical Design`
+   *  filter because "intelligence" is the company's own word. The cost is that
+   *  a company named exactly after a keyword it hires for ("Triton") is missed
+   *  — a quiet miss, versus flooding the report with every role word quoted. */
+  const isVocabulary = (text) => {
+    if (phrases.has(text)) return true;
+    const parts = text.split(/[^a-z0-9+#]+/i).filter(Boolean);
+    return parts.length > 0 && parts.every((p) => words.has(p));
+  };
+
+  for (const m of q.matchAll(/site:([^\s)"']+)/gi)) {
+    const name = companyFromHost(m[1]);
+    if (name && !isVocabulary(name)) hints.push(name);
+  }
+
+  for (const m of q.matchAll(/"([^"]+)"/g)) {
+    const raw = m[1].trim();
+    const lower = raw.toLowerCase();
+    if (!raw || isVocabulary(lower)) continue;
+    // A company name in a query is a proper noun: it starts with a capital and
+    // is not a sentence. Lowercase fragments ("will sponsor") and long phrases
+    // are search language, not employers.
+    if (!/^[A-Z0-9]/.test(raw)) continue;
+    if (raw.split(/\s+/).length > 3) continue;
+    hints.push(lower);
+  }
+
+  return [...new Set(hints)];
+}
+
+/**
+ * Companies named in search_queries that are not tracked as scannable boards.
+ *
+ * @param {Record<string, any>|null|undefined} cfg - Parsed portals.yml.
+ * @returns {{hint: string, sources: string[]}[]} Sorted by hint.
+ */
+export function unminedHints(cfg) {
+  const stopwords = buildHintStopwords(cfg);
+
+  // Already-tracked companies are the point of the exercise, not a finding.
+  // Match on the derived slug shapes too, so "Cerebras" in a query is
+  // recognised as the tracked "Cerebras" entry regardless of punctuation.
+  const tracked = new Set();
+  for (const c of cfg?.tracked_companies ?? []) {
+    if (typeof c?.name !== 'string') continue;
+    tracked.add(c.name.toLowerCase());
+    for (const s of deriveSlugCandidates(c.name)) tracked.add(s);
+  }
+
+  /** @type {Map<string, Set<string>>} */
+  const byHint = new Map();
+  for (const entry of cfg?.search_queries ?? []) {
+    if (entry?.enabled === false || typeof entry?.query !== 'string') continue;
+    for (const hint of companyHintsFromQuery(entry.query, stopwords)) {
+      // The joined form only ("scale nova" → "scalenova"), so a tracked
+      // "ScaleNova" or "Scale-Nova" is recognised. Not every candidate: those
+      // include the first word, and a tracked "Scale" would then hide an
+      // untracked "Scale Nova" — the miss this report exists to surface.
+      const [joined] = deriveSlugCandidates(hint);
+      if (tracked.has(hint) || (joined && tracked.has(joined))) continue;
+      if (!byHint.has(hint)) byHint.set(hint, new Set());
+      byHint.get(hint).add(String(entry.name ?? '(unnamed)'));
+    }
+  }
+
+  return [...byHint.entries()]
+    .map(([hint, sources]) => ({ hint, sources: [...sources].sort() }))
+    .sort((a, b) => a.hint.localeCompare(b.hint));
+}
+
 /**
  * Classify a fetch/probe failure for scan summaries and slug diagnostics.
  *
  * @param {Error|{status?: number, name?: string, message?: string}|null|undefined} err
- * @returns {'slug_gone'|'auth'|'network'|'server'|'unknown'}
+ * @returns {'slug_gone'|'auth'|'network'|'server'|'rate_limit'|'unknown'}
  */
 export function classifyFetchError(err) {
   if (!err) return 'unknown';
@@ -230,9 +514,11 @@ export function classifyFetchError(err) {
   const status = err.status;
   if (status === 404 || status === 410) return 'slug_gone';
   if (status === 401 || status === 403) return 'auth';
+  if (status === 429) return 'rate_limit';
   if (typeof status === 'number' && status >= 500) return 'server';
   if (/HTTP 404|HTTP 410/.test(msg)) return 'slug_gone';
   if (/HTTP 401|HTTP 403/.test(msg)) return 'auth';
+  if (/HTTP 429\b/.test(msg)) return 'rate_limit';
   if (/HTTP 5\d\d/.test(msg)) return 'server';
   return 'unknown';
 }
@@ -242,8 +528,9 @@ export function classifyFetchError(err) {
  *
  * @param {string} ats - Key into ATS (greenhouse | ashby | lever).
  * @param {string} slug - Candidate slug to probe.
- * @param {{fetchJson?: Function, eu?: boolean}} [deps] - Injectable HTTP for
- *   testability; `eu` selects Lever's EU data-residency instance.
+ * @param {{fetchJson?: Function, fetchEmbed?: Function, eu?: boolean}} [deps] - Injectable
+ *   HTTP for testability; `eu` selects Lever's EU data-residency instance;
+ *   `fetchEmbed` reads a full page for an ATS with an `oversized` fallback.
  * @returns {Promise<{ats,slug,url,status,jobCount?,httpStatus?,errorKind?,reason?}>}
  *   status is 'live' (jobs > 0), 'empty' (200, no jobs), or 'missing'
  *   (404/error/unexpected shape).
@@ -251,7 +538,7 @@ export function classifyFetchError(err) {
 export async function probeSlug(
   ats,
   slug,
-  { fetchJson = defaultFetchJson, eu = false } = {},
+  { fetchJson = probeFetchJson, fetchEmbed = defaultFetchFullText, eu = false } = {},
 ) {
   const spec = ATS[ats];
   if (!spec)
@@ -265,7 +552,11 @@ export async function probeSlug(
     };
   const url = spec.probeUrl(slug, { eu });
   try {
-    const json = await fetchJson(url);
+    const probeOpts = {
+      ...(spec.timeoutMs ? { timeoutMs: spec.timeoutMs } : {}),
+      ...(spec.maxBytes ? { maxBytes: spec.maxBytes } : {}),
+    };
+    const json = await fetchJson(url, Object.keys(probeOpts).length ? probeOpts : undefined);
     const count = spec.jobCount(json);
     if (count == null)
       return {
@@ -284,6 +575,14 @@ export async function probeSlug(
       jobCount: count,
     };
   } catch (err) {
+    if (/** @type {any} */ (err)?.code === 'response_too_large' && spec.oversized) {
+      try {
+        const count = await spec.oversized(slug, { fetchEmbed });
+        if (count != null) return { ats, slug, url, status: count > 0 ? 'live' : 'empty', jobCount: count };
+      } catch {
+        // Fall through: report the original size error, not the fallback's.
+      }
+    }
     return {
       ats,
       slug,
@@ -426,6 +725,21 @@ async function ownerConfirmed(ats, slug, companyName, { fetchJson, fetchText, eu
 }
 
 /**
+ * Strip control characters from text before it reaches a terminal.
+ *
+ * Owner names come from a remote board page's ``<title>``, so a hostile or
+ * merely broken board can put ANSI escapes in our CLI output. Escape sequences
+ * can recolour or rewrite prior lines, which is a misleading report rather than
+ * a cosmetic problem: this command's whole job is telling an operator what is
+ * live. Tab and newline are dropped too, since the row is one line.
+ */
+function sanitizeForTerminal(text) {
+  if (typeof text !== 'string') return '';
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').slice(0, 120).trim();
+}
+
+/**
  * Probe slug variants across all ATSes; prefer live boards over empty ones.
  *
  * No first-word suffix variants (#2937). Nothing downstream re-checks identity:
@@ -437,6 +751,12 @@ async function ownerConfirmed(ats, slug, companyName, { fetchJson, fetchText, eu
  */
 async function discoverAlternates(name, { fetchJson, fetchText }) {
   let bestEmpty = null;
+  // A live board whose identity could not be confirmed is NOT a suggestion: it is
+  // never adopted, and `fix-slugs` still refuses to write it. It is worth
+  // reporting all the same, because "your slug 404s and there is a live board at
+  // ashby/<slug> owned by someone else" and "your slug 404s and nothing answers"
+  // are different facts about a company and the summary showed neither (#4230).
+  let bestRejected = null;
   // One owner lookup per (ats, eu, slug) per company, so the added identity check
   // cannot multiply requests when candidates repeat across the probe order.
   const cache = new Map();
@@ -450,13 +770,24 @@ async function discoverAlternates(name, { fetchJson, fetchText }) {
         const r = await probeSlug(ats, slug, { fetchJson, eu });
         if (r.status !== 'live' && r.status !== 'empty') continue;
         const owner = await ownerConfirmed(ats, slug, name, { fetchJson, fetchText, eu, cache });
-        if (!owner.ok) continue;
+        if (!owner.ok) {
+          // Only a live board is worth reporting. An empty unconfirmed board says
+          // nothing the operator can act on, and `!bestRejected` keeps the first
+          // (widest-derived) candidate rather than the last one probed.
+          if (r.status === 'live' && !bestRejected) {
+            bestRejected = { ...r, ownerReason: owner.reason, ownerBoardName: owner.boardName || '' };
+          }
+          continue;
+        }
         if (r.status === 'live') return r;
         if (!bestEmpty) bestEmpty = r;
       }
     }
   }
-  return bestEmpty;
+  // The winner still wins; the rejection rides along so the caller can report it
+  // without the gate moving.
+  if (bestEmpty) return { ...bestEmpty, rejectedAlternate: bestRejected };
+  if (bestRejected) return { rejectedAlternate: bestRejected };
 }
 
 /**
@@ -551,71 +882,130 @@ export async function probeProvider(entry, provider, baseCtx) {
 /**
  * Verify each enabled portals.yml entry's board is reachable.
  *
- * Two tiers, cheapest first:
+ * Two tiers, cheapest first. An explicit provider id the scanner does not
+ * load is reported before either tier, so a recognizable URL cannot hide the typo.
  *   1. Greenhouse/Ashby/Lever slugs are probed directly (one JSON request each),
  *      with cross-probe suggestions when a slug 404s.
  *   2. Everything else is routed through the SAME provider plugins the scanner
  *      uses (Workday, SuccessFactors, SmartRecruiters, Avature, …), bounded to
  *      a few requests. This catches broken non-ATS boards that used to be
  *      reported as an un-actionable "skipped".
- * An entry reaches `skipped` only when no provider claims it. Probing is
- * sequential to stay gentle on rate limits.
+ * An entry reaches `skipped` only when no provider claims it. Entries are
+ * probed through a small bounded pool (`concurrency`, 6 by default, the same
+ * width audit-portals.mjs uses on these boards): one entry at a time made a
+ * large portals.yml outlast the web Portals page's 110 s budget, so the health
+ * check timed out instead of naming the broken boards. Rows keep input order.
  *
  * @param {Array<object>} companies - portals.yml entries (tracked_companies and/or job_boards).
- * @param {{fetchJson?: Function, providers?: Map, httpCtx?: object}} [deps]
+ * @param {{fetchJson?: Function, providers?: Map, httpCtx?: object, concurrency?: number}} [deps]
  *   `providers`/`httpCtx` enable tier 2; omit them (as the ATS unit tests do) to
  *   get tier-1-only behavior where non-ATS entries stay `skipped`.
  * @returns {Promise<Array<object>>} One result row per entry.
  */
 export async function verifyCompanies(
   companies,
-  { fetchJson = defaultFetchJson, fetchText = defaultFetchText, providers = null, httpCtx = null } = {},
+  { fetchJson = probeFetchJson, fetchText = probeFetchText, providers = null, httpCtx = null, concurrency = 6 } = {},
 ) {
-  const list = Array.isArray(companies) ? companies : [];
-  const results = [];
-  for (const company of list) {
-    if (!company || typeof company !== 'object') continue;
-    if (company.enabled === false) continue;
-    const name = typeof company.name === 'string' ? company.name : '(unnamed)';
-    const match =
-      parseAtsSlug(company.api) || parseAtsSlug(company.careers_url);
-    if (match) {
-      const probe = await probeSlug(match.ats, match.slug, { fetchJson, eu: match.eu });
-      if (probe.status === 'live' || probe.status === 'empty') {
-        results.push({ name, ...probe });
-        continue;
-      }
-      // Wrong slug or ATS migration — cross-probe only for slug/unknown failures.
-      if (probe.errorKind === 'slug_gone' || probe.errorKind === 'unknown') {
-        const suggested = await discoverAlternates(name, { fetchJson, fetchText });
-        if (suggested) {
-          results.push({ name, ...probe, suggested });
-          continue;
-        }
-      }
-      results.push({ name, ...probe });
-      continue;
+  const list = (Array.isArray(companies) ? companies : []).filter(
+    (c) => c && typeof c === 'object' && c.enabled !== false,
+  );
+  const rows = new Array(list.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < list.length) {
+      const i = next++;
+      rows[i] = await verifyOne(list[i], { fetchJson, fetchText, providers, httpCtx });
     }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, list.length)) }, worker));
+  return rows;
+}
 
-    // Tier 2: hand the entry to the scanner's provider layer. Skip the
-    // local-parser provider — a health check must stay network-only and never
-    // execute a configured local command.
-    if (providers && providers.size > 0) {
-      const resolved = resolveProvider(company, providers, { skipIds: ['local-parser'] });
-      if (resolved && resolved.provider) {
-        const probe = await probeProvider(company, resolved.provider, httpCtx || makeHttpCtx());
-        results.push({ name, ...probe });
-        continue;
-      }
+/**
+ * Apply an entry's `timeout_ms` and `max_response_mb` to a ctx, as scan.mjs
+ * and audit-portals.mjs do, so the check reads a board with the same limits
+ * the scan does. The ctx's fetchers are replaced in place; pass a copy when
+ * it is shared.
+ *
+ * @param {object} ctx
+ * @param {object} entry
+ * @returns {any}
+ */
+function withEntryLimits(ctx, entry) {
+  return applyEntryTimeout(applyEntryResponseCap(ctx, entry), entry);
+}
+
+/**
+ * One health row for one enabled entry; the body of verifyCompanies' pool.
+ *
+ * @param {object} company
+ * @param {{fetchJson: Function, fetchText: Function, providers: Map|null, httpCtx: object|null}} deps
+ * @returns {Promise<object>}
+ */
+async function verifyOne(company, { fetchJson, fetchText, providers, httpCtx }) {
+  const name = typeof company.name === 'string' ? company.name : '(unnamed)';
+  // scan.mjs rejects an unknown provider before it looks at the URL. Probing
+  // a Greenhouse URL first used to return live, and --strict never saw the typo.
+  let resolved = null;
+  if (providers && providers.size > 0) {
+    resolved = resolveProvider(company, providers, { skipIds: ['local-parser'] });
+    if (resolved?.error) {
+      return {
+        name,
+        status: 'missing',
+        errorKind: 'unknown',
+        provider: typeof company.provider === 'string' ? company.provider : 'unknown',
+        reason: resolved.error,
+      };
     }
-
-    results.push({
-      name,
-      status: 'skipped',
-      reason: 'no provider matched careers_url or api',
-    });
   }
-  return results;
+  const match =
+    parseAtsSlug(company.api) || parseAtsSlug(company.careers_url);
+  // An Ashby entry that opts into the embed source (`ashby: { embed: true }`)
+  // is one whose posting API is disabled. Tier 1 probes exactly that API, so
+  // it would report a live board as a wrong slug; the provider layer below
+  // reads the embed page instead.
+  const embedOnly = match?.ats === 'ashby' && /** @type {any} */ (company).ashby?.embed === true;
+  if (match && !embedOnly) {
+    // The entry's own board is read with its timeout_ms and max_response_mb,
+    // as scan.mjs reads it. Alternates below are other boards and keep the
+    // defaults.
+    const entryFetchJson = withEntryLimits({ fetchJson }, company).fetchJson;
+    const probe = await probeSlug(match.ats, match.slug, { fetchJson: entryFetchJson, eu: match.eu });
+    if (probe.status === 'live' || probe.status === 'empty') return { name, ...probe };
+    // Wrong slug or ATS migration — cross-probe only for slug/unknown failures.
+    if (probe.errorKind === 'slug_gone' || probe.errorKind === 'unknown') {
+      const suggested = await discoverAlternates(name, { fetchJson, fetchText });
+      if (suggested) return { name, ...probe, suggested };
+    }
+    return { name, ...probe };
+  }
+
+  // Tier 2: hand the entry to the scanner's provider layer. Skip the
+  // local-parser provider. A health check must stay network-only and never
+  // execute a configured local command. The unknown-provider error was
+  // already returned above, before a recognizable URL could hide it.
+  if (providers && providers.size > 0) {
+    if (resolved && resolved.provider) {
+      const probe = await probeProvider(company, resolved.provider, withEntryLimits({ ...(httpCtx || makeHttpCtx()) }, company));
+      return { name, ...probe };
+    }
+    const full = resolveProvider(company, providers);
+    if (full?.provider?.id === 'local-parser') {
+      return {
+        name,
+        status: 'skipped',
+        provider: 'local-parser',
+        reason: 'local parser; verify-portals does not run it. Use scan.mjs to read this board.',
+      };
+    }
+  }
+
+  return {
+    name,
+    status: 'skipped',
+    reason: 'no provider matched. Name a provider this scanner loads, set a careers_url a provider detects, or set scan_method: websearch for the scan.mjs agent handoff. verify-portals does not verify that board.',
+  };
 }
 
 /**
@@ -628,10 +1018,10 @@ export async function verifyCompanies(
  */
 export async function verifyPortalsFile(
   filePath,
-  { fetchJson = defaultFetchJson, providers = null, httpCtx = null } = {},
+  { fetchJson = probeFetchJson, providers = null, httpCtx = null } = {},
 ) {
   if (!existsSync(filePath)) return { found: false, results: [] };
-  const config = yaml.load(readFileSync(filePath, 'utf-8'));
+  const config = loadYaml(readFileSync(filePath, 'utf-8'));
   // tracked_companies and job_boards carry the same entry shape and both feed the
   // scanner, so sweep both — a job board going dark is exactly as worth surfacing
   // as a company board 404ing.
@@ -650,10 +1040,11 @@ const ERROR_KIND_LABEL = {
   auth: 'auth blocked',
   network: 'network error',
   server: 'server error',
+  rate_limit: 'rate limited',
   unknown: 'unresolved',
 };
 
-function printResults(results) {
+export function printResults(results) {
   for (const r of results) {
     const icon = ICON[r.status] || '?';
     // ATS rows carry ats/slug; provider-layer rows carry the provider id.
@@ -666,8 +1057,26 @@ function printResults(results) {
     } else if (r.status === 'missing') {
       const kind = ERROR_KIND_LABEL[r.errorKind] || 'unresolved';
       detail = `${source} (${kind}) — ${r.reason || 'unresolved'}`;
-      if (r.suggested) {
+      // Only an *adoptable* suggestion gets the "try" line. A rejected-only
+      // result carries `rejectedAlternate` and no top-level ats/slug, so gating
+      // on `r.suggested` alone rendered `try undefined/undefined`.
+      if (r.suggested && r.suggested.ats && r.suggested.slug) {
         detail += ` → try ${r.suggested.ats}/${r.suggested.slug}`;
+      }
+      // A live alternate whose identity could not be confirmed is reported, never
+      // suggested: the operator learns the board exists and why it was refused,
+      // and `fix-slugs` still will not write it (#4230).
+      const rejected = r.suggested?.rejectedAlternate;
+      if (rejected) {
+        // The observed owner and the refusal reason are two different facts: the
+        // first is what the board calls itself, the second is why we would not
+        // adopt it. Printing one in place of the other told the operator
+        // "identity unconfirmed" even when the identity was confirmed and simply
+        // did not match.
+        const board = sanitizeForTerminal(rejected.ownerBoardName);
+        const reason = rejected.ownerReason || 'identity unconfirmed';
+        const who = board ? `owned by "${board}" — ${reason}` : reason;
+        detail += `; also found live ${rejected.ats}/${rejected.slug} ${who}`;
       }
     } else {
       detail = r.reason || '';
@@ -723,12 +1132,105 @@ async function runAdd(name, { fetchJson }) {
   }
 }
 
-const KNOWN_FLAGS = ['--add', '--strict', '--file', '--help', '-h'];
+/**
+ * Probe every company named in search_queries but not tracked.
+ *
+ * Stops at the first resolving slug per company: the goal is a yes/no on "is
+ * there a board here", and the ATS directories rate-limit hard enough that
+ * exhaustively probing every variant of every hint would poison the run.
+ *
+ * Only a 404/410 (`slug_gone`) is evidence that a slug has no board. Any other
+ * failure (429, network, auth, server, an unexpected body) leaves the question
+ * open, so a hint with no hit keeps the first such failure as `probeError`
+ * and is reported as unverified rather than as "no board".
+ *
+ * @returns {Promise<{hint: string, sources: string[], hit: object|null, probeError: object|null}[]>}
+ */
+export async function findUnmined(cfg, { fetchJson = defaultFetchJson, onProgress } = {}) {
+  const results = [];
+  for (const { hint, sources } of unminedHints(cfg)) {
+    let hit = null;
+    let probeError = null;
+    outer: for (const slug of deriveSlugCandidates(hint)) {
+      for (const ats of Object.keys(ATS)) {
+        // Lever is one registry key with an eu flag, so both instances are
+        // probed or an EU-only tenant reads as "no Lever board" (as in
+        // discoverAlternates).
+        for (const eu of ats === 'lever' ? [false, true] : [false]) {
+          const r = await probeSlug(ats, slug, { fetchJson, eu });
+          if (r.status === 'live' || r.status === 'empty') { hit = { ...r, eu }; break outer; }
+          if (r.errorKind !== 'slug_gone' && !probeError) probeError = r;
+        }
+      }
+    }
+    results.push({ hint, sources, hit, probeError: hit ? null : probeError });
+    onProgress?.({ hint, hit });
+  }
+  return results;
+}
+
+export async function runUnmined(filePath, { fetchJson } = {}) {
+  if (!existsSync(filePath)) {
+    console.log(`verify-portals: no portals file at ${filePath} — nothing to check.`);
+    return 0;
+  }
+  const cfg = loadYaml(readFileSync(filePath, 'utf8')) || {};
+  const hints = unminedHints(cfg);
+  if (hints.length === 0) {
+    console.log('No untracked companies named in search_queries. Nothing to mine.');
+    return 0;
+  }
+
+  console.log(
+    `Probing ${hints.length} company name(s) found only in search_queries, across ${Object.keys(ATS).join('/')}...\n`,
+  );
+  const results = await findUnmined(cfg, { fetchJson });
+  const found = results.filter((r) => r.hit);
+  const unverified = results.filter((r) => r.probeError);
+
+  const probed = Object.keys(ATS).join('/');
+  for (const { hint, sources, hit, probeError } of results) {
+    if (probeError) {
+      const why = probeError.httpStatus ? `HTTP ${probeError.httpStatus}` : probeError.errorKind;
+      console.log(`  ⚠️  ${hint} — could not verify (${probeError.ats}/${probeError.slug}: ${why}); re-run later`);
+      continue;
+    }
+    if (!hit) {
+      // Deliberately not "no board": only the three slug-addressable ATSs are
+      // probed. AMD and Apple genuinely do have boards — on Workday and their
+      // own stack — which need tenant/site identifiers this can't guess.
+      console.log(`  ·  ${hint} — no ${probed} board (may still be on Workday, Gem, or a custom site)`);
+      continue;
+    }
+    const detail = hit.status === 'live' ? `${hit.jobCount} jobs` : 'live but empty';
+    console.log(`  ${ICON[hit.status]} ${hint} — ${hit.ats}${hit.eu ? ' (EU)' : ''}/${hit.slug} (${detail})`);
+    console.log(`       named in: ${sources.join(', ')}`);
+  }
+
+  if (found.length) {
+    console.log(
+      `\n${found.length} of ${results.length} have a real board. A search_queries entry only ` +
+        'produces links for a human;\nmove these to tracked_companies so the scanner actually reads them.',
+    );
+  } else if (!unverified.length) {
+    console.log('\nNo scannable boards behind these names — the search entries are earning their keep.');
+  }
+  if (unverified.length) {
+    console.log(
+      `\n${unverified.length} of ${results.length} could not be checked, so they are not reported as having no board.`,
+    );
+  }
+  // Both count for --strict: an unverified name may still hide a board.
+  return found.length + unverified.length;
+}
+
+const KNOWN_FLAGS = ['--add', '--unmined', '--strict', '--file', '--help', '-h'];
 const VALUE_FLAGS = ['--add', '--file'];
 
 const USAGE = `Usage:
   node verify-portals.mjs                 # sweep tracked_companies + job_boards in portals.yml
   node verify-portals.mjs --add cursor    # probe slug variants for one name
+  node verify-portals.mjs --unmined       # companies named only in search_queries that have a Greenhouse/Ashby/Lever board
   node verify-portals.mjs --strict        # exit non-zero if any slug is unresolved
   node verify-portals.mjs --file <path>   # use a specific portals file
   node verify-portals.mjs --help          # print this usage block and exit`;
@@ -750,18 +1252,17 @@ async function main() {
   validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
   const strict = hasFlag(args, '--strict');
-  const fetchJson = defaultFetchJson;
+  const fetchJson = probeFetchJson;
 
   if (hasFlag(args, '--add')) {
     await runAdd(flagValue(args, '--add') || '', { fetchJson });
     return;
   }
 
-  // requireOperand above catches a bare `--file` (nothing follows) and
-  // `--file --anotherflag` (the next token looks like a flag), but not
-  // `--file=` — an explicit empty value after `=` is a single token
-  // (`--file=`) that never matches the bare `--file` requireOperand checks
-  // for, so it would otherwise reach resolve('') the same way.
+  // requireOperand above catches a bare `--file` (nothing follows),
+  // `--file --anotherflag` (the next token looks like a flag), and
+  // `--file=` (empty value in equals form, #5127). Keep this check as
+  // defense-in-depth so an empty path never reaches resolve('') the same way.
   const fileArg = flagValue(args, '--file');
   if (hasFlag(args, '--file') && !fileArg) {
     console.error('Error: --file requires a value');
@@ -771,6 +1272,14 @@ async function main() {
   const filePath = resolve(
     hasFlag(args, '--file') ? fileArg : DEFAULT_PORTALS_PATH,
   );
+
+  if (hasFlag(args, '--unmined')) {
+    const n = await runUnmined(filePath, { fetchJson });
+    // --strict makes this a CI gate: an unmined board is a silent coverage hole.
+    // process.exitCode, not process.exit(1), for the reason given at the end of main().
+    if (strict && n > 0) process.exitCode = 1;
+    return;
+  }
 
   // Load the scanner's provider plugins so non-ATS boards (Workday,
   // SuccessFactors, SmartRecruiters, …) get a real reachability probe instead
@@ -782,7 +1291,7 @@ async function main() {
   // plugin-free install (mergeProviderPlugins returns before config/plugins.yml
   // is read when it is absent).
   const { mergeProviderPlugins } = await import('./plugins/_engine.mjs');
-  await mergeProviderPlugins(providers, { root: dirname(PROVIDERS_DIR) });
+  await mergeProviderPlugins(providers, { root: dirname(PROVIDERS_DIR), dataRoot: DATA_ROOT });
   const httpCtx = makeHttpCtx();
   const { found, results } = await verifyPortalsFile(filePath, { fetchJson, providers, httpCtx });
   if (!found) {
@@ -818,7 +1327,15 @@ async function main() {
 
   if (strict && missing.length > 0) {
     console.log('🔴 Unresolved slugs found (--strict).');
-    process.exit(1);
+    // process.exitCode, not process.exit(1): main() returns, and the process
+    // exits 1 once the event loop drains. On Windows, Node 24 aborts when
+    // process.exit() runs right after a request (nodejs/node#56645): it prints a
+    // libuv assertion and exits with a crash code instead of 1. Measured
+    // 2026-11-12 on Node 24.14.1: --strict on a Workday board that does not
+    // exist, and --unmined --strict on a name with a Greenhouse board, aborted 4
+    // times out of 4. The exits that run before any request (a bad flag or
+    // --help, an empty --file, a name runAdd() cannot slug) keep process.exit().
+    process.exitCode = 1;
   }
 }
 
@@ -827,6 +1344,6 @@ async function main() {
 if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(`verify-portals failed: ${err.message}`);
-    process.exit(1);
+    process.exitCode = 1; // not process.exit(1), for the reason given at the end of main()
   });
 }

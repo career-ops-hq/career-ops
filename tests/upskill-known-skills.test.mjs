@@ -20,6 +20,7 @@
 import { pass, fail, ROOT } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
+import { load as yamlLoad } from 'js-yaml';
 
 console.log('\nupskill.mjs known-skills helpers (import-safe module)');
 
@@ -33,6 +34,10 @@ try {
     aggregateGaps,
     computeTargetedGaps,
     parseReportGaps,
+    // Re-exported from skill-extract.mjs; its own canonicalization fixtures live
+    // in skill-extract.test.mjs. Used here only to assert what the CLI ends up
+    // treating as KNOWN, which is the behaviour #2609 was about.
+    extractSkills,
   } = mod;
 
   // ── the guard itself ──────────────────────────────────────────────────────
@@ -109,12 +114,30 @@ try {
     }
   }
 
+  // The fixture has to actually be cyclic, or the walk assertion below proves
+  // nothing. Assert the loop on a SINGLE load: two loads build two independent
+  // object trees, so a cross-load identity check could never hold.
+  {
+    const cyclicDoc = yamlLoad('root: &a\n  name: Python\n  self: *a\n');
+    if (cyclicDoc?.root?.self === cyclicDoc?.root) {
+      pass('the cyclic-alias fixture really produces a cycle, so the walk below has one to terminate on');
+    } else {
+      fail('cyclic fixture no longer produces a cycle — rewrite it, not the guard');
+    }
+  }
+
   // A cyclic anchor/alias graph must terminate, not RangeError the whole run.
   // The try//catch around yamlLoad cannot help — the throw would happen in the walk.
   try {
     const cyclic = yamlValueText('root: &a\n  self: *a\n  skill: Kafka\n');
-    if (cyclic.includes('Kafka')) pass('yamlValueText walks a cyclic YAML alias graph without recursing forever');
-    else fail(`yamlValueText cyclic alias => ${JSON.stringify(cyclic)}`);
+    if (cyclic.includes('Kafka')) {
+      pass('yamlValueText walks a cyclic YAML alias graph without recursing forever');
+      if (extractSkills(cyclic).has('Kafka')) {
+        pass('extractSkills retains a skill from cyclic yamlValueText output');
+      } else {
+        fail(`extractSkills cyclic YAML => ${JSON.stringify(cyclic)}`);
+      }
+    } else fail(`yamlValueText cyclic alias => ${JSON.stringify(cyclic)}`);
   } catch (e) {
     fail(`yamlValueText threw on a cyclic alias graph: ${e.message}`);
   }
@@ -178,6 +201,45 @@ try {
       pass('comment-only Kubernetes stays a GAP while genuinely-known Python is excluded (the #2609 bug, end to end)');
     } else {
       fail(`comment poisoning still suppresses: gaps=${gaps.join(',')} excluded=${excludedAsKnown.join(',')}`);
+    }
+  }
+
+  // The same composition asserted through the extractor the CLI actually uses:
+  // what reaches the known set is what suppresses gaps downstream. `leaked` is
+  // the baseline — if raw concatenation stopped leaking, the fixture would be
+  // asserting nothing and this block would go green for the wrong reason.
+  {
+    const profile = [
+      'candidate:',
+      '  full_name: "Test User"',
+      '# We dropped Kubernetes last year and never picked up Terraform.',
+      'skills:',
+      '  - Python',
+    ].join('\n');
+    const cv = '# CV\n\n<!-- template note: list Snowflake if you have used it -->\n\n## Skills\nSQL, AWS\n';
+
+    const leaked = extractSkills([cv, profile].join('\n'));
+    if (leaked.has('Kubernetes') && leaked.has('Snowflake')) {
+      pass('raw concatenation still leaks comment-only skills, so the fixture below is meaningful');
+    } else {
+      fail(`the raw-concat fixture no longer reproduces the leak: ${[...leaked].join(',')}`);
+    }
+
+    const fixed = extractSkills(knownSkillsText(cv, profile));
+    const ghosts = ['Kubernetes', 'Terraform', 'Snowflake'].filter(skill => fixed.has(skill));
+    const reals = ['Python', 'SQL', 'AWS'].filter(skill => !fixed.has(skill));
+    if (ghosts.length === 0 && reals.length === 0) {
+      pass('extractSkills over knownSkillsText drops every comment-only skill and keeps Python/SQL/AWS');
+    } else {
+      fail(`known-skills composition => leaked=${ghosts.join(',')} dropped=${reals.join(',')}`);
+    }
+
+    // A skill in KEY position stays known — dropping keys would narrow what
+    // counts as known, a different behaviour change than removing comments.
+    if (extractSkills(yamlValueText('skills:\n  Python: expert\n')).has('Python')) {
+      pass('a skill in KEY position survives into the known set');
+    } else {
+      fail('a skill in key position was dropped from the known set');
     }
   }
 

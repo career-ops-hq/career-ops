@@ -29,11 +29,14 @@ import {
   renderPortalEntry,
   dedupeAgainstPortals,
   insertIntoTrackedCompanies,
+  splicedCorrectly,
   parseWorkdayHint,
   buildWorkdayCandidates,
   resolveCompany,
   resolveWorkday,
+  partitionBlacklisted,
 } from '../discover-ats.mjs';
+import { parseBlacklist } from '../scan.mjs';
 import * as yaml from 'js-yaml';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
@@ -266,6 +269,37 @@ const commentDoc = '# top comment\ntracked_companies:\n  # inline comment\n  - n
 const commentInserted = insertIntoTrackedCompanies(commentDoc, [snip]);
 ok('preserves top comment', commentInserted.includes('# top comment'));
 ok('preserves inline comment', commentInserted.includes('# inline comment'));
+
+// Other legitimate ways to write the block. Each used to leave a portals.yml the
+// scanner cannot parse: a second `tracked_companies:` key (a duplicate mapping
+// key) or entries at two different indents.
+const namesAfter = (text) => { try { return yaml.load(text).tracked_companies.map(e => e.name); } catch { return null; } };
+
+const flowEmpty = insertIntoTrackedCompanies('title_filter:\n  positive: [a]\n\ntracked_companies: []\n\njob_boards: []\n', [snip]);
+eq('empty flow list `[]` → one block, the new entry', namesAfter(flowEmpty), ['New']);
+ok('empty flow list → no second tracked_companies key', flowEmpty.match(/^tracked_companies:/gm).length === 1);
+
+const trailingComment = insertIntoTrackedCompanies('tracked_companies:   # my companies\n  - name: Existing\n    careers_url: https://jobs.lever.co/existing\n\njob_boards: []\n', [snip]);
+eq('header with a trailing comment → entry added to the same block', namesAfter(trailingComment), ['Existing', 'New']);
+ok('header with a trailing comment → comment kept', trailingComment.includes('tracked_companies:   # my companies'));
+
+const flowEmptyComment = insertIntoTrackedCompanies('tracked_companies: []   # none yet\njob_boards: []\n', [snip]);
+eq('`[]` with a trailing comment → entry added, comment kept', namesAfter(flowEmptyComment), ['New']);
+ok('`[]` with a trailing comment → comment kept', flowEmptyComment.includes('tracked_companies:   # none yet'));
+
+// Entries written at column 0 (what PyYAML's default dump produces). The old
+// boundary test read the first `- name:` as the next top-level key and inserted
+// before it, at a different indent.
+const colZero = insertIntoTrackedCompanies('title_filter:\n  positive: [a]\n\ntracked_companies:\n- name: Existing\n  careers_url: https://jobs.lever.co/existing\n- name: Second\n  careers_url: https://jobs.lever.co/second\n\njob_boards: []\n', [snip]);
+eq('column-0 entries → new entry joins the list', namesAfter(colZero), ['Existing', 'Second', 'New']);
+ok('column-0 entries → new entry written at column 0 too', /^- name: New$/m.test(colZero));
+ok('column-0 entries → still before job_boards:', colZero.indexOf('- name: New') < colZero.indexOf('job_boards:'));
+
+// splicedCorrectly: the guard --write applies to its own output.
+ok('splicedCorrectly accepts the expected count', splicedCorrectly(inserted, 2));
+ok('splicedCorrectly rejects a wrong count', !splicedCorrectly(inserted, 3));
+ok('splicedCorrectly rejects a duplicated key', !splicedCorrectly('tracked_companies: [{name: A}]\ntracked_companies:\n  - name: B\n', 1));
+ok('splicedCorrectly rejects text without a list', !splicedCorrectly('title_filter: {}\n', 0));
 
 // ============================================================================
 // 6b. Workday coordinate parsing (pure, no network)
@@ -693,3 +727,53 @@ try {
   workdayVendorOk = false;
 }
 ok('--vendors workday accepted', workdayVendorOk);
+
+// ── Blacklist ─────────────────────────────────────────────────────────
+console.log('\n--- data/blacklist.md is never resolved or written ---');
+{
+  const bl = parseBlacklist('| Company | Since | Scope | Reason |\n|---|---|---|---|\n'
+    + '| BannedCo | 2026-01-01 | company | culture |\n'
+    + '| banned.wd1.myworkdayjobs.com | 2026-01-01 | domain | same |\n');
+  const pre = partitionBlacklisted([
+    { name: 'BannedCo' },
+    { name: 'Hinted', workday: 'https://banned.wd1.myworkdayjobs.com/Site' },
+    { name: 'KeptCo' },
+  ], bl);
+  eq('pre-probe: name and Workday-hint domain matches are split out', pre.blacklisted.map((b) => b.name), ['BannedCo', 'Hinted']);
+  eq('pre-probe: the rest is kept', pre.allowed.map((c) => c.name), ['KeptCo']);
+  eq('pre-probe: matched entry + reason are reported', pre.blacklisted[0], { name: 'BannedCo', entry: 'BannedCo', reason: 'culture' });
+  const post = partitionBlacklisted([{ name: 'Other', careers_url: 'https://banned.wd1.myworkdayjobs.com/X' }], bl, (r) => [r.careers_url]);
+  eq('post-probe: a resolved board on a blacklisted host is dropped', post.allowed.length, 0);
+
+  // Review on #5333: the website must be checked even when a Workday hint is
+  // present, and a bare documented `website: example.com` must still match.
+  const bl2 = parseBlacklist('| Company | Since | Scope | Reason |\n|---|---|---|---|\n'
+    + '| banned-site.example | 2026-01-01 | domain | same |\n');
+  const both = partitionBlacklisted([
+    { name: 'BothFields', workday: 'https://ok.wd1.myworkdayjobs.com/Site', website: 'https://www.banned-site.example' },
+    { name: 'BareSite', website: 'banned-site.example' },
+    { name: 'BareSubdomain', website: 'careers.banned-site.example/jobs' },
+    { name: 'CleanSite', website: 'fine.example' },
+  ], bl2);
+  eq('pre-probe: website is checked even when a Workday hint is present', both.blacklisted.map((b) => b.name), ['BothFields', 'BareSite', 'BareSubdomain']);
+  eq('pre-probe: a bare website not on the list is kept', both.allowed.map((c) => c.name), ['CleanSite']);
+
+  // End to end: every company blacklisted → nothing probed (no network) and
+  // --write leaves portals.yml byte-for-byte unchanged.
+  const dir = mkdtempSync(join(tmpdir(), 'discover-ats-bl-'));
+  try {
+    const portals = join(dir, 'portals.yml');
+    const blPath = join(dir, 'blacklist.md');
+    const content = 'tracked_companies:\n  - name: Existing\n    careers_url: https://jobs.lever.co/existing\n';
+    writeFileSync(portals, content);
+    writeFileSync(blPath, '| Company | Since | Scope | Reason |\n|---|---|---|---|\n| BannedCo | 2026-01-01 | company | culture |\n');
+    const out = JSON.parse(execFileSync('node', [scriptPath, 'BannedCo', '--write'], {
+      encoding: 'utf-8', timeout: 15000, cwd: dirname(scriptPath),
+      env: { ...process.env, CAREER_OPS_PORTALS: portals, CAREER_OPS_BLACKLIST: blPath },
+    }));
+    eq('CLI: blacklisted company reported, not resolved', [out.metadata.blacklistedSkipped, out.metadata.resolved], [1, 0]);
+    eq('CLI: --write leaves portals.yml unchanged', readFileSync(portals, 'utf-8'), content);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}

@@ -35,8 +35,8 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { pass, fail } from './helpers.mjs';
-import { gitIn, gitStatusEntries, parsePorcelainStatus } from '../update-system.mjs';
+import { pass, fail, sealProcessGitEnv } from './helpers.mjs';
+import { gitIn, gitStatusEntries, parsePorcelainStatus, userLayerViolations } from '../update-system.mjs';
 
 // quotepath: false in most repos here only to keep assertion strings readable —
 // with `-z` the parser never sees a quoted path regardless of the setting. The
@@ -48,6 +48,7 @@ function makeRepo({ quotepath = false } = {}) {
   g('config', 'user.email', 'test@example.com');
   g('config', 'user.name', 'Test');
   g('config', 'core.quotepath', String(quotepath));
+  g('config', 'core.hooksPath', join(dir, 'no-such-hooks'));
   return { dir, g };
 }
 
@@ -64,7 +65,42 @@ function assertRoundTrip(label, dir, expected) {
   }
 }
 
+// Fixture git inherits process.env, so keep the contributor's git config out of it.
+sealProcessGitEnv();
+
 console.log('\n🧪 Testing updater git-status path parsing...');
+
+// ── A scaffold checkout must not make pre-existing user data look new ───────
+// Before the updater ships reports/.gitkeep, Git collapses the non-empty
+// untracked directory. After checkout, default porcelain expands it, and the
+// safety comparison mistakes the unchanged user file for updater output.
+{
+  const { dir, g } = makeRepo();
+  try {
+    mkdirSync(join(dir, 'reports'));
+    writeFileSync(join(dir, 'reports', 'my-own-file.txt'), 'user data\n');
+    const initialStatusPaths = new Set(gitStatusEntries(dir).map((entry) => entry.path));
+
+    writeFileSync(join(dir, 'reports', '.gitkeep'), '');
+    g('add', 'reports/.gitkeep');
+    const changed = gitStatusEntries(dir)
+      .map((entry) => entry.path)
+      .filter((file) => !initialStatusPaths.has(file));
+    const violations = userLayerViolations(changed, ['reports/.gitkeep'], ['reports/']);
+
+    if (
+      initialStatusPaths.has('reports/my-own-file.txt') &&
+      changed.length === 1 && changed[0] === 'reports/.gitkeep' &&
+      violations.length === 0
+    ) {
+      pass('shipping reports/.gitkeep leaves pre-existing untracked user files out of the safety violations');
+    } else {
+      fail(`scaffold checkout confused user data with updater changes — initial ${JSON.stringify([...initialStatusPaths])}, changed ${JSON.stringify(changed)}, violations ${JSON.stringify(violations)}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 // ── 1. FIRST LINE is a worktree modification (the corruption trigger ──────
 // The bug only fires on the FIRST status line: gitIn trims the whole buffer,

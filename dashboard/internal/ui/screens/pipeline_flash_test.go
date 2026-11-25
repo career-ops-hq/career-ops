@@ -13,7 +13,7 @@ func newFlashTestModel(t *testing.T) PipelineModel {
 	t.Helper()
 	return NewPipelineModel(
 		theme.NewTheme("catppuccin-mocha"),
-		[]model.CareerApplication{{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0}},
+		[]model.CareerApplication{{Company: "Globex", Role: "Engineer", Status: "Evaluated", Score: 4.0, HasScore: true}},
 		model.PipelineMetrics{Total: 1},
 		t.TempDir(),
 		120,

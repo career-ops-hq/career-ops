@@ -115,3 +115,33 @@ test("an incomplete trailing field must be OMITTED, never fabricated from a part
   assert.deepEqual(obj, { a: 1 }, "the incomplete 'b' field must not appear at all, fabricated or otherwise");
   assert.equal(truncated, true);
 });
+
+test("a code fence inside a string value survives", () => {
+  // The fence strip used to be global (/```(?:json)?/gi), so it reached inside
+  // string VALUES. An applicant describing technical work — the population most
+  // likely to paste a code block — had their answer silently rewritten:
+  //
+  //   in : "Here is my code:\n```js\nfoo()\n```\nThanks"
+  //   out: "Here is my code:\njs\nfoo()\n\nThanks"
+  //
+  // with truncated:false, i.e. reported as a clean parse, and straight into a
+  // prefilled application form. Only a fence that WRAPS the message is stripped.
+  const answer = "Here is my code:\n```js\nfoo()\n```\nThanks";
+  const { obj, truncated } = extractJsonObject("```json\n" + JSON.stringify({ answer }) + "\n```");
+  assert.equal(obj.answer, answer, "the fence strip reached inside a string value");
+  assert.equal(truncated, false);
+});
+
+test("a bare fence in a value survives when the message has no wrapper", () => {
+  const { obj } = extractJsonObject(JSON.stringify({ b: "x ``` y" }));
+  assert.equal(obj.b, "x ``` y");
+});
+
+test("prose around the object still works, fenced or not", () => {
+  // The wrapper strip is anchored, so a fence after prose is not removed. It
+  // does not need to be: the scanner seeks the first `{`, and a trailing fence
+  // sits past the matching `}`. Asserted so a future 'simplification' back to a
+  // global strip has to fail something.
+  assert.equal(extractJsonObject('Sure:\n```json\n{"a":2}\n```').obj.a, 2);
+  assert.equal(extractJsonObject('{"a":3}\nhope that helps').obj.a, 3);
+});

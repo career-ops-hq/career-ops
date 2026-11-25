@@ -354,6 +354,119 @@ try {
   } else {
     fail(`SEM/SEMrush boundary => ${[...semBoundary].join(',')}`);
   }
+  // Testing / QA + observability (2026-09-20). Same two halves as the
+  // certification table: the token is recognized from ordinary JD prose, AND it
+  // canonicalizes to its display form, so a CV that names it suppresses the gap.
+  const qaCases = [
+    ['junit', 'JUnit'], ['testng', 'TestNG'], ['nunit', 'NUnit'],
+    ['xunit', 'xUnit'], ['mstest', 'MSTest'], ['cucumber', 'Cucumber'],
+    ['mockito', 'Mockito'], ['jest', 'Jest'], ['pytest', 'pytest'],
+    ['selenium', 'Selenium'], ['playwright', 'Playwright'],
+    ['cypress', 'Cypress'], ['karate', 'Karate'], ['postman', 'Postman'],
+    ['tdd', 'TDD'], ['bdd', 'BDD'],
+    ['opentelemetry', 'OpenTelemetry'], ['otel', 'OpenTelemetry'],
+    ['elk', 'ELK'], ['splunk', 'Splunk'], ['cloudwatch', 'CloudWatch'],
+  ];
+  const qaFailures = [];
+  for (const [raw, display] of qaCases) {
+    const found = extractSkills(`Requires ${raw} experience.`);
+    if (!found.has(display)) qaFailures.push(`extract "${raw}" => ${[...found].join(',') || '(none)'}`);
+    if (canonicalize(raw) !== display) qaFailures.push(`canonicalize("${raw}") => ${canonicalize(raw)}`);
+  }
+  if (qaFailures.length === 0) pass(`extractSkills covers all ${qaCases.length} testing/observability tokens (recognition + canonical form)`);
+  else fail(`testing/observability coverage => ${qaFailures.join(' | ')}`);
+
+  // The real report shape this was added for: report 463's Essential
+  // Requirements row, where JUnit/Cucumber previously extracted as nothing.
+  const jd = extractSkills('Core Java, Spring Boot, JUnit, Cucumber; TDD/BDD discipline | Observability: Grafana, ELK/Loki, Splunk, CloudWatch');
+  const wanted = ['JUnit', 'Cucumber', 'TDD', 'BDD', 'ELK', 'Splunk', 'CloudWatch'];
+  if (wanted.every(x => jd.has(x))) pass('extractSkills recovers the JUnit/Cucumber/TDD/BDD + log-stack gaps from a real gap row');
+  else fail(`report-463 gap row => ${[...jd].join(',')}`);
+
+  // AI / ML spellings (2026-10-04). Same two halves as the tables above, for
+  // the other ways a CV writes an AI/ML skill the vocabulary already has.
+  const aiCases = [
+    ['huggingface', 'Hugging Face'], ['sklearn', 'scikit-learn'],
+    ['large language model', 'LLMs'], ['large language models', 'LLMs'],
+    ['retrieval-augmented generation', 'RAG'], ['retrieval augmented generation', 'RAG'],
+    ['natural language processing', 'NLP'],
+  ];
+  const aiFailures = [];
+  for (const [raw, display] of aiCases) {
+    const found = extractSkills(`Requires ${raw} experience.`);
+    if (!found.has(display)) aiFailures.push(`extract "${raw}" => ${[...found].join(',') || '(none)'}`);
+    if (canonicalize(raw) !== display) aiFailures.push(`canonicalize("${raw}") => ${canonicalize(raw)}`);
+  }
+  if (aiFailures.length === 0) pass(`extractSkills covers all ${aiCases.length} AI/ML alternate spellings (recognition + canonical form)`);
+  else fail(`AI/ML spelling coverage => ${aiFailures.join(' | ')}`);
+
+  // None of them reaches past the skill it names: not funnel prose that says
+  // "fine tuning" or "fine-tune", not a smaller model class, not "natural
+  // language" as an everyday phrase.
+  const aiNegatives = [
+    ['Fine tuning the funnel to lift ROAS', 'Fine-tuning'],
+    ['Fine-tune campaign spend across paid channels', 'Fine-tuning'],
+    ['Experience with small language models on edge devices', 'LLMs'],
+    ['Answer natural language questions over the warehouse', 'NLP'],
+  ];
+  const aiLeaks = aiNegatives.filter(([text, skill]) => extractSkills(text).has(skill));
+  if (aiLeaks.length === 0) pass('the AI/ML spellings stay off "fine tuning"/"fine-tune" prose, small language models and "natural language" prose');
+  else fail(`AI/ML spelling over-match => ${aiLeaks.map(([text, skill]) => `${skill} in "${text}"`).join(' | ')}`);
+
+  // End to end, on the Skills line of the shipped example CV
+  // (examples/dual-track-engineer-instructor/cv.md), which jd-skill-gap used to
+  // answer with Hugging Face as a gap.
+  const { classifySkillGaps } = await import(pathToFileURL(join(ROOT, 'jd-skill-gap.mjs')).href);
+  const exampleCv = '## Skills\n\nEngineering: TypeScript, Python (daily), SQL. LangChain, LangGraph, Anthropic SDK, HuggingFace Transformers.\n';
+  const classified = classifySkillGaps(['Hugging Face', 'LangChain'], exampleCv);
+  if (classified.existing.includes('Hugging Face') && classified.gap.length === 0) {
+    pass('jd-skill-gap reads "HuggingFace Transformers" on a CV as the Hugging Face skill, not a gap');
+  } else {
+    fail(`example-CV Hugging Face => ${JSON.stringify(classified)}`);
+  }
+
+  // Fine-tuning is matched outside SKILL_TOKENS, and only where it names the ML
+  // skill: as an entry of its own in a list or table row, or on a line that also
+  // names a model skill. These are the shapes a CV, a posting and a report's Gap
+  // table write it in, across all three spellings; the bare name is what
+  // jd-skill-gap passes in to ask whether a skill is known at all.
+  const fineTuningNamed = [
+    'Fine-tuning', 'finetuning', 'fine tuning',
+    'AI/ML: PyTorch, Hugging Face, Fine-tuning, RAG',
+    'Techniques: Fine-tuning, distillation, quantization',
+    '- **Fine-tuning** (LoRA, QLoRA)',
+    '| Fine-tuning | Medium | No production runs yet |',
+    'Experience fine-tuning LLMs for classification',
+    'LLM fine-tuning and evaluation',
+    'Experience with model fine-tuning, evaluation and deployment',
+    'Fine-tuning of models for intent classification',
+    // examples/cv-example.md, the shipped ML CV
+    '- Built NLP pipeline for document classification (BERT fine-tuning, 94% accuracy on legal docs)',
+  ];
+  const ftMissed = fineTuningNamed.filter(text => !extractSkills(text).has('Fine-tuning'));
+  for (const raw of ['fine-tuning', 'finetuning', 'fine tuning']) {
+    if (canonicalize(raw) !== 'Fine-tuning') ftMissed.push(`canonicalize("${raw}") => ${canonicalize(raw)}`);
+  }
+  if (ftMissed.length === 0) pass(`extractSkills reads Fine-tuning in all ${fineTuningNamed.length} list and model-context shapes`);
+  else fail(`Fine-tuning missed => ${ftMissed.join(' | ')}`);
+
+  // Everywhere else it is tuning something that is not a model. A skill on the
+  // same line is context only when it is a model skill (not Google Ads, not
+  // PostgreSQL, not Spark, a data tool from the Data / ML / AI block), the word
+  // "models" only when it is what is being tuned, and a label in front of a
+  // colon is not a list entry (its pair is the "Techniques:" line above).
+  const fineTuningProse = [
+    'Fine-tuning the funnel to lift ROAS',
+    'Owned paid acquisition, fine-tuning bids and budgets across Google Ads and Meta',
+    'Fine-tuning PostgreSQL queries and indexes cut p95 latency by 40%',
+    'Fine-tuning Spark jobs for cost on Databricks',
+    'Fine-tuning dbt models to cut warehouse spend',
+    'Fine-tuning attribution models in GA4',
+    'Fine-tuning: dbt models to cut warehouse spend',
+  ];
+  const ftLeaks = fineTuningProse.filter(text => extractSkills(text).has('Fine-tuning'));
+  if (ftLeaks.length === 0) pass('extractSkills does not read fine-tuning of funnels, bids, queries, Spark jobs, dbt and attribution models, or a label over prose as the ML skill');
+  else fail(`Fine-tuning prose leak => ${ftLeaks.join(' | ')}`);
 
   // empty / falsy input
   if (extractSkills('').size === 0 && extractSkills(null).size === 0) pass('extractSkills returns an empty set for empty/null input');

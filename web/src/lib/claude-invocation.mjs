@@ -90,11 +90,10 @@ export function scopeFrom(allowed) {
 /**
  * One scope per capability record, so Claude honours BOTH axes the policy states.
  *
- * `persisting` kinds run the REAL mode and write canonical artifacts
- * (reserve-report-num.mjs / merge-tracker.mjs / verify-portals.mjs), so they need
- * Write + Bash. The read-only kinds produce their result through the response
- * stream and need no write tool at all — pdf emits its CV in a `<<cv-html>>`
- * envelope the backend persists (#2185), and research only reports.
+ * `persisting` is the writing record (fix-portal runs verify-portals.mjs). pdf
+ * and evaluate emit their artifact inline and the backend persists it, so they
+ * take a read-only scope. evaluate still fetches the posting. A posting is
+ * untrusted input, and Write or Bash on that run could be aimed at cv.md.
  *
  * The split between the two read-only scopes is the network axis. It used to be
  * absent: a single `readOnly` scope granted WebFetch/WebSearch to every
@@ -115,11 +114,11 @@ export const TOOL_SCOPES = Object.freeze({
 /**
  * Resolve the tool scope for a worker kind.
  *
- * What a kind needs is no longer decided here — capabilitiesFor owns it, on both
- * axes, so Codex's sandbox and this allow list cannot drift into disagreeing
- * about the same kind (#2507). An unreviewed kind gets the narrowest scope:
- * granting a write tool, or the network, to a worker nobody has classified is the
- * one unrecoverable default, and capabilitiesFor makes the same choice.
+ * What a kind needs is no longer decided here. capabilitiesFor owns it, on both
+ * axes, so Codex's sandbox and this allow list cannot drift (#2507). An
+ * unreviewed kind gets the narrowest scope. Granting a write tool, or the
+ * network, to a worker nobody has classified is the unrecoverable default, and
+ * capabilitiesFor makes the same choice.
  *
  * @param {string} kind - Worker kind ("pdf", "research", "evaluate", …).
  * @returns {ToolScope}
@@ -162,13 +161,11 @@ export function claudeCliArgs({ kind, prompt }) {
     "--verbose",
     "--include-partial-messages",
     "--permission-mode", "acceptEdits",
-    // Every non-writing kind, not just pdf. --strict-mcp-config with no --mcp-config loads ZERO
-    // MCP servers, so the tool lists below describe everything the agent can
-    // reach — without it an MCP server from the user's own config could supply a
-    // write tool that appears in neither list. #2185 is about pdf, and applying
-    // this to every kind would silently stop a configured MCP server (e.g. the
-    // optional Canva server) from loading on evaluate/research runs. The same gap
-    // for the other kinds is #2507.
+    // Every non-writing kind. --strict-mcp-config with no --mcp-config loads
+    // zero MCP servers, so the tool lists below describe everything the agent
+    // can reach. Without it, a server from the user's own config could supply
+    // a write tool that appears in neither list. evaluate no longer writes, so
+    // it is locked too. A writing kind keeps its MCP servers.
     ...(capabilitiesFor(kind).writes ? [] : ["--strict-mcp-config"]),
     "--allowedTools", scope.allowed,
     "--disallowedTools", scope.disallowed,

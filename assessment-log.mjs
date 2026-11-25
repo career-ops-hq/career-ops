@@ -15,12 +15,27 @@
  * `add`). Threshold/score are percentages; both optional — vendors often hide
  * the threshold, and some platforms never reveal the score.
  *
+ * Take-home / demo-recording assignments (#5733) share the file as an optional
+ * `kind` (default skills-test) plus trailing columns 9-14:
+ *   kind, deadline, deliverable, requirements_url, submitted_at, proof
+ * Rows from before this change have 8 or fewer cells and parse as skills-test.
+ * The log stays append-only: recording a submission appends a second row for the
+ * same company+report#+subject (`submit`), and the newest non-empty value wins
+ * when `open` folds the rows. Nothing is ever submitted by this tool.
+ *
  * Future work (out of scope here): fold per-vendor staleness rates into
  * analyze-patterns.mjs the way ATS channel yield is analyzed today.
  *
  * Run: node assessment-log.mjs add --company <name> [--report <num>] \
  *        --platform <vendor> --subject <topic> [--threshold <pct>] \
  *        [--score <pct>] [--stale "<observed staleness note>"]
+ *      node assessment-log.mjs add --kind take-home --company <name> \
+ *        --platform <channel> --subject <topic> --deadline <ISO with offset> \
+ *        [--deliverable video|file|link] [--requirements-url <url>] \
+ *        [--submitted-at <ISO>] [--proof "<text or path>"]
+ *      node assessment-log.mjs submit --company <name> --subject <topic> \
+ *        [--report <num>] --submitted-at <ISO> [--proof "<text or path>"]
+ *      node assessment-log.mjs open [--tz <IANA zone>] [--json]
  *      node assessment-log.mjs             (JSON)
  *      node assessment-log.mjs --summary   (human-readable)
  *      node assessment-log.mjs --self-test
@@ -29,7 +44,8 @@
 import { readFileSync, existsSync, appendFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
@@ -37,10 +53,19 @@ const CAREER_OPS = getCareerOpsRoot();
 const LOG_PATH = join(CAREER_OPS, 'data/assessments.tsv');
 
 const KNOWN_FLAGS = ['--self-test', '--summary', '--help', '-h'];
-const ADD_VALUE_FLAGS = ['--company', '--report', '--platform', '--subject', '--threshold', '--score', '--stale'];
+const ADD_VALUE_FLAGS = ['--company', '--report', '--platform', '--subject', '--threshold', '--score', '--stale',
+  '--kind', '--deadline', '--deliverable', '--requirements-url', '--submitted-at', '--proof'];
+const OPEN_VALUE_FLAGS = ['--tz'];
+const OPEN_FLAGS = ['--json'];
+export const KINDS = ['skills-test', 'take-home'];
+export const DELIVERABLES = ['video', 'file', 'link'];
+export const WARN_HOURS = 48;
 
 const USAGE = `Usage:
   node assessment-log.mjs add --company <name> [--report <num>] --platform <vendor> --subject <topic> [--threshold <pct>] [--score <pct>] [--stale "<note>"]
+  node assessment-log.mjs add --kind take-home --company <name> --platform <channel> --subject <topic> --deadline <ISO with offset> [--deliverable video|file|link] [--requirements-url <url>] [--submitted-at <ISO>] [--proof "<text|path>"]
+  node assessment-log.mjs submit --company <name> --subject <topic> [--report <num>] --submitted-at <ISO> [--proof "<text|path>"]   # records a submission you already made; submits nothing
+  node assessment-log.mjs open [--tz <IANA zone>] [--json]   # open take-homes by deadline, converted to your timezone
   node assessment-log.mjs                         # print the assessment log as JSON
   node assessment-log.mjs --summary               # print a human-readable summary
   node assessment-log.mjs --self-test             # run the in-memory test suite
@@ -49,6 +74,7 @@ const USAGE = `Usage:
 const HEADER_COMMENT = [
   '# assessments.tsv — append-only skills-assessment log (user layer). Never rewrite rows.',
   '# {YYYY-MM-DD}\\t{company}\\t{report#|-}\\t{platform}\\t{subject}\\t{threshold%|-}\\t{score%|-}\\t{stale_note}',
+  '# optional trailing cells: \\t{kind}\\t{deadline}\\t{deliverable}\\t{requirements_url}\\t{submitted_at}\\t{proof}  (kind: skills-test|take-home)',
 ].join('\n');
 
 // --- Percent parsing ---
@@ -71,8 +97,10 @@ export function parseAssessments(content) {
     const t = line.trim();
     if (!t || t.startsWith('#')) continue;
     const cells = t.split('\t').map(c => c.trim());
-    const [date, company, reportNum = '', platform = '', subject = '', threshold = '', score = '', staleNote = ''] = cells;
-    if (cells.length < 5 || !date || !company || !platform || !subject) {
+    const [date, company, reportNum = '', platform = '', subject = '', threshold = '', score = '', staleNote = '',
+      kindRaw = '', deadline = '', deliverable = '', requirementsUrl = '', submittedAt = '', proof = ''] = cells;
+    const kind = kindRaw === '' || kindRaw === '-' ? 'skills-test' : kindRaw;
+    if (cells.length < 5 || !date || !company || !platform || !subject || !KINDS.includes(kind)) {
       malformed.push({ line: t.slice(0, 80) });
       continue;
     }
@@ -84,6 +112,12 @@ export function parseAssessments(content) {
       threshold: parsePct(threshold),
       score: parsePct(score),
       staleNote: norm(staleNote),
+      kind,
+      deadline: norm(deadline),
+      deliverable: norm(deliverable),
+      requirementsUrl: norm(requirementsUrl),
+      submittedAt: norm(submittedAt),
+      proof: norm(proof),
     });
   }
   return { rows, malformed };
@@ -94,6 +128,9 @@ export function summarize(rows, malformed = []) {
   const byPlatform = {};
   let staleFlagged = 0;
   for (const r of rows) {
+    // Take-home assignments have no threshold/score; counting them would pad
+    // every platform's "unknown outcome" tally. They are read via `open`.
+    if (r.kind === 'take-home') continue;
     byPlatform[r.platform] ??= { count: 0, staleFlagged: 0, passed: 0, failed: 0, unknownOutcome: 0 };
     const agg = byPlatform[r.platform];
     agg.count += 1;
@@ -112,8 +149,8 @@ export function summarize(rows, malformed = []) {
     quality: {
       total: rows.length,
       staleFlagged,
-      withoutScore: rows.filter(r => r.score === null).length,
-      withoutThreshold: rows.filter(r => r.threshold === null).length,
+      withoutScore: rows.filter(r => r.kind !== 'take-home' && r.score === null).length,
+      withoutThreshold: rows.filter(r => r.kind !== 'take-home' && r.threshold === null).length,
       malformedLines: malformed,
     },
   };
@@ -138,16 +175,156 @@ export function buildRow(fields, today) {
     if (parsePct(v) === null) throw new Error(`--${name} must be a percentage (e.g. 70 or 70%), got "${v}"`);
     return v;
   };
-  return [
+  const kind = String(fields.kind ?? '').trim() || 'skills-test';
+  if (!KINDS.includes(kind)) throw new Error(`--kind must be one of ${KINDS.join(', ')}, got "${kind}"`);
+  const base = [
     today, req('company'), opt('report'), req('platform'), req('subject'),
     optPct('threshold'), optPct('score'), opt('stale') === '-' ? '' : opt('stale'),
-  ].join('\t');
+  ];
+  const tail = ['deadline', 'deliverable', 'requirements-url', 'submitted-at', 'proof'].map(k => opt(k));
+  if (kind === 'skills-test') {
+    if (tail.some(v => v !== '-')) {
+      throw new Error('--deadline/--deliverable/--requirements-url/--submitted-at/--proof need --kind take-home');
+    }
+    return base.join('\t'); // byte-identical to the pre-#5733 format
+  }
+  if (tail[0] !== '-' && !isOffsetDateTime(tail[0])) {
+    throw new Error(`--deadline must be an ISO date-time with the sender's UTC offset or Z (e.g. 2026-11-02T17:00:00-08:00), got "${tail[0]}"`);
+  }
+  if (tail[1] !== '-' && !DELIVERABLES.includes(tail[1])) {
+    throw new Error(`--deliverable must be one of ${DELIVERABLES.join(', ')}, got "${tail[1]}"`);
+  }
+  if (tail[3] !== '-' && !isIsoDate(tail[3]) && !isLocalDateTime(tail[3]) && !isOffsetDateTime(tail[3])) {
+    throw new Error(`--submitted-at must be an ISO date or date-time, got "${tail[3]}"`);
+  }
+  return [...base, kind, ...tail].join('\t');
 }
 
-function addEntry(args) {
+// --- Take-home deadlines ---
+// Strict calendar and clock validation: Date.parse accepts or silently rolls over
+// values such as 2026-02-30 and offsets like +99:99, so check the fields explicitly.
+const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const OFFSET_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(Z|([+-])(\d{2}):?(\d{2}))$/;
+const LOCAL_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?$/;
+
+function validCalendarDate(y, m, d) {
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+function validClock(h, min, s) {
+  return h >= 0 && h <= 23 && min >= 0 && min <= 59 && (s === undefined || (s >= 0 && s <= 59));
+}
+
+/** YYYY-MM-DD that is a real calendar date. */
+export function isIsoDate(v) {
+  const m = typeof v === 'string' ? DATE_RE.exec(v) : null;
+  return !!m && validCalendarDate(+m[1], +m[2], +m[3]);
+}
+
+/** YYYY-MM-DDTHH:MM[:SS] with a real date and clock, no offset. */
+export function isLocalDateTime(v) {
+  const m = typeof v === 'string' ? LOCAL_DATETIME_RE.exec(v) : null;
+  return !!m && validCalendarDate(+m[1], +m[2], +m[3]) && validClock(+m[4], +m[5], m[6] === undefined ? undefined : +m[6]);
+}
+
+/** Date-time with Z or a +/-HH:MM offset (hours 0-14, minutes 0-59). */
+export function isOffsetDateTime(v) {
+  const m = typeof v === 'string' ? OFFSET_DATETIME_RE.exec(v) : null;
+  if (!m) return false;
+  if (!validCalendarDate(+m[1], +m[2], +m[3])) return false;
+  if (!validClock(+m[4], +m[5], m[6] === undefined ? undefined : +m[6])) return false;
+  if (m[7] === 'Z') return true;
+  const oh = +m[9], om = +m[10];
+  return oh <= 14 && om <= 59;
+}
+
+export function isValidTimeZone(tz) {
+  if (!tz || typeof tz !== 'string') return false;
+  try { new Intl.DateTimeFormat('en-CA', { timeZone: tz }); return true; } catch { return false; }
+}
+
+// Zone precedence: --tz, then config/profile.yml location.timezone (only if it is
+// an Area/City IANA name — the example profile ships an abbreviation like "PST", which is
+// ambiguous and is ignored), then the machine's zone.
+export function resolveTimeZone(flagTz, profilePath = getProfilePath()) {
+  if (flagTz) {
+    if (!isValidTimeZone(flagTz)) throw new Error(`--tz "${flagTz}" is not a valid IANA timezone (e.g. America/Toronto)`);
+    return { tz: flagTz, source: '--tz' };
+  }
+  try {
+    if (profilePath && existsSync(profilePath)) {
+      const cand = (loadYaml(readFileSync(profilePath, 'utf-8')) || {})?.location?.timezone;
+      if (typeof cand === 'string' && cand.includes('/') && isValidTimeZone(cand)) return { tz: cand, source: 'config/profile.yml' };
+    }
+  } catch { /* unreadable profile -> fall through */ }
+  return { tz: Intl.DateTimeFormat().resolvedOptions().timeZone, source: 'machine' };
+}
+
+export function formatInZone(iso, tz) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short',
+    }).formatToParts(new Date(iso)).map(p => [p.type, p.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute} ${parts.timeZoneName}`;
+}
+
+const takeHomeKey = (r) => [r.company, r.reportNum ?? '', r.subject].join('\u0000').toLowerCase();
+
+// Fold append-only rows into one current record per assignment
+// (company + report# + subject); a later non-empty value overrides an earlier one.
+export function foldTakeHomes(rows) {
+  const byKey = new Map();
+  for (const r of rows) {
+    if (r.kind !== 'take-home') continue;
+    const key = takeHomeKey(r);
+    const prev = byKey.get(key);
+    if (!prev) { byKey.set(key, { ...r }); continue; }
+    for (const f of ['deadline', 'deliverable', 'requirementsUrl', 'submittedAt', 'proof', 'platform']) {
+      if (r[f]) prev[f] = r[f];
+    }
+  }
+  return [...byKey.values()];
+}
+
+// Open (unsubmitted) take-homes, soonest deadline first (no deadline last).
+// warn = due within WARN_HOURS and not submitted; overdue = deadline passed.
+export function openTakeHomes(rows, { tz, now = new Date() }) {
+  const open = foldTakeHomes(rows).filter(r => !r.submittedAt).map(r => {
+    const t = r.deadline ? Date.parse(r.deadline) : NaN;
+    const hoursLeft = Number.isNaN(t) ? null : (t - now.getTime()) / 3600000;
+    return {
+      company: r.company, reportNum: r.reportNum, subject: r.subject, platform: r.platform,
+      deliverable: r.deliverable, requirementsUrl: r.requirementsUrl,
+      deadline: r.deadline,
+      deadlineLocal: Number.isNaN(t) ? null : formatInZone(r.deadline, tz),
+      hoursLeft: hoursLeft === null ? null : Math.round(hoursLeft * 10) / 10,
+      overdue: hoursLeft !== null && hoursLeft < 0,
+      warn: hoursLeft !== null && hoursLeft >= 0 && hoursLeft <= WARN_HOURS,
+    };
+  });
+  open.sort((a, b) => (a.deadline ? Date.parse(a.deadline) : Infinity) - (b.deadline ? Date.parse(b.deadline) : Infinity));
+  return open;
+}
+
+function printOpen(open, tz, source) {
+  console.log(`\nOPEN TAKE-HOME ASSIGNMENTS — deadlines shown in ${tz} (${source})\n`);
+  if (!open.length) { console.log('  None open.\n'); return; }
+  for (const a of open) {
+    const mark = a.overdue ? 'OVERDUE' : a.warn ? `DUE IN ${Math.floor(a.hoursLeft)}h` : '       ';
+    const ref = a.reportNum ? ` (#${a.reportNum})` : '';
+    const how = a.deliverable ? ` [${a.deliverable}]` : '';
+    console.log(`  ${a.overdue || a.warn ? '⚠' : ' '} ${a.deadlineLocal ?? 'no deadline'}  ${a.company}${ref} — ${a.subject}${how}  ${mark}`.trimEnd());
+    if (a.requirementsUrl) console.log(`      requirements: ${a.requirementsUrl}`);
+  }
+  console.log('');
+}
+
+function addEntry(args, mode = 'add') {
   const fields = {};
   for (let i = 0; i < args.length; i++) {
-    const m = args[i].match(/^--(company|report|platform|subject|threshold|score|stale)$/);
+    const m = args[i].match(/^--(company|report|platform|subject|threshold|score|stale|kind|deadline|deliverable|requirements-url|submitted-at|proof)$/);
     if (m) { fields[m[1]] = args[i + 1] ?? ''; i++; }
   }
   // LOCAL day: this is the date written into the appended assessments.tsv row,
@@ -156,6 +333,21 @@ function addEntry(args) {
   const today = localToday();
   let row;
   try {
+    if (mode === 'submit') {
+      // Append-only: record a submission as a NEW row for an existing take-home,
+      // never by rewriting the original. Platform/deadline/etc. come from the
+      // folded earlier rows; this command submits nothing anywhere.
+      if (!String(fields['submitted-at'] ?? '').trim()) throw new Error('--submitted-at is required');
+      const existing = existsSync(LOG_PATH) ? parseAssessments(readFileSync(LOG_PATH, 'utf-8')).rows : [];
+      const want = takeHomeKey({ company: String(fields.company ?? '').trim(), reportNum: String(fields.report ?? '').trim() || null, subject: String(fields.subject ?? '').trim() });
+      const prior = foldTakeHomes(existing).find(r => takeHomeKey(r) === want);
+      if (!prior) throw new Error('no logged take-home matches --company/--report/--subject (add it first with --kind take-home)');
+      fields.kind = 'take-home';
+      fields.platform = prior.platform;
+      fields.deadline = prior.deadline ?? '';
+      fields.deliverable = prior.deliverable ?? '';
+      fields['requirements-url'] = prior.requirementsUrl ?? '';
+    }
     row = buildRow(fields, today);
   } catch (e) {
     console.error(`assessment-log: ${e.message}`);
@@ -260,6 +452,10 @@ function printSummary(result) {
   } else {
     console.log('  Events:');
     for (const a of assessments) {
+      if (a.kind === 'take-home') {
+        console.log(`  ${a.date} ${a.company}${a.reportNum ? ` (#${a.reportNum})` : ''} — take-home: ${a.subject}${a.submittedAt ? ` (submitted ${a.submittedAt})` : ''}`);
+        continue;
+      }
       const ref = a.reportNum ? ` (#${a.reportNum})` : '';
       const outcome = a.threshold !== null && a.score !== null
         ? `${a.score}% vs threshold ${a.threshold}% — ${a.score >= a.threshold ? 'passed' : 'failed'}`
@@ -287,6 +483,24 @@ function printSummary(result) {
   console.log('');
 }
 
+function openCommand(args) {
+  const tzIdx = args.indexOf('--tz');
+  let zone;
+  try {
+    if (tzIdx >= 0 && (args[tzIdx + 1] === undefined || args[tzIdx + 1].startsWith('--'))) {
+      throw new Error('--tz requires an IANA timezone (e.g. America/Toronto)');
+    }
+    zone = resolveTimeZone(tzIdx >= 0 ? args[tzIdx + 1] : undefined);
+  } catch (e) {
+    console.error(`assessment-log: ${e.message}`);
+    process.exit(1);
+  }
+  const content = existsSync(LOG_PATH) ? readFileSync(LOG_PATH, 'utf-8') : '';
+  const open = openTakeHomes(parseAssessments(content).rows, { tz: zone.tz });
+  if (args.includes('--json')) console.log(JSON.stringify({ timeZone: zone.tz, timeZoneSource: zone.source, open }, null, 2));
+  else printOpen(open, zone.tz, zone.source);
+}
+
 function main() {
   const args = process.argv.slice(2);
 
@@ -298,16 +512,17 @@ function main() {
   // Values passed to the add subcommand remain positional data even when they
   // start with a dash (for example an explicitly unknown "-" percentage).
   // Only a leading-dash argument outside those value slots is a CLI flag.
+  const valueFlags = args[0] === 'add' || args[0] === 'submit' ? ADD_VALUE_FLAGS : args[0] === 'open' ? OPEN_VALUE_FLAGS : [];
   const consumedValueIndices = new Set();
-  if (args[0] === 'add') {
+  if (valueFlags.length) {
     args.forEach((arg, index) => {
-      if (ADD_VALUE_FLAGS.includes(arg) && args[index + 1] !== undefined && !args[index + 1].startsWith('--')) {
+      if (valueFlags.includes(arg) && args[index + 1] !== undefined && !args[index + 1].startsWith('--')) {
         consumedValueIndices.add(index + 1);
       }
     });
   }
 
-  const validFlags = args[0] === 'add' ? [...KNOWN_FLAGS, ...ADD_VALUE_FLAGS] : KNOWN_FLAGS;
+  const validFlags = [...KNOWN_FLAGS, ...valueFlags, ...(args[0] === 'open' ? OPEN_FLAGS : [])];
   const unknownFlags = args.filter((arg, index) =>
     arg.startsWith('-') && !consumedValueIndices.has(index) && !validFlags.includes(arg));
   if (unknownFlags.length) {
@@ -317,7 +532,8 @@ function main() {
   }
 
   if (args.includes('--self-test')) { selfTest(); return; }
-  if (args[0] === 'add') { addEntry(args.slice(1)); return; }
+  if (args[0] === 'add' || args[0] === 'submit') { addEntry(args.slice(1), args[0]); return; }
+  if (args[0] === 'open') { openCommand(args.slice(1)); return; }
 
   const content = existsSync(LOG_PATH) ? readFileSync(LOG_PATH, 'utf-8') : '';
   const { rows, malformed } = parseAssessments(content);

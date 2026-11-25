@@ -22,10 +22,20 @@
 // clone with only Node (#1440), and reproducing the orphan needs Chromium plus a
 // payload tuned to one template's exact geometry. The rule is the contract; the
 // render is how the rule was arrived at.
+//
+// What a CSS assertion cannot do is check that the RENDERER OBEYS the rule. A
+// property Chromium ignored would satisfy every assertion below while the
+// guarantee shipped broken, and nothing here could tell the difference. That
+// half is covered by tests/cv-visual/fragmentation-support.spec.mjs, which
+// renders the same document with and without each property and asserts the two
+// paginate differently — so a property going inert fails there instead of
+// passing silently here. The split is deliberate: this file stays browser-free
+// and runs anywhere, and the render check lives under tests/cv-visual/, which
+// is already browser-gated by its own config.
 import { readFileSync, existsSync } from 'fs';
 import { relative, join, dirname } from 'path';
 import { pass, fail, ROOT } from './helpers.mjs';
-import { listTemplates } from '../cv-templates.mjs';
+import { listTemplates, DEFAULT_TEMPLATES_DIR } from '../cv-templates.mjs';
 
 console.log('\nCV template page-break control — no orphaned project tech line');
 
@@ -93,7 +103,7 @@ function emitsProjectTech(t) {
   return /project-tech/.test(readFileSync(partial, 'utf-8'));
 }
 
-const discovered = listTemplates('cv').filter((t) => t.format === 'html');
+const discovered = listTemplates('cv', { dir: DEFAULT_TEMPLATES_DIR }).filter((t) => t.format === 'html');
 
 if (discovered.length === 0) {
   fail('no HTML CV templates discovered — listTemplates("cv") returned nothing');
@@ -147,9 +157,21 @@ for (const t of templates) {
   // The templates pair every modern break property with its legacy alias. Losing
   // half the pair is the kind of edit that looks like a tidy-up and quietly drops
   // support for whatever engine still needs the prefix-era name.
-  if (declares(parsed, '.project-tech', 'break-before', 'avoid')
-    && !declares(parsed, '.project-tech', 'page-break-before', 'avoid')) {
-    fail(`${rel}: .project-tech has break-before: avoid without the paired page-break-before: avoid`);
+  //
+  // Checked over every pair these templates can declare, not just break-before.
+  // The asymmetry was accidental: .project-title's break-after and .project's
+  // break-inside carry the same legacy aliases and had no guard at all, so half
+  // of either pair could be dropped with nothing to notice.
+  for (const [selector, prop] of [
+    ['.project-tech', 'break-before'],
+    ['.project-desc', 'break-after'],
+    ['.project-title', 'break-after'],
+    ['.project', 'break-inside'],
+  ]) {
+    if (declares(parsed, selector, prop, 'avoid')
+      && !declares(parsed, selector, `page-${prop}`, 'avoid')) {
+      fail(`${rel}: ${selector} has ${prop}: avoid without the paired page-${prop}: avoid`);
+    }
   }
 
   // Regression guard on the protection that already existed: a project title must

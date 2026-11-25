@@ -10,7 +10,7 @@
  * is that place: an append-only queue the agent drains at the start of a
  * session.
  *
- *   data/agent-inbox.md
+ *   <data root>/data/agent-inbox.md   (CAREER_OPS_INBOX overrides)
  *     - [ ] <stamp> — <request>          (pending)
  *     - [x] <stamp> — <request> → result: <one line>   (resolved)
  *
@@ -20,20 +20,41 @@
  * this CLI, and any tool (a dashboard, a script, cron) can append to it. The
  * protocol an agent follows is documented in modes/agent-inbox.md.
  *
+ * Item numbers are *file positions*, not positions in the pending list: `add`
+ * only ever appends, so a number never changes meaning once printed. `list`
+ * therefore shows gaps as items get resolved (2, 4, 5) — the gaps are the
+ * receipt that something was already handled, and a whole batch of resolves can
+ * be read off a single `list` without drifting.
+ *
  * Usage:
  *   node agent-inbox.mjs add "evaluate https://acme.com/jobs/42"
  *   node agent-inbox.mjs list [--all]                 # pending only, or every item
- *   node agent-inbox.mjs resolve 1 [--result "scored 4.3 — report 012"]
+ *   node agent-inbox.mjs resolve 1 [--expect "Acme"] [--result "scored 4.3 — report 012"]
  */
 
 import {
   readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync,
-  openSync, fstatSync, readSync, closeSync,
+  openSync, fstatSync, readSync, closeSync, realpathSync, statSync,
 } from 'fs';
-import { dirname } from 'path';
+import { dirname, join, resolve as resolvePath } from 'path';
+import { fileURLToPath } from 'url';
 import { withPipelineLock } from './pipeline-lock.mjs';
+import { writeFileAtomic } from './tracker-utils.mjs';
+import { localToday } from './lib/local-today.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const PATH = process.env.CAREER_OPS_INBOX || 'data/agent-inbox.md';
+const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
+const DEFAULT_REL = 'data/agent-inbox.md';
+// The inbox is user data, so it lives under the data root like every other
+// data/ file (learn.mjs reads it from there). It used to be relative to the
+// working directory, so a plugin install, whose scripts run from the plugin
+// copy, queued items into a folder Claude Code replaces on update.
+// CAREER_OPS_INBOX still wins, and a relative value resolves against the
+// working directory like the other path overrides.
+const INBOX_OVERRIDE = process.env.CAREER_OPS_INBOX?.trim();
+const DATA_ROOT = INBOX_OVERRIDE ? null : getCareerOpsRoot();
+const PATH = INBOX_OVERRIDE ? resolvePath(INBOX_OVERRIDE) : join(DATA_ROOT, DEFAULT_REL);
 
 const HEADER = [
   '# Agent Inbox',
@@ -48,20 +69,30 @@ const HEADER = [
   '',
 ].join('\n');
 
-function stamp() {
-  return new Date().toISOString().slice(0, 16).replace('T', ' ');
+// Local date and time, the clock the person queuing the item is looking at.
+// toISOString() is UTC, and this stamp carries no zone marker, so a request
+// queued at 10:30 on the 18th east of Greenwich read "2026-08-17 20:30".
+function stamp(now = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${localToday(now)} ${p(now.getHours())}:${p(now.getMinutes())}`;
 }
 
 function ensureGitignored() {
   // The inbox is personal data. On installs whose .gitignore predates this
   // feature, make sure the default path is ignored so a first `add` can't
-  // accidentally commit it. Only manages the default, non-overridden path.
-  if (process.env.CAREER_OPS_INBOX || PATH !== 'data/agent-inbox.md') return;
+  // accidentally commit it. Only manages the default, non-overridden path, and
+  // only when the data root is the code checkout: a separate data root (an
+  // environment variable, the marker, a plugin install) is not that checkout's
+  // working tree, and a plugin copy's .gitignore is not ours to edit. Compare
+  // real paths: CAREER_OPS_ROOT may name a symlink to the checkout itself.
+  if (!DATA_ROOT) return;
   try {
-    if (!existsSync('.gitignore')) return; // not a git checkout we should touch
-    const text = readFileSync('.gitignore', 'utf8');
-    if (text.split('\n').some((l) => l.trim() === PATH)) return; // already ignored
-    writeFileSync('.gitignore', text.replace(/\s*$/, '') + `\n${PATH}\n`);
+    if (realpathSync(DATA_ROOT) !== realpathSync(CODE_ROOT)) return;
+    const gitignore = join(DATA_ROOT, '.gitignore');
+    if (!existsSync(gitignore)) return; // not a git checkout we should touch
+    const text = readFileSync(gitignore, 'utf8');
+    if (text.split('\n').some((l) => l.trim() === DEFAULT_REL)) return; // already ignored
+    writeFileSync(gitignore, text.replace(/\s*$/, '') + `\n${DEFAULT_REL}\n`);
   } catch { /* best effort — never block queuing on this */ }
 }
 
@@ -120,22 +151,42 @@ function needsLeadingNewline(path) {
   }
 }
 
-// Parse the checklist into items, in file order.
+// Parse the checklist into items, in file order. `num` is the stable 1-based
+// item number used by `list` and `resolve` — it is the position in the FULL
+// list, so resolving an item never renumbers the others.
 function parseItems() {
   if (!existsSync(PATH)) return [];
   const items = [];
   readFileSync(PATH, 'utf8').split('\n').forEach((line, i) => {
     const m = /^- \[([ xX])\]\s*(.*)$/.exec(line.trim());
-    if (m) items.push({ line: i, done: m[1].toLowerCase() === 'x', text: m[2] });
+    if (m) items.push({ num: items.length + 1, line: i, done: m[1].toLowerCase() === 'x', text: m[2] });
   });
   return items;
 }
 
 function opt(name, def = '') {
-  const i = process.argv.indexOf('--' + name);
-  if (i < 0) return def;
-  const v = process.argv[i + 1];
-  return v && !v.startsWith('--') ? v : def;
+  const [first] = optAll(name);
+  return first || def;
+}
+
+// Every value given for a repeatable flag, in argv order, in both spellings:
+// `--expect Acme` and `--expect=Acme`. Matching only the bare token dropped the
+// second: the guard was skipped and `--result=...` recorded nothing, at exit 0.
+// An occurrence with no value yields '' rather than being dropped, so the
+// caller can reject it: reading only the first occurrence would never see a
+// later bare one.
+function optAll(name) {
+  const flag = '--' + name;
+  const values = [];
+  process.argv.forEach((arg, i) => {
+    if (arg.startsWith(`${flag}=`)) {
+      values.push(arg.slice(flag.length + 1));
+    } else if (arg === flag) {
+      const v = process.argv[i + 1];
+      values.push(v && !v.startsWith('--') ? v : '');
+    }
+  });
+  return values;
 }
 
 async function add() {
@@ -198,31 +249,81 @@ async function add() {
 
 function list() {
   const all = process.argv.includes('--all');
-  const items = parseItems().filter((it) => all || !it.done);
+  const parsed = parseItems();
+  const items = parsed.filter((it) => all || !it.done);
   if (!items.length) return process.stdout.write(all ? 'Inbox is empty.\n' : 'No pending items.\n');
-  items.forEach((it, n) => {
-    process.stdout.write(`${String(n + 1).padStart(2)}. [${it.done ? 'x' : ' '}] ${it.text}\n`);
+  items.forEach((it) => {
+    process.stdout.write(`${String(it.num).padStart(2)}. [${it.done ? 'x' : ' '}] ${it.text}\n`);
   });
+  // Explain the gaps rather than let them read as a display bug.
+  if (items.length < parsed.length) {
+    process.stdout.write(
+      `\n(${parsed.length - items.length} resolved item(s) hidden — numbers are stable file positions, so gaps are expected. \`list --all\` shows everything.)\n`,
+    );
+  }
 }
 
 async function resolve() {
   const n = Number(process.argv[3]);
   if (!Number.isInteger(n) || n < 1) fail('resolve needs a 1-based item number (see `list`)');
+  // Before the lock and before anything is written: a flag resolve does not
+  // know (a mistyped --expect among them) was skipped, so the item was
+  // resolved with the guard the caller meant to set turned off. A flag with no
+  // value is refused too: a bare --result recorded nothing at exit 0.
+  validateFlags(process.argv.slice(4), ['--expect', '--result', '--help', '-h'], USAGE, {
+    valueFlags: ['--expect', '--result'],
+    requireOperand: true,
+  });
   const outcome = await withPipelineLock(PATH, () => {
-    // The pending snapshot, line lookup, and rewrite are one transaction. An
+    // The item snapshot, line lookup, and rewrite are one transaction. An
     // add between the old read and write was acknowledged, then overwritten by
     // this stale snapshot even though add itself correctly held this same lock.
     // Number inside the critical section too, so the selected item and the
     // rewritten line always come from one locked view.
-    const pending = parseItems().filter((it) => !it.done);
-    const target = pending[n - 1];
-    if (!target) return { error: `no pending item #${n} (${pending.length} pending)` };
+    //
+    // Number against the FULL item list, not the pending subset. `add` only ever
+    // appends, so an item's position is stable for the life of the file and a
+    // batch of resolves read off one `list` stays correct. Numbering against the
+    // pending view instead made each resolve shift every higher number down by
+    // one — silently stamping later results onto the wrong items.
+    const items = parseItems();
+    const target = items[n - 1];
+    if (!target) {
+      const pending = items.filter((it) => !it.done).length;
+      return { error: `no item #${n} — inbox has ${items.length} item(s), ${pending} pending. Run \`list --all\`.` };
+    }
+    // Already-resolved is an error, not a silent re-stamp: it is what a stale
+    // number from an older `list` most often lands on.
+    if (target.done) return { error: `item #${n} is already resolved — refusing to overwrite it:\n  #${n}: ${target.text}` };
+    // Optional caller-side guard: abort unless the target says what the caller
+    // thinks it says. Catches "right command, wrong target" generally.
+    // Every --expect given must hold, and every one must carry a value: a bare
+    // --expect anywhere on the line is a guard the caller meant to set and did
+    // not, so it fails instead of being skipped behind an earlier valid one.
+    const expects = optAll('expect');
+    if (expects.includes('')) return { error: '--expect needs a substring, e.g. --expect "Dana-Farber"' };
+    const missing = expects.find((expect) => !target.text.toLowerCase().includes(expect.toLowerCase()));
+    if (missing !== undefined) {
+      return { error: `item #${n} does not contain --expect ${JSON.stringify(missing)} — refusing to resolve:\n  #${n}: ${target.text}` };
+    }
     const result = oneLine(opt('result'));
     const lines = readFileSync(PATH, 'utf8').split('\n');
     let updated = lines[target.line].replace('[ ]', '[x]');
     if (result && !/→ result:/.test(updated)) updated += ` → result: ${result}`;
     lines[target.line] = updated;
-    writeFileSync(PATH, lines.join('\n'));
+    // Replace, don't rewrite in place. The lock serialises writers, but `list`
+    // and anything reading the file by hand do not take it, and writeFileSync
+    // truncates before it writes: a reader in that window, or a crash inside
+    // it, sees a queue with items missing. A same-directory temp file renamed
+    // over the original is the repo's existing helper for exactly this.
+    //
+    // A rename replaces the directory entry it is given and installs a new
+    // file, so two things the in-place write got for free have to be asked
+    // for: write THROUGH a symlinked inbox (rename over the link would swap it
+    // for a regular file and leave its target stale), and keep the queue's
+    // permissions (a 0600 inbox must not come back 0644 under the umask).
+    const real = realpathSync(PATH);
+    writeFileAtomic(real, lines.join('\n'), { mode: statSync(real).mode & 0o7777 });
     return { target };
   }, { timeoutMs: 30_000 });
   // Fail only after withPipelineLock has released. process.exit() inside the
@@ -236,15 +337,24 @@ function fail(msg) {
   process.exit(1);
 }
 
+const USAGE =
+  'Usage:\n' +
+  '  node agent-inbox.mjs add "evaluate https://acme.com/jobs/42"\n' +
+  '  node agent-inbox.mjs list [--all]\n' +
+  '  node agent-inbox.mjs resolve <n> [--expect "substring"] [--result "..."]\n' +
+  '\n' +
+  'Numbers are stable file positions: `list` shows gaps once items are\n' +
+  'resolved, and a batch of resolves read off one `list` stays correct.\n' +
+  '--expect aborts unless the target item contains that substring.\n';
+
 const cmd = process.argv[2];
 if (cmd === 'add') await add();
 else if (cmd === 'list') list();
 else if (cmd === 'resolve') await resolve();
+else if (cmd === undefined || cmd === '--help' || cmd === '-h') process.stdout.write(USAGE);
 else {
-  process.stdout.write(
-    'Usage:\n' +
-    '  node agent-inbox.mjs add "evaluate https://acme.com/jobs/42"\n' +
-    '  node agent-inbox.mjs list [--all]\n' +
-    '  node agent-inbox.mjs resolve <n> [--result "..."]\n',
-  );
+  // A word that is not a subcommand (`ad` for `add`) queued nothing, so it must
+  // not exit 0: the callers that check the status read 0 as "queued".
+  process.stderr.write(`agent-inbox.mjs: unknown command "${cmd}"\n${USAGE}`);
+  process.exit(1);
 }

@@ -235,10 +235,11 @@ try {
     data: { count: 500, job_post_list: Array.from({ length: 100 }, (_, i) => mkJob(String(5000 + i), `岗位E${i}`)) },
   }));
   const capWarnings = [];
+  let cappedJobs = [];
   const originalConsoleError = console.error;
   console.error = (...args) => capWarnings.push(args.join(' '));
   try {
-    await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI'], max_pages: 1 }, capped.ctx);
+    cappedJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI'], max_pages: 1 }, capped.ctx);
   } finally {
     console.error = originalConsoleError;
   }
@@ -252,6 +253,58 @@ try {
   } else {
     fail(`feishu-jobs.fetch() truncation warnings = ${JSON.stringify(capWarnings)}`);
   }
+  // The warned cut is also marked, so scan.mjs logs the board partial, not reachable.
+  if (cappedJobs.truncated?.reason === 'page-cap' && cappedJobs.truncated.fetched === 100) {
+    pass('feishu-jobs.fetch() marks the board page-cap when max_pages truncates it');
+  } else {
+    fail(`feishu-jobs.fetch() max_pages cut: truncated = ${JSON.stringify(cappedJobs.truncated)}`);
+  }
+  // An empty page ends the board even when the planned walk reaches max_pages:
+  // no cap warning, no mark.
+  const exhaustedAtCap = mkCtx(({ offset }) => ({
+    code: 0,
+    data: { count: 500, job_post_list: offset === 0 ? Array.from({ length: 100 }, (_, i) => mkJob(String(9000 + i), `岗位S${i}`)) : [] },
+  }));
+  const exhaustedWarnings = [];
+  let exhaustedJobs = [];
+  const beforeExhausted = console.error;
+  console.error = (...args) => exhaustedWarnings.push(args.join(' '));
+  try {
+    exhaustedJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI'], max_pages: 2 }, exhaustedAtCap.ctx);
+  } finally {
+    console.error = beforeExhausted;
+  }
+  if (exhaustedJobs.length === 100 && exhaustedJobs.truncated === undefined && !exhaustedWarnings.some((line) => line.includes('truncated at'))) {
+    pass('feishu-jobs.fetch() treats an empty page at max_pages as the end of the board: no warning, no mark');
+  } else {
+    fail(`feishu-jobs.fetch() empty page at max_pages: ${exhaustedJobs.length} jobs, truncated = ${JSON.stringify(exhaustedJobs.truncated)}, warnings = ${JSON.stringify(exhaustedWarnings)}`);
+  }
+  // With no count, the page budget stands: full pages are read up to max_pages
+  // and the cut is a cap; a short page ends the keyword, unmarked.
+  const noCountRun = async (rowsFor, max_pages) => {
+    const ctx = mkCtx(({ offset }) => ({ code: 0, data: { job_post_list: Array.from({ length: rowsFor(offset / 100 + 1) }, (_, i) => mkJob(String(9500 + offset + i), `岗位N${offset + i}`)) } }));
+    const lines = [];
+    const before = console.error;
+    console.error = (...args) => lines.push(args.join(' '));
+    try {
+      const jobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI'], max_pages }, ctx.ctx);
+      return { jobs, lines, calls: ctx.calls.length };
+    } finally {
+      console.error = before;
+    }
+  };
+  const noCountFull = await noCountRun(() => 100, 2);
+  if (noCountFull.calls === 2 && noCountFull.jobs.length === 200 && noCountFull.jobs.truncated?.reason === 'page-cap' && noCountFull.lines.some((l) => l.includes('truncated at 200 postings'))) {
+    pass('feishu-jobs.fetch() reads full pages up to max_pages without a count and marks the cut page-cap');
+  } else {
+    fail(`feishu-jobs.fetch() no count, full pages: ${noCountFull.calls} requests, ${noCountFull.jobs.length} jobs, truncated = ${JSON.stringify(noCountFull.jobs.truncated)}, warnings = ${JSON.stringify(noCountFull.lines)}`);
+  }
+  const noCountShort = await noCountRun((page) => (page === 1 ? 40 : 100), 3);
+  if (noCountShort.calls === 1 && noCountShort.jobs.length === 40 && noCountShort.jobs.truncated === undefined && noCountShort.lines.length === 0) {
+    pass('feishu-jobs.fetch() ends a keyword on a short first page without a count, unmarked');
+  } else {
+    fail(`feishu-jobs.fetch() no count, short page: ${noCountShort.calls} requests, ${noCountShort.jobs.length} jobs, truncated = ${JSON.stringify(noCountShort.jobs.truncated)}`);
+  }
 
   const probe = mkCtx(() => ({
     code: 0,
@@ -264,6 +317,8 @@ try {
   } else {
     fail(`feishu-jobs.fetch() ctx.maxPages=1: ${probe.calls.length} requests, keyword=${JSON.stringify(probe.calls[0] && probe.calls[0].keyword)}`);
   }
+  if (probeJobs.truncated === undefined) pass('feishu-jobs.fetch() leaves the ctx.maxPages probe unmarked');
+  else fail(`feishu-jobs.fetch() probe was marked: ${JSON.stringify(probeJobs.truncated)}`);
 
   const fractionalEntryLimit = mkCtx(() => ({
     code: 0,
@@ -345,6 +400,22 @@ try {
     fail(`feishu-jobs.fetch() partial results on failure: ${JSON.stringify(blipJobs.map(j => j.title))}`);
   }
 
+  // Read only in part, so the result says so: scan.mjs logs the board partial
+  // instead of reachable (ADDING_A_PROVIDER.md, lib/board-truncation.mjs).
+  if (blipJobs.truncated?.reason === 'fetch-error' && blipJobs.truncated.fetched === 1) {
+    pass('feishu-jobs.fetch() marks the board partial when a later request fails');
+  } else {
+    fail(`feishu-jobs.fetch() a later request fails: truncated = ${JSON.stringify(blipJobs.truncated)}`);
+  }
+
+  const whole = mkCtx(() => ({ code: 0, data: { count: 1, job_post_list: [mkJob('9', '全读岗位')] } }));
+  const wholeJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI', '大模型'] }, whole.ctx);
+  if (wholeJobs.length === 1 && wholeJobs.truncated === undefined) {
+    pass('feishu-jobs.fetch() leaves the board unmarked when every request answers');
+  } else {
+    fail(`feishu-jobs.fetch() whole board: ${wholeJobs.length} jobs, truncated = ${JSON.stringify(wholeJobs.truncated)}`);
+  }
+
   const softFail = mkCtx(({ keyword }) => (keyword === '大模型'
     ? { code: 1, message: 'rate limited' }
     : { code: 0, data: { count: 1, job_post_list: [mkJob('8', '幸存岗位2')] } }));
@@ -353,6 +424,14 @@ try {
     pass('feishu-jobs.fetch() treats an in-band code!=0 as a blip once jobs are collected');
   } else {
     fail(`feishu-jobs.fetch() code!=0 blip: ${JSON.stringify(softFailJobs.map(j => j.title))}`);
+  }
+
+  // Read only in part, so the result says so: scan.mjs logs the board partial
+  // instead of reachable (ADDING_A_PROVIDER.md, lib/board-truncation.mjs).
+  if (softFailJobs.truncated?.reason === 'fetch-error' && softFailJobs.truncated.fetched === 1) {
+    pass('feishu-jobs.fetch() marks the board partial when a later request answers code!=0');
+  } else {
+    fail(`feishu-jobs.fetch() a later request answers code!=0: truncated = ${JSON.stringify(softFailJobs.truncated)}`);
   }
 
   const untrusted = mkCtx(() => ({ code: 0, data: { count: 0, job_post_list: [] } }));
@@ -364,6 +443,58 @@ try {
     pass('feishu-jobs.fetch() rejects an untrusted explicit-provider URL before any request');
   } else {
     fail(`feishu-jobs.fetch() must not request an untrusted explicit-provider URL (threw=${untrustedThrew}, calls=${untrusted.calls.length})`);
+  }
+
+  let inFlight = 0;
+  let peakInFlight = 0;
+  const parallelCalls = [];
+  const parallelSleeps = [];
+  const parallelJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI'] }, {
+    sleep: async (ms) => { parallelSleeps.push(ms); },
+    fetchJson: async (_url, opts) => {
+      const { offset } = JSON.parse(opts.body);
+      parallelCalls.push(offset);
+      inFlight++;
+      peakInFlight = Math.max(peakInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight--;
+      return {
+        code: 0,
+        data: {
+          count: 950,
+          job_post_list: Array.from({ length: Math.min(100, 950 - offset) }, (_, i) => mkJob(String(20_000 + offset + i), `并行岗位${offset + i}`)),
+        },
+      };
+    },
+  });
+  if (parallelJobs.length === 950 && parallelCalls.length === 10 && peakInFlight === 4 && parallelSleeps.length === 3) {
+    pass('feishu-jobs.fetch() fetches the pages after the first four at a time, one pause per batch');
+  } else {
+    fail(`feishu-jobs.fetch() parallel pages: ${parallelJobs.length} jobs, ${parallelCalls.length} requests, peak ${peakInFlight} in flight, ${parallelSleeps.length} sleeps`);
+  }
+  if (parallelJobs[0].title === '并行岗位0' && parallelJobs[949].title === '并行岗位949') {
+    pass('feishu-jobs.fetch() keeps board order when pages arrive in parallel');
+  } else {
+    fail(`feishu-jobs.fetch() parallel order: first=${parallelJobs[0]?.title} last=${parallelJobs[949]?.title}`);
+  }
+
+  const midBatchFail = mkCtx(({ offset }) => {
+    if (offset === 300) throw new Error('HTTP 503');
+    return { code: 0, data: { count: 600, job_post_list: Array.from({ length: 100 }, (_, i) => mkJob(String(30_000 + offset + i), `批次岗位${offset + i}`)) } };
+  });
+  const midBatchWarnings = [];
+  const consoleErrorBeforeMidBatch = console.error;
+  console.error = (...args) => midBatchWarnings.push(args.join(' '));
+  let midBatchJobs;
+  try {
+    midBatchJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI'] }, midBatchFail.ctx);
+  } finally {
+    console.error = consoleErrorBeforeMidBatch;
+  }
+  if (midBatchJobs.length === 300 && midBatchWarnings.some((line) => line.includes('page 4 failed'))) {
+    pass('feishu-jobs.fetch() keeps the pages before a failed one in the same batch');
+  } else {
+    fail(`feishu-jobs.fetch() mid-batch failure: ${midBatchJobs.length} jobs, warnings ${JSON.stringify(midBatchWarnings)}`);
   }
 
   let firstFailThrew = false;

@@ -61,6 +61,9 @@
      `style:`, which the PDF pipeline injects as a later :root block. */
   :root {
     --secondary-color: hsl(270, 70%, 45%);
+    --tag-color: hsl(187, 74%, 28%);
+    --tag-bg: hsl(187, 40%, 95%);
+    --tag-border: hsl(187, 40%, 88%);
   }
 
   * {
@@ -118,6 +121,17 @@
     line-height: 1.1;
   }
 
+  .header-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    color: hsl(187, 74%, 32%);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+    line-height: 1.2;
+  }
+
   .header-gradient {
     height: 2px;
     background: linear-gradient(to right, hsl(187, 74%, 32%), var(--secondary-color));
@@ -140,8 +154,12 @@
     text-decoration: none;
   }
 
-  .contact-row .separator {
+  /* Generated on the item BEFORE it, so a wrap cannot start a line with the
+     separator. See cv-template.html for the full rationale. */
+  .contact-row > *:not(:last-child)::after {
+    content: "|";
     color: #ccc;
+    margin-inline-start: 14px;   /* matches the 14px column gap above */
   }
 
   /* === OPTIONAL PROFILE PHOTO (opt-in, DACH/European markets — #264) ===
@@ -205,11 +223,11 @@
     font-family: 'DM Sans', sans-serif;
     font-size: 10px;
     font-weight: 500;
-    color: hsl(187, 74%, 28%);
-    background: hsl(187, 40%, 95%);
+    color: var(--tag-color);
+    background: var(--tag-bg);
     padding: 4px 10px;
     border-radius: 3px;
-    border: 1px solid hsl(187, 40%, 88%);
+    border: 1px solid var(--tag-border);
   }
 
   /* === WORK EXPERIENCE === */
@@ -250,6 +268,14 @@
     color: #888;
   }
 
+  .job-context {
+    font-style: italic;
+    font-size: 10.5px;
+    line-height: 1.55;
+    color: #555;
+    margin-top: 3px;
+  }
+
   .job ul {
     padding-left: 18px;
     margin-top: 6px;
@@ -282,7 +308,7 @@
     font-size: 9px;
     font-weight: 500;
     color: hsl(187, 74%, 32%);
-    background: hsl(187, 40%, 95%);
+    background: var(--tag-bg);
     padding: 1px 6px;
     border-radius: 2px;
     margin-left: 6px;
@@ -399,6 +425,22 @@
     font-size: 10.5px;
   }
 
+  /* === GDPR / RODO CONSENT (footer) === */
+  /* Opt-in footer slot filled from payload.consent. Empty by default — the
+     :empty rule hides the div (and its border-top) when no consent text is
+     set, so existing resumes render byte-identical to a pre-consent layout.
+     Mirrors the {{PHOTO}} opt-in slot pattern (#264). */
+  .cv-consent {
+    margin-top: 14px;
+    padding-top: 8px;
+    border-top: 1px solid #ddd;
+    font-size: 8.5px;
+    line-height: 1.4;
+    color: #777;
+    text-align: left;
+  }
+  .cv-consent:empty { display: none; }
+
   /* === PRINT === */
   @media print {
     body {
@@ -413,11 +455,38 @@
 
   /* === PAGE BREAK CONTROL === */
   .avoid-break,
-  .job,
-  .project,
   .edu-item {
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  /* #3242: opt-in — unchanged default (this template has always kept a role
+     whole; override via config/profile.yml style.job_break_inside: auto to
+     let a role flow across a page break instead). This template's :root token
+     block does not declare --job-break-inside, so the fallback below is the
+     only default. */
+  .job {
+    page-break-inside: var(--job-break-inside, avoid);
+    break-inside: var(--job-break-inside, avoid);
+  }
+
+  /* Opt-in — unchanged default (this template has always kept a project whole;
+     override via config/profile.yml style.project_break_inside: auto to let a
+     project flow across a page break instead). This template's :root token
+     block does not declare --project-break-inside, so the fallback below is the
+     only default.
+
+     The Projects SECTION reads the token too. It used to carry the blanket
+     `avoid-break`, which made the whole section atomic unconditionally, so
+     `project_break_inside: auto` could not take effect here: the section moved
+     whole whichever way the token was set, and the entries inside it never got
+     the chance to split. The fallback is `avoid`, which is exactly what
+     `avoid-break` gave it, so an unset token leaves this template's pagination
+     untouched. Every other section keeps `avoid-break`. */
+  .project,
+  .projects-section {
+    page-break-inside: var(--project-break-inside, avoid);
+    break-inside: var(--project-break-inside, avoid);
   }
 
   /* === RTL (Arabic) Support === */
@@ -428,6 +497,7 @@
   }
 
   html[lang="ar"] .header h1,
+  html[lang="ar"] .header-title,
   html[lang="ar"] .section-title,
   html[lang="ar"] .job-company,
   html[lang="ar"] .project-title,
@@ -477,6 +547,7 @@
   }
 
   html[lang="ja"] .header h1,
+  html[lang="ja"] .header-title,
   html[lang="ja"] .section-title,
   html[lang="ja"] .job-company,
   html[lang="ja"] .project-title,
@@ -533,6 +604,7 @@
      rule above can't reach them — same gap CodeRabbit flagged on #2616,
      fixed the same way as the ja/zh-CN blocks below. */
   html[lang="ko"] .header h1,
+  html[lang="ko"] .header-title,
   html[lang="ko"] .section-title,
   html[lang="ko"] .job-company,
   html[lang="ko"] .project-title {
@@ -542,6 +614,7 @@
   }
 
   html[lang="zh-TW"] .header h1,
+  html[lang="zh-TW"] .header-title,
   html[lang="zh-TW"] .section-title,
   html[lang="zh-TW"] .job-company,
   html[lang="zh-TW"] .project-title {
@@ -551,10 +624,12 @@
   }
 
   html[lang="zh-CN"] .header h1,
+  html[lang="zh-CN"] .header-title,
   html[lang="zh-CN"] .section-title,
   html[lang="zh-CN"] .job-company,
   html[lang="zh-CN"] .project-title,
   html[lang="zh"] .header h1,
+  html[lang="zh"] .header-title,
   html[lang="zh"] .section-title,
   html[lang="zh"] .job-company,
   html[lang="zh"] .project-title {
@@ -589,16 +664,13 @@
   <!-- HEADER -->
   <div class="header avoid-break">
     <h1>{{NAME}}</h1>
+    {{TITLE_BLOCK}}
     <div class="header-gradient"></div>
     <div class="contact-row">
       <span>{{PHONE}}</span>
-      <span class="separator">|</span>
       <span>{{EMAIL}}</span>
-      <span class="separator">|</span>
       <a href="{{LINKEDIN_URL}}">{{LINKEDIN_DISPLAY}}</a>
-      <span class="separator">|</span>
       <a href="{{PORTFOLIO_URL}}">{{PORTFOLIO_DISPLAY}}</a>
-      <span class="separator">|</span>
       <span>{{LOCATION}}</span>
     </div>
   </div>
@@ -624,7 +696,7 @@
   </div>
 
   <!-- PROJECTS -->
-  <div class="section avoid-break">
+  <div class="section projects-section">
     <div class="section-title">{{SECTION_PROJECTS}}</div>
     {{PROJECTS}}
   </div>
@@ -648,6 +720,9 @@
   </div>
 
   <!-- END -->
+
+  <!-- GDPR / RODO consent -->
+  <div class="cv-consent">{{CONSENT}}</div>
 
 </div>
 </body>

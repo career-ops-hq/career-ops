@@ -2,8 +2,9 @@
 // Only a real HTTP 404 may advance a miss counter. Throttles, transport
 // failures and DNS errors mean "unknown", never "dead".
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { renameSyncWithRetry } from './lib/rename-retry.mjs';
 
 export const DEAD_BOARD_HEADER = 'ats\tboard\tmisses\tlast_checked';
 export const DEAD_BOARD_MISSES = 3;
@@ -52,6 +53,29 @@ export function recordBoardResult(rows, ats, board, status, now = Date.now()) {
   rows.set(rowKey, { ats, board, misses, lastChecked: now });
 }
 
+/**
+ * Record a failed fetch, given the error instead of a status picked off it.
+ *
+ * A provider that walks several pages marks its errors with `firstPage`
+ * (providers/icims.mjs). `firstPage: false` means the board had already
+ * answered its first page with postings when a later request failed, so the
+ * board is there whatever that later status was: it is recorded the way a
+ * success is. Without this a 404 on page 3 of a live board counted as a miss,
+ * and three sweeps of it retired the board for the whole re-probe window.
+ *
+ * An error without the mark is read as before, by its status.
+ *
+ * @param {Map<string, object>} rows - Dead-board rows from loadDeadBoards().
+ * @param {string} ats - Source id.
+ * @param {string} board - Board key from boardKey().
+ * @param {unknown} err - What the provider threw.
+ * @param {number} [now] - Clock, for tests.
+ * @returns {void}
+ */
+export function recordBoardFailure(rows, ats, board, err, now = Date.now()) {
+  recordBoardResult(rows, ats, board, err?.firstPage === false ? 200 : err?.status, now);
+}
+
 export function saveDeadBoards(file, rows) {
   mkdirSync(dirname(file), { recursive: true });
   const body = [...rows.values()]
@@ -59,5 +83,5 @@ export function saveDeadBoards(file, rows) {
     .map((row) => `${row.ats}\t${row.board}\t${row.misses}\t${new Date(row.lastChecked).toISOString()}`);
   const tmp = `${file}.tmp`;
   writeFileSync(tmp, `${DEAD_BOARD_HEADER}\n${body.length ? `${body.join('\n')}\n` : ''}`, 'utf8');
-  renameSync(tmp, file);
+  renameSyncWithRetry(tmp, file);
 }

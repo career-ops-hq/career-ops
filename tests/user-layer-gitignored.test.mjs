@@ -9,9 +9,10 @@
 // This test compares the two lists directly so they cannot diverge again.
 
 import { spawnSync } from 'child_process';
-import { lstatSync, readFileSync } from 'fs';
+import { copyFileSync, lstatSync, mkdtempSync, readFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
 import { join } from 'path';
-import { pass, fail, warn, ROOT } from './helpers.mjs';
+import { pass, fail, warn, ROOT, hermeticGitRunner } from './helpers.mjs';
 
 /**
  * Ask git whether one path is ignored, keeping "git said no" and "git could not
@@ -177,6 +178,33 @@ for (const path of timestampedBackupProbes) {
   else fail(`${path}: git check-ignore could not answer — ${stderr}`);
 }
 
+// The backups' sibling, from the same two writers: the temp file an atomic
+// write renames into place. `.{name}.{pid}.{ts}.{uuid}.tmp` (tracker-utils.mjs
+// writeFileAtomic and web/src/lib/core/safe-write.ts atomicWrite), plus the
+// `{file}.tmp-{pid}-{uuid}` shape safe-write.ts used before they were aligned —
+// a checkout that predates the alignment can still have one lying around.
+//
+// It exists only between the write and the rename, so a passing rename leaves
+// nothing. A rename that THROWS does: Windows contention for the destination
+// handle (the #3006/#3046 class), ENOSPC, a read-only mount. What it leaves is
+// a byte-for-byte copy of cv.md / profile.yml / portals.yml under a second
+// name — the same PII the backup probes above exist for, reached by a different
+// door.
+const atomicWriteTempProbes = [
+  '.cv.md.4821.1755900000000.1e0d6a0e-1b7c-4a1a-9f4a-7c1d2b3e4f56.tmp',
+  '.applications.md.4821.1755900000000.1e0d6a0e.tmp',
+  'cv.md.tmp-4821-1e0d6a0e-1b7c-4a1a-9f4a-7c1d2b3e4f56',
+  'config/profile.yml.tmp-4821-1e0d6a0e',
+  'portals.yml.tmp-4821-1e0d6a0e',
+];
+
+for (const path of atomicWriteTempProbes) {
+  const { verdict, stderr } = checkIgnore(path);
+  if (verdict === 'ignored') pass(`${path} is git-ignored`);
+  else if (verdict === 'not-ignored') fail(`${path} is NOT git-ignored — a leaked atomic-write temp file holds the same PII as the original`);
+  else fail(`${path}: git check-ignore could not answer — ${stderr}`);
+}
+
 // The tracker's DERIVED SQLite index (tracker.mjs, #918), which carries the
 // same content as the markdown it indexes — company, role, score, status,
 // notes.
@@ -237,7 +265,7 @@ for (const path of rootLayoutTrackerProbes) {
 // rule — a later pattern, so it wins. A future fixture must land the same way,
 // which a rule ordered after that negation would silently break.
 const trackedFixtureProbes = [
-  'test-fixtures/upgrade/state-v1.16/data/applications.md',
+  'test-fixtures/upgrade/state-v1.18/data/applications.md',
   'test-fixtures/upgrade/state-v1.18/data/follow-ups.md',
   'test-fixtures/upgrade/state-v1.20/data/applications.md',   // the next one, not yet written
 ];
@@ -272,6 +300,75 @@ for (const path of derivedIndexProbes) {
   } else {
     fail(`${path}: git check-ignore could not answer — ${stderr}`);
   }
+}
+
+// Files the probes above never reach (#6535). reports/ was covered for markdown
+// only, so an exported PDF or HTML copy of an evaluation sat beside it
+// unignored. A CV exported or saved at the repo root under any name but cv.md
+// was covered by nothing, and no-user-data.yml has no rule for those names
+// either. The rules are root-anchored, which the docs/ probe pins: a PDF the
+// repo adds under a subdirectory must stay committable. The uppercase probes
+// pin the extension casing, since a case-sensitive checkout (Linux, or
+// core.ignorecase=false) would match `/*.pdf` against cv.pdf and not CV.PDF.
+//
+// These probes test the RULES, so they run in a throwaway repository holding
+// only a copy of .gitignore, under a sealed git environment. In the checkout
+// itself a contributor's global `*.pdf` exclude would fail the docs/ probe
+// with the rules correct, and a symlinked reports/ makes git refuse the
+// reports/ probes outright (#3165).
+const exportedCopyProbes = [
+  'reports/001-acme-2026-11-06.pdf',
+  'reports/001-acme-2026-11-06.html',
+  'reports/superseded/001-acme-2026-11-06.pdf',
+  'cv.pdf',
+  'resume.pdf',
+  'cv.docx',
+  'CV.PDF',
+  'Resume.Docx',
+];
+const committableProbes = ['reports/.gitkeep', 'docs/__gitignore_probe__.pdf'];
+
+const rulesRepo = mkdtempSync(join(tmpdir(), 'career-ops-gitignore-rules-'));
+try {
+  const g = hermeticGitRunner(rulesRepo, { stdio: ['pipe', 'pipe', 'pipe'] });
+  g('init', '--quiet');
+  // Pinned off, so the copied rules decide alone on every platform.
+  g('config', 'core.ignorecase', 'false');
+  copyFileSync(join(ROOT, '.gitignore'), join(rulesRepo, '.gitignore'));
+
+  /**
+   * check-ignore in the rules repository: exit 0 ignored, 1 not ignored.
+   *
+   * @param {string} probe - Repo-relative path to test.
+   * @returns {{verdict: 'ignored'|'not-ignored'|'unanswerable', stderr: string}}
+   */
+  const checkRule = (probe) => {
+    try {
+      g('check-ignore', '-q', '--no-index', probe);
+      return { verdict: 'ignored', stderr: '' };
+    } catch (err) {
+      if (err.status === 1) return { verdict: 'not-ignored', stderr: '' };
+      return { verdict: 'unanswerable', stderr: String(err.stderr || err.message).trim() };
+    }
+  };
+
+  for (const path of exportedCopyProbes) {
+    const { verdict, stderr } = checkRule(path);
+    if (verdict === 'ignored') pass(`${path} is git-ignored`);
+    else if (verdict === 'not-ignored') fail(`${path} is NOT git-ignored — it holds the same PII as the report or CV it was exported from`);
+    else fail(`${path}: git check-ignore could not answer — ${stderr}`);
+  }
+
+  for (const path of committableProbes) {
+    const { verdict, stderr } = checkRule(path);
+    if (verdict === 'not-ignored') pass(`${path} stays committable`);
+    else if (verdict === 'ignored') fail(`${path} is git-ignored — a rule meant for user data swallowed a system path`);
+    else fail(`${path}: git check-ignore could not answer — ${stderr}`);
+  }
+} catch (err) {
+  fail(`exported-copy ignore probes crashed: ${err.stack || err.message}`);
+} finally {
+  rmSync(rulesRepo, { recursive: true, force: true });
 }
 
 // Not user-layer data, but the same mechanism: this one is about what a

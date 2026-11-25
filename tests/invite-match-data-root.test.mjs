@@ -16,6 +16,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const CODE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const TRACKER_HEADER = [
@@ -76,7 +77,7 @@ test('--apply resolves set-status.mjs from the code root, not the data root', ()
       /Cannot find module/,
       `invite-match resolved a sibling script off the data root:\n${result.output}`,
     );
-    assert.equal(result.status, 0, result.output);
+    assert.equal(result.status, 0, describeSpawn(result));
     assert.match(readFileSync(tracker, 'utf-8'), /\| Rejected \|/, 'tracker row was not advanced to Rejected');
   } finally {
     rmSync(dataRoot, { recursive: true, force: true });

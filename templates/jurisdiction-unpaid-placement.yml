@@ -1,0 +1,90 @@
+# Career-Ops — Unpaid-Placement Rules (jurisdiction table) (#5446)
+#
+# Consumed prompt-level by modes/oferta.md Block G ("Unpaid-Placement"
+# signal, Signal 20). This file is a DATA REFERENCE, not instruction logic:
+# extending it to a new jurisdiction never requires touching the rule text in
+# modes/oferta-signals/. No script reads it — the agent does. Nothing in this
+# system ever fetches or scrapes an official page: the candidate clicks the
+# official link themselves (zero-fetch by design, same as the vacancy-status
+# and AI-screening tables). Jurisdiction-compliance-lens umbrella #2026.
+#
+# CONTRIBUTION RULE (mandatory): no entry lands in this table without
+#   1. a regulator-grade citable source (statute, regulation, or official
+#      government page), AND
+#   2. an explicit effective date, AND
+#   3. an `as_of` date recording when the row was last verified, AND
+#   4. an `official_source.url` pointing at the OFFICIAL government/regulator
+#      page (statute text or regulator guide) —
+#      never a third-party mirror, aggregator, or law-firm copy of the text.
+# Secondary summaries are not enough. Unverified rows will be rejected in
+# review. Seed narrow and verified; extend via community PRs.
+#
+# NEVER-ASSERT RULE (mandatory — mirrored in the Signal 20 file): a posting
+# that says the role is unpaid is NEVER a basis for asserting that the
+# arrangement is unlawful. Whether a carve-out applies (an approved school
+# program, a regulated-profession student in training, and so on) cannot be
+# seen from a posting. The agent quotes the posting's phrase, states the
+# jurisdiction's rule and its carve-outs, notes that the applicability of a
+# carve-out cannot be seen from the posting, and stops there. Not legal advice.
+#
+# Schema per entry (key = jurisdiction code, matching the other tables, e.g.
+# CA-ON):
+#   jurisdiction_name: string    — human-readable name for report output
+#   law_name: string             — short name of the statute/regulation
+#   effective: YYYY-MM-DD        — date the cited consolidation took effect
+#   applies_to: string           — whom the rule treats as an employee
+#   exceptions: list             — carve-outs, each with its citation
+#   official_source:
+#     url: string                — OFFICIAL regulator/statute page
+#     what_it_shows: string      — what a candidate finds there
+#   legal_basis: string          — statute/regulation citation
+#   sources: list                — citable pages backing the row
+#   as_of: YYYY-MM-DD            — date this row was last verified
+#
+# NOT VERIFIED, DELIBERATELY ABSENT FROM THE ONTARIO ROW: the Ministry of
+# Labour "six conditions" test for a trainee. It comes from ministry policy,
+# not from the Act, and only secondary summaries have been seen. It stays out
+# of the table until a citable ministry page is checked.
+#
+# CANDIDATE ROWS FOR CONTRIBUTORS (comments only — NOT seeds; do NOT add as
+# rows until each has an official source, an effective date, and an as_of
+# date read first-hand):
+#   - GB : United Kingdom. No "intern" category; whoever is a worker must
+#          receive the National Minimum Wage. Carve-outs: a required
+#          placement of under a year within a UK further or higher education
+#          course, and shadowing only. Source to check: GOV.UK "Employment
+#          rights and pay for interns".
+#   - US : FLSA "primary beneficiary" test (DOL, 2018 guidance); looser for
+#          public-sector and non-profit placements. Not confirmed that the
+#          2018 guidance is still the current position.
+#   - AU : Fair Work Act 2009. Unpaid work is limited to a genuine vocational
+#          placement required by an approved course; a signed "unpaid
+#          internship agreement" does not change that.
+#   - FR : A gratification is mandatory once a placement lasts more than two
+#          months (about 308 hours); 4.50 EUR per hour from 2026-01-01.
+#          Below that it is optional. Only secondary sources seen so far.
+
+jurisdictions:
+  CA-ON:
+    jurisdiction_name: "Ontario, Canada"
+    law_name: "Employment Standards Act, 2000 (ESA), s. 1 (1) 'employee' and s. 3 (5); O. Reg. 285/01, s. 2 (1) (e)"
+    effective: "2026-01-01"
+    applies_to: >-
+      ESA s. 1 (1), definition of "employee", clause (c): "a person who
+      receives training from a person who is an employer, if the skill in
+      which the person is being trained is a skill used by the employer's
+      employees". Training can therefore make the trainee an employee,
+      whatever the role is called.
+    exceptions:
+      - "ESA s. 3 (5) para. 1: a secondary school student under a work experience program authorized by the student's school board (the Act does not apply to the individual or to the person for whom they perform work)"
+      - "ESA s. 3 (5) para. 2: an individual under a program approved by a college of applied arts and technology or a university"
+      - "ESA s. 3 (5) para. 2.1: an individual under a program approved by a registered career college that meets prescribed criteria"
+      - "O. Reg. 285/01 s. 2 (1) (e): Parts VII, VII.1, VIII, IX, X and XI of the Act (hours, minimum wage, overtime, public holidays, vacation) do not apply to a student in training for an occupation mentioned in clause (a), (b), (c) or (d), that is architecture, law, professional engineering, public accounting, surveying, veterinary science; the registered health practitioners listed in clause (b); naturopathy; teaching"
+    official_source:
+      url: "https://www.ontario.ca/laws/statute/00e41"
+      what_it_shows: "Official e-Laws text of the Employment Standards Act, 2000: s. 1 (1) definition of 'employee' and s. 3 (5). O. Reg. 285/01 is at https://www.ontario.ca/laws/regulation/010285."
+    legal_basis: "Employment Standards Act, 2000, S.O. 2000, c. 41, s. 1 (1) 'employee' (c) and s. 3 (5) paras. 1, 2 and 2.1; O. Reg. 285/01, s. 2 (1) (e) (verified on ontario.ca/laws against the consolidation period from 2026-01-01)"
+    sources:
+      - "e-Laws — Employment Standards Act, 2000 (ontario.ca/laws/statute/00e41)"
+      - "e-Laws — O. Reg. 285/01 (ontario.ca/laws/regulation/010285)"
+    as_of: "2026-10-18"

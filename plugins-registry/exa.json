@@ -1,0 +1,14 @@
+{
+  "name": "career-ops-plugin-exa",
+  "id": "exa",
+  "repo": "https://github.com/Codexnever/career-ops-plugin-exa",
+  "author": "Codexnever",
+  "hooks": ["search"],
+  "description": "Find job postings beyond your tracked portals with Exa's semantic web search, one query at a time; you review every lead.",
+  "requiredEnv": ["EXA_API_KEY"],
+  "allowedHosts": ["api.exa.ai"],
+  "skill": true,
+  "license": "MIT",
+  "version": "0.1.1",
+  "sha": "0ceb6971fedc60c89b23953a1605e020769132be"
+}

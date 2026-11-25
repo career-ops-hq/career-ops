@@ -14,9 +14,11 @@ import {
   codexStreamArgs,
   completedReportNames,
   hasNewCompletedReport,
+  newCompletedReportNum,
   isFatalClaudeStderr,
   isFatalCodexStderr,
   isFatalGenericStderr,
+  noOutputError,
   parseClaudeEvent,
   parseCodexEvent,
   parseGrokEvent,
@@ -315,13 +317,18 @@ test("Claude system init becomes the ready status", () => {
   assert.deepEqual(event, { status: "Agent ready" });
 });
 
-test("Claude result usage becomes tokens + cost", () => {
+test("Claude result usage counts cache reads with every reported token category", () => {
   const event = parseClaudeEvent(JSON.stringify({
     type: "result",
-    usage: { input_tokens: 100, output_tokens: 20, cache_creation_input_tokens: 5 },
+    usage: {
+      input_tokens: 100,
+      output_tokens: 20,
+      cache_creation_input_tokens: 5,
+      cache_read_input_tokens: 500,
+    },
     total_cost_usd: 0.012,
   }));
-  assert.deepEqual(event, { tokens: 125, costUsd: 0.012 });
+  assert.deepEqual(event, { tokens: 625, costUsd: 0.012 });
 });
 
 test("Claude result without usage is ignored, not zeroed", () => {
@@ -419,6 +426,17 @@ test("Grok thought is dropped — reasoning must not read as an answer", () => {
   assert.equal(parseGrokEvent(JSON.stringify({ type: "thought", data: "let me think" })), null);
 });
 
+test("a Grok error event is the error, not a tool or an answer", () => {
+  assert.deepEqual(
+    parseGrokEvent(JSON.stringify({ type: "error", message: "rate limit reached for this account" })),
+    { error: "rate limit reached for this account" },
+  );
+  assert.deepEqual(
+    parseGrokEvent(JSON.stringify({ type: "error" })),
+    { error: "Grok failed before finishing" },
+  );
+});
+
 test("Grok available_commands (a multi-KB manifest, every turn) is dropped", () => {
   assert.equal(parseGrokEvent(JSON.stringify({ type: "available_commands", commands: ["a", "b"] })), null);
 });
@@ -448,9 +466,41 @@ test("Grok usage without a usage block is skipped, not reported as zero", () => 
   assert.equal(parseGrokEvent(JSON.stringify({ type: "end" })), null);
 });
 
-test("Grok malformed usage cannot report negative tokens", () => {
-  const line = JSON.stringify({ type: "end", usage: { input_tokens: 5, cached_input_tokens: 9000 } });
-  assert.deepEqual(parseGrokEvent(line), { tokens: 0, tokensAreTotal: true, costUsd: null });
+test("Grok usage with cache larger than input is dropped", () => {
+  // Reporting this as {tokens: 0} would replace a total the earlier frames
+  // already counted, because Grok frames are running totals.
+  const line = JSON.stringify({
+    type: "end",
+    usage: { input_tokens: 5, cached_input_tokens: 9000, output_tokens: 10 },
+  });
+  assert.equal(parseGrokEvent(line), null);
+});
+
+test("a later Grok frame with cache larger than input keeps the last total", () => {
+  let total = 0;
+  total = accumulateTokens(total, parseGrokEvent(JSON.stringify({
+    type: "usage",
+    usage: { input_tokens: 1000, cached_input_tokens: 0, output_tokens: 40 },
+  })));
+  assert.equal(total, 1040);
+  total = accumulateTokens(total, parseGrokEvent(JSON.stringify({
+    type: "end",
+    usage: { input_tokens: 100, cached_input_tokens: 500, output_tokens: 10 },
+  })));
+  assert.equal(total, 1040);
+});
+
+test("a later Grok total still replaces when cache is inside the input", () => {
+  let total = accumulateTokens(0, parseGrokEvent(JSON.stringify({
+    type: "usage",
+    usage: { input_tokens: 1000, cached_input_tokens: 0, output_tokens: 40 },
+  })));
+  total = accumulateTokens(total, parseGrokEvent(JSON.stringify({
+    type: "end",
+    usage: { input_tokens: 1000, cached_input_tokens: 900, output_tokens: 40 },
+  })));
+  // 140 is the billed total. Cache inside the input is a real shrink, not a clamp.
+  assert.equal(total, 140);
 });
 
 test("Grok survives its own JSON.parse successes (null, bare scalars) and garbage", () => {
@@ -526,6 +576,12 @@ test("reservation churn alone does not count as persistence", () => {
   assert.equal(hasNewCompletedReport(before, ["020-existing.md", "022-RESERVED.md"]), false);
 });
 
+test("newCompletedReportNum is the leading number of the new report", () => {
+  const before = ["020-existing.md", "021-RESERVED.md"];
+  assert.equal(newCompletedReportNum(before, ["020-existing.md", "021-new-company.md"]), 21);
+  assert.equal(newCompletedReportNum(before, ["020-existing.md", "022-RESERVED.md"]), null);
+});
+
 test("codexStreamArgs turns on the JSONL that parseCodexEvent reads", () => {
   // Given/When: the structured-stream argv for a prompt. This is the invocation
   // /api/run uses; CliSpec.args stays plain `["exec", prompt]` because every other
@@ -564,6 +620,7 @@ test("the fallback does not fail a run because a word appeared", () => {
     "Errors: 0",
     "Logged in as santifer",
     "npm notice New minor version",
+    "request ID req-429-abc",
   ]) {
     assert.equal(isFatalGenericStderr(line), false, `benign line treated as fatal: ${line}`);
   }
@@ -581,6 +638,8 @@ test("the fallback still catches every real failure it caught before", () => {
     "missing credentials",
     "quota exceeded",
     "rate limit hit",
+    "HTTP 429",
+    "too many requests",
     "permission denied",
     "fatal: not a git repository",
     "command not found",
@@ -596,10 +655,11 @@ import { killMsForKind, timeoutMessage, RUN_MAX_DURATION_S } from "../../src/lib
 
 test("evaluate's kill budget gives real headroom, not the old 285s floor (#3124)", () => {
   const ms = killMsForKind("evaluate");
+  assert.equal(ms, 740_000, "evaluate leaves 60s under maxDuration for report-persist");
   assert.ok(ms > 285_000, `evaluate must exceed the 285s that killed real runs, got ${ms}ms`);
   assert.ok(ms < RUN_MAX_DURATION_S * 1000, "must stay under maxDuration so the SIGTERM is graceful, not a hard cutoff");
   assert.equal(killMsForKind("pdf"), 600_000, "pdf keeps its post-agent render headroom");
-  assert.equal(killMsForKind("fix-portal"), killMsForKind("evaluate"), "non-pdf kinds share the evaluate budget");
+  assert.equal(killMsForKind("fix-portal"), 780_000, "kinds with no post-agent phase keep the longer budget");
 });
 
 test("a timed-out run reads as a timeout, never as 'didn't save a report' (#3124)", () => {
@@ -607,4 +667,110 @@ test("a timed-out run reads as a timeout, never as 'didn't save a report' (#3124
   assert.match(msg, /780s time limit/, "the message names the limit it hit");
   assert.match(msg, /re-run|Claude Code/i, "it offers a next step");
   assert.doesNotMatch(msg, /didn't save a report/i, "a timeout must not be blamed on the CLI's ability to write");
+});
+
+// A CLI can exit 0 and still do nothing. Antigravity prints the reason to stderr
+// ("a tool required the "command" permission that headless mode cannot prompt
+// for") and exits cleanly with an empty stdout. The route captured that line but
+// dropped it on the clean-exit branch, so the user saw only "is it installed and
+// authenticated?" for a CLI that was installed and signed in.
+const AGY_PERMISSION_LINE =
+  'jetski: no output produced — a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.';
+
+test("a clean exit with no output now carries the CLI's own stderr reason", () => {
+  const msg = noOutputError({
+    emittedText: false,
+    sawError: false,
+    cleanExit: true,
+    stderrSnippet: AGY_PERMISSION_LINE.slice(0, 200),
+  });
+  assert.match(msg, /^The CLI returned nothing\. \(jetski: no output produced/);
+  assert.match(msg, /headless mode cannot prompt for/);
+  assert.doesNotMatch(msg, /authenticated/);
+  assert.ok(msg.endsWith("(career-ops is best on Claude Code.)"), "the Claude Code tip stays last");
+});
+
+test("an empty reply and a plain crash are not a sign-in problem", () => {
+  assert.equal(
+    noOutputError({ emittedText: false, sawError: false, cleanExit: true, stderrSnippet: null }),
+    "The CLI returned nothing. (career-ops is best on Claude Code.)",
+  );
+  assert.equal(
+    noOutputError({ emittedText: false, sawError: false, cleanExit: false }),
+    "The CLI exited with an error.",
+  );
+});
+
+test("a rate limit says to wait, and a real sign-in failure still says so", () => {
+  const limited = noOutputError({
+    emittedText: false,
+    sawError: false,
+    cleanExit: false,
+    stderrSnippet: "429 rate limit exceeded, try again later",
+  });
+  assert.match(limited, /^Rate limit\. Wait and try again\./);
+  assert.match(limited, /429 rate limit exceeded/);
+  assert.doesNotMatch(limited, /authenticated/);
+  const signedOut = noOutputError({
+    emittedText: false,
+    sawError: false,
+    cleanExit: false,
+    stderrSnippet: "Error: not authenticated",
+  });
+  assert.match(signedOut, /is it installed and authenticated/);
+  assert.match(signedOut, /not authenticated/);
+  const loaded = noOutputError({
+    emittedText: false,
+    sawError: false,
+    cleanExit: false,
+    stderrSnippet: "credentials loaded successfully; network connection failed",
+  });
+  assert.equal(loaded, "The CLI exited with an error. (credentials loaded successfully; network connection failed)");
+  const authWithRequestId = noOutputError({
+    emittedText: false,
+    sawError: false,
+    cleanExit: false,
+    stderrSnippet: "Authentication failed: invalid credentials (request ID req-429-abc)",
+  });
+  assert.match(authWithRequestId, /is it installed and authenticated/);
+  assert.doesNotMatch(authWithRequestId, /^Rate limit/);
+  const expired = noOutputError({
+    emittedText: false,
+    sawError: false,
+    cleanExit: false,
+    stderrSnippet: "Error: configured API key has expired",
+  });
+  assert.match(expired, /is it installed and authenticated/);
+  const signedIn = noOutputError({
+    emittedText: false,
+    sawError: false,
+    cleanExit: false,
+    stderrSnippet: "Error: authenticated successfully; connection refused",
+  });
+  assert.equal(signedIn, "The CLI exited with an error. (Error: authenticated successfully; connection refused)");
+  const pleaseLogin = noOutputError({
+    emittedText: false,
+    sawError: false,
+    cleanExit: false,
+    stderrSnippet: "Error: please login (API key configured)",
+  });
+  assert.match(pleaseLogin, /is it installed and authenticated/);
+});
+
+test("a non-clean exit still appends the snippet", () => {
+  assert.equal(
+    noOutputError({ emittedText: false, sawError: false, cleanExit: false, stderrSnippet: "Error: connection refused" }),
+    "The CLI exited with an error. (Error: connection refused)",
+  );
+});
+
+test("no error when the CLI produced text or reported its own structured error", () => {
+  assert.equal(noOutputError({ emittedText: true, sawError: false, cleanExit: true, stderrSnippet: "Error: x" }), null);
+  assert.equal(noOutputError({ emittedText: false, sawError: true, cleanExit: false, stderrSnippet: "Error: x" }), null);
+});
+
+test("the generic stderr classifier flags the Antigravity permission line, so the snippet exists", () => {
+  // Without this the helper has nothing to append: the route only keeps a stderr
+  // line the classifier flags.
+  assert.equal(isFatalGenericStderr(AGY_PERMISSION_LINE), true);
 });

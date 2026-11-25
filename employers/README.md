@@ -1,0 +1,339 @@
+# Employer registry
+
+A community-maintained list of employer job boards that the local scanner can
+read. Each row is a pointer: **employer → ATS → board**. The registry holds no
+job postings and no job titles, and its rows hold no personal data. The
+contribution manifests do publish two things about people: the GitHub
+username of whoever contributes, and the name of whoever grants the license
+(`contributor` and `signed_by`, see [the manifest](#the-contribution-manifest)).
+Postings are always read from the employer's own board, on your machine.
+
+- [What a row looks like](#a-row)
+- [Files](#files)
+- [Contributing boards](#contributing-boards)
+- [The contribution manifest](#the-contribution-manifest)
+- [Validation](#validation)
+- [Removal at an employer's request](#removal-at-an-employers-request)
+- [License](#license)
+
+## A row
+
+One JSON object per line in `boards/<ats>/<initial>.ndjson`:
+
+```json
+{"ats":"greenhouse","region":"us","board":"vercel","careers_url":"https://job-boards.greenhouse.io/vercel","name":"Vercel","source":"community","contribution":"2026-11-08-santifer","added":"2026-11-08"}
+```
+
+| Field | Required | Rule |
+|---|---|---|
+| `ats` | yes | One of `greenhouse`, `ashby`, `lever`, `workable`, `smartrecruiters`, `rippling`, `join`, `recruitee`, `breezy`, `bamboohr`, `pinpoint`, `applicantpro`, `hibob`, `hirehive`, `homerun`, `jazzhr`, `keka`, `personio`, `prevueaps`, `schoolspring`, `taleez`, `teamtailor`, `trakstar`, `turbohire`, `zoho-recruit`, `avature`, `clearcompany`, `jobvite`, `eightfold`, `adp-myjobs`, `successfactors-classic`, `oraclecloud`, `csod`, `phenom`, `successfactors`, `peoplesoft`, `workday`. |
+| `region` | greenhouse and lever; personio and zoho-recruit off their default host | Greenhouse and Lever: `us` or `eu`, always. An EU board (`job-boards.eu.greenhouse.io`, `jobs.eu.lever.co`) is a different board from a US one with the same id. Personio: absent for a board on `<id>.jobs.personio.de`, `com` for one on `<id>.jobs.personio.com`; the two are different boards. Zoho Recruit: absent for a board on `zohorecruit.com`, otherwise its data-centre domain: `au` (`zohorecruit.com.au`), `ca`, `cn` (`zohorecruit.com.cn`), `eu`, `in`, `jp` or `sa`. Absent on every other ATS. |
+| `board` | yes | The board id, as it appears in the board's URL. Ashby ids keep their case (`AlephAlpha`, `DeepL`). Where the board is the company's subdomain on the ATS's host, the id is that one label, lowercase: `recruitee`, `breezy`, `bamboohr`, `pinpoint`, `applicantpro`, `hibob` (`<id>.careers.hibob.com`), `hirehive`, `homerun`, `jazzhr` (`<id>.applytojob.com`), `keka`, `personio` (`<id>.jobs.personio.de` or `.com`, see `region`), `prevueaps`, `schoolspring`, `taleez`, `teamtailor`, `trakstar` (`<id>.hire.trakstar.com`), `turbohire`, `zoho-recruit` (`<id>.zohorecruit.com`) `avature` (`<id>.avature.net`) and `eightfold` (`<id>.eightfold.ai`); all but the first four (`recruitee`, `breezy`, `bamboohr`, `pinpoint`) are one DNS label of at most 63 characters; those four are not limited yet. The subdomains an ATS keeps for itself, as its provider in `providers/` lists them (`www`, `api` and the like), are not board ids. Jobvite: the company's path on `jobs.jobvite.com`. ADP (`adp-myjobs`): the career site's path on `myjobs.adp.com`, in its case. ClearCompany: the career site's id, a lowercase GUID, as in `careers-api.clearcompany.com/v1/<id>`. SuccessFactors classic (`successfactors-classic`): `label/eu|com/company` for a career page at `<label>.successfactors.<eu|com>/career?company=<company>`, for example `career5/eu/ACME001`; the company id keeps its case. Oracle Recruiting Cloud (`oraclecloud`): `host/siteNumber`, with the tenant host on Oracle's cloud, for example `acme.fa.us2.oraclecloud.com/CX_1001`, for `https://<host>/hcmUI/CandidateExperience/en/sites/<siteNumber>/jobs`; a careers site on the company's own domain is not admitted. Cornerstone OnDemand (`csod`): `tenant/site/corp` for a career site at `https://<tenant>.csod.com/ux/ats/careersite/<site>/home?c=<corp>`, for example `acme/4/acme`; the tenant is one lowercase DNS label (reserved and test tenants are not boards), the site a whole number from 1 to 999, and the corp name keeps its case. Phenom (`phenom`), SuccessFactors (`successfactors`) and PeopleSoft (`peoplesoft`) can serve a company's careers site on the company's own domain. For these three, the board is that site's host, in lowercase, followed by the SuccessFactors brand path when there is one, or, for PeopleSoft, by its site (`recruit.example.edu/site1`). Such a row carries `own_domain_mark`: the ATS's mark that was seen on the site, and the date it was checked. A host is on at most one row, and these rows are added only by the project's own contributions, listed in `OWN_DOMAIN_CONTRIBUTORS`. Workday: `tenant/wdN/site`, with the site in the case of the careers page's canonical link (`<link rel="canonical">`), for example `nvidia/wd5/NVIDIAExternalCareerSite`. Numeric-only ids, placeholders and characters outside `A-Z a-z 0-9 . _ -` are rejected. |
+| `workday_host` | workday only | `jobs` for `https://<tenant>.<wdN>.myworkdayjobs.com/<site>`, `site` for `https://<wdN>.myworkdaysite.com/recruiting/<tenant>/<site>`. |
+| `careers_url` | yes | The canonical board URL. It must be exactly the URL built from `ats`, `region`, `board` and `workday_host` (`buildBoardUrl` in `lib/ats-board-url.mjs`, the same function the ATS discovery uses). It is the registry's unique key. |
+| `name` | yes | The employer's name, up to 80 characters. No URL, email address, phone number or @handle. |
+| `website` | no | The employer's registrable domain (`example.com`), without scheme, `www` or path. |
+| `countries` | no | ISO 3166-1 alpha-2 codes. Stored; the scanner does not filter on them yet. |
+| `tags` | no | Reserved. No tag is accepted until the vocabulary is defined. |
+| `source` | yes | Where the pointer came from: `community`, `ats-directory`, `vc-portfolio`, `employer-list:<org>`, `prior-mit:<owner>/<repo>@<commit>`, `web-index:<name>@<YYYY-MM-DD>` (pointers found in a public web index: the index's name and the date it was queried, for example `web-index:wayback@2026-11-12`) or `user-submissions@<YYYY-MM-DD>` (boards that users of the project sent in, with the date they were taken; the registry holds nothing about who sent them). It must match the manifest's `source`. |
+| `contribution` | yes | The id of the manifest that added the row. |
+| `added` | yes | The date the row was added (`YYYY-MM-DD`). |
+| `retired`, `retired_reason` | maintainers only | `retired: true` with a reason: `gone`, `owner_request`, `moved`, `duplicate` or `policy`. |
+
+There is no free text and no unknown key. Rows in a file are sorted by
+`board` (case-insensitive), then `region`. The file is named after the
+board's first character, lowercase: `boards/ashby/a.ndjson` holds `AlephAlpha`
+and `attio`.
+
+A retired row is never deleted. It stays in its file so the same board cannot
+be added again by another contribution, and tools that read the registry skip
+it.
+
+## Files
+
+```
+employers/
+├── README.md               this file
+├── LICENSE                 CC BY 4.0
+├── THIRD_PARTY_NOTICES.md  notices for data under a third party's license
+├── CHANGELOG.md            one credit line per contribution, generated from the manifests by maintainers
+├── schema.json             JSON Schema of a row and of a manifest, for editors
+├── contributions/          one manifest per contribution
+├── boards/<ats>/<initial>.ndjson
+└── inbox/                  contributions waiting to be folded in (only while there are some)
+```
+
+Every release carries the registry to existing installs: the updater copies
+`boards/`, `contributions/` (the manifests, with the attribution some sources
+require), `LICENSE` and `THIRD_PARTY_NOTICES.md`. `inbox/` stays in this
+repository. An install uses its copy only to compare (see
+[Boards your install knows](#boards-your-install-knows)); the scanner does not
+read boards from it. CI warns when `boards/` passes 25 MB, so a maintainer can
+look at how the data is stored; past that size the release could carry only the
+sorted `careers_url` keys, or a compressed copy.
+
+## Boards your install knows
+
+```
+node employers-gap.mjs --list
+```
+
+lists the job boards in your own files that the registry does not have yet:
+`portals.yml`, `data/pipeline.md` and `data/scan-history.tsv`, and with
+`--include-applied` also `data/applications.md` and `reports/`. It uses no AI.
+Each URL is read back to its board with the same reader as the import
+(`parseBoardUrl`), so a posting link counts as its board, and a board is new
+only when no row has it, retired rows included: a board taken out is never
+proposed again.
+
+Before it lists a board as new it asks the board, through the provider the
+scanner already uses for that system, whether it lists jobs now (one page per
+board), so a board a company left when it moved to another system, or one with
+no jobs, is not listed. `--offline` skips that and sets aside a board whose
+company the registry already has on another system. Referral, internal and
+LinkedIn-copy boards, the examples in `templates/portals.example.yml`, and
+Greenhouse boards whose own name marks a channel copy or a sourcing board are
+set aside with their reason.
+
+What it would share is the board address only (`careers_url`), never a
+posting, a title, your tracker or which file it came from. `--out <file>`
+writes that list, one URL per line; the script itself sends nothing.
+
+## Contributing boards
+
+A contribution is one new file in `inbox/`, and nothing else. You do not edit
+`boards/`, `contributions/` or `CHANGELOG.md`: after merging, maintainers fold
+the inbox into them.
+
+### The inbox file
+
+Name it `inbox/<YYYY-MM-DD>-<github-username>.ndjson`, with the date and your
+GitHub username in lowercase: `inbox/2026-11-20-octocat.ndjson`. A file holds
+up to 5,000 boards. For a longer list, number the files:
+`inbox/2026-11-20-octocat-001.ndjson`, `-002.ndjson`, and so on. A username
+that itself ends in a hyphen and three digits, such as `octocat-001`, always
+writes the part number, even for a single file:
+`inbox/2026-11-20-octocat-001-001.ndjson`.
+
+A contribution has one source (see [the manifest](#the-contribution-manifest)).
+To add boards from another source on the same day, make a second
+contribution: put `.2` after your username, then `.3`, and so on up to `.99`.
+Every file of that contribution carries the number:
+
+```
+inbox/2026-11-20-octocat.ndjson      first contribution of the day
+inbox/2026-11-20-octocat.json        its manifest
+inbox/2026-11-20-octocat.2.ndjson    second contribution, from another source
+inbox/2026-11-20-octocat.2.json      its manifest
+```
+
+A longer list is numbered the same way: `inbox/2026-11-20-octocat.2-001.ndjson`.
+A GitHub username never has a dot, so the number is never read as part of
+it. The first contribution of a day has no number, and `.1`, `.0` or `.02`
+are errors. A number does not need the ones below it: `.3` is fine without
+`.2`, because contributions are folded in one by one and an earlier one may
+already have taken `.2`. A number already in `contributions/` is an error:
+pick another.
+
+One board per line, one JSON object per line:
+
+```json
+{"ats":"greenhouse","board":"vercel","name":"Vercel","website":"vercel.com"}
+{"ats":"ashby","board":"DeepL","name":"DeepL"}
+{"ats":"workday","board":"nvidia/wd5/NVIDIAExternalCareerSite","name":"NVIDIA"}
+```
+
+| Key | Required | Rule |
+|---|---|---|
+| `ats` | yes | One of the ATS in [the row table](#a-row). |
+| `board` | yes | The board id, as in [the row table](#a-row). Workday: `tenant/wdN/site`. |
+| `name` | yes | The employer's name, up to 80 characters. No URL, email address, phone number or @handle. |
+| `website` | no | The employer's registrable domain (`example.com`). |
+| `region` | no | Greenhouse and Lever: `eu` for a board on `job-boards.eu.greenhouse.io` or `jobs.eu.lever.co`. Without it, the board is on the US host. Personio: `com` for a board on `<id>.jobs.personio.com`. Zoho Recruit: the data-centre domain, as in [the row table](#a-row). Without it, a Personio board is on `.jobs.personio.de` and a Zoho Recruit board on `zohorecruit.com`. |
+| `workday_host` | no | Workday only: `site` for a board on `<wdN>.myworkdaysite.com/recruiting/<tenant>/<site>`. Without it, the board is on `<tenant>.<wdN>.myworkdayjobs.com/<site>`. |
+
+Any other key is an error. Each board appears once in the inbox. A board
+that is already in the registry is a warning, not an error: it is skipped
+when the inbox is folded in.
+
+### From the browser
+
+1. Open [`employers/`](https://github.com/career-ops-hq/career-ops/tree/main/employers)
+   on GitHub and choose **Add file**, then **Create new file**.
+2. Name the file `inbox/<YYYY-MM-DD>-<github-username>.ndjson` and paste your
+   lines.
+3. Commit it to a new branch and open the pull request.
+
+### From a list, with the importer
+
+If you have a list of board URLs, the importer writes the inbox files for you:
+
+```bash
+node seeds/employers-import.mjs boards.csv --login <github-username>
+node seeds/employers-validate.mjs
+```
+
+The list is a CSV with a `url` column (and optionally `name` and `website`),
+or plain text with one board URL per line. The importer reads each URL back
+to its ATS and board, writes the canonical form, and splits the result into
+files of 5,000. For an ATS whose board is a subdomain, it reads any URL on
+the board's host (the board, a posting), and also `<id>.recruiterbox.com`
+(Trakstar), `feed.homerun.co/<id>` (Homerun) and
+`www.applicantpro.com/openings/<id>/…` (ApplicantPro). For ClearCompany it reads
+`careers-api.clearcompany.com/v1/<id>` and the career-site script's `?siteId=<id>`. A URL it does not
+recognise, a duplicate, or a line with an invalid name or website goes to
+`boards.csv.rejected.csv` with the reason,
+and never into the inbox. Without a name column, it makes each name from the
+board id: check those names before you open the pull request. It makes no
+network request.
+
+Then commit only the new files in `employers/inbox/` and open the pull
+request.
+
+### For an organization
+
+An organization adds its manifest next to its boards files, under the same
+name without a part number: `inbox/<YYYY-MM-DD>-<github-username>.json`, or
+`inbox/<YYYY-MM-DD>-<github-username>.2.json` for a second contribution of the
+day. It has the fields of [the contribution manifest](#the-contribution-manifest);
+`contributor` is the username in the file name (without the number), and
+`rows` counts the lines of all its files. Without a manifest, the
+contribution is credited to the username in the file name, with source
+`community`.
+
+### What happens next
+
+The `Employer registry validate` workflow checks the new files, and reports
+whether the pull request only adds files to `inbox/`. A maintainer reviews it
+and merges it, then folds the inbox in: each line becomes a row with its
+`source`, `contribution` and `added` date, boards already in the registry are
+skipped, the manifest moves to `contributions/`, and `CHANGELOG.md` gets the
+credit line. If a contribution id without a number is already taken (the
+same username on the same date), the fold adds `-2`, `-3`, and so on. A
+numbered id is never changed.
+
+What does not get in:
+
+- boards on an ATS outside the list above (more ATS will follow, each with its
+  own board format);
+- a board on the employer's own domain, even when an ATS in the list serves
+  it: a row points at the board's address on the ATS's host;
+- job aggregators and reposting sites (`data-static/aggregator-domains.txt`);
+- lists taken from sites that need a login, or from LinkedIn or Indeed, even
+  as hints;
+- a bulk list without a written `origin`.
+
+By opening the pull request you license the data you add under CC BY 4.0,
+you also allow the maintainer to distribute it under ODbL 1.0 or CC0 (see
+[License](#license)), and you confirm that no contract stops the list from
+being redistributed and that it holds no personal data.
+
+## The contribution manifest
+
+Every contribution is recorded in one manifest,
+`contributions/<YYYY-MM-DD>-<github-username>.json` (or
+`<YYYY-MM-DD>-<github-username>.<n>.json` for a later contribution of the same
+day), and each row it adds names it in `contribution`. The manifest is the
+row's provenance: who contributed it, where the list came from, and the
+license it was granted under. The pull
+request that adds it is opened from the account named in `contributor`, and
+opening it is how the manifest is signed.
+
+An organization writes its manifest in `inbox/` with its boards (see
+[For an organization](#for-an-organization)). For a contribution without
+one, maintainers write a short manifest when they fold the inbox in: the
+username in the file name is the `contributor`, `signed_by` is that
+account, and the source is `community`. Both are public: the username and
+`signed_by` appear in the manifest, and `attribution` in `CHANGELOG.md`.
+
+```json
+{"id":"2026-11-20-acme","contributor":"github-handle","on_behalf_of":"Acme Inc.","signed_by":"Name of a founder or officer",
+ "rows":120,"source":"employer-list:acme","origin":"How and where the list was obtained, in one sentence",
+ "no_conflicting_contract":true,"personal_data":false,"exclusive":false,
+ "license":"CC-BY-4.0","also_permits":["ODbL-1.0","CC0-1.0"],
+ "attribution":"Employer pages contributed by Acme","date":"2026-11-20"}
+```
+
+| Field | Rule |
+|---|---|
+| `id` | `<YYYY-MM-DD>-<slug>`, or `<YYYY-MM-DD>-<slug>.<n>` with `n` from 2 to 99 for a later contribution of the same day; the same as the file name. |
+| `contributor` | The GitHub username of the account that opens the pull request. |
+| `on_behalf_of` | Optional: the organization the list comes from. |
+| `signed_by` | Who grants the license. For an organization, a founder or an officer with authority to do so. |
+| `rows` | How many rows the contribution adds. |
+| `source` | The same value as each of its rows. |
+| `origin` | How and where the list was obtained, in one sentence. |
+| `no_conflicting_contract` | `true`: no contract stops the list from being redistributed. |
+| `personal_data` | `false`: the list holds no personal data. |
+| `exclusive` | `false`: the contribution is not exclusive to anyone. |
+| `license`, `also_permits` | `"CC-BY-4.0"` and `["ODbL-1.0","CC0-1.0"]`. |
+| `attribution` | The credit line in `CHANGELOG.md`. Credit, not advertising. |
+| `date` | The contribution date, the same as in the id. |
+
+## Validation
+
+```bash
+node seeds/employers-validate.mjs                    # check employers/, inbox included
+node seeds/employers-validate.mjs --base <dir>       # also check the changes against another checkout
+node seeds/employers-validate.mjs --write-changelog  # maintainers, on main: regenerate CHANGELOG.md, then check
+node seeds/employers-validate.mjs --inbox-only --base <ref>  # does <ref>...HEAD only add inbox files? (JSON)
+node seeds/employers-fold.mjs [--apply]              # maintainers: fold the inbox in (dry run without --apply)
+```
+
+Every error names the file, the line and the reason. In a pull request, each
+one also appears as an annotation on the line it is about, with a summary on
+the workflow run. The checks:
+
+1. Every row and manifest matches the format above; unknown keys are errors.
+2. `ats`, `region`, `workday_host` and `source` come from their closed lists,
+   and `careers_url` is the canonical URL of the board.
+3. Board ids have the shape their ATS uses.
+4. No `careers_url` or `website` is on an aggregator domain.
+5. No personal data: no email address, phone number or @handle.
+6. Each board is listed once: `careers_url` is unique ignoring letter case,
+   and a Workday board appears under one host form only. When a pull request
+   adds a second spelling of a board, the row already merged stays and the new
+   one is the error. A `website` on more than one row is a warning: one company
+   can have several boards.
+7. Each row is in its own file, in order.
+8. Each row names a valid manifest; a pull request adds new rows only with a
+   manifest of its own.
+9. A contribution does not change `retired`, and no row is ever deleted.
+10. A warning, not an error, when `boards/` passes 25 MB.
+11. The inbox: file names, at most 5,000 lines a file, the line format above,
+    the same board rules, each board once across the inbox, and an
+    organization's manifest (same rules, `rows` equal to its lines,
+    `contributor` equal to the username in the file name). A numbered
+    contribution id already in `contributions/` is an error. A board already
+    in the registry is a warning.
+
+`CHANGELOG.md` is not checked against the manifests: a contribution does not
+edit it, and maintainers regenerate it on main.
+
+In a pull request, the `Employer registry validate` workflow runs the
+validator from the base branch against the pull request's files, so a pull
+request cannot change the rules it is checked by. It then reports whether
+every change adds a new file directly in `inbox/`, with a valid name: no
+edited, deleted or renamed file, and nothing outside `inbox/`. The answer is
+in the job summary and in the job's `inbox_only` output; the workflow does
+not act on it.
+
+## Removal at an employer's request
+
+An employer can ask for its row to be removed, either with the
+[employer removal issue form](https://github.com/career-ops-hq/career-ops/issues/new?template=employer-removal.yml)
+or by email to **hi@santifer.io**. Within 7 days a maintainer marks the row
+`retired: true` with `retired_reason: owner_request`. The row stays in the
+file, retired, so the board is not added again by a later contribution, and
+tools that read the registry stop reading that board.
+
+## License
+
+The data in this directory is licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/): see [LICENSE](LICENSE).
+Contributors also allow the licensor to distribute their contributions under
+ODbL 1.0 or CC0 1.0.
+
+Licensor and database maker: Santiago Fernández de Valderrama
+
+The career-ops code is MIT-licensed (the repository's root `LICENSE`).

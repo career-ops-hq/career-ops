@@ -101,3 +101,43 @@ const OK_CHILD = 'console.log("OK");';
   if (lastRunFailure() === null) pass('a rejected executable clears the previous failure record');
   else fail(`a rejected executable must not leave a stale record, got ${JSON.stringify(lastRunFailure())}`);
 }
+
+// The helper existing is not the same as the call sites using it. Below the
+// per-file node:test path — which runDiscovered() already fixed, and which #4164
+// is refining — test-all.mjs spawns ONE child for every suite under
+// web/tests/lib. That site reported the fact of failure and nothing else: just a
+// rerun command naming ~100 files. Observed twice on 2026-10-04 on
+// windows-latest, on two unrelated PRs, and neither log could say which of the
+// hundred suites broke.
+//
+// Asserted structurally because the behaviour cannot be reached without making a
+// real suite fail, and the only way to do that is to write a failing file into
+// web/tests/lib — i.e. into the developer's own checkout.
+//
+// Deliberately accepts ANY of the known output carriers rather than one
+// spelling: formatRunFailure() is what main has, #4164 adds failureExcerpt(),
+// and reading .stdout/.stderr off the record directly is equally valid. The
+// invariant is that the child's output reaches the message, not which helper
+// carries it there.
+{
+  const { readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { ROOT } = await import('./helpers.mjs');
+  const src = readFileSync(join(ROOT, 'test-all.mjs'), 'utf8');
+
+  // The site, found by the thing that makes it distinctive: it is the only
+  // fail() whose message interpolates the discovered web-unit list.
+  const site = src.split('\n').find((l) => l.includes('fail(') && l.includes('webUnits.join('));
+  if (site) pass('the web-unit batch failure site is still findable');
+  else fail('no fail() in test-all.mjs interpolates webUnits.join() — this check has lost its subject');
+
+  const CARRIERS = [/formatRunFailure\s*\(/, /failureExcerpt\s*\(/, /\.(stdout|stderr)\b/];
+  if (site && CARRIERS.some((re) => re.test(site))) {
+    pass('the web-unit batch failure carries the child output, not just a rerun command');
+  } else if (site) {
+    fail(
+      'the web-unit batch failure names ~100 files to re-run but surfaces none of the ' +
+        `child's output, so CI cannot say which suite failed: ${site.trim()}`,
+    );
+  }
+}

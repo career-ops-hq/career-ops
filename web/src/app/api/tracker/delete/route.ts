@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
-import { careerOpsRoot, rootScript, trackerCanDelete } from "@/lib/career-ops";
+import { rootScript, trackerCanDelete } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { isTrackerWriting } from "@/lib/core/run-registry";
+import { parseOrphanReport } from "@/lib/tracker-delete-output.mjs";
+import { readJsonObject } from "@/lib/json-body";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,20 +19,9 @@ export const dynamic = "force-dynamic";
 // nothing and can overlap.
 let deleting = false;
 
-function parseOrphan(stderr: string): string | null {
-  // dry-run: "(report file would be orphaned: <path>)"
-  // real:    "Note: report file may now be orphaned — <path>"
-  const m = stderr.match(/orphaned[:—-]+\s*([^\n)]+)\)?\s*$/im);
-  return m ? m[1].trim() : null;
-}
-
 export async function POST(req: Request) {
-  let body: { n?: string | number; dryRun?: boolean };
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "bad json" }, { status: 400 });
-  }
+  const body = await readJsonObject<{ n?: string | number; dryRun?: boolean }>(req);
+  if (!body) return Response.json({ error: "bad json" }, { status: 400 });
   const num = String(body.n ?? "").trim();
   if (!/^\d+$/.test(num)) {
     return Response.json({ error: "a numeric application number is required" }, { status: 400 });
@@ -63,7 +55,9 @@ export async function POST(req: Request) {
       let err = "";
       let child;
       try {
-        child = spawn(process.execPath, args, { cwd: careerOpsRoot(), env: process.env });
+        // windowsHide: see api/doctor/route.ts — a stale inherited console
+        // kills every child with 0xC0000142 on Windows; never inherit one.
+        child = spawn(process.execPath, args, { cwd: resolveCodeRoot(process.cwd(), process.env), env: process.env, windowsHide: true });
       } catch (e) {
         resolve({ code: 1, err: e instanceof Error ? e.message : "failed to start tracker.mjs" });
         return;
@@ -74,20 +68,49 @@ export async function POST(req: Request) {
       child.stdout.on("data", () => {
         /* delete reports to stderr; drain stdout so the pipe never stalls */
       });
-      const killer = setTimeout(() => {
-        try {
-          child.kill("SIGTERM");
-        } catch {
-          /* ignore */
-        }
-      }, 30_000);
-      child.on("error", (e) => {
-        clearTimeout(killer);
-        resolve({ code: 1, err: e.message });
-      });
+      // CAREER_OPS_CHILD_TIMEOUT_MS lets a test prove the kill without waiting
+      // 30 seconds. A child that ignores SIGTERM used to leave this promise,
+      // and the deleting flag, open forever. Exit 0 during the grace window
+      // is the script finishing, so that result stands.
+      const requested = Number(process.env.CAREER_OPS_CHILD_TIMEOUT_MS);
+      const timeout = Number.isFinite(requested) && requested > 0 ? requested : 30_000;
+      const grace = 2_000;
+      let settled = false;
+      let stopping = false;
+      let gaveUp = false;
+      let killer: ReturnType<typeof setTimeout> | undefined;
+      let hardKill: ReturnType<typeof setTimeout> | undefined;
+      let giveUp: ReturnType<typeof setTimeout> | undefined;
+      const finish = (value: { code: number | null; err: string }) => {
+        if (settled) return;
+        settled = true;
+        if (killer) clearTimeout(killer);
+        if (hardKill) clearTimeout(hardKill);
+        if (giveUp) clearTimeout(giveUp);
+        resolve(value);
+      };
+      const timedOut = () => ({ code: null, err: "Delete timed out after 30 seconds and was stopped." });
+      killer = setTimeout(() => {
+        stopping = true;
+        try { child.kill("SIGTERM"); } catch { /* already gone */ }
+        hardKill = setTimeout(() => {
+          try { child.kill("SIGKILL"); } catch { /* already gone */ }
+        }, grace);
+        // close waits on the pipes. A descendant holding stdout never delivers
+        // it, and SIGKILL does not reach that descendant.
+        giveUp = setTimeout(() => {
+          gaveUp = true;
+          finish(timedOut());
+        }, grace + 1_000);
+      }, timeout);
+      child.on("error", (e) => finish({ code: 1, err: e.message }));
       child.on("close", (code) => {
-        clearTimeout(killer);
-        resolve({ code, err });
+        if (gaveUp) return;
+        if (stopping && code == null) {
+          finish(timedOut());
+          return;
+        }
+        finish({ code, err });
       });
     });
 
@@ -98,7 +121,7 @@ export async function POST(req: Request) {
         { status: notFound ? 404 : 400 },
       );
     }
-    return Response.json({ ok: true, dryRun, orphanReport: parseOrphan(result.err) });
+    return Response.json({ ok: true, dryRun, orphanReport: parseOrphanReport(result.err) });
   } finally {
     if (!dryRun) deleting = false;
   }

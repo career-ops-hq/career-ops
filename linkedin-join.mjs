@@ -73,17 +73,17 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { asciiFold } from './lib/ascii-fold.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
 const DEFAULT_CSV = join(DATA_ROOT, 'data/Connections.csv');
-const TRACKER_PATH = join(DATA_ROOT, 'data/applications.md');
+export const TRACKER_PATH = resolveTrackerPath(DATA_ROOT);
 const PORTALS_PATH = join(DATA_ROOT, 'portals.yml');
 const CONTACTS_PATH = join(DATA_ROOT, 'data/contacts.tsv');
 
@@ -139,13 +139,16 @@ const companyQuery = flagValue(args, '--company') ?? null;
  * anonymized tracker rows reduce to zero distinctive tokens and drop out as
  * targets entirely rather than matching arbitrary connections.
  */
+const LEGAL_FORMS = new Set([
+  'inc', 'incorporated', 'llc', 'llp', 'ltd', 'limited', 'corp', 'corporation',
+  'co', 'company', 'gmbh', 'mbh', 'ag', 'kg', 'sa', 'sas', 'sarl', 'bv', 'nv',
+  'ab', 'oy', 'as', 'aps', 'plc', 'pty', 'srl', 'spa', 'kk', 'pte', 'pvt',
+]);
 const GENERIC = new Set([
   // articles / conjunctions
   'the', 'a', 'an', 'and', 'of', 'for',
   // legal forms
-  'inc', 'incorporated', 'llc', 'llp', 'ltd', 'limited', 'corp', 'corporation',
-  'co', 'company', 'gmbh', 'mbh', 'ag', 'kg', 'sa', 'sas', 'sarl', 'bv', 'nv',
-  'ab', 'oy', 'as', 'aps', 'plc', 'pty', 'srl', 'spa', 'kk', 'pte', 'pvt',
+  ...LEGAL_FORMS,
   // corporate filler
   'holdings', 'holding', 'group', 'groupe', 'international', 'global',
   'worldwide', 'enterprises', 'enterprise', 'ventures', 'capital', 'partners',
@@ -191,6 +194,37 @@ export function foldToken(token) {
 }
 
 /**
+ * Join each run of single-letter tokens that spells a legal form into that one
+ * token. The split on punctuation turns "Acme L.L.C." into acme, l, l, c and
+ * "Novo Nordisk A/S" into novo, nordisk, a, s: the letters are not the generic
+ * "llc" or "as" that GENERIC drops, so they stayed distinctive and a dotted
+ * legal form demoted an exact employer to a weak match, which is hidden by
+ * default. A run that spells no legal form ("A.P. Moller") is left as it was.
+ * tracker-utils.mjs's corporate-form check joins the same runs (#7171).
+ *
+ * @param {string[]} tokens
+ * @returns {string[]}
+ */
+function joinDottedLegalForms(tokens) {
+  const out = [];
+  for (let i = 0; i < tokens.length;) {
+    let j = i;
+    while (j < tokens.length && [...tokens[j]].length === 1) j++;
+    if (j - i > 1 && LEGAL_FORMS.has(tokens.slice(i, j).join(''))) {
+      out.push(tokens.slice(i, j).join(''));
+      i = j;
+    } else if (j > i) {
+      out.push(...tokens.slice(i, j));
+      i = j;
+    } else {
+      out.push(tokens[i]);
+      i++;
+    }
+  }
+  return out;
+}
+
+/**
  * Split a company name into folded tokens.
  *
  * Parentheticals are dropped: tracker rows carry agency or disambiguation
@@ -206,11 +240,11 @@ export function companyTokens(name) {
   const raw = String(name || '');
   const parens = [...raw.matchAll(/\(([^)]*)\)/g)].map(m => m[1].trim()).filter(Boolean);
   const base = raw.replace(/\([^)]*\)/g, ' ');
-  const all = base
+  const all = joinDottedLegalForms(base
     .split(/[^\p{L}\p{M}\p{N}]+/u)
     .filter(Boolean)
     .map(foldToken)
-    .filter(Boolean);
+    .filter(Boolean));
   return {
     all,
     distinctive: all.filter(t => !GENERIC.has(t)),
@@ -445,7 +479,7 @@ export function parseTrackerTargets(content) {
 export function parsePortalTargets(content) {
   let doc;
   try {
-    doc = yaml.load(String(content || ''));
+    doc = loadYaml(String(content || ''));
   } catch {
     return { targets: [], skipped: [{ company: '(portals.yml)', reason: 'YAML parse error' }] };
   }
@@ -937,6 +971,11 @@ function main() {
 // Entry guard (repo convention, cf. contacts.mjs / stats.mjs / invite-match.mjs):
 // without it, importing this module to unit-test its exports runs the whole CLI
 // and exits the test process.
+//
+// process.exitCode, not process.exit(): a write to a pipe can still be queued
+// when main() returns (it is on macOS), and process.exit() drops it, so a
+// result over the 64 KiB pipe buffer reached `| jq` or an agent's shell cut
+// off mid-JSON. main() is synchronous, so the process ends once stdout drains.
 if (isMainModule(import.meta.url)) {
-  process.exit(main());
+  process.exitCode = main();
 }

@@ -54,17 +54,34 @@ func TestComputeProgressMetricsCountsHiredInEveryStage(t *testing.T) {
 // With a hire in the denominator and numerator, the rates must be real numbers
 // rather than the 0%% the missing tiers produced.
 func TestComputeProgressMetricsRatesIncludeHired(t *testing.T) {
-	// 1 hired + 1 rejected: everApplied = 2, everResponded/Interview/Offer = 1.
+	// Rejection is a reply, but does not by itself prove an interview or offer.
 	pm := ComputeProgressMetrics(appsWithStatuses("Hired", "Rejected"))
 
-	if pm.ResponseRate != 50 {
-		t.Errorf("ResponseRate = %v, want 50", pm.ResponseRate)
+	if pm.ResponseRate != 100 {
+		t.Errorf("ResponseRate = %v, want 100", pm.ResponseRate)
 	}
 	if pm.InterviewRate != 50 {
 		t.Errorf("InterviewRate = %v, want 50", pm.InterviewRate)
 	}
 	if pm.OfferRate != 50 {
 		t.Errorf("OfferRate = %v, want 50", pm.OfferRate)
+	}
+}
+
+func TestComputeProgressMetricsTreatsAssessmentAsRespondedBeforeInterview(t *testing.T) {
+	pm := ComputeProgressMetrics(appsWithStatuses("Assessment"))
+
+	if got := stageCount(pm, "Applied"); got != 1 {
+		t.Errorf("Applied = %d, want 1", got)
+	}
+	if got := stageCount(pm, "Responded"); got != 1 {
+		t.Errorf("Responded = %d, want 1", got)
+	}
+	if got := stageCount(pm, "Assessment"); got != 1 {
+		t.Errorf("Assessment = %d, want 1", got)
+	}
+	if got := stageCount(pm, "Interview"); got != 0 {
+		t.Errorf("Interview = %d, want 0 before an interview", got)
 	}
 }
 
@@ -87,9 +104,9 @@ func TestComputeProgressMetricsFunnelIsMonotonic(t *testing.T) {
 	if applied != 6 {
 		t.Errorf("Applied = %d, want 6", applied)
 	}
-	// responded = responded+interview+offer+hired = 4
-	if responded != 4 {
-		t.Errorf("Responded = %d, want 4", responded)
+	// responded = responded+interview+offer+hired+rejected = 5
+	if responded != 5 {
+		t.Errorf("Responded = %d, want 5", responded)
 	}
 	// interview = interview+offer+hired = 3
 	if interview != 3 {
@@ -123,5 +140,17 @@ func TestFunnelTopStageCountsUnscoredRowsAndIsNotNamedEvaluated(t *testing.T) {
 	}
 	if pm.AvgScore != 4.2 {
 		t.Errorf("AvgScore = %v, want 4.2 — the average covers scored rows only, which is why the count beside it cannot be called 'evaluated'", pm.AvgScore)
+	}
+}
+
+// Active means in flight, the same set stats.mjs counts: an evaluated row was
+// never sent and a hire is finished.
+func TestComputeProgressMetricsActiveAppsAreInFlight(t *testing.T) {
+	pm := ComputeProgressMetrics(appsWithStatuses(
+		"Evaluated", "Applied", "Responded", "Assessment", "Interview", "Offer",
+		"Hired", "Rejected", "Discarded", "SKIP",
+	))
+	if pm.ActiveApps != 5 {
+		t.Fatalf("ActiveApps = %d, want 5", pm.ActiveApps)
 	}
 }

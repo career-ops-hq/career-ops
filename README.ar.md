@@ -1,120 +1,214 @@
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg"><img src="docs/wordmark-light.svg" alt="career-ops" width="250" height="56"></picture></p>
 
+<p align="center" dir="rtl">وكيل ذكاء اصطناعي مفتوح المصدر للبحث عن عمل.</p>
+
+<p align="center">
+  <a href="README.md">English</a> |
+  <a href="README.es.md">Español</a> |
+  <a href="README.de.md">Deutsch</a> |
+  <a href="README.fr.md">Français</a> |
+  <a href="README.pt-BR.md">Português (Brasil)</a> |
+  <a href="README.ko-KR.md">한국어</a> |
+  <a href="README.ja.md">日本語</a> |
+  <a href="README.cn.md">简体中文</a> |
+  <a href="README.zh-TW.md">繁體中文</a> |
+  <a href="README.ua.md">Українська</a> |
+  <a href="README.ru.md">Русский</a> |
+  <a href="README.pl.md">Polski</a> |
+  <a href="README.da.md">Dansk</a> |
+  <a href="README.nb.md">Norsk (bokmål)</a> |
+  <a href="README.ta.md">தமிழ்</a> |
+  <a href="README.ar.md">العربية</a> |
+  <a href="README.hi.md">हिन्दी</a> |
+  <a href="README.tr.md">Türkçe</a> |
+  <a href="README.vi.md">Tiếng Việt</a> |
+  <a href="README.id.md">Bahasa Indonesia</a>
+</p>
+
+<!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
+
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;أنشأه <a href="https://github.com/santifer"><strong>@santifer</strong></a>، بمشاركة&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ar.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ar.md#builders">&#8294;800+&#8297; مساهم</a></p>
+
 <p align="center" dir="rtl">
-  <em>لقد قضيت شهورًا في التقديم على الوظائف بالطريقة التقليدية الصعبة. لذا قمت ببناء وتطوير النظام الذي تمنيت لو كان لدي.</em><br>
-  تستخدم الشركات الذكاء الاصطناعي لتصفية المرشحين. <strong>أنا ببساطة أعطيت المرشحين الذكاء الاصطناعي ليختاروا هم الشركات المناسبة.</strong><br>
-  يقيّم ويرتّب ويصيغ المسودات. <strong>لا يرسل أبدًا: أنت من يرسل.</strong> مفتوح المصدر، محلي، ملكك.
+<strong>أشهر من إرسال السير الذاتية إلى&nbsp;الصمت.</strong><br>
+فبنيت المرشِّح الذي كنت&nbsp;أحتاجه.
+</p>
+
+<p align="center" dir="rtl">
+<strong>740&nbsp;إعلانًا&nbsp;مقيَّمًا. 68&nbsp;طلبًا. 12&nbsp;مقابلة.&nbsp;1&nbsp;عرض.</strong><br>
+كنت أول مستخدم له. حصلت على&nbsp;الوظيفة. ثم&nbsp;جعلته&nbsp;مفتوح&nbsp;المصدر.
+</p>
+
+<p align="center" dir="rtl">
+الصق إعلان وظيفة. على جهازك، يخبرك إن كانت الوظيفة لا تزال&nbsp;مفتوحة وإن كانت&nbsp;تناسبك.<br>
+يكيّف سيرتك الذاتية ويكتب مسودات&nbsp;إجاباتك. <strong>أنت&nbsp;تضغط&nbsp;«إرسال».</strong>
 </p>
 
 <p align="center">
-  <a href="https://x.com/santifer/status/2041403685696053741"><img src="docs/demo.gif" alt="خط عمل career-ops: إعلانات وظائف مقيّمة، 219 منها معلّمة بعدم التقديم، ثم تقييم كامل واحد" width="800"></a>
+  <img src="docs/demo.gif" alt="بحث المؤلف نفسه في لوحة تحكم career-ops: إعلانات مقيَّمة بالدرجات، وعدد بالأحمر لتلك الموسومة «لا تقدّم»، ثم تقرير تقييم كامل" width="800">
 </p>
 
-<p align="center" dir="rtl"><sub>لقطة في منتصف البحث: خط العمل، ثم فتح إعلان واحد وتقييمه من البداية إلى النهاية.</sub></p>
+<p align="center" dir="rtl"><sub>بحثي أنا، في منتصف الطريق، والواجهة&nbsp;باللغة&nbsp;الإسبانية.</sub></p>
 
-<p align="center" dir="rtl"><strong>من 740 إعلان وظيفة، 68 فقط كانت تستحق التقديم. 12 مقابلة. عرض عمل واحد.</strong></p>
-<p align="center" dir="rtl"><sub>بحث واحد، بحث المؤلف، 2026. الرقم المهم هو ما تم استبعاده، لا العدد الإجمالي. كل الأرقام في <a href="https://santifer.io/career-ops-system">دراسة الحالة</a>.</sub></p>
-
-<p align="center" dir="rtl"><sub>لا يرسل أبدًا، لا يبعث بريدًا، لا يتصل بالخارج: <a href="#ما-لا-يفعله-career-ops">ما لا يفعله</a> · يعمل داخل واجهة الذكاء الاصطناعي التي تستخدمها أصلًا، <a href="docs/RUNNING_ON_A_BUDGET.md">مع دعم النماذج المجانية والمحلية</a>.</sub></p>
-
-<details>
-<summary>اقرأ بـ 17 لغة</summary>
-<div align="center">
-
-[English](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [தமிழ்](README.ta.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md) | [Türkçe](README.tr.md)
-
-</div>
-</details>
-
-<hr>
-
-<p align="center">
-  <a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsantifer%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20verified&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="تم توظيفهم عبر career-ops: عدد موثّق"></a>
+<p align="center" dir="rtl">
+  تستخدم الشركات الذكاء الاصطناعي لتصفية المرشحين.<br>
+  <strong>أنا ببساطة أعطيت المرشحين الذكاء&nbsp;الاصطناعي&nbsp;<em>ليختاروا</em>&nbsp;الشركات.</strong>
 </p>
 
-<p align="center" dir="rtl"><sub>حصلت على وظيفتك؟ <a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">شاركها ←</a> · بطاقتك تُري شخصًا في منتصف بحثه أن المخرج موجود.</sub></p>
-
-<p align="center">
-  <a href="HIRED.md"><img src="docs/hired-wall.svg" alt="أحدث ثلاث قصص توظيف" width="800"></a>
+<p align="center" dir="rtl">
+  بعد ستة أشهر، <strong>تركت تلك الوظيفة.</strong><br>
+  والآن نبني career-ops لكي&nbsp;تحصل&nbsp;أنت&nbsp;على&nbsp;وظيفتك.
 </p>
 
-<p align="center" dir="rtl"><sub>كل رقم هو قصة علنية يمكنك <a href="HIRED.md">التحقق منها ←</a> · وكلها بدأت من حيث أنت الآن.</sub></p>
+<p align="center" dir="rtl"><a href="#دورك">جرّبه على وظيفة&nbsp;واحدة&nbsp;↓</a> · <a href="https://santifer.io/career-ops-system">اقرأ القصة&nbsp;كاملة&nbsp;←</a></p>
+<p align="center" dir="rtl"><sub>تفضّل ألّا تستخدم الطرفية؟ <a href="https://career-ops.org/waitlist?ref=readme-ar">انضم إلى قائمة الانتظار لنسخة الويب&nbsp;←</a></sub></p>
 
-<p align="center" dir="rtl"><sub>ظهر في</sub></p>
+<br>
+
+<p align="center"><a href="HIRED.md"><img src="docs/hired-badge.svg" alt="Hired with career-ops: public stories on the record"></a></p>
+
+<p align="center" dir="rtl">من جاؤوا بعدي كتبوا كيف حصلوا على وظائفهم.</p>
+
+<p align="center" dir="rtl">
+  <a href="HIRED.md"><img src="docs/hired-wall.svg" alt="قصص توظيف يمكنك فتحها وقراءتها" width="800"></a>
+</p>
+
+<p align="center" dir="rtl"><sub>كل بطاقة هي issue علنية يمكنك فتحها. حصلت على وظيفتك؟ <a href="https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml">اترك بطاقتك ←</a></sub></p>
+
+<p align="center" dir="rtl">⭐ <strong>إن ساعدك career-ops، فنجمة منك تساعد الشخص التالي على&nbsp;إيجاده.</strong></p>
+
+<br>
 
 <p align="center">
   <a href="https://wired.com.gr/article/to-ai-ergaleio-pou-fernei-epanastasi-ston-tropo-pou-psachnoume-douleia/" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/wired-dark.svg"><img src="docs/press/wired.svg" alt="WIRED" height="32"></picture></a>
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://www.businessinsider.com/how-i-built-tool-filter-job-listings-landed-head-ai-2026-4" rel="noopener noreferrer nofollow"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/press/business-insider-dark.svg"><img src="docs/press/business-insider.svg" alt="Business Insider" height="32"></picture></a>
 </p>
 
 <p align="center">
-  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank" rel="noopener noreferrer"><img src="docs/press/producthunt.svg" alt="career-ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
-  &nbsp;&nbsp;
-  <a href="https://trendshift.io/repositories/25195" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+  <a href="https://vercel.com/open-source-program"><img alt="Vercel OSS Program" src="https://vercel.com/oss/program-badge-2026.svg" height="32"></a>
 </p>
 
-<p align="center" dir="rtl"><sub>من إنشاء وصيانة <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>)</sub></p>
+<p align="center">
+  <a href="https://trendshift.io/repositories/25195" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25195" alt="GitHub Trending: #1 repository of the day (Trendshift)" width="250" height="55"></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" rel="noopener noreferrer"><img src="docs/press/producthunt.svg" alt="Featured on Product Hunt" width="206" height="54"></a>
+</p>
 
-## ما هو هذا المشروع؟
+## دورك
 
-career-ops ([career-ops.org](https://career-ops.org)، ويُعرف أيضًا باسم **careerops**) هو أداة بحث عن الوظائف بالذكاء الاصطناعي، مفتوحة المصدر، تعمل محليًا داخل أي واجهة سطر أوامر للبرمجة بالذكاء الاصطناعي: تقيّم العروض، وتكيّف سيرتك الذاتية، وتتابع كل طلب، والقرار الأخير يبقى دائمًا لك. بدلًا من تتبع طلبات التوظيف يدويًا في جداول البيانات، تحصل على خط عمل مدعوم بالذكاء الاصطناعي يقوم بما يلي:
+الصق إعلان وظيفة كنت ستقدّم عليه الليلة. إن عاد بـ<em>لا تقدّم</em>، فقد استعدت ليلتك للتو. وإن عاد بخطة، فأنت تعرف الخطوة التالية.
 
-- **تقييم العروض الوظيفية** في تقرير منظّم: كتل من A إلى H، مع درجة إجمالية من 1 إلى 5 يُتوصَّل إليها بحكم شامل عبر خمسة أبعاد وليس بمعادلة حسابية. عمود أهمية كل متطلب في الكتلة B وتقييم مصداقية الإعلان في الكتلة G إشارتان منفصلتان محايدتان لا تؤثران في الدرجة أبدًا؛ ولا تُكتب الكتلة H إلا عند 4.5 فما فوق
-- **إنشاء ملفات PDF مخصّصة**: سير ذاتية محسّنة لأنظمة تتبع المتقدمين (ATS) ومكيّفة لكل وصف وظيفي
-- **فحص بوابات التوظيف تلقائيًا** (Greenhouse و Ashby و Lever وصفحات الشركات)
-- **المعالجة الجماعية**: تقييم أكثر من 10 عروض بالتوازي عبر وكلاء فرعيين
-- **تتبع كل شيء** في مصدر حقيقة واحد مع فحوصات سلامة
-- **البحث عن الشركات وإيجاد الشخص المناسب للتواصل**: التقديم يضعك في الطابور؛ والبحث يمنحك محادثة
+```bash
+npx @santifer/career-ops init
+```
 
-> **مهم: هذه ليست أداة للتقديم العشوائي بالجملة.** career-ops مرشِّح: يساعدك على إيجاد العروض القليلة التي تستحق وقتك من بين المئات. يوصي النظام بشدة بعدم التقديم على أي عرض تقل درجته عن 4.0/5. وقتك ثمين، ووقت مسؤول التوظيف كذلك. راجع دائمًا قبل الإرسال.
+<p align="center" dir="rtl"><sub>مفتوح المصدر. محلي. داخل واجهة الذكاء الاصطناعي التي تستخدمها أصلًا. <a href="docs/RUNNING_ON_A_BUDGET.md">النماذج المجانية والمحلية مشمولة.</a></sub></p>
 
-career-ops وكيلي الطابع: واجهة الذكاء الاصطناعي التي تختارها تتصفح صفحات التوظيف عبر Playwright، وتقيّم الملاءمة بالاستدلال على سيرتك الذاتية مقابل الوصف الوظيفي (لا بمطابقة الكلمات المفتاحية)، وتكيّف سيرتك لكل إعلان.
 
-> **تنبيه: التقييمات الأولى لن تكون رائعة.** النظام لا يعرفك بعد. زوّده بالسياق: سيرتك الذاتية، وقصة مسيرتك، وإنجازاتك المثبتة، وتفضيلاتك، وما تجيده، وما تريد تجنبه. كلما غذّيته أكثر، تحسّن أداؤه. تعامل معه كأنك تُدرّب مسؤول توظيف جديد: في الأسبوع الأول يحتاج إلى التعرف عليك، ثم يصبح لا غنى عنه.
+## لست مضطرًا للبحث وحدك
 
-بناه شخص استخدمه لتقييم 740 إعلان وظيفة، والتقديم على 68 منها، والحصول على منصب Head of Applied AI. [اقرأ دراسة الحالة كاملة](https://santifer.io/career-ops-system).
+الصمت بعد أن تضغط إرسال لا يتعلق بك. رأى ما يكفي من الناس الشيء نفسه فكتبوا الممارسة في ستة أسطر:
+
+> قدّم أفضل على عدد أقل. الإشارة قبل الكم. الدليل قبل الكلمات المفتاحية. الإنسان هو من يقرر. المحلي أولًا. الكرامة على جانبي الطاولة.
+
+<p align="center" dir="rtl"><a href="https://career-ops.org/manifesto?utm_source=readme"><img src="https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2FSIGNATURES.md&search=n%3A(%5Cd%2B)%5Cs*%24&replace=%241%20signatories&label=THE%20CAREEROPS%20MANIFESTO&color=DD7627&style=for-the-badge&labelColor=2b3137" alt="بيان CareerOps: عدد الموقّعين مباشرة"></a></p>
+
+<p align="center" dir="rtl">بعضهم، بكلماتهم هم.</p>
+
+<p align="center" dir="rtl">
+  <a href="https://career-ops.org/manifesto?utm_source=readme"><img src="docs/manifesto-wall.svg" alt="ثلاثة توقيعات على بيان CareerOps، بكلمات أصحابها" width="800"></a>
+</p>
+
+<p align="center" dir="rtl"><sub>كل توقيع هو commit يمكنك تدقيقه. <a href="https://career-ops.org/manifesto?utm_source=readme">اقرأها كلها، أو أضف توقيعك ←</a></sub></p>
+
+<br>
+
+التوظيف لن يصلح نفسه بنفسه. من يمرّون به يستطيعون، وهم في الغرفة أصلًا، يقارنون ملاحظاتهم ويصلحون إعدادات بعضهم بعضًا.
+
+<a id="builders"></a>
+
+<p align="center"><a href="CONTRIBUTING.md"><img src="https://warpchart.dev/api/builders?lang=ar" alt="جدار متحرك لصور المساهمين الرمزية على GitHub، يمتلئ بترتيب الوصول منذ أبريل 2026، مع ترك المربع التالي مفتوحًا." width="100%"></a></p>
+
+[هنا يُكتب الإصلاح](CONTRIBUTING.md). غرفة، لا نادٍ. **لنبنِ معًا.**
+
+<p align="center" dir="rtl"><a href="https://discord.gg/8pRpHETxa4"><img src="docs/discord-badge.svg" alt="Discord: عدد أعضاء خادم career-ops مباشرة"></a></p>
+
+## الرعاة
+
+career-ops مجاني للمرشحين، إلى الأبد. هذه الشركات ترعى المشروع:
+
+<p align="center">
+  <a href="https://serpapi.com/career-ops-org" title="SerpApi"><img src="docs/sponsors/serpapi.svg" alt="SerpApi" height="48"></a>
+</p>
+
+<p align="center"><strong>SerpApi</strong> · Build a portfolio project with live search data. SerpApi gives developers structured JSON/Markdown from Google Search, Maps, Shopping, and other engines through a simple API call.</p>
+
+> الرعاية تشتري ظهورًا موسومًا بوضوح، لا نفوذًا أبدًا: لا مبلغ من المال يغيّر خارطة الطريق أو يضع شيئًا داخل المنتج. الرعاة لا يظهرون أبدًا في التقييمات أو الترتيبات أو التوصيات.
+
+## ماذا يفعل career-ops من أجلك
+
+الصق إعلان وظيفة. يخبرك إن كانت تلك الليلة تستحق.
+
+- **أما زالت مفتوحة؟** يتحقق من أن الإعلان لا يزال منشورًا قبل أن تكتب كلمة واحدة.
+- **ليس أنت؟** يقيّم الدور مقابل سيرتك الذاتية الحقيقية ويطلب منك تخطي التوافق الضعيف. يمكنك تجاوز رأيه.
+- **يستحق؟** يصوغ السيرة الذاتية وخطاب التقديم والإجابات. أنت تقرؤها. أنت ترسلها.
+- **مع من أتحدث؟** يجد الشخص ويصوغ الرسالة. لا يرسلها أبدًا.
+- **إلى أين يذهب كل هذا؟** كل طلب يبقى على جهازك. لا يُرفع إلينا شيء.
+- **ماذا ينبغي أن أتعلم؟** بعد سلسلة من الرفض، يسمّي الفجوة.
+
+الجولات الأولى خشنة. هو لا يعرفك بعد. تحدّث إليه: سيرتك الذاتية، ما تريده، ما ترفضه. اعتبرها الأسبوع الأول لمسؤول توظيف.
+
+عند التشغيل الأول يسألك عن كل ذلك في الدردشة. لا شيء يُضبط يدويًا.
 
 ## ما لا يفعله career-ops
 
-- **إرسال طلب توظيف.** يجهّز الإجابات؛ أنت من يفتح النموذج ويضغط إرسال. السكربت لا ينفّذ POST أبدًا (`prepare-application.mjs`).
+- **إرسال طلب تقديم تلقائيًا.** يصوغ الإجابة لكل حقل؛ أنت تراجع وتضغط إرسال. السكربت لا يرسل POST أبدًا (`prepare-application.mjs`).
 - **إرسال بريد إلكتروني.** مسودات فقط. لا يوجد أي وسيلة لإرسال البريد في هذا الكود كله.
 - **الاتصال بالخارج.** لا قياس عن بُعد، ولا خادم خلفي لنا. سيرتك الذاتية تنتقل من جهازك إلى مزوّد الذكاء الاصطناعي الذي اخترته، ولا مكان آخر. السجل العلني الوحيد هو هذا المستودع: `HIRED.md` وقضاياه.
 - **دفعك للتقديم تحت 4.0/5.** سيقول لك ألا تفعل. يمكنك تجاوز ذلك، وسيخبرك بذلك.
 
-يعيد صياغة سيرتك الذاتية؛ ولا يجوز له أبدًا اختلاقها. اليوم تعيش هذه القاعدة في الأوامر النصية، وليس بعد في تحقق إلزامي بالكود. اقرأ كل سيرة ذاتية قبل إرسالها. التفاصيل في [الأسئلة الشائعة](#الأسئلة-الشائعة-faq).
-
-## بيان CareerOps
-
-career-ops هو أول تطبيق مرجعي لـ[بيان CareerOps](https://career-ops.org/manifesto?utm_source=readme). اقرأه. إن كان يقول ما تؤمن به، وقّعه. توقيعك يصبح commit.
+يعيد صياغة سيرتك الذاتية؛ ولا يجوز له أبدًا اختلاقها. يوقف فحصٌ في الكود أي ملف PDF يتضمن أرقامًا أو حقائق غير موجودة في سيرتك الذاتية ولا في ملف article digest الخاص بك، لكنه لا يستطيع بعدُ الحكم على كل إعادة صياغة. اقرأ كل سيرة ذاتية قبل إرسالها. التفاصيل في [الأسئلة الشائعة](#الأسئلة-الشائعة-faq).
 
 ## الميزات
 
 | الميزة                   | الوصف                                                                                                                                    |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **خط عمل تلقائي**        | الصق رابطًا واحصل على تقييم كامل + PDF + سجل في المتتبع                                                                                  |
-| **تقييم A-H**            | ملخص الدور، مطابقة السيرة الذاتية (مع مدى أهمية كل متطلب لهذا الإعلان، وما إذا كان ذلك الوزن مستمدًا من صياغة الوصف نفسه أو بنيته أو من تقدير، مع تسمية كل متطلب، ولا يمكن لتقدير أن يكون في الشريحة العليا أبدًا)، استراتيجية المستوى، بحث التعويضات، التخصيص، التحضير للمقابلة (STAR+R)، بالإضافة إلى فحص مصداقية الإعلان في الكتلة G الذي يرصد عمليات الاحتيال والوظائف الوهمية، وإشارة تصريح العمل التي تعلّم أي وصف وظيفي ينص صراحة على عدم كفالة التأشيرة كعائق قاطع |
-| **بنك قصص المقابلات**    | يراكم قصص STAR+Reflection عبر التقييمات: 5 إلى 10 قصص رئيسية تجيب عن أي سؤال سلوكي                                                        |
-| **نصوص التفاوض**         | أطر التفاوض على الراتب، الرد على الخصم الجغرافي، استخدام العروض المنافسة كورقة ضغط                                                        |
-| **إنشاء PDF متوافق مع ATS** | سير ذاتية محقونة بالكلمات المفتاحية بتصميم Space Grotesk + DM Sans                                                                    |
+| **تقييم A-H**            | ملخص الدور، مطابقة السيرة الذاتية (مع مدى أهمية كل متطلب لهذا الإعلان، وما إذا كان ذلك الوزن مستمدًا من صياغة الوصف نفسه أو بنيته أو من تقدير، مع تسمية كل متطلب، ولا يمكن لتقدير أن يكون في الشريحة العليا أبدًا)، استراتيجية المستوى، بحث التعويضات، التخصيص، التحضير للمقابلة (STAR+R)، بالإضافة إلى فحص مصداقية الإعلان في الكتلة G (أما زال مفتوحًا، وهل هو إعادة نشر: ملاحظات، لا أحكام)، وإشارة تصريح العمل التي تعلّم أي وصف وظيفي ينص صراحة على عدم كفالة التأشيرة كعائق قاطع |
+| **Human-in-the-Loop**    | الذكاء الاصطناعي يقيّم ويوصي، وأنت تقرر وتتصرف. النظام لا يقدّم طلب توظيف أبدًا: القرار الأخير دائمًا لك <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->               |
+| **إنشاء PDF متوافق مع ATS** | سير ذاتية تقرؤها أنظمة ATS، مكيّفة لكل وصف وظيفي انطلاقًا من خبرتك أنت، بتصميم Space Grotesk + DM Sans                                                                    |
 | **مولّد خطابات التقديم** | خطابات تقديم مبنية على البحث مع مرآة الكلمات المفتاحية، وأربعة أسئلة تفاعلية للزاوية (لماذا/المشكلات/المنهج/النبرة)، وبوابة موافقة على المسودة داخل المحادثة، وPDF بحجم A4 عبر خط عمل HTML + Playwright نفسه المستخدم للسير الذاتية. يصيغ مسودة تلقائيًا مع كل تقييم؛ أكملها وأنشئها عند الطلب عبر `/career-ops cover` |
+| **ما وراء السيرة الذاتية** | بحث الشركة ([`deep`](modes/deep.md)) يكشف استراتيجية الذكاء الاصطناعي والتحركات الأخيرة وثقافة الهندسة والزاوية التي ينبغي لملفك أن يتخذها. اكتشاف جهات الاتصال ([`contacto`](modes/contacto.md)) يحدد مدير التوظيف أو مسؤول التوظيف أو زميل الفريق الذي يستحق التواصل ويصيغ رسالة LinkedIn لا تتجاوز 300 حرف مضبوطة لكل نوع من جهات الاتصال. مسودات رسائل التقديم الرسمية ([`email`](modes/email.md)) تحوّل تقريرًا مقيّمًا أو وصفًا ملصقًا إلى سطر موضوع ونص وقائمة مرفقات دون إرسال أو تقديم أو نقر على أي شيء. التقديم يضعك في الطابور؛ والبحث يمنحك محادثة. |
+| **تحليل الأنماط**        | أنماط الرفض ومعدلات التقدم لكل قناة ATS (`analyze-patterns.mjs`)، إحصاءات القمع طوال البحث (`stats.mjs`)، رصد إعادة نشر الإعلانات، وهي علامة محتملة على وظيفة وهمية (`detect-reposts.mjs`) |
+
+<details>
+<summary><b>كل ما يفعله غير ذلك</b></summary>
+
+| الميزة                   | الوصف                                                                                                                                    |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **خط عمل تلقائي**        | الصق رابطًا واحصل على تقييم كامل + PDF + سجل في المتتبع                                                                                  |
+| **بنك قصص المقابلات**    | يراكم قصص STAR+Reflection عبر التقييمات: 5 إلى 10 قصص رئيسية يمكنك تكييفها مع الأسئلة السلوكية التي تُطرح عليك                                                        |
+| **نصوص التفاوض**         | أطر التفاوض على الراتب، الرد على الخصم الجغرافي، استخدام العروض المنافسة كورقة ضغط                                                        |
 | **مسودات رسائل التقديم** | رسائل رسمية لمسؤول التوظيف أو للإحالة أو للتقديم البارد من تقرير أو وصف ملصق، مع سطر الموضوع، وقائمة المرفقات، ونقاط ملاءمة موثقة بمصادرها، وكتلة تواصل مستمدة من ملفك. مسودة فقط: career-ops لا يرسل ولا يقدّم ولا ينقر على أي شيء أبدًا. |
-| **ماسح البوابات**        | أكثر من 100 شركة مهيأة مسبقًا (Anthropic و OpenAI و ElevenLabs و Retool و n8n...) + استعلامات مخصصة عبر Ashby و Greenhouse و Lever و Wellfound |
+| **ماسح البوابات**        | أكثر من 100 شركة مهيأة مسبقًا (Anthropic و OpenAI و ElevenLabs و Retool و n8n...) + استعلامات بحث ويب مخصصة عبر Ashby و Greenhouse و Lever و Wellfound |
 | **اكتشاف الشركات الممولة** | أمر `company:funded` القائم على المراجعة أولًا يُظهر الشركات التي حصلت على تمويل حديثًا وتشخيصات المصادر من تغذيات عامة منظمة دون تعديل بياناتك |
 | **المعالجة الجماعية**    | تقييم متوازٍ عبر عمّال CLI بلا واجهة (`claude -p` / `opencode run`)                                                                      |
 | **لوحة تحكم TUI**        | واجهة طرفية لتصفح خط عملك وتصفيته وترتيبه                                                                                                |
-| **Human-in-the-Loop**    | الذكاء الاصطناعي يقيّم ويوصي، وأنت تقرر وتتصرف. النظام لا يقدّم طلب توظيف أبدًا: القرار الأخير دائمًا لك <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->               |
 | **سلامة خط العمل**       | دمج تلقائي، إزالة التكرار، توحيد الحالات، فحوصات صحية                                                                                    |
 | **حزمة المقابلات**       | خطط تحضير بكتل زمنية، جلسات تدريب مع ملاحظات، مراجعات ما بعد المقابلة ([`interview/`](modes/interview/README.md))، وكاشف للإشارات التحذيرية في الشركة ([`interview-redflag`](modes/interview-redflag.md)) |
 | **مرحلة العرض**          | رفيق قراءة العقد: مرور بندًا بندًا مع قائمة أسئلة للمحامي ([`offer-prep`](modes/offer-prep.md))، ومحلل للفجوة بين الراتب المطلوب والمعلن والفعلي (`salary-gap.mjs`) |
 | **المتابعات والردود**    | حاسبة إيقاع المتابعة وتذكيرات مُعدّة مسبقًا (`followup-cadence.mjs`، `followup-seed.mjs`)؛ تصنيف ردود جهة التوظيف إلى تحديثات في المتتبع ([`reply-watch`](modes/reply-watch.md)) |
-| **تحليل الأنماط**        | أنماط الرفض ومعدلات التقدم لكل قناة ATS (`analyze-patterns.mjs`)، إحصاءات القمع طوال البحث (`stats.mjs`)، رصد إعادة النشر والوظائف الوهمية (`detect-reposts.mjs`) |
 | **نظام الإضافات**        | تكاملات اختيارية (Gmail و Notion و Apify + سجل مجتمعي)، معطّلة افتراضيًا؛ انظر [docs/PLUGINS.md](docs/PLUGINS.md)                          |
-| **ما وراء السيرة الذاتية** | بحث الشركة ([`deep`](modes/deep.md)) يكشف استراتيجية الذكاء الاصطناعي والتحركات الأخيرة وثقافة الهندسة والزاوية التي ينبغي لملفك أن يتخذها. اكتشاف جهات الاتصال ([`contacto`](modes/contacto.md)) يحدد مدير التوظيف أو مسؤول التوظيف أو زميل الفريق الذي يستحق التواصل ويصيغ رسالة LinkedIn لا تتجاوز 300 حرف مضبوطة لكل نوع من جهات الاتصال. مسودات رسائل التقديم الرسمية ([`email`](modes/email.md)) تحوّل تقريرًا مقيّمًا أو وصفًا ملصقًا إلى سطر موضوع ونص وقائمة مرفقات دون إرسال أو تقديم أو نقر على أي شيء. التقديم يضعك في الطابور؛ والبحث يمنحك محادثة. |
+
+</details>
+
+## كيف يعمل النظام؟
+
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), the tailored CV in the format set by cv.output_format — a PDF by default — and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## البدء السريع
 
-**أسرع طريقة: أمر واحد:**
+**أسرع طريقة، بأمر واحد:**
 
 ```bash
 npx @santifer/career-ops init
@@ -122,7 +216,7 @@ npx @santifer/career-ops init
 
 > 💡 `npx` يأتي مع [Node.js](https://nodejs.org): يشغّل المثبّت مرة واحدة
 > دون تثبيت أي شيء بشكل عام. لا يوجد Node بعد؟ ثبّته أولًا.
-> (تستخدم بالفعل واجهة Claude Code / Gemini / Codex؟ إذن لديك بالفعل.)
+> (تستخدم بالفعل واجهة Claude Code / Codex؟ إذن لديك بالفعل.)
 
 يستنسخ هذا أحدث إصدار في `./career-ops` ويثبّت الاعتماديات. ثم:
 
@@ -140,18 +234,13 @@ claude   # or codex / qwen / opencode / agy / grok — open your AI CLI here
 git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # only needed for PDF generation
+# On a non-Debian/Ubuntu Linux distro (Fedora, Arch, ...), Chromium's system
+# libraries aren't installed by the line above — install them yourself with
+# your distro's package manager if PDF generation fails to launch the browser
+# (Playwright's own docs list the required libraries per platform).
 
-# 2. Check setup
-npm run doctor                     # Validates all prerequisites
-
-# 3. Configure
-cp config/profile.example.yml config/profile.yml  # Edit with your details
-cp templates/portals.example.yml portals.yml       # Customize companies
-
-# 4. Add your CV
-# Create cv.md in the project root with your CV in markdown
-
-# 5. Open your AI CLI in this directory
+# 2. Open your AI CLI in this directory. On first launch it walks you
+#    through setup (your CV, profile and target roles) by chatting
 claude   # or codex / opencode / qwen / agy / grok
 
 # Then ask your CLI to adapt the system to you:
@@ -160,14 +249,9 @@ claude   # or codex / opencode / qwen / agy / grok
 # "Add these 5 companies to portals.yml"
 # "Update my profile with this CV I'm pasting"
 
-# 6. Start using
-# Paste a job URL or JD text to trigger auto-pipeline
-# If your CLI supports slash commands, use /career-ops (or its CLI-specific alias)
-# In Codex, ask for the same mode in plain language, e.g.:
-# "Run the career-ops scan mode"
-# "Run the career-ops pipeline mode for data/pipeline.md"
-# "Run the career-ops pdf mode for the latest evaluated role"
-# "Run the career-ops tracker mode and summarize the current statuses"
+# 3. Start using
+# الصق رابط وظيفة أو نص وصفها لتشغيل auto-pipeline.
+# بقية الأوضاع وكيفية طلبها في واجهتك: انظر «الاستخدام» أدناه.
 ```
 
 </details>
@@ -178,186 +262,141 @@ claude   # or codex / opencode / qwen / agy / grok
 npm i -g @santifer/career-ops
 ```
 
-يثبّت هذا الملف التنفيذي `career-ops` بشكل عام لتتمكن من تشغيله مباشرة بدلًا من `npx`. على عكس `npx @santifer/career-ops init` (الذي يهيئ مجلد مشروع)، يمنحك التثبيت العام أمر `career-ops` دائمًا متاحًا في أي مكان في الطرفية.
+يثبّت هذا الملف التنفيذي `career-ops` بشكل عام لتتمكن من تشغيل `career-ops init [folder]` دون `npx`. الأمر `init` هو أمره الوحيد: يُعِدّ مساحة عمل، وكل ما يأتي بعد ذلك يجري داخل واجهة الذكاء الاصطناعي البرمجية التي تستخدمها (انظر الاستخدام أدناه)، لا عبر هذا الملف التنفيذي.
 
 **أيهما تستخدم؟**
 - `npx @santifer/career-ops init`: الأفضل للاستخدام الأول؛ ينشئ مجلد مشروع مخصصًا.
-- `npm i -g @santifer/career-ops`: الأفضل عندما يكون لديك مجلد مشروع وتريد تشغيل أوامر career-ops مباشرة.
+- `npm i -g @santifer/career-ops`: إذا كنت تفضّل كتابة `career-ops init` بدلًا من صيغة `npx`. لا يضيف أي أوامر أخرى.
+
+### طرق أخرى للتشغيل
+
+- **من أي مجلد، كإضافة Claude Code:** [docs/CLAUDE_PLUGIN.md](docs/CLAUDE_PLUGIN.md).
+- **بدون واجهة أوامر ذكاء اصطناعي:** تقيّم سكربتات Gemini وOllama والسكربتات المتوافقة مع OpenAI وصفًا وظيفيًا بمفردها. راجع [docs/SCRIPTS.md](docs/SCRIPTS.md#geminieval--ollamaeval--openaieval).
 
 > **النظام مصمم ليخصّصه وكيل واجهة الذكاء الاصطناعي نفسه.** الأوضاع والأنماط وأوزان التقييم ونصوص التفاوض: اطلب منه تغييرها فحسب. إنه يقرأ الملفات نفسها التي يستخدمها، لذا يعرف تمامًا ما الذي يجب تحريره.
 
 انظر [docs/SETUP.md](docs/SETUP.md) لدليل الإعداد الكامل، و[docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) لتشغيل career-ops بتكلفة منخفضة باستخدام نماذج مخصصة أو محلية (و[docs/FREE_TIER.md](docs/FREE_TIER.md) لتشغيله دون تكلفة على الطبقة المجانية من Antigravity CLI)، و[docs/AUTOMATION.md](docs/AUTOMATION.md) لجدولة عمليات الفحص المتكررة ووصفة الفرز إلى قائمة مختصرة دون استهلاك رموز، و[docs/APPLY_AUTOFILL.md](docs/APPLY_AUTOFILL.md) لتفاصيل تدفق التعبئة التلقائية لنماذج ATS، و[docs/LINKEDIN_JOIN.md](docs/LINKEDIN_JOIN.md) لمقارنة تصدير جهات اتصالك في LinkedIn مع الشركات في قمعك، و[docs/FAQ.md](docs/FAQ.md) لإجابات أسئلة الإعداد الشائعة، بما فيها [كيف يمنع تتبع مصدر القصص الأرقام المختلقة](docs/FAQ.md#why-does-career-ops-refuse-to-use-a-number-from-my-story-bank). مبادئ التصميم في [ARCHITECTURE.md](ARCHITECTURE.md)؛ وتدفقات التشغيل في [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## تكامل Antigravity CLI
-
-يدعم career-ops واجهة Antigravity CLI أصلًا، بالطريقة نفسها التي يدعم بها Claude Code و OpenCode. جميع أوامر الشرطة المائلة متاحة عبر نقطة دخول المهارة المشتركة، باستخدام منطق التقييم نفسه في `modes/*.md`.
-
-نقلت Google وصول المستهلكين إلى Gemini CLI نحو Antigravity CLI. أصبح `GEMINI.md` الآن حارس توافق بلا تأثير، حتى لا يكرر Antigravity تعليمات المشروع الكاملة عندما يقرأ `AGENTS.md` و`GEMINI.md` معًا.
-
-### Antigravity CLI الأصلي
-
-```bash
-# 1. Run in the career-ops directory
-cd career-ops
-agy
-
-# 2. Use the unified /career-ops command with subcommands:
-/career-ops "Senior AI Engineer at Anthropic..."
-/career-ops pipeline
-/career-ops scan
-/career-ops pdf
-/career-ops tracker
-```
-
-المهارة معرّفة وفق المعيار المفتوح في `.agents/skills/career-ops/SKILL.md` ومربوطة برابط رمزي أو مُشار إليها لكل واجهة مدعومة (مثل `.claude/` و`.cursor/` و`.qwen/` و`.antigravitycli/` و`.grok/`).
-
-## تكامل Codex
-
-يدعم career-ops واجهة Codex عبر الموجّه المشترك نفسه، لكن نموذج الاستدعاء يختلف عن الواجهات التي تسجّل أوامر الشرطة المائلة تلقائيًا. للدليل الكامل انظر [docs/CODEX.md](docs/CODEX.md).
-
-### Codex التفاعلي
-
-```bash
-cd career-ops
-codex
-```
-
-أوامر الشرطة المائلة غير مضمونة في Codex. إذا لم يكن `/career-ops` متاحًا، اطلب من Codex تشغيل الوضع مباشرة بلغة عادية:
-
-```text
-Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123
-Run the career-ops scan mode and summarize new matches.
-Run the career-ops pipeline mode for data/pipeline.md.
-Run the career-ops pdf mode for the latest evaluated role.
-Run the career-ops tracker mode and summarize the current statuses.
-```
-
-### Codex بضربة واحدة (`codex exec`)
-
-```bash
-codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
-codex exec "Run career-ops scan mode in this repo and summarize new matches."
-codex exec "Run career-ops pipeline mode for data/pipeline.md."
-codex exec "Run career-ops pdf mode for the latest evaluated role."
-codex exec "Run career-ops tracker mode and summarize the current statuses."
-```
-
-## تكامل Grok Build CLI
-
-يدعم career-ops واجهة Grok Build CLI أصلًا، بالطريقة نفسها التي يدعم بها Claude Code و OpenCode. يُحمَّل `AGENTS.md` تلقائيًا كقواعد للمشروع، وجميع أوامر الشرطة المائلة متاحة عبر نقطة دخول المهارة المشتركة.
-
-### Grok Build CLI الأصلي
-
-```bash
-# 1. Run in the career-ops directory
-cd career-ops
-grok
-
-# 2. Use the unified /career-ops command with subcommands:
-/career-ops "Senior AI Engineer at Anthropic..."
-/career-ops pipeline
-/career-ops scan
-/career-ops pdf
-/career-ops tracker
-```
-
-لعمّال المعالجة الجماعية بلا واجهة، استخدم `grok -p "prompt"` (أضف `--yolo` للموافقة التلقائية على تنفيذ الأدوات).
-
-### سكربت Gemini API مستقل (لا يحتاج تثبيت واجهة)
-
-```bash
-# 1. Get a free API key at https://aistudio.google.com/apikey
-cp .env.example .env
-# Edit .env, set GEMINI_API_KEY=your_key_here
-
-# 2. Install dependencies
-npm install
-
-# 3. Evaluate a job description
-node gemini-eval.mjs "We are looking for a Senior AI Engineer..."
-node gemini-eval.mjs --file ./jds/my-job.txt
-node agent-inbox.mjs add "..."   # queue a request for the next session
-npm run gemini:eval -- "JD text here"
-```
-
-> **الطبقة المجانية:** يعمل الخياران دون فوترة. تستخدم الواجهة الأصلية Google OAuth؛ ويستخدم سكربت API نموذج `gemini-3.6-flash` (حدود المعدل تعتمد على النموذج والطبقة؛ راجع وثائق Google AI للحصص الحالية).
-
 ## الاستخدام
 
-يستخدم career-ops موجّه أوامر مشتركًا. في الواجهات التي تسجّل أوامر الشرطة المائلة، يبدو الأمر هكذا:
+الصق رابط وظيفة أو وصفها في واجهة الذكاء الاصطناعي لديك. يتحقق career-ops من أن الوظيفة ذات الرابط ما زالت متاحة (النص الملصوق ليس له رابط للتحقق منه)، ويقيّمها مقابل سيرتك الذاتية، ويكتب تقريرًا، ويكيّف سيرتك الذاتية (بصيغة PDF افتراضيًا)، ويضيف صفًا إلى متتبّعك. هذا يكفي في معظم الأيام. وكل ما عدا ذلك وضع تطلبه باسمه. إذا تعذّرت قراءة الإعلان، يتوقف خط المعالجة ويطلب منك لصق النص أو مشاركة لقطة شاشة.
 
-```
-/career-ops           → عرض كل الأوامر المتاحة
-/career-ops {JD}      → خط العمل التلقائي: تقييم + تقرير + PDF + متتبع (الصق نصًا أو رابطًا)
-/career-ops pipeline  → معالجة الروابط المعلّقة من صندوق الوارد (data/pipeline.md)
-/career-ops oferta    → تقييم فقط، الكتل من A إلى G (بدون PDF تلقائي)
-/career-ops ofertas   → مقارنة عدة عروض وترتيبها
-/career-ops contacto  → حركة LinkedIn الذكية: إيجاد جهات الاتصال + صياغة رسالة
-/career-ops deep      → أمر بحث معمّق عن الشركة
-/career-ops interview-prep → إنشاء مستند تحضير لمقابلة خاص بالشركة
-/career-ops interview    → مقابلة تفاعلية لإعداد الملف والسيرة الذاتية
-/career-ops eu-swe    → معايرة طلب SWE أوروبي قبل السيرة الذاتية أو التقديم أو المقابلة
-/career-ops eu-fintech → فحص 21 بوابة تقنية مالية أوروبية لأدوار Product Manager (بدون رموز)
-/career-ops interview/plan → خطة تحضير بكتل زمنية لمقابلة قادمة
-/career-ops interview/practice → مقابلة تدريبية، سؤال واحد في كل مرة مع ملاحظات
-/career-ops interview/debrief → مراجعة ما بعد المقابلة: سد الثغرات وتوقع الجولة التالية
-/career-ops interview-redflag → تحليل إشارات التحذير لدى جهة التوظيف قبل الانضمام
-/career-ops pdf       → PDF فقط، سيرة ذاتية محسّنة لأنظمة ATS
-/career-ops text      → سيرة ذاتية مخصّصة بصيغة markdown (تعكس cv.md، بدون PDF)
-/career-ops latex     → تصدير السيرة الذاتية بصيغة LaTeX/Overleaf .tex
-/career-ops latex-tex → تخصيص ملف resume.tex الخاص بك في مكانه (اختياري؛ يبقى cv.md الافتراضي)
-/career-ops cover     → خطاب تقديم: وصف ملصق مستقل أو /career-ops cover {slug}
-/career-ops email     → مسودة رسالة تقديم رسمية (مسودة فقط؛ لا يرسل ولا يقدّم ولا ينقر أبدًا)
-/career-ops add       → إضافة مشروع/ورقة/دور إلى سيرتك الذاتية (جلب + معاينة + تأكيد)
-/career-ops expand    → اكتشاف الكفاءات الناقصة وإضافتها تلقائيًا من روابط الملف
-/career-ops training  → تقييم دورة/شهادة مقابل هدفك الأساسي (North Star)
-/career-ops project   → تقييم فكرة مشروع لملف الأعمال
-/career-ops tracker   → نظرة عامة على حالة الطلبات
-/career-ops agent-inbox → وضع الطلبات في الطابور/تفريغها للجلسة القادمة (data/agent-inbox.md)
-/career-ops apply     → مساعد تقديم مباشر (يقرأ النموذج + يولّد الإجابات)
-/career-ops scan      → فحص البوابات واكتشاف عروض جديدة
-/career-ops discover  → تحويل قائمة شركات إلى لوحات ATS قابلة للفحص + إضافتها إلى portals.yml (بدون رموز)
-/career-ops batch     → معالجة جماعية بعمّال متوازين
-/career-ops patterns  → تحليل أنماط الرفض وتحسين الاستهداف
-/career-ops offer-prep → قراءة عرض/عقد مستلم مع المرشح: مرور على البنود + أسئلة للمحامي (ليست استشارة قانونية)
-/career-ops titles    → اقتراح مسميات وظيفية مجاورة من سيرتك الذاتية لتوسيع البحث
-/career-ops upskill   → تحليل مجمّع لفجوات المهارات من تقاريرك المقيّمة
-/career-ops followup  → متتبع إيقاع المتابعة: تعليم المتأخر وإنشاء مسودات
-/career-ops reply-watch → تصنيف ردود جهات التوظيف واقتراح تحديثات للمتتبع
-/career-ops outcome   → تسجيل نتيجة الطلب وأرشفة المخرجات
-/career-ops calibrate → تقرير استشاري: هل تتنبأ درجات تقييمك بنتائجك الفعلية؟ يقرأ بيانات /outcome؛ ولا يغيّر التقييم أبدًا
-/career-ops update    → تحديث ملفات نظام career-ops مع معاينة الفروقات + فحص التوافق
-```
+### كيف تطلب وضعًا
 
-أو الصق رابط الوظيفة أو وصفها مباشرة: يكتشفه career-ops تلقائيًا ويشغّل خط العمل الكامل.
+| الواجهة | كيف تطلب `scan` |
+| --- | --- |
+| Claude Code, OpenCode, Antigravity CLI (`agy`), Grok Build CLI | `/career-ops scan` |
+| Pi | `/skill:career-ops scan` |
+| Codex أو Qwen أو Cursor أو أي واجهة أخرى مدعومة | لغة عادية: "Run the career-ops scan mode" |
 
-في Codex، أوامر الشرطة المائلة غير مضمونة. استخدم أسماء الأوضاع نفسها في الأمر النصي بدلًا من ذلك، أو استدعِها من `codex exec`.
+كتابة `/career-ops` وحدها تعرض قائمة الأوامر في الواجهات التي تستخدمه. واللغة العادية تعمل في كل واجهة مدعومة. عند استخدامه كإضافة لـ Claude Code يكون الأمر `/career-ops:career-ops`.
 
-## كيف يعمل النظام؟
+تشترك كلها في موجّه واحد هو `.agents/skills/career-ops/SKILL.md` وفي ملفات `modes/*.md` نفسها، لذا تُوجِّه كل واجهة الطلب بالطريقة نفسها (وتحتاج الأوضاع التي تعتمد على المتصفح إلى أدوات Playwright أيضًا). أوامر الشرطة المائلة غير مضمونة في Codex: اطلب بلغة عادية، أو شغّل موجّهًا واحدًا دون واجهة عبر `codex exec "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"` ([docs/CODEX.md](docs/CODEX.md)). وتجد كيفية التشغيل في كل واجهة مدعومة، وأوامر التشغيل دون واجهة حيث تتوفر، وملاحظات الإعداد الخاصة بكل واجهة، في [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md).
 
-```
-You paste a job URL or description
-        │
-        ▼
-┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
-│  Detection       │
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  A-H Evaluation  │  Match, gaps, comp research, STAR stories, legitimacy
-│  (reads cv.md)   │
-└────────┬─────────┘
-         │
-    ┌────┼────┐
-    ▼    ▼    ▼
- Report  PDF  Tracker
-  .md   .pdf  entry
-```
+### أوامر الاستخدام اليومي
+
+| الأمر | ماذا يفعل |
+| --- | --- |
+| *الصق رابطًا أو وصفًا وظيفيًا* | خط المعالجة الكامل: التحقق من أن الوظيفة ما زالت متاحة (للروابط فقط)، تقييم A-G مع H عند الدرجات المرتفعة، تقرير، سيرة ذاتية مُكيَّفة (PDF افتراضيًا)، صف في المتتبّع |
+| `scan` | يفحص بواباتك بحثًا عن وظائف جديدة ويضيفها إلى صندوق الوارد (`data/pipeline.md`) |
+| `pipeline` | يعالج الروابط المنتظرة في صندوق الوارد (قد تتخطى مستويات standard وpremium غير المطابقة بوضوح) |
+| `apply` | يملأ نموذج التقديم معك حقلًا بحقل. ويتوقف قبل الإرسال |
+| `tracker` | أين وصل كل طلب |
+| `followup` | أي الطلبات حان موعد متابعتها، مع مسودات |
+
+<details>
+<summary><b>كل الأوامر، حسب مرحلة البحث</b></summary>
+
+تحتفظ `oferta` و`ofertas` و`contacto` بأسمائها الإسبانية الأصلية: عرض، عروض، جهة اتصال.
+
+**إيجاد وظائف**
+
+| الأمر | ماذا يفعل |
+| --- | --- |
+| [`scan`](modes/scan.md) | فحص البوابات واكتشاف عروض جديدة |
+| [`discover`](modes/discover.md) | تحويل قائمة أسماء شركات إلى لوحات ATS قابلة للفحص. يعرض معاينة افتراضيًا ولا يضيفها إلى `portals.yml` إلا مع `--write` (بدون رموز) |
+| [`pipeline`](modes/pipeline.md) | معالجة الروابط المعلّقة من صندوق الوارد (`data/pipeline.md`) |
+| [`triage`](modes/triage.md) | فرز أولي سريع (يستحق/لا يستحق) استنادًا إلى `modes/_brief.md`، قبل التقييم الكامل (لا يكتب أي ملفات) |
+| [`batch`](modes/batch.md) | تقييم وظائف كثيرة بعمّال دون واجهة (بالتوازي مع Claude، وواحدة تلو الأخرى مع بقية الواجهات) |
+| [`titles`](modes/titles.md) | اقتراح مسميات وظيفية قريبة من سيرتك الذاتية لتوسيع البحث |
+
+**تقييم وظيفة**
+
+| الأمر | ماذا يفعل |
+| --- | --- |
+| *الصق رابطًا أو وصفًا وظيفيًا* | [Auto-pipeline](modes/auto-pipeline.md): تقييم + تقرير + سيرة ذاتية مُكيَّفة (PDF افتراضيًا) + إدخال في المتتبّع |
+| [`oferta`](modes/oferta.md) | تقييم فقط، الكتل من A إلى G مع H عند الدرجات المرتفعة (بدون PDF) |
+| [`ofertas`](modes/ofertas.md) | مقارنة عدة عروض وترتيبها |
+| [`deep`](modes/deep.md) | موجّه بحث معمّق عن الشركة |
+| [`eu-swe`](modes/regional/eu-swe.md) | معايرة طلب أوروبي في هندسة البرمجيات قبل السيرة الذاتية أو التقديم أو المقابلة |
+
+**التقديم**
+
+| الأمر | ماذا يفعل |
+| --- | --- |
+| [`pdf`](modes/pdf.md) | سيرة ذاتية محسّنة لأنظمة ATS بصيغة PDF |
+| [`ats`](modes/ats.md) | فحص ملاءمة سيرة ذاتية مولَّدة لأنظمة ATS: الدرجة والمشكلات القابلة للإصلاح |
+| [`text`](modes/text.md) | سيرة ذاتية مُكيَّفة بصيغة markdown (تعكس `cv.md`، بدون PDF) |
+| [`latex`](modes/latex.md) | تصدير السيرة الذاتية بصيغة LaTeX/Overleaf `.tex` |
+| [`latex-tex`](modes/latex-tex.md) | تكييف ملف `resume.tex` الخاص بك في مكانه (اختياري؛ ويبقى `cv.md` هو الافتراضي) |
+| [`cover`](modes/cover.md) | خطاب تغطية، من وصف وظيفي ملصوق أو من تقرير مقيَّم (`cover {slug}`) |
+| [`email`](modes/email.md) | مسودة بريد تقديم رسمي. مسودة فقط: لا يرسل ولا يقدّم ولا ينقر أبدًا |
+| [`contacto`](modes/contacto.md) | إيجاد مدير التوظيف أو المسؤول عن الاستقطاب أو زميل في المجال، وصياغة رسالة LinkedIn |
+| [`apply`](modes/apply.md) | مساعد تقديم مباشر (Playwright من هذا المستودع). لا يرسل الطلب |
+
+**المقابلة**
+
+| الأمر | ماذا يفعل |
+| --- | --- |
+| [`interview-prep`](modes/interview-prep.md) | مستند تحضير للمقابلة خاص بالشركة |
+| [`interview/plan`](modes/interview/plan.md) | خطة تحضير مقسّمة إلى فترات زمنية لمقابلة قادمة |
+| [`interview/practice`](modes/interview/practice.md) | مقابلة تدريبية، سؤال واحد في كل مرة، مع ملاحظات |
+| [`interview/debrief`](modes/interview/debrief.md) | مراجعة ما بعد المقابلة: سدّ الثغرات وتوقّع الجولة التالية |
+| [`interview-redflag`](modes/interview-redflag.md) | تحليل علامات التحذير لدى جهة العمل قبل الانضمام إليها |
+
+**بعد التقديم**
+
+| الأمر | ماذا يفعل |
+| --- | --- |
+| [`tracker`](modes/tracker.md) | نظرة عامة على حالة الطلبات |
+| [`followup`](modes/followup.md) | إيقاع المتابعة: تمييز الطلبات المتأخرة وتوليد مسودات |
+| [`reply-watch`](modes/reply-watch.md) | تصنيف ردود جهات العمل واقتراح تحديثات للمتتبّع |
+| [`outcome`](modes/outcome.md) | تسجيل نتيجة الطلب وأرشفة مخرجاته |
+| [`offer-prep`](modes/offer-prep.md) | قراءة عرض أو عقد وصلك معك: مرور على البنود وأسئلة للمحامي (ليست استشارة قانونية) |
+
+**ملفك وسيرتك الذاتية**
+
+| الأمر | ماذا يفعل |
+| --- | --- |
+| [`interview`](modes/interview.md) | إعداد الملف: مقابلة تفاعلية عن خبرتك تبني سيرتك الذاتية وملفك (وليست تدريبًا على المقابلات) |
+| [`intake`](modes/intake.md) | بناء ملفك أو إثراؤه من الملفات الموجودة في `documents/` (السيرة الذاتية الرئيسية، تصدير LinkedIn). لا يُكتب شيء دون تأكيدك |
+| [`master-profile`](modes/master-profile.md) | استيراد Master Career Profile ومراجعته والتحقق منه، وتجهيز حقائق مختارة كنقاط في السيرة الذاتية |
+| [`add`](modes/add.md) | إضافة مشروع أو ورقة بحثية أو منصب إلى سيرتك الذاتية (جلب، معاينة، تأكيد) |
+| [`expand`](modes/expand.md) | اكتشاف الكفاءات الناقصة في سيرتك الذاتية من روابط ملفك |
+| [`retro`](modes/retro.md) | مراجعة هذه الجلسة وحفظ ما علّمته إياه كقواعد (لا يكتب إلا ما تقبله) |
+
+**تحسين استهدافك**
+
+| الأمر | ماذا يفعل |
+| --- | --- |
+| [`patterns`](modes/patterns.md) | تحليل أنماط الرفض وتحسين الاستهداف |
+| [`calibrate`](modes/calibrate.md) | التحقق مما إذا كانت درجات تقييمك تتنبأ بنتائجك الفعلية. استشاري: لا يغيّر التقييم أبدًا |
+| [`upskill`](modes/upskill.md) | تحليل فجوات المهارات عبر تقاريرك المقيَّمة |
+| [`training`](modes/training.md) | تقييم دورة أو شهادة مقابل North Star الخاصة بك |
+| [`project`](modes/project.md) | تقييم فكرة مشروع لمحفظة الأعمال |
+
+**النظام**
+
+| الأمر | ماذا يفعل |
+| --- | --- |
+| [`agent-inbox`](modes/agent-inbox.md) | وضع الطلبات في قائمة انتظار للجلسة التالية ومعالجتها حينها (`data/agent-inbox.md`). ويعمل `inbox` أيضًا |
+| [`update`](modes/update.md) | تحديث ملفات نظام career-ops، مع معاينة الفروقات وفحص التوافق |
+
+</details>
 
 ## بوابات التوظيف المهيأة مسبقًا
 
-يأتي الماسح مع **أكثر من 100 شركة** جاهزة للفحص و**أكثر من 45 استعلام بحث** عبر لوحات الوظائف الرئيسية. انسخ `templates/portals.example.yml` إلى `portals.yml` وأضف ما تريد:
+يأتي الماسح مع **أكثر من 100 شركة** جاهزة للفحص و**أكثر من 35 استعلام بحث** عبر لوحات الوظائف الرئيسية. انسخ `templates/portals.example.yml` إلى `portals.yml` وأضف ما تريد:
 
 **مختبرات الذكاء الاصطناعي:** Anthropic, OpenAI, Mistral, Cohere, LangChain, Pinecone
 **الذكاء الاصطناعي الصوتي:** ElevenLabs, PolyAI, Parloa, Hume AI, Deepgram, Vapi, Bland AI
@@ -387,9 +426,9 @@ npm run serve:dashboard   # launch the TUI
 npm run build:dashboard   # optional: build the standalone binary
 ```
 
-الميزات: 6 تبويبات تصفية، 4 أوضاع ترتيب، عرض مجمّع/مسطّح، معاينات بتحميل كسول، تغيير الحالات في السطر.
+الميزات: 10 تبويبات تصفية، 8 أوضاع ترتيب، عرض مجمّع/مسطّح، معاينات بتحميل كسول، تغيير الحالات في السطر.
 
-توجد أيضًا **واجهة ويب تجريبية** (ألفا، اختيارية: لا يعمل شيء ما لم تشغّلها بنفسك): انظر [`web/README.md`](web/README.md).
+توجد أيضًا **واجهة ويب تجريبية** (ألفا واختيارية: لا يعمل شيء ما لم تشغّلها بنفسك): انظر [`web/README.md`](web/README.md).
 
 ## هيكلية المشروع
 
@@ -446,6 +485,10 @@ career-ops/
 
 - **تجاوز المتتبع:** يمكنك أيضًا ضبط `CAREER_OPS_TRACKER` لتجاوز مسار ملف متتبع الطلبات مباشرة.
 - **الكتابات:** جميع عمليات الكتابة (مثل الدمج) تستهدف قانونيًا `{DATA_ROOT}/data/applications.md`.
+- **إعدادات الماسح:** يُقرأ `portals.yml` ويُتحقَّق منه في `{DATA_ROOT}/portals.yml`، لذا يفحص `node validate-portals.mjs` الملف نفسه الذي يقرؤه `scan.mjs`.
+- **المستندات المولَّدة:** تُكتب السير الذاتية المخصّصة وخطابات التقديم داخل `{DATA_ROOT}/output/`، أما فهرس ملفات PDF الذي يربطها بتقرير فموجود في `{DATA_ROOT}/data/pdf-index.tsv`. وما دام `CAREER_OPS_TRACKER` غير مضبوط، فإن مساحة عمل المتتبع التي تحصر هذه الكتابات هي جذر البيانات، لا نسخة المستودع.
+- **ملفات PDF عند تجاوز المتتبع:** يحلّ `generate-pdf.mjs` قيمة `CAREER_OPS_TRACKER` قبل أن يستنتج مساحة العمل، لذا عند ضبط التجاوز تكون مساحة العمل هي المجلد الذي يحتوي ذلك المتتبع (أو المجلد الذي فوقه، عندما يكون المتتبع داخل مجلد `data/`). وعندها يجب أن يقع ملف HTML الخاص بالسيرة الذاتية وكل ملفات PDF داخل مساحة العمل تلك، وينتقل الفهرس إلى `data/pdf-index.tsv` التابع لها. أما خطابات التقديم فتبقى وجهتها `{DATA_ROOT}/output/`، لذا تُرفض عندما يقع ذلك المجلد خارج مساحة عمل المتتبع.
+- **طبقة الكود تبقى في مكانها:** تُحلّ `node_modules/` و`providers/` و`modes/` والسكربتات نفسها دائمًا نسبةً إلى المستودع، ولا تُحلّ أبدًا نسبةً إلى جذر البيانات.
 
 تحترم لوحة تحكم Go الطرفية وسكربتات Node.js وأوضاع وكيل الذكاء الاصطناعي هذا التسلسل تلقائيًا.
 
@@ -465,6 +508,34 @@ career-ops/
 - **لوحة التحكم**: Go + Bubble Tea + Lipgloss (سمة Catppuccin Mocha)
 - **البيانات**: جداول Markdown + إعدادات YAML + ملفات TSV للمعالجة الجماعية
 
+<p align="center">
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="docs/npm-badge.svg" alt="Latest release"></a>
+</p>
+
+<p align="center">
+  <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/Built_with-Claude_Code-000?style=for-the-badge&logo=anthropic&logoColor=white" alt="Built with Claude Code"></a>
+</p>
+
+<p align="center" dir="rtl">
+  <sub>يعمل أيضًا في أي واجهة CLI تلتزم بمعيار agent skills. انظر <a href="docs/SUPPORTED_CLIS.md">الواجهات المدعومة</a>.</sub><br>
+  <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
+  <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
+  <img src="https://img.shields.io/badge/Antigravity_CLI-4285F4?style=flat&logo=google&logoColor=white" alt="Antigravity CLI">
+  <img src="https://img.shields.io/badge/Codex-412991?style=flat&logo=openai&logoColor=white" alt="Codex">
+  <img src="https://img.shields.io/badge/Qwen-615CED?style=flat" alt="Qwen">
+  <img src="https://img.shields.io/badge/Kimi-FF4B4B?style=flat" alt="Kimi">
+  <img src="https://img.shields.io/badge/GitHub_Copilot-000?style=flat&logo=githubcopilot&logoColor=white" alt="GitHub Copilot">
+  <img src="https://img.shields.io/badge/Grok_Build_CLI-000?style=flat&logo=x&logoColor=white" alt="Grok Build CLI">
+  <img src="https://img.shields.io/badge/Pi-4B3F72?style=flat" alt="Pi">
+  <br>
+  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
+  <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
+  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
+  <img src="https://img.shields.io/badge/Bubble_Tea-FF75B5?style=flat&logo=go&logoColor=white" alt="Bubble Tea">
+  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
+  <a href="TRADEMARK.md"><img src="https://img.shields.io/badge/Trademark-Policy-blue.svg" alt="Trademark Policy"></a>
+</p>
+
 ## مفتوح المصدر أيضًا
 
 - **[cv-santiago](https://github.com/santifer/cv-santiago)**: موقع ملف الأعمال (santifer.io) مع روبوت محادثة بالذكاء الاصطناعي ولوحة LLMOps ودراسات حالة. إن احتجت ملف أعمال لعرضه إلى جانب بحثك عن وظيفة، انسخه (fork) واجعله ملكك.
@@ -472,10 +543,10 @@ career-ops/
 ## الأسئلة الشائعة (FAQ)
 
 **ما هو career-ops؟**
-career-ops أداة بحث عن الوظائف بالذكاء الاصطناعي، مفتوحة المصدر، تعمل محليًا في واجهة الذكاء الاصطناعي التي تستخدمها (Claude Code و Codex و OpenCode وغيرها) وتترك كل قرار لك. تقيّم العروض مقابل سيرتك الذاتية، وتنشئ ملفات PDF مكيّفة لأنظمة ATS، وتجد الشخص المناسب للتواصل، وتتابع كل شيء في مكان واحد: القرار الأخير دائمًا لك. وهي أول تطبيق مرجعي لبيان CareerOps. المزيد على [career-ops.org](https://career-ops.org).
+career-ops ([career-ops.org](https://career-ops.org)، ويُعرف أيضًا باسم **careerops**) أداة بحث عن الوظائف بالذكاء الاصطناعي، مفتوحة المصدر، تعمل محليًا في واجهة الذكاء الاصطناعي التي تستخدمها (Claude Code و Codex و OpenCode وغيرها) وتترك كل قرار لك. تقيّم العروض مقابل سيرتك الذاتية، وتنشئ ملفات PDF مكيّفة لأنظمة ATS، وتجد الشخص المناسب للتواصل، وتتابع كل شيء في مكان واحد: القرار الأخير دائمًا لك. وهي أول تطبيق مرجعي [لبيان CareerOps](https://career-ops.org/manifesto).
 
 **هل يمكن للسيرة الذاتية المخصّصة أن تختلق أشياء؟**
-لا يجوز لها، والأوامر النصية تقول ذلك: أعد الصياغة، ولا تختلق أبدًا. هذه القاعدة لم تُفرض بعد عبر تحقق في الكود. قضيتان مفتوحتان تتابعان ذلك: [#2677](https://github.com/career-ops-hq/career-ops/issues/2677) (المسميات الوظيفية يجب أن تطابق cv.md) و[#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (تحقق من الدقة يوقف العملية عند الاختلاف). حتى دمجهما، اقرأ كل سيرة ذاتية قبل إرسالها. [إخلاء المسؤولية القانوني](LEGAL_DISCLAIMER.md) يقول الشيء نفسه بكلمات أكثر.
+لا يجوز لها، والأوامر النصية تقول ذلك: أعد الصياغة، ولا تختلق أبدًا. يمنع `generate-pdf` إنشاء سيرة ذاتية تتضمن أرقامًا أو حقائق غير موجودة في مصادرك، ما لم تمرّر `--skip-fact-check`. ويشغّل وضع `pdf` أيضًا `cv-title-check.mjs`، الذي يقارن كل مسمى وظيفي في السيرة الذاتية المخصّصة بالمسمى الذي يذكره cv.md للوظيفة نفسها (بمطابقة الشركة والتواريخ)، ويسألك هل تُبقي أي مسمى مختلف أم تعيده. وهو ينبّه ولا يمنع، لأن إعادة صياغة المسمى قد تكون قرارك أحيانًا. ولا شيء يحكم على إعادة الصياغة بعدُ: تتابع ذلك القضية [#1411](https://github.com/career-ops-hq/career-ops/issues/1411) (تحقق من الدقة يوقف العملية عند الاختلاف). حتى ذلك الحين، اقرأ كل سيرة ذاتية قبل إرسالها. [إخلاء المسؤولية القانوني](LEGAL_DISCLAIMER.md) يقول الشيء نفسه بكلمات أكثر.
 
 **هل يمكنني تشغيل career-ops مجانًا، أو بنموذج أرخص أو محلي؟**
 نعم. career-ops لا يعتمد على واجهة بعينها ويعمل على النماذج المجانية والمحلية (نماذج OpenRouter المجانية أو Ollama أو أي نقطة نهاية متوافقة مع OpenAI)، فلست مقيدًا باشتراك مدفوع. انظر [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) للإعداد الكامل.
@@ -490,16 +561,16 @@ career-ops أداة بحث عن الوظائف بالذكاء الاصطناعي
 يعمل career-ops على Windows. الإعداد الخاص بالمنصة والصعوبات المعروفة (اكتشاف Git Bash، ونهايات الأسطر، ومجدول المهام) في [docs/WINDOWS.md](docs/WINDOWS.md). إذا فشل تحميل المهارات بخطأ رابط رمزي أثناء التثبيت، فالحل في [docs/FAQ.md](docs/FAQ.md). الخطوات الكاملة في [docs/SETUP.md](docs/SETUP.md).
 
 **هل يقدّم career-ops على الوظائف نيابةً عني؟**
-لا. career-ops مرشِّح، لا أداة تقديم تلقائي عشوائي. الذكاء الاصطناعي يقيّم ويرتّب ويصيغ المسودات؛ وأنت تراجع وتقرر. لا يرسل ولا يقدّم ولا ينقر على أي شيء أبدًا: القرار الأخير دائمًا لك. هذا التصميم الذي يُبقي الإنسان في الحلقة هو جوهر الفكرة.
+لا. career-ops مرشِّح، لا أداة تقديم تلقائي عشوائي. الذكاء الاصطناعي يقيّم ويرتّب ويصيغ المسودات؛ وأنت تراجع وتقرر. يصوغ الإجابات ويملأ الحقول؛ ولا يقدّم الطلب أبدًا. أنت تضغط «إرسال». هذا التصميم الذي يُبقي الإنسان في الحلقة هو جوهر الفكرة.
 
 **هل career-ops مجاني ومفتوح المصدر؟**
-نعم. career-ops مجاني ومفتوح المصدر، وسيبقى كذلك دائمًا للمرشح: إنه أول تطبيق مرجعي لـ[بيان CareerOps](https://career-ops.org/manifesto). اقرأه، وإن كان يقول ما تؤمن به، وقّعه.
+نعم. career-ops مجاني ومفتوح المصدر، وسيبقى كذلك دائمًا للمرشح. إنه أول تطبيق مرجعي لـ[بيان CareerOps](https://career-ops.org/manifesto). اقرأه، وإن كان يقول ما تؤمن به، وقّعه.
 
 ## عن المؤلف
 
-أنا [Santiago Fernández de Valderrama Aparicio](https://santifer.io/about) (santifer): Head of Applied AI، ومؤسس سابق (بنيت وبعت شركة لا تزال تعمل باسمي). بنيت career-ops لإدارة بحثي الشخصي عن وظيفة. ونجح الأمر: استخدمته للحصول على منصبي الحالي.
+أنا [Santiago Fernández de Valderrama Aparicio](https://santifer.io/about) (santifer)، مؤسس سابق: بنيت وبعت شركة لا تزال تعمل باسمي. بنيت career-ops لإدارة بحثي الشخصي عن وظيفة، ونجح الأمر: أوصلني إلى منصب Head of Applied AI. وبعد ستة أشهر تركت ذلك المنصب لأتفرغ لبناء career-ops بدوام كامل.
 
-هل يهمك كيف تتم صيانة هذا المستودع في نحو 4 ساعات أسبوعيًا؟ اقرأ [Agentic maintenance: how career-ops is run by a fleet of AI agents](https://santifer.io/ai-agent-fleet).
+هل يهمك كيف تتم صيانة مستودع بهذا الحجم بأسطول من وكلاء الذكاء الاصطناعي وإنسانٍ يقرر كل عملية دمج؟ اقرأ [Agentic maintenance: how career-ops is run by a fleet of AI agents](https://santifer.io/ai-agent-fleet).
 
 ملف أعمالي ومشاريعي مفتوحة المصدر الأخرى → [santifer.io](https://santifer.io)
 
@@ -519,7 +590,7 @@ Wikidata: [Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org/
 ## المساهمون
 
 <a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops&v=2" />
 </a>
 
 كل من ساهم بكود أو وثائق أو ترجمات أو اختبارات مدرج في
@@ -535,7 +606,9 @@ Wikidata: [Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org/
 للاستخدام المجتمعي، ومحفوظة لتسمية المنتجات التجارية
 والتزكية.
 
-## تقدير وتغطية
+الكود مرخّص بموجب MIT؛ أما البيانات في [`employers/`](employers/) فمرخّصة بموجب [CC BY 4.0](employers/LICENSE).
+
+## سجلّ النجوم
 
 <p align="center">
   <a href="https://warpchart.dev/hq">
@@ -546,36 +619,7 @@ Wikidata: [Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org/
   </a>
 </p>
 
-<p align="center">
-  <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Join_the_community-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
-</p>
-
-<p align="center">
-  <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/Built_with-Claude_Code-000?style=for-the-badge&logo=anthropic&logoColor=white" alt="Built with Claude Code"></a>
-</p>
-
-<p align="center" dir="rtl">
-  <sub>يعمل أيضًا على أي واجهة تتبع معيار agent-skill. انظر <a href="docs/SUPPORTED_CLIS.md">الواجهات المدعومة</a>.</sub><br>
-  <img src="https://img.shields.io/badge/Claude_Code-000?style=flat&logo=anthropic&logoColor=white" alt="Claude Code">
-  <img src="https://img.shields.io/badge/OpenCode-111827?style=flat&logo=terminal&logoColor=white" alt="OpenCode">
-  <img src="https://img.shields.io/badge/Antigravity_CLI-4285F4?style=flat&logo=google&logoColor=white" alt="Antigravity CLI">
-  <img src="https://img.shields.io/badge/Codex-412991?style=flat&logo=openai&logoColor=white" alt="Codex">
-  <img src="https://img.shields.io/badge/Qwen-615CED?style=flat" alt="Qwen">
-  <img src="https://img.shields.io/badge/Kimi-FF4B4B?style=flat" alt="Kimi">
-  <img src="https://img.shields.io/badge/GitHub_Copilot-000?style=flat&logo=githubcopilot&logoColor=white" alt="GitHub Copilot">
-  <img src="https://img.shields.io/badge/Grok_Build_CLI-000?style=flat&logo=x&logoColor=white" alt="Grok Build CLI">
-  <br>
-  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
-  <img src="https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white" alt="Go">
-  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
-  <img src="https://img.shields.io/badge/Bubble_Tea-FF75B5?style=flat&logo=go&logoColor=white" alt="Bubble Tea">
-  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
-  <a href="TRADEMARK.md"><img src="https://img.shields.io/badge/Trademark-Policy-blue.svg" alt="Trademark Policy"></a>
-</p>
+<p align="center" dir="rtl"><sub>من إنشاء وصيانة <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>)</sub></p>
 
 ## تواصل معي
 

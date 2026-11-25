@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { toolRequired } from './required-tools.mjs';
 import { injectThemeStyle, readStyleTokens } from '../theme-style.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -20,7 +21,7 @@ const BODY_SURFACES = [
 ];
 
 test('Chinese Minimal applies profile typography and colors without changing its defaults', {
-  skip: !existsSync(chromium.executablePath()) && 'Chromium is not installed',
+  skip: !toolRequired('browser') && !existsSync(chromium.executablePath()) && 'Chromium is not installed',
 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'zh-minimal-theme-'));
   let browser;
@@ -70,8 +71,10 @@ test('Chinese Minimal applies profile typography and colors without changing its
     assert.equal(defaults.colors['.job-role'], 'rgb(23, 74, 126)');
     assert.equal(defaults.colors['.edu-org'], 'rgb(23, 74, 126)');
     assert.equal(defaults.colors['.award-org'], 'rgb(115, 34, 195)');
-    assert.match(defaults.fonts.body, /^"Liberation Sans"/);
-    assert.match(defaults.fonts.body, /"PingFang SC"/);
+    // One font run for mixed Chinese/Latin lines keeps PDF extraction order (#2202).
+    // Arial Unicode MS leads because headless Chromium embeds it for Han text;
+    // PingFang SC stays right behind it for machines without it.
+    assert.match(defaults.fonts.body, /^"Arial Unicode MS", "Arial Unicode MS", "PingFang SC"/);
 
     for (const [lang, fallback] of [
       ['en', 'PingFang SC'], ['zh', 'PingFang SC'], ['zh-CN', 'PingFang SC'],

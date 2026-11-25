@@ -83,7 +83,7 @@ import { join, dirname } from 'path';
 import * as yaml from 'js-yaml';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { extractJdSkillsByClass, classifySkillGaps } from './jd-skill-gap.mjs';
-import { parseAmount } from './salary-gap.mjs';
+import { parseAmount } from './providers/_salary-text.mjs';
 import { ROLE_STOPWORDS, BASELINE_TOKENS, normalizeTitle } from './role-matcher.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -623,6 +623,22 @@ export function scoreTitle(title, targets) {
 
 // ── Requirements coverage ────────────────────────────────────────────
 
+// The shared extractor also reads bare lines. A standalone allowance amount
+// is metadata, not a must-have skill named "EUR" or "Stipend". Keep its line
+// nonempty (and keep any bullet marker) so paragraph boundaries do not change.
+// Mixed requirement/allowance lines are deliberately left alone.
+function requirementsWithoutAllowances(jdText) {
+  return String(jdText ?? '').split('\n').map((line) => {
+    if (!/bonus|budget|stipend/i.test(line)) return line;
+    const figures = extractJdComp(line).annual;
+    if (!figures.length || figures.some((figure) => !figure.nonSalary)) return line;
+    let label = line;
+    for (const figure of figures) label = label.replace(figure.raw, '');
+    if (!/^\s*(?:[-*•]\s*)?(?:(?:relocation|signing|sign[- ]on)\s+bonus|training\s+budget|stipend)\s*:?\s*[.;]?\s*$/i.test(label)) return line;
+    return line.match(/^\s*(?:[-*•]\s*)?/)[0] + '[non-salary]';
+  }).join('\n');
+}
+
 /**
  * Score how much of the JD's MUST-have list cv.md already supports.
  *
@@ -642,7 +658,7 @@ export function scoreRequirements(jdText, cvText) {
     return { score: UNKNOWN_SCORE, evidence: 'no cv.md to compare against', unknown: true };
   }
 
-  const { required, preferred } = extractJdSkillsByClass(String(jdText ?? ''));
+  const { required, preferred } = extractJdSkillsByClass(requirementsWithoutAllowances(jdText));
   if (required.length === 0) {
     return {
       score: UNKNOWN_SCORE,
@@ -757,7 +773,7 @@ const ISO_CODES = [
 
 const CUR = `[$€£¥]|(?:${ISO_CODES.join('|')})`;
 // A number with optional grouping/decimal separators and an optional k suffix.
-// `parseAmount` from salary-gap.mjs owns what the separators MEAN (a period is
+// `parseAmount` from providers/_salary-text.mjs owns what the separators MEAN (a period is
 // thousands grouping in half of Europe); this pattern only has to find the run.
 //
 // The leading run is unbounded (a plain "150000" must be captured whole), and a
@@ -865,7 +881,7 @@ function toCurrencyCode(token) {
 }
 
 /**
- * Hand a captured numeric run (or pair) to salary-gap.mjs's `parseAmount`.
+ * Hand a captured numeric run (or pair) to providers/_salary-text.mjs's `parseAmount`.
  *
  * `parseAmount` is anchored and accepts `-`, `–` and `—` between the bounds but
  * not the word "to", so the pair is rejoined with a hyphen here. Whitespace

@@ -11,6 +11,7 @@
 
 import { isMainModule } from '../../lib/is-main-module.mjs';
 import { apiBase, fetchWithTimeout, readBoundedText } from './lib/api.mjs';
+import { cleanForDisplay } from './lib/clean.mjs';
 
 const USER_AGENT = 'career-ops-plugin-h1b-sponsor/1.0';
 const TIMEOUT_MS = 10_000;
@@ -19,16 +20,6 @@ const USAGE = 'Usage: node plugins/h1b-sponsor/token.mjs request';
 // H1B_API_TOKEN= line: a value carrying shell metacharacters would run when the
 // user sources their .env.
 const TOKEN_RE = /^h1b_[0-9a-f]+$/;
-// Server-controlled text printed to the terminal gets the same control-char
-// strip check.mjs applies: C0, DEL, and C1, then whitespace collapse.
-// eslint-disable-next-line no-control-regex
-const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/g;
-function displayClean(s) {
-  // Whitespace collapse first: newlines are control chars too, and stripping
-  // them before the collapse would glue words together instead of separating
-  // them. What survives (ESC, BEL, DEL, C1) is not whitespace and is stripped.
-  return String(s || '').replace(/\s+/g, ' ').replace(CONTROL_CHARS, '').trim();
-}
 
 // "about 12 hours" is something a person can act on; the raw 43200 reads like
 // an error code.
@@ -112,7 +103,7 @@ export async function mintToken({ fetchImpl = guardedMintFetch } = {}) {
   } catch (err) {
     const reason = (err && err.name === 'AbortError')
       ? `no response within ${TIMEOUT_MS / 1000}s`
-      : displayClean((err && err.message) ? err.message : err);
+      : cleanForDisplay((err && err.message) ? err.message : err);
     return { ok: false, exitCode: 1, message: `could not reach the key service (${reason})` };
   }
 
@@ -148,7 +139,7 @@ export async function mintToken({ fetchImpl = guardedMintFetch } = {}) {
 
   // Server-controlled text; collapse whitespace so it stays one line and cannot
   // smuggle extra instructions into output the agent may relay.
-  const note = (typeof body.note === 'string') ? displayClean(body.note) : '';
+  const note = (typeof body.note === 'string') ? cleanForDisplay(body.note) : '';
 
   return { ok: true, token, note };
 }
@@ -192,7 +183,7 @@ async function main() {
 // test files in-process, so that turned the whole suite red).
 if (isMainModule(import.meta.url)) {
   main().catch(err => {
-    const message = displayClean((err && err.message) ? err.message : err);
+    const message = cleanForDisplay((err && err.message) ? err.message : err);
     process.stderr.write(`could not issue a key (${message})\n`);
     process.exitCode = 1;
   });

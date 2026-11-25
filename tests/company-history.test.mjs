@@ -289,6 +289,27 @@ console.log('\n--- 4. real-file loaders ---');
 
     const counts = buildFollowupCountsByAppNum(followups.rows);
     eq('buildFollowupCountsByAppNum: counts appNum 1 once', counts.get(1), 1);
+
+    const mixedTsv = [
+      'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation',
+      'https://loaderco.example/jobs/1\t2026-01-01\tgreenhouse\tEngineer\tLoaderCo\tadded\tRemote',
+      'https://loaderco.example/jobs/2\t2026-02-15\tgreenhouse\tEngineer\tLoaderCo Inc.\tadded\tRemote',
+      'https://otherco.example/jobs/1\t2026-01-01\tgreenhouse\tEngineer\tOtherCo\tadded\tRemote',
+      'https://otherco.example/jobs/2\t2026-02-15\tgreenhouse\tEngineer\tOtherCo\tadded\tRemote',
+    ].join('\n');
+    const mixedPath = join(tmpDir, 'mixed-scan-history.tsv');
+    writeFileSync(mixedPath, mixedTsv);
+    const full = loadRepostClusters(tmpDir, mixedPath);
+    const scoped = loadRepostClusters(tmpDir, mixedPath, undefined, 'LoaderCo');
+    const sources = { tracker: false, followups: false, scanHistory: true, statusLog: false };
+    const churnOf = (clusters, name) => getCompanyCard(buildCompanyCards(
+      { trackerRows: [], followupRows: [], repostClusters: clusters, sourcesLoaded: sources },
+      { now: NOW, silenceWindowDays: 28 },
+    ), name).postingChurn;
+    eq('scoped load keeps the sibling spelling inside the LoaderCo cluster', churnOf(scoped.clusters, 'LoaderCo'), churnOf(full.clusters, 'LoaderCo'));
+    ok('scoped LoaderCo cluster counted both URLs', churnOf(scoped.clusters, 'LoaderCo').clusters[0]?.repostCount === 2);
+    eq('scoped load leaves OtherCo off the LoaderCo card', churnOf(scoped.clusters, 'OtherCo').label, 'none-detected');
+    eq('full load still clusters OtherCo', churnOf(full.clusters, 'OtherCo').clusters.length, 1);
   } finally {
     rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -350,18 +371,32 @@ try {
   ok('unknown flag exits 1', e.status === 1);
 }
 
-// --emit-signal is a bare boolean flag, not a value flag: `--emit-signal=true`
-// must be rejected explicitly, since the unknown-flag check strips the `=`
-// suffix before matching KNOWN_FLAGS (so it would otherwise pass as "known")
-// while the boolean read is an exact-token check that would silently never
-// see it as set — accepted args, signal never emitted.
+// --emit-signal is a bare boolean flag: any `=` form is not a flag this script
+// accepts, so the shared validator reports it as unrecognized instead of
+// letting it pass as "known" while never turning emission on.
 for (const bad of ['--emit-signal=true', '--emit-signal=1', '--emit-signal=']) {
   try {
     execFileSync('node', [scriptPath, '--summary', bad], { encoding: 'utf-8', timeout: 10000, cwd: dirname(scriptPath) });
     ok(`"${bad}" exits 1`, false);
   } catch (e) {
-    ok(`"${bad}" exits 1`, e.status === 1 && /does not accept a value/.test(String(e.stderr)));
+    ok(`"${bad}" exits 1`, e.status === 1 && /unrecognized flag/.test(String(e.stderr)));
   }
+}
+
+// Unknown flags are rejected BEFORE --help is answered: `--help --bogus` must
+// fail, not print usage and exit 0 having never looked at `--bogus`.
+try {
+  execFileSync('node', [scriptPath, '--help', '--bogus-flag-xyz'], { encoding: 'utf-8', timeout: 10000, cwd: dirname(scriptPath) });
+  ok('--help with an unknown flag exits 1', false);
+} catch (e) {
+  ok('--help with an unknown flag exits 1', e.status === 1 && /unrecognized flag/.test(String(e.stderr)));
+}
+
+try {
+  const helpOut = execFileSync('node', [scriptPath, '--help'], { encoding: 'utf-8', timeout: 10000, cwd: dirname(scriptPath) });
+  ok('--help alone prints usage and exits 0', /^Usage:/.test(helpOut));
+} catch (e) {
+  ok('--help alone prints usage and exits 0', false);
 }
 
 // --silence-window validation: non-numeric, zero, and negative must fail fast
@@ -394,6 +429,6 @@ for (const flagArgs of [['--company', '--summary'], ['--company'], ['--scan-hist
     ok(`value flag without a value ("${label}") exits 1`, false);
   } catch (e) {
     ok(`value flag without a value ("${label}") exits 1`,
-      e.status === 1 && /expects a (non-empty )?value/.test(String(e.stderr)));
+      e.status === 1 && /(expects a (non-empty )?|requires a )value/.test(String(e.stderr)));
   }
 }

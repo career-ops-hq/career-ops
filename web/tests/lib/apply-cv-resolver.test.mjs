@@ -28,7 +28,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -60,7 +60,10 @@ const loaderSrc = [
 register('data:text/javascript,' + encodeURIComponent(loaderSrc), pathToFileURL(WEB_SRC + '/'));
 
 const { resolveTailoredCv } = await import('../../src/lib/apply/cv.ts');
+const { locateTailoredPdf } = await import('../../src/lib/cv-pdf-file.ts');
 const { sortNewestFirst } = await import('../../src/lib/apply/cv-match.mjs');
+const { findReportFile } = await import('../../src/lib/career-ops.ts');
+const { resolvePdfPaths } = await import('../../src/lib/pdf-paths.mjs');
 
 // Provision a throwaway career-ops root with an output/ dir, redirected via
 // the same CAREER_OPS_ROOT override career-ops.ts's careerOpsRoot() reads
@@ -78,12 +81,19 @@ async function withFixture(files, fn) {
     }
   }
   const prev = process.env.CAREER_OPS_ROOT;
+  const prevCode = process.env.CAREER_OPS_CODE_ROOT;
   process.env.CAREER_OPS_ROOT = root;
+  // The stub tracker-utils.mjs below stands in for the code checkout, where
+  // pdf-index.ts loads it from; the temp dir is both roots here.
+  process.env.CAREER_OPS_CODE_ROOT = root;
   try {
     return await fn(outputDir);
   } finally {
     if (prev === undefined) delete process.env.CAREER_OPS_ROOT;
     else process.env.CAREER_OPS_ROOT = prev;
+    if (prevCode === undefined) delete process.env.CAREER_OPS_CODE_ROOT;
+    else process.env.CAREER_OPS_CODE_ROOT = prevCode;
+    rmSync(root, { recursive: true, force: true });
   }
 }
 
@@ -98,6 +108,61 @@ test('resolveTailoredCv: a multi-word company does NOT match a file whose first 
   });
 });
 
+test('generated CV uses the linked report identity when its application number differs', async () => {
+  await withFixture([], async (outputDir) => {
+    const root = dirname(outputDir);
+    mkdirSync(join(root, 'data'));
+    mkdirSync(join(root, 'reports'));
+    writeFileSync(join(root, 'reports', '018-acme-2026-07-01.md'), '# Acme engineer\n');
+    writeFileSync(join(root, 'reports', '019-acme-2026-07-01.md'), '# Acme manager\n');
+    writeFileSync(join(root, 'data', 'applications.md'), [
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+      '|---|---|---|---|---|---|---|---|---|',
+      '| 309 | 2026-07-01 | Acme | Engineer | 4.5/5 | Evaluated | | [018](../reports/018-acme-2026-07-01.md) | |',
+      '| 310 | 2026-07-01 | Acme | Manager | 4.5/5 | Evaluated | | [019](../reports/019-acme-2026-07-01.md) | |',
+    ].join('\n'));
+
+    const first = resolvePdfPaths('309', '2026-07-26', root, findReportFile);
+    const padded = resolvePdfPaths('0309', '2026-07-26', root, findReportFile);
+    const second = resolvePdfPaths('310', '2026-07-26', root, findReportFile);
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, true);
+    assert.equal(first.paths.reportNum, '018');
+    assert.equal(second.paths.reportNum, '019');
+    assert.deepEqual(first, padded);
+    assert.notEqual(first.paths.finalPdf, second.paths.finalPdf);
+
+    writeFileSync(first.paths.finalPdf, 'stub-pdf-bytes');
+    assert.equal(await resolveTailoredCv('Acme'), first.paths.finalPdf);
+
+    // Supply only this fixture's path endpoints. Web CI installs web dependencies
+    // alone; importing the full core here would require its separate packages.
+    // The application, report and manifest lookups still use the real web code.
+    writeFileSync(join(root, 'tracker-utils.mjs'), [
+      `export const resolveTrackerPath = () => ${JSON.stringify(join(root, 'data', 'applications.md'))};`,
+      `export const resolvePdfIndexPath = () => ${JSON.stringify(join(root, 'data', 'pdf-index.tsv'))};`,
+    ].join('\n'));
+    writeFileSync(second.paths.finalPdf, 'second-role-pdf-bytes');
+    writeFileSync(join(root, 'data', 'pdf-index.tsv'), [
+      '# report\tpdf\thtml\tformat\tdate',
+      `018\toutput/${basename(first.paths.finalPdf)}\t\tletter\t2026-07-26`,
+      `019\toutput/${basename(second.paths.finalPdf)}\t\tletter\t2026-07-26`,
+    ].join('\n'));
+    assert.equal(await resolveTailoredCv(undefined, '309'), first.paths.finalPdf);
+    assert.equal(await resolveTailoredCv(undefined, '310'), second.paths.finalPdf);
+    assert.equal(await resolveTailoredCv(undefined, '0309'), first.paths.finalPdf);
+
+    writeFileSync(join(root, 'data', 'applications.md'), [
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+      '|---|---|---|---|---|---|---|---|---|',
+      '| 309 | 2026-07-01 | Acme | Engineer | 4.5/5 | Evaluated | | [report](../reports/018-acme-2026-07-01.md) | |',
+      '| 310 | 2026-07-01 | Acme | Manager | 4.5/5 | Evaluated | | [report](../reports/019-acme-2026-07-01.md) | |',
+    ].join('\n'));
+    assert.equal(await resolveTailoredCv(undefined, '309'), first.paths.finalPdf);
+    assert.equal(await resolveTailoredCv(undefined, '310'), second.paths.finalPdf);
+  });
+});
+
 test('resolveTailoredCv: "Meta" does not resolve a file for "Metabase" (token-boundary match)', async () => {
   await withFixture([['cv-jane-doe-metabase-engineer-2026-01-01.pdf']], async () => {
     const result = await resolveTailoredCv('Meta');
@@ -109,6 +174,107 @@ test('resolveTailoredCv: a real cv-<slug>-*.pdf matches its company', async () =
   await withFixture([['cv-jane-doe-acme-engineer-2026-01-01.pdf']], async (outputDir) => {
     const result = await resolveTailoredCv('Acme');
     assert.equal(result, join(outputDir, 'cv-jane-doe-acme-engineer-2026-01-01.pdf'));
+  });
+});
+
+test('locateTailoredPdf: company fallback serves the styled PDF when a newer ATS sibling exists', async () => {
+  await withFixture(
+    [
+      ['cv-jane-doe-acme-engineer-2026-01-01.pdf', 0],
+      ['cv-jane-doe-acme-engineer-ats-2026-01-01.pdf', 10000],
+    ],
+    async (outputDir) => {
+      const result = await locateTailoredPdf({ n: '', company: 'Acme', application: '', kind: 'cv' });
+      assert.equal('file' in result ? result.file : '', join(outputDir, 'cv-jane-doe-acme-engineer-2026-01-01.pdf'));
+    },
+  );
+});
+
+test('resolveTailoredCv: Apply uploads the styled PDF when an ATS sibling exists, even if that sibling is newer', async () => {
+  await withFixture(
+    [
+      ['cv-jane-doe-acme-engineer-2026-01-01.pdf', 0],
+      ['cv-jane-doe-acme-engineer-ats-2026-01-01.pdf', 10000],
+    ],
+    async (outputDir) => {
+      const result = await resolveTailoredCv('Acme');
+      assert.equal(result, join(outputDir, 'cv-jane-doe-acme-engineer-2026-01-01.pdf'));
+    },
+  );
+});
+
+test('resolveTailoredCv: a styled PDF whose company slug ends in ats still resolves', async () => {
+  await withFixture([['cv-jane-doe-ats-2026-01-01.pdf']], async (outputDir) => {
+    const result = await resolveTailoredCv('Ats');
+    assert.equal(result, join(outputDir, 'cv-jane-doe-ats-2026-01-01.pdf'));
+  });
+});
+
+test('resolveTailoredCv: a lone .ats.pdf is not uploaded as the styled CV', async () => {
+  await withFixture([['cv-jane-doe-acme-engineer-2026-01-01.ats.pdf']], async () => {
+    assert.equal(await resolveTailoredCv('Acme'), null);
+  });
+});
+
+test('resolveTailoredCv: Apply uploads the styled PDF when a newer .ats.pdf exists', async () => {
+  await withFixture(
+    [
+      ['cv-jane-doe-acme-engineer-2026-01-01.pdf', 0],
+      ['cv-jane-doe-acme-engineer-2026-01-01.ats.pdf', 10000],
+    ],
+    async (outputDir) => {
+      const result = await resolveTailoredCv('Acme');
+      assert.equal(result, join(outputDir, 'cv-jane-doe-acme-engineer-2026-01-01.pdf'));
+    },
+  );
+});
+
+test('resolveTailoredCv: a company whose slug ends in ats still resolves when the other company is present', async () => {
+  await withFixture(
+    [
+      ['cv-jane-8-acme-2026-07-26.pdf', 0],
+      ['cv-jane-8-acme-ats-2026-07-26.pdf', 10000],
+    ],
+    async (outputDir) => {
+      assert.equal(await resolveTailoredCv('Acme'), join(outputDir, 'cv-jane-8-acme-2026-07-26.pdf'));
+      assert.equal(await resolveTailoredCv('Acme ATS'), join(outputDir, 'cv-jane-8-acme-ats-2026-07-26.pdf'));
+    },
+  );
+});
+
+test('locateTailoredPdf: a lone .ats.pdf is not served as the styled CV', async () => {
+  await withFixture([['cv-jane-doe-acme-engineer-2026-01-01.ats.pdf']], async () => {
+    const result = await locateTailoredPdf({ n: '', company: 'Acme', application: '', kind: 'cv' });
+    assert.equal('status' in result ? result.status : 0, 404);
+  });
+});
+
+test('resolveTailoredCv: an application number uploads the indexed PDF when an ATS sibling exists', async () => {
+  await withFixture([], async (outputDir) => {
+    const root = dirname(outputDir);
+    mkdirSync(join(root, 'data'));
+    mkdirSync(join(root, 'reports'));
+    writeFileSync(join(root, 'reports', '018-acme-2026-07-01.md'), '# Acme engineer\n');
+    writeFileSync(join(root, 'data', 'applications.md'), [
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+      '|---|---|---|---|---|---|---|---|---|',
+      '| 309 | 2026-07-01 | Acme | Engineer | 4.5/5 | Evaluated | | [018](../reports/018-acme-2026-07-01.md) | |',
+    ].join('\n'));
+    writeFileSync(join(root, 'tracker-utils.mjs'), [
+      `export const resolveTrackerPath = () => ${JSON.stringify(join(root, 'data', 'applications.md'))};`,
+      `export const resolvePdfIndexPath = () => ${JSON.stringify(join(root, 'data', 'pdf-index.tsv'))};`,
+    ].join('\n'));
+
+    const styled = 'cv-jane-doe-018-acme-2026-07-26.pdf';
+    const ats = 'cv-jane-doe-018-acme-ats-2026-07-26.pdf';
+    writeFileSync(join(outputDir, styled), 'styled');
+    writeFileSync(join(outputDir, ats), 'ats');
+    writeFileSync(join(root, 'data', 'pdf-index.tsv'), [
+      '# report\tpdf\thtml\tformat\tdate',
+      `018\toutput/${styled}\t\tletter\t2026-07-26`,
+    ].join('\n'));
+
+    assert.equal(await resolveTailoredCv(undefined, '309'), join(outputDir, styled));
   });
 });
 
@@ -134,6 +300,35 @@ test('resolveTailoredCv: a cover-*.pdf is never returned, even if newer than the
     async (outputDir) => {
       const result = await resolveTailoredCv('Acme');
       assert.equal(result, join(outputDir, 'cv-jane-doe-acme-engineer-2026-01-01.pdf'));
+    }
+  );
+});
+
+test('resolveTailoredCv: an over-budget .overflow.pdf draft is never returned, even though it is newer than the CV', async () => {
+  // generate-pdf.mjs keeps a render that ran over its page budget as a sibling
+  // {name}.overflow.pdf (then .overflow-2.pdf, ...) and writes it AFTER the
+  // deliverable, so newest-first alone would hand the apply flow the version
+  // the budget rejected.
+  await withFixture(
+    [
+      ['cv-jane-doe-acme-engineer-2026-01-01.pdf', -60000],
+      ['cv-jane-doe-acme-engineer-2026-01-01.overflow.pdf', 0],
+      ['cv-jane-doe-acme-engineer-2026-01-01.overflow-2.pdf', 0],
+    ],
+    async (outputDir) => {
+      const result = await resolveTailoredCv('Acme');
+      assert.equal(result, join(outputDir, 'cv-jane-doe-acme-engineer-2026-01-01.pdf'));
+    }
+  );
+});
+
+test('resolveTailoredCv: a company with only an over-budget draft has no tailored CV', async () => {
+  await withFixture(
+    [
+      ['cv-jane-doe-acme-engineer-2026-01-01.overflow.pdf', 0],
+    ],
+    async () => {
+      assert.equal(await resolveTailoredCv('Acme'), null);
     }
   );
 });

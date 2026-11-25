@@ -13,7 +13,7 @@
  *      exits — so a direct run returns 0 even when assertions fail.
  */
 
-import { parseActiveInterviews, extractFriction, aggregateProcessQuality } from '../process-quality.mjs';
+import { parseActiveInterviews, extractFriction, aggregateProcessQuality, findColumn } from '../process-quality.mjs';
 import { execFileSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -390,3 +390,17 @@ for (const { reason } of documentedExamples) {
   const notes = `[process-friction: ${reason}]`;
   eq(`documented example parses: "${reason}"`, extractFriction({ Notes: notes }), { hasFriction: true, reason });
 }
+
+// ============================================================================
+// 12. findColumn (#5195) — column lookup by case/whitespace-insensitive header
+// ============================================================================
+console.log('\n--- 12. findColumn (#5195) ---');
+
+eq('findColumn: exact match', findColumn({ notes: 'clean process' }, 'notes'), 'clean process');
+eq('findColumn: case-insensitive match', findColumn({ Notes: 'clean process' }, 'notes'), 'clean process');
+eq('findColumn: whitespace-trimmed header', findColumn({ '  Notes  ': 'clean process' }, 'notes'), 'clean process');
+eq('findColumn: miss returns empty string', findColumn({ Company: 'Acme' }, 'notes'), '');
+eq('findColumn: null row returns empty string', findColumn(null, 'notes'), '');
+eq('findColumn: undefined row returns empty string', findColumn(undefined, 'notes'), '');
+eq('findColumn: null cell value returns empty string', findColumn({ notes: null }, 'notes'), '');
+eq('findColumn: undefined cell value returns empty string', findColumn({ notes: undefined }, 'notes'), '');

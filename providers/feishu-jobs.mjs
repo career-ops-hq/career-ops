@@ -42,8 +42,9 @@
 //     keywords: ["AI", "大模型"]
 //     max_pages: 5
 
-import { MACOS_BROWSER_LIKE_USER_AGENT } from './_http.mjs';
+import { MACOS_BROWSER_LIKE_USER_AGENT, sleep } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const PAGE_SIZE = 100;
 const DEFAULT_KEYWORDS = [''];  // empty keyword = the whole board, no topical bias
@@ -51,6 +52,10 @@ const DEFAULT_MAX_PAGES = 200;
 // Every request after the first pays it — across pages and keyword switches
 // (same idiom as avature/workday/alibaba).
 const INTER_PAGE_DELAY_MS = 300;
+// Pages fetched in parallel after the first one. Checked live 2026-10: 8
+// concurrent requests on jobs.bytedance.com and three rounds of 4 on the
+// vrfi1sk8a0.jobs.feishu.cn tenant all returned code 0.
+const PAGE_CONCURRENCY = 4;
 // Sent unconditionally: a no-op on tenants without ByteDance's own domain's
 // UA-sniffing rule, required on jobs.bytedance.com itself (see header).
 // NOT the shared Windows BROWSER_LIKE_USER_AGENT from _http.mjs — that one is a
@@ -149,52 +154,91 @@ export default {
 
     /** @type {Map<string, import('./_types.js').Job>} */
     const seen = new Map();
-    const sleep = (ms) => (typeof ctx?.sleep === 'function' ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
+    const companyName = entry.name || origin;
+    const fetchPage = async (keyword, page) => {
+      const offset = (page - 1) * PAGE_SIZE;
+      const json = /** @type {any} */ (await ctx.fetchJson(api, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'accept': 'application/json',
+          'user-agent': MACOS_BROWSER_LIKE_USER_AGENT,
+          'referer': `${origin}/`,
+        },
+        body: JSON.stringify(keyword ? { limit: PAGE_SIZE, offset, keyword } : { limit: PAGE_SIZE, offset }),
+        redirect: 'error',
+      }));
+      if (json?.code !== 0) {
+        throw new Error(`API error: code=${json?.code}`);
+      }
+      return json;
+    };
     let firstRequest = true;
+    // Why part of the board went unread, first cause first; null while it is whole.
+    /** @type {'page-cap' | null} */
+    let partialReason = null;
 
     for (const keyword of keywords) {
-      for (let page = 1; page <= maxPages; page++) {
+      // Page 1 tells us the inventory size; the rest of the keyword's pages are
+      // then fetched PAGE_CONCURRENCY at a time. Each request takes ~3s server
+      // side, so a 5000-post board was ~150s sequential.
+      let page = 1;
+      let lastPage = 1;
+      let total = 0;
+      // Raw rows of the last page read: an empty or short page is the end of
+      // the board, not a cap stop.
+      let lastRawRows = 0;
+      while (page <= lastPage) {
+        const batch = page === 1
+          ? [1]
+          : Array.from({ length: Math.min(PAGE_CONCURRENCY, lastPage - page + 1) }, (_, i) => page + i);
         if (firstRequest) firstRequest = false;
-        else await sleep(INTER_PAGE_DELAY_MS);
-        const offset = (page - 1) * PAGE_SIZE;
-        let json;
-        try {
-          json = /** @type {any} */ (await ctx.fetchJson(api, {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              'accept': 'application/json',
-              'user-agent': MACOS_BROWSER_LIKE_USER_AGENT,
-              'referer': `${origin}/`,
-            },
-            body: JSON.stringify(keyword ? { limit: PAGE_SIZE, offset, keyword } : { limit: PAGE_SIZE, offset }),
-            redirect: 'error',
-          }));
-          if (json?.code !== 0) {
-            throw new Error(`API error: code=${json?.code}`);
+        else await sleep(INTER_PAGE_DELAY_MS, ctx);
+        const results = await Promise.allSettled(batch.map((p) => fetchPage(keyword, p)));
+        let exhausted = false;
+        for (let i = 0; i < batch.length; i++) {
+          const result = results[i];
+          if (result.status === 'rejected') {
+            const err = result.reason;
+            if (seen.size === 0) throw err;
+            console.error(`  ⚠ feishu-jobs: keyword "${keyword}" page ${batch[i]} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
+            // The rest of the board was never read: the result says so, so scan.mjs
+            // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
+            return markTruncated([...seen.values()], partialReason ?? 'fetch-error', { fetched: seen.size });
           }
-        } catch (err) {
-          if (seen.size === 0) throw err;
-          console.error(`  ⚠ feishu-jobs: keyword "${keyword}" page ${page} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
-          return [...seen.values()];
+          const json = result.value;
+          const sourcePage = Array.isArray(json?.data?.job_post_list) ? json.data.job_post_list : [];
+          const parsed = parseFeishuJobsResponse(json, companyName, origin);
+          lastRawRows = sourcePage.length;
+          if (sourcePage.length === 0) { exhausted = true; break; }
+          for (const job of parsed.jobs) {
+            if (!seen.has(job.url)) seen.set(job.url, job);
+          }
+          if (batch[i] === 1) {
+            total = parsed.total;
+            // With no count the page budget stands; a short page then ends the
+            // keyword below. A missing count used to leave a budget of zero pages.
+            lastPage = total > 0 ? Math.min(maxPages, Math.ceil(total / PAGE_SIZE)) : maxPages;
+          }
+          if (total <= 0 && sourcePage.length < PAGE_SIZE) { exhausted = true; break; }
         }
-        const companyName = entry.name || origin;
-        const sourcePage = Array.isArray(json?.data?.job_post_list) ? json.data.job_post_list : [];
-        const { jobs, total } = parseFeishuJobsResponse(json, companyName, origin);
-        if (sourcePage.length === 0) break;
-
-        for (const job of jobs) {
-          if (!seen.has(job.url)) seen.set(job.url, job);
-        }
-
-        const covered = Math.min(offset + PAGE_SIZE, total);
-        if (covered >= total) break;
-        if (page === maxPages && probeMaxPages > entryMaxPages) {
-          console.error(`  ⚠ feishu-jobs: keyword "${keyword}" truncated at ${covered} of ${total} postings — raise max_pages for complete coverage`);
-        }
+        if (exhausted) break;
+        page = batch[batch.length - 1] + 1;
+      }
+      // Postings left: the reported count says so, or, with no count, the page
+      // budget ran out on a full page.
+      const covered = Math.min(lastPage * PAGE_SIZE, total);
+      const moreLeft = total > 0 ? covered < total : true;
+      if (moreLeft && lastPage === maxPages && lastRawRows >= PAGE_SIZE && probeMaxPages > entryMaxPages) {
+        console.error(`  ⚠ feishu-jobs: keyword "${keyword}" truncated at ${total > 0 ? `${covered} of ${total}` : lastPage * PAGE_SIZE} postings — raise max_pages for complete coverage`);
+        partialReason ??= 'page-cap';
       }
     }
 
-    return [...seen.values()];
+    const result = [...seen.values()];
+    // A keyword max_pages cut is a page-cap stop: the warning above says so, and
+    // the result does too, so scan.mjs logs the board partial (lib/board-truncation.mjs).
+    if (partialReason) markTruncated(result, partialReason, { fetched: result.length });
+    return result;
   },
 };

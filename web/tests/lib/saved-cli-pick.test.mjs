@@ -5,7 +5,7 @@ import { test } from "node:test";
 // hold a hand-copied mirror of pickSoleInstalled, which cannot fail when the
 // real function changes -- exactly the drift that let the multi-CLI gap below
 // go unnoticed.
-import { pickDefaultInstalled, pickSoleInstalled } from "../../src/lib/cli-pick.mjs";
+import { keepIfInstalled, pickDefaultInstalled, pickSoleInstalled } from "../../src/lib/cli-pick.mjs";
 
 test("sole installed CLI is the default", () => {
   assert.equal(
@@ -72,4 +72,22 @@ test("multi-CLI machines get a persistable default, unlike pickSoleInstalled", (
   ];
   assert.equal(pickSoleInstalled(clis), null, "sole-pick correctly declines");
   assert.equal(pickDefaultInstalled(clis), "claude", "but a default must still exist to persist");
+});
+
+// --- keepIfInstalled: a saved id is only kept while its CLI is installed (#4012) ---
+
+test("keepIfInstalled keeps an installed id and drops an uninstalled or unknown one", () => {
+  const clis = [
+    { id: "claude", installed: true },
+    { id: "opencode", installed: false },
+  ];
+  assert.equal(keepIfInstalled("claude", clis), "claude");
+  assert.equal(keepIfInstalled("opencode", clis), null);
+  assert.equal(keepIfInstalled("codex", clis), null);
+});
+
+test("keepIfInstalled tolerates empty ids, undefined lists and sparse entries", () => {
+  assert.equal(keepIfInstalled("", [{ id: "", installed: true }]), null);
+  assert.equal(keepIfInstalled("claude", undefined), null);
+  assert.equal(keepIfInstalled("claude", [null, { id: "claude", installed: true }]), "claude");
 });

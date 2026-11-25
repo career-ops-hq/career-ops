@@ -30,6 +30,7 @@ console.log('\nPlugin: h1b-sponsor');
 const PLUGIN_DIR = join(ROOT, 'plugins', 'h1b-sponsor');
 const MANIFEST_PATH = join(PLUGIN_DIR, 'manifest.json');
 const TIER_PATH = join(PLUGIN_DIR, 'lib', 'tier.mjs');
+const CLEAN_PATH = join(PLUGIN_DIR, 'lib', 'clean.mjs');
 const CACHE_PATH = join(PLUGIN_DIR, 'lib', 'cache.mjs');
 const API_PATH = join(PLUGIN_DIR, 'lib', 'api.mjs');
 const INDEX_PATH = join(PLUGIN_DIR, 'lib', 'index.mjs');
@@ -240,6 +241,58 @@ if (!existsSync(TIER_PATH)) {
     }
   } catch (e) {
     fail(`classifyTier import crashed: ${e.message}`);
+  }
+}
+
+// ---------- lib/clean.mjs: CONTROL_CHARS, cleanForDisplay ----------
+if (!existsSync(CLEAN_PATH)) {
+  fail('lib/clean.mjs missing: the plugin ships it');
+} else {
+  try {
+    const { CONTROL_CHARS, cleanForDisplay, displayClean } = await import(pathToFileURL(CLEAN_PATH).href);
+
+    if (CONTROL_CHARS instanceof RegExp) {
+      pass('lib/clean.mjs: CONTROL_CHARS is a RegExp');
+    } else {
+      fail('lib/clean.mjs: CONTROL_CHARS is not a RegExp');
+    }
+
+    if (typeof cleanForDisplay === 'function') {
+      pass('lib/clean.mjs: cleanForDisplay is a function');
+    } else {
+      fail('lib/clean.mjs: cleanForDisplay is not a function');
+    }
+
+    if (displayClean === cleanForDisplay) {
+      pass('lib/clean.mjs: displayClean is an alias for cleanForDisplay');
+    } else {
+      fail('lib/clean.mjs: displayClean is not an alias for cleanForDisplay');
+    }
+
+    // null / undefined / empty string handling
+    if (cleanForDisplay(null) === '' && cleanForDisplay(undefined) === '' && cleanForDisplay('') === '') {
+      pass('cleanForDisplay: handles null, undefined, and empty string');
+    } else {
+      fail(`cleanForDisplay null/empty handling failed: null="${cleanForDisplay(null)}" undef="${cleanForDisplay(undefined)}"`);
+    }
+
+    // whitespace collapse and trim
+    if (cleanForDisplay('  hello   world  \t\n  again  ') === 'hello world again') {
+      pass('cleanForDisplay: collapses internal whitespace and trims ends');
+    } else {
+      fail(`cleanForDisplay whitespace collapse failed: "${cleanForDisplay('  hello   world  \t\n  again  ')}"`);
+    }
+
+    // control character stripping (C0, DEL, C1)
+    const withControls = `foo${ESC}[31mbar${BEL}${CRLF}baz\x7fqux\x80\x9f`;
+    const cleaned = cleanForDisplay(withControls);
+    if (!/[\u0000-\u001f\u007f-\u009f]/.test(cleaned) && cleaned === 'foo[31mbar bazqux') {
+      pass('cleanForDisplay: strips C0, DEL, and C1 control characters');
+    } else {
+      fail(`cleanForDisplay control character strip failed: got "${cleaned}"`);
+    }
+  } catch (e) {
+    fail(`lib/clean.mjs crashed: ${e.message}`);
   }
 }
 

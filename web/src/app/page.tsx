@@ -1,24 +1,103 @@
-import { pipelineSummary, doctorState } from "@/lib/career-ops";
+import { readApplications, readInbox, requestReportReader, doctorState, withCloseDates, readAwaitingAges } from "@/lib/career-ops";
+import { pickAwaitingDecision, pickApplyNext, includeApplyTarget, localDay } from "@/lib/home/awaiting.mjs";
+import { cardReason } from "@/lib/machine-summary.mjs";
+import type { CardReason } from "@/lib/machine-summary.mjs";
+import { todaySnapshot } from "@/lib/home/today-snapshot.mjs";
+import { homeLead, showFirstRunHome } from "@/lib/home/home-lead.mjs";
+import { scoreNum, parseReport } from "@/lib/format";
+import { reportNumberFor } from "@/lib/apply-checklist.mjs";
+import { readCvDiskForRows } from "@/lib/read-cv-disk";
+import { applyPostingUrl } from "@/lib/posting-url.mjs";
 import { OnboardingBanner } from "@/components/onboarding-banner";
+import { OnboardingProgress } from "@/components/home/onboarding-progress";
 import { FirstRunHome } from "@/components/home/first-run-home";
 import { TodayDashboard } from "@/components/home/today-dashboard";
 
 export const dynamic = "force-dynamic"; // always read fresh local files at request time (never at build — CI has no user data)
 
-export default function Home() {
-  const { phase, onboardingNeeded } = doctorState();
+export default async function Home() {
+  // Pipeline already joins scan-history closes_at. Today has to as well, or
+  // Apply next can name a posting that closed.
+  const snapshot = { applications: await withCloseDates(readApplications()), inbox: readInbox() };
+  const { phase, onboardingNeeded } = doctorState(snapshot);
   // First run (truly empty install): the CV-upload takeover IS the home — value
   // before commitment. The full dashboard returns once they have a CV or any data.
-  if (phase === "first-run") return <FirstRunHome />;
+  if (showFirstRunHome(phase, snapshot.inbox.length)) return <FirstRunHome />;
 
-  const { inbox, applications } = pipelineSummary();
+  const { inbox, applications } = todaySnapshot(snapshot, scoreNum);
+  const reasons: Record<string, CardReason> = {};
+  const legitimacy: Record<string, string> = {};
+  const postingUrls: Record<string, string> = {};
+  const readReport = requestReportReader();
+  const loaded = new Map<string, { reason: CardReason | null; legitimacy: string; reportUrl: string; reportFile: string | null }>();
+  const readApp = (app: (typeof applications)[number]) => {
+    const hit = loaded.get(app.n);
+    if (hit) return hit;
+    const report = readReport(app);
+    const content = report?.content ?? "";
+    const parsed = parseReport(content);
+    const entry = {
+      reason: cardReason(content),
+      legitimacy: parsed.legitimacy ?? "",
+      reportUrl: parsed.fields.find((field) => field.label === "URL")?.value ?? "",
+      reportFile: report?.file ?? null,
+    };
+    loaded.set(app.n, entry);
+    return entry;
+  };
+  // One calendar day for the server and the browser. A second local day, after
+  // midnight or in another time zone, can drop the target and then miss the
+  // next open Apply, because only these rows carry a decision.
+  const applyDay = localDay();
+  const ages = await readAwaitingAges(applications, applyDay, (app) => applyPostingUrl(readApp(app).reportUrl, app.url, app.applyLink));
+  const shown = pickAwaitingDecision(applications, scoreNum, 6, (app) => ages[app.n]?.open.state === "closed");
+  const applyTarget = pickApplyNext(
+    applications,
+    scoreNum,
+    (app) => (ages[app.n]?.open.state === "closed" ? "" : readApp(app).reason?.decision ?? ""),
+    (app) => readApp(app).legitimacy,
+    applyDay,
+  );
+  const awaiting = includeApplyTarget(shown, applyTarget);
+  for (const app of awaiting) {
+    const entry = readApp(app);
+    if (entry.reason) reasons[app.n] = entry.reason;
+    if (entry.legitimacy) legitimacy[app.n] = entry.legitimacy;
+    postingUrls[app.n] = applyPostingUrl(entry.reportUrl, app.url, app.applyLink);
+  }
+  const disks = await readCvDiskForRows(
+    awaiting.map((app) => ({
+      n: app.n,
+      company: app.company,
+      trackerMarked: (app.pdf ?? "").includes("✅"),
+      // An empty report cell still has a file such as 7-fixture.md. The report
+      // number is on that filename, the same read the report page uses.
+      reportNumber: reportNumberFor(app.n, app, readApp(app).reportFile),
+    })),
+  );
+  const applyFacts: Record<string, { pdfOnDisk: boolean; postingUrl: string }> = {};
+  for (const app of awaiting) {
+    applyFacts[app.n] = { pdfOnDisk: disks[app.n]?.applyPdfReady ?? false, postingUrl: postingUrls[app.n] ?? "" };
+  }
   // Established / in-between: the dual-loop retention dashboard. Show the setup
   // banner whenever ANY prereq is missing (mirrors the core doctor.mjs), so a
   // portals-missing user is nudged rather than told "all caught up".
+  // Once there is a tracker or an inbox, that work leads. Setup stays on the
+  // page, under the queue, until the profile panel is complete.
+  const dashboard = (
+    <TodayDashboard applications={applications} reasons={reasons} legitimacy={legitimacy} inbox={inbox} inBetween={phase === "in-between"} applyFacts={applyFacts} ages={ages} applyDay={applyDay} />
+  );
+  const lead = homeLead(snapshot.applications.length > 0 || snapshot.inbox.length > 0);
   return (
     <>
+      {lead === "queue" && dashboard}
       {onboardingNeeded && <OnboardingBanner />}
-      <TodayDashboard applications={applications} inbox={inbox} inBetween={phase === "in-between"} />
+      {/* The growing-profile panel stays until every prerequisite AND every
+          personalization section is theirs — it renders nothing once complete. */}
+      <div className="mx-auto max-w-5xl px-6 pt-6">
+        <OnboardingProgress />
+      </div>
+      {lead === "setup" && dashboard}
     </>
   );
 }

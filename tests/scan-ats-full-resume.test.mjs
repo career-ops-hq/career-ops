@@ -8,7 +8,7 @@ import { pass, fail, ROOT } from './helpers.mjs';
 console.log('\nscan-ats-full — resume machinery');
 
 const mod = await import(pathToFileURL(join(ROOT, 'scan-ats-full.mjs')).href);
-const { parallelEach, withTimeout, datasetFingerprint } = mod;
+const { parallelEach, withTimeout, datasetFingerprint, restorePendingRetries, retryCheckpointFields } = mod;
 
 // withTimeout: passes a fast promise through untouched.
 {
@@ -95,13 +95,16 @@ const { parallelEach, withTimeout, datasetFingerprint } = mod;
 }
 
 // ── Checkpoint compatibility rules (Task 3) ─────────────────────────
-const { loadCheckpoint, checkpointCompatible } = mod;
+const { loadCheckpoint, checkpointCompatible, checkpointMismatch } = mod;
 
 {
   const cp = { version: 1, cutoffMs: 1, ats: ['workday'], limit: null, includeUndated: false };
   const opts = { ats: ['workday'], limit: Infinity, includeUndated: false, shuffle: false };
   if (checkpointCompatible(cp, opts)) pass('checkpoint compatible with identical settings');
   else fail('identical settings judged incompatible');
+
+  if (checkpointMismatch(cp, opts) === null) pass('checkpointMismatch returns null on identical settings');
+  else fail(`expected null mismatch, got: ${checkpointMismatch(cp, opts)}`);
 
   if (!checkpointCompatible(cp, { ...opts, ats: ['greenhouse'] })) pass('ats mismatch rejected');
   else fail('ats mismatch accepted');
@@ -114,15 +117,154 @@ const { loadCheckpoint, checkpointCompatible } = mod;
 
   if (!checkpointCompatible(null, opts)) pass('null checkpoint rejected');
   else fail('null checkpoint accepted');
+
+  if (checkpointMismatch(null, opts) === 'missing checkpoint') pass('checkpointMismatch reports missing checkpoint');
+  else fail(`null checkpoint mismatch: ${checkpointMismatch(null, opts)}`);
+
+  // Edge cases for checkpointMismatch:
+  // 1. Added ATS sources
+  const addedMismatch = checkpointMismatch(cp, { ...opts, ats: ['workday', 'paylocity', 'join'] });
+  if (addedMismatch && addedMismatch.includes('added: paylocity, join') && !addedMismatch.includes('removed:')) {
+    pass('checkpointMismatch names added ATS sources');
+  } else {
+    fail(`added mismatch unexpected: ${addedMismatch}`);
+  }
+
+  // 2. Removed ATS sources
+  const cpMulti = { ...cp, ats: ['workday', 'lever', 'ashby'] };
+  const removedMismatch = checkpointMismatch(cpMulti, { ...opts, ats: ['workday'] });
+  if (removedMismatch && removedMismatch.includes('removed: lever, ashby') && !removedMismatch.includes('added:')) {
+    pass('checkpointMismatch names removed ATS sources');
+  } else {
+    fail(`removed mismatch unexpected: ${removedMismatch}`);
+  }
+
+  // 3. Both added and removed ATS sources
+  const bothMismatch = checkpointMismatch(cpMulti, { ...opts, ats: ['workday', 'greenhouse'] });
+  if (bothMismatch && bothMismatch.includes('added: greenhouse') && bothMismatch.includes('removed: lever, ashby')) {
+    pass('checkpointMismatch names both added and removed ATS sources');
+  } else {
+    fail(`both mismatch unexpected: ${bothMismatch}`);
+  }
+
+  // 4. Reordered ATS sources
+  const reorderMismatch = checkpointMismatch({ ...cp, ats: ['lever', 'workday'] }, { ...opts, ats: ['workday', 'lever'] });
+  if (reorderMismatch && reorderMismatch.includes('ATS sources order differed')) {
+    pass('checkpointMismatch detects ATS sources reordering');
+  } else {
+    fail(`reorder mismatch unexpected: ${reorderMismatch}`);
+  }
+
+  // 5. Limit differences
+  const limitToNumeric = checkpointMismatch(cp, { ...opts, limit: 200 });
+  if (limitToNumeric && limitToNumeric.includes('limit changed (was none, now 200)')) {
+    pass('checkpointMismatch explains limit added');
+  } else {
+    fail(`limitToNumeric unexpected: ${limitToNumeric}`);
+  }
+
+  const limitToNone = checkpointMismatch({ ...cp, limit: 150 }, { ...opts, limit: Infinity });
+  if (limitToNone && limitToNone.includes('limit changed (was 150, now none)')) {
+    pass('checkpointMismatch explains limit removed');
+  } else {
+    fail(`limitToNone unexpected: ${limitToNone}`);
+  }
+
+  const limitChanged = checkpointMismatch({ ...cp, limit: 100 }, { ...opts, limit: 250 });
+  if (limitChanged && limitChanged.includes('limit changed (was 100, now 250)')) {
+    pass('checkpointMismatch explains limit changed');
+  } else {
+    fail(`limitChanged unexpected: ${limitChanged}`);
+  }
+
+  // 6. includeUndated differences
+  const undatedMismatch = checkpointMismatch(cp, { ...opts, includeUndated: true });
+  if (undatedMismatch && undatedMismatch.includes('includeUndated changed (was false, now true)')) {
+    pass('checkpointMismatch explains includeUndated changed to true');
+  } else {
+    fail(`undatedMismatch unexpected: ${undatedMismatch}`);
+  }
+
+  const undatedReverse = checkpointMismatch({ ...cp, includeUndated: true }, { ...opts, includeUndated: false });
+  if (undatedReverse && undatedReverse.includes('includeUndated changed (was true, now false)')) {
+    pass('checkpointMismatch explains includeUndated changed to false');
+  } else {
+    fail(`undatedReverse unexpected: ${undatedReverse}`);
+  }
+
+  // 7. Shuffle flag passed
+  const shuffleMismatch = checkpointMismatch(cp, { ...opts, shuffle: true });
+  if (shuffleMismatch && shuffleMismatch.includes('--shuffle is set')) {
+    pass('checkpointMismatch explains shuffle set');
+  } else {
+    fail(`shuffleMismatch unexpected: ${shuffleMismatch}`);
+  }
+
+  // 8. Multiple differences combined
+  const multiMismatch = checkpointMismatch(cp, { ...opts, ats: ['workday', 'join'], limit: 50, shuffle: true });
+  if (multiMismatch
+    && multiMismatch.includes('--shuffle is set')
+    && multiMismatch.includes('added: join')
+    && multiMismatch.includes('limit changed (was none, now 50)')) {
+    pass('checkpointMismatch combines multiple differences separated by semicolons');
+  } else {
+    fail(`multiMismatch unexpected: ${multiMismatch}`);
+  }
+}
+
+// Filter fingerprints: a portals.yml filter edited between a run and its
+// --resume would leave the swept boards judged by the old filter, so each one
+// is recorded in the checkpoint and a change is named on resume.
+{
+  const { filterFingerprints, changedFilterKeys } = mod;
+  const config = {
+    title_filter: { positive: ['backend'], negative: ['intern'] },
+    location_filter: { allow: ['remote'] },
+    content_filter: { exclude: ['clearance'] },
+    domain_filter: ['defi', 'crypto'],
+  };
+  const cp = { filters: filterFingerprints(config) };
+  const changed = (c) => changedFilterKeys(cp, filterFingerprints(c));
+
+  if (changed(structuredClone(config)).length === 0) pass('unchanged filters resume');
+  else fail(`unchanged filters reported: ${changed(config)}`);
+
+  const reordered = { domain_filter: config.domain_filter, content_filter: config.content_filter, location_filter: config.location_filter, title_filter: { negative: ['intern'], positive: ['backend'] } };
+  if (changed(reordered).length === 0) pass('reordered YAML mapping keys are not a change');
+  else fail(`key reorder reported as ${changed(reordered)}`);
+
+  for (const [key, edit] of [
+    ['title_filter', (c) => { c.title_filter.positive.push('platform'); }],
+    ['title_filter_overrides', (c) => { c.title_filter_overrides = { acme: { positive: ['sre'] } }; }],
+    ['location_filter', (c) => { c.location_filter.allow = ['berlin']; }],
+    ['content_filter', (c) => { delete c.content_filter; }],
+    ['domain_filter', (c) => { c.domain_filter.push('web3'); }],
+  ]) {
+    const c = structuredClone(config);
+    edit(c);
+    const got = changed(c);
+    if (JSON.stringify(got) === JSON.stringify([key])) pass(`${key} edit named on resume`);
+    else fail(`${key} edit reported as ${JSON.stringify(got)}`);
+  }
+
+  // title_filter_full replaces title_filter for this sweep, so adding it is a
+  // change even when title_filter itself is untouched.
+  const withFull = { ...structuredClone(config), title_filter_full: { positive: ['solidity'] } };
+  if (changed(withFull).includes('title_filter_full')) pass('adding title_filter_full is a change');
+  else fail(`title_filter_full addition reported as ${JSON.stringify(changed(withFull))}`);
+
+  // Checkpoints written before filters were recorded resume as before.
+  if (changedFilterKeys({ version: 1 }, filterFingerprints(config)).length === 0) pass('checkpoint without filters still resumes');
+  else fail('checkpoint without filters rejected');
 }
 
 // loadCheckpoint: garbage and wrong-version files → null, never a throw.
 {
-  const { writeFileSync, mkdirSync, rmSync } = await import('node:fs');
-  // Anchored to ROOT, not CWD: run from anywhere else and a relative path would
-  // create — and then rmSync — a directory outside the project.
-  const dir = join(ROOT, 'data/cache/.test-checkpoint');
-  mkdirSync(dir, { recursive: true });
+  const { writeFileSync, mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  // A temp directory of its own. This used to be data/cache/.test-checkpoint
+  // under ROOT, which is the developer's data directory (#5113).
+  const dir = mkdtempSync(join(tmpdir(), 'co-scan-checkpoint-'));
   const p = `${dir}/cp.json`;
   writeFileSync(p, 'not json', 'utf-8');
   if (loadCheckpoint(p) === null) pass('loadCheckpoint returns null on garbage JSON');
@@ -141,6 +283,10 @@ const { loadCheckpoint, checkpointCompatible } = mod;
     ['non-numeric resumeAt', { name: 'workday', resumeAt: 'x', datasetLen: 10 }],
     ['negative resumeAt', { name: 'workday', resumeAt: -1, datasetLen: 10 }],
     ['missing name', { resumeAt: 5, datasetLen: 10 }],
+    ['non-array deferred', { name: 'workday', resumeAt: 5, datasetLen: 10, deferred: 3 }],
+    ['non-integer deferred index', { name: 'workday', resumeAt: 5, datasetLen: 10, deferred: [1, 'x'] }],
+    ['non-array retries', { name: 'workday', resumeAt: 5, datasetLen: 10, retries: 3 }],
+    ['non-integer retries index', { name: 'workday', resumeAt: 5, datasetLen: 10, retries: [1, 'x'] }],
   ]) {
     writeFileSync(p, JSON.stringify({ version: 1, current }), 'utf-8');
     if (loadCheckpoint(p) === null) pass(`loadCheckpoint rejects malformed current (${label})`);
@@ -150,6 +296,44 @@ const { loadCheckpoint, checkpointCompatible } = mod;
   writeFileSync(p, JSON.stringify({ version: 1, current: { name: 'workday', resumeAt: 500, datasetLen: 12884 } }), 'utf-8');
   if (loadCheckpoint(p)?.current?.resumeAt === 500) pass('loadCheckpoint accepts a well-formed current');
   else fail('well-formed current rejected');
+
+  // The domain gate's deferred boards ride along in `current`, so a resumed
+  // run can retry the ones below its offset (#3304).
+  writeFileSync(p, JSON.stringify({ version: 1, current: { name: 'workday', resumeAt: 500, datasetLen: 12884, deferred: [12, 480] } }), 'utf-8');
+  if (JSON.stringify(loadCheckpoint(p)?.current?.deferred) === '[12,480]') pass('loadCheckpoint keeps the deferred board indices');
+  else fail('deferred board indices lost or rejected');
+
+  writeFileSync(p, JSON.stringify({ version: 1, current: { name: 'workday', resumeAt: 500, datasetLen: 12884, deferred: [12], retries: [12, 480] } }), 'utf-8');
+  if (JSON.stringify(loadCheckpoint(p)?.current?.retries) === '[12,480]') pass('loadCheckpoint keeps the pending retry indices');
+  else fail('pending retry indices lost or rejected');
+
+  const boards = [{ name: 'below' }, { name: 'deferred' }, { name: 'admitted' }, { name: 'ahead' }];
+  const restored = restorePendingRetries(boards, 3, { deferred: [1], retries: [1, 2, 3] });
+  const names = restored.truncated.map((entry) => entry.name).join(',');
+  const deferredNames = [...restored.deferred.keys()].map((entry) => entry.name).join(',');
+  if (names === 'deferred,admitted' && deferredNames === 'deferred' && restored.pendingRetries.get(boards[2]) === 2) {
+    pass('restorePendingRetries retries an admitted board below the offset and defers only the gate-deferred one');
+  } else {
+    fail(`restorePendingRetries mixed the queues: truncated=${names} deferred=${deferredNames}`);
+  }
+  const legacy = restorePendingRetries(boards, 3, { deferred: [1] });
+  if (legacy.truncated.length === 1 && legacy.truncated[0].name === 'deferred' && legacy.deferred.has(boards[1])) {
+    pass('restorePendingRetries still retries a checkpoint that stored only deferred indices');
+  } else {
+    fail('restorePendingRetries dropped a legacy deferred index');
+  }
+  const pending = new Map([[boards[2], 2], [boards[1], 1]]);
+  const deferred = new Map([[boards[1], { index: 1, jobs: null }]]);
+  const fields = retryCheckpointFields(pending, deferred);
+  if (JSON.stringify(fields.retries) === '[2,1]' && JSON.stringify(fields.deferred) === '[1]') {
+    pass('retryCheckpointFields keeps an admitted retry beside the deferred subset');
+  } else {
+    fail(`retryCheckpointFields ${JSON.stringify(fields)}`);
+  }
+  pending.delete(boards[2]);
+  const after = retryCheckpointFields(pending, deferred);
+  if (JSON.stringify(after.retries) === '[1]') pass('dropping a finished retry removes it from the next checkpoint');
+  else fail(`finished retry stayed in the checkpoint: ${JSON.stringify(after)}`);
 
   // current: null is the legitimate "source finished" marker, not malformed.
   writeFileSync(p, JSON.stringify({ version: 1, current: null }), 'utf-8');

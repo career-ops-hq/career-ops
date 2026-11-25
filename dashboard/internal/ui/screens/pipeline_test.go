@@ -5,7 +5,9 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
+	"github.com/santifer/career-ops/dashboard/internal/data"
 	"github.com/santifer/career-ops/dashboard/internal/model"
 	"github.com/santifer/career-ops/dashboard/internal/theme"
 )
@@ -30,6 +32,7 @@ func TestWithReloadedDataPreservesStateAndSelection(t *testing.T) {
 			Role:       "Backend Engineer",
 			Status:     "Evaluated",
 			Score:      4.2,
+			HasScore:   true,
 			ReportPath: "reports/001-acme.md",
 		},
 		{
@@ -37,6 +40,7 @@ func TestWithReloadedDataPreservesStateAndSelection(t *testing.T) {
 			Role:       "Platform Engineer",
 			Status:     "Applied",
 			Score:      4.6,
+			HasScore:   true,
 			ReportPath: "reports/002-beta.md",
 		},
 	}
@@ -50,7 +54,7 @@ func TestWithReloadedDataPreservesStateAndSelection(t *testing.T) {
 		40,
 	)
 	pm.sortMode = sortCompany
-	pm.activeTab = 0
+	pm.activeTab = tabIndexForFilter(t, filterAll)
 	pm.viewMode = "flat"
 	pm.applyFilterAndSort()
 	pm.cursor = 1
@@ -64,6 +68,7 @@ func TestWithReloadedDataPreservesStateAndSelection(t *testing.T) {
 			Role:       "AI Engineer",
 			Status:     "Interview",
 			Score:      4.8,
+			HasScore:   true,
 			ReportPath: "reports/003-gamma.md",
 		},
 	}
@@ -98,12 +103,13 @@ func TestRenderAppLineIncludesDateColumn(t *testing.T) {
 	)
 
 	line := pm.renderAppLine(model.CareerApplication{
-		Number:  42,
-		Date:    "2026-04-13",
-		Company: "Anthropic",
-		Role:    "Forward Deployed Engineer",
-		Status:  "Applied",
-		Score:   4.5,
+		Number:   42,
+		Date:     "2026-04-13",
+		Company:  "Anthropic",
+		Role:     "Forward Deployed Engineer",
+		Status:   "Applied",
+		Score:    4.5,
+		HasScore: true,
 	}, false)
 
 	if !strings.Contains(line, "2026-04-13") {
@@ -112,14 +118,38 @@ func TestRenderAppLineIncludesDateColumn(t *testing.T) {
 	if !strings.Contains(line, "#42") {
 		t.Fatalf("expected rendered line to include tracker number marker, got %q", line)
 	}
+
+	// With ledger history the DATE column shows the latest status change,
+	// not the tracker's evaluation date.
+	line = pm.renderAppLine(model.CareerApplication{
+		Number:     42,
+		Date:       "2026-04-13",
+		StatusDate: "2026-05-20",
+		Company:    "Anthropic",
+		Role:       "Forward Deployed Engineer",
+		Status:     "Interview",
+		Score:      4.5,
+		HasScore:   true,
+	}, false)
+	if !strings.Contains(line, "2026-05-20") || strings.Contains(line, "2026-04-13") {
+		t.Fatalf("expected DATE column to show the status-change date over the tracker date, got %q", line)
+	}
+}
+
+func TestColumnHeaderReadsDate(t *testing.T) {
+	pm := NewPipelineModel(theme.NewTheme("catppuccin-mocha"), nil, model.PipelineMetrics{}, "..", 120, 40)
+	header := pm.renderColumnHeader()
+	if !strings.Contains(header, "DATE") || strings.Contains(header, "APPLIED") {
+		t.Fatalf("expected the date column header to read DATE, not APPLIED, got %q", header)
+	}
 }
 
 func TestSearchFiltersByCompanyRoleAndNotes(t *testing.T) {
 	apps := []model.CareerApplication{
-		{Company: "Stripe", Role: "Backend Engineer", Status: "Evaluated", Score: 4.6, Notes: "payments infra"},
-		{Company: "Anthropic", Role: "AI Safety Engineer", Status: "Applied", Score: 4.8, Notes: "policy work"},
-		{Company: "Acme Corp", Role: "Senior PM, Voice AI", Status: "Evaluated", Score: 4.2, Notes: "Series B in Madrid"},
-		{Company: "Globex", Role: "Platform Engineer", Status: "Applied", Score: 3.9, Notes: "remote-first"},
+		{Company: "Stripe", Role: "Backend Engineer", Status: "Evaluated", Score: 4.6, HasScore: true, Notes: "payments infra"},
+		{Company: "Anthropic", Role: "AI Safety Engineer", Status: "Applied", Score: 4.8, HasScore: true, Notes: "policy work"},
+		{Company: "Acme Corp", Role: "Senior PM, Voice AI", Status: "Evaluated", Score: 4.2, HasScore: true, Notes: "Series B in Madrid"},
+		{Company: "Globex", Role: "Platform Engineer", Status: "Applied", Score: 3.9, HasScore: true, Notes: "remote-first"},
 	}
 
 	pm := NewPipelineModel(theme.NewTheme("catppuccin-mocha"), apps, model.PipelineMetrics{Total: len(apps)}, "..", 120, 40)
@@ -156,9 +186,9 @@ func TestSearchFiltersByCompanyRoleAndNotes(t *testing.T) {
 
 func TestSearchComposesWithActiveTab(t *testing.T) {
 	apps := []model.CareerApplication{
-		{Company: "Stripe", Role: "Backend Engineer", Status: "Evaluated", Score: 4.6},
-		{Company: "Stripe", Role: "Frontend Engineer", Status: "Applied", Score: 4.5},
-		{Company: "Anthropic", Role: "AI Engineer", Status: "Applied", Score: 4.8},
+		{Company: "Stripe", Role: "Backend Engineer", Status: "Evaluated", Score: 4.6, HasScore: true},
+		{Company: "Stripe", Role: "Frontend Engineer", Status: "Applied", Score: 4.5, HasScore: true},
+		{Company: "Anthropic", Role: "AI Engineer", Status: "Applied", Score: 4.8, HasScore: true},
 	}
 
 	pm := NewPipelineModel(theme.NewTheme("catppuccin-mocha"), apps, model.PipelineMetrics{Total: len(apps)}, "..", 120, 40)
@@ -173,7 +203,7 @@ func TestSearchComposesWithActiveTab(t *testing.T) {
 
 func TestSearchIsCaseInsensitive(t *testing.T) {
 	apps := []model.CareerApplication{
-		{Company: "Anthropic", Role: "AI Engineer", Status: "Evaluated", Score: 4.8},
+		{Company: "Anthropic", Role: "AI Engineer", Status: "Evaluated", Score: 4.8, HasScore: true},
 	}
 
 	pm := NewPipelineModel(theme.NewTheme("catppuccin-mocha"), apps, model.PipelineMetrics{Total: len(apps)}, "..", 120, 40)
@@ -188,7 +218,7 @@ func TestSearchIsCaseInsensitive(t *testing.T) {
 
 func TestOpenURLKeyFlashesWhenApplicationHasNoURL(t *testing.T) {
 	apps := []model.CareerApplication{
-		{Company: "Acme", Role: "Triage Engineer", Status: "Evaluated", Score: 4.0},
+		{Company: "Acme", Role: "Triage Engineer", Status: "Evaluated", Score: 4.0, HasScore: true},
 	}
 	pm := NewPipelineModel(theme.NewTheme("catppuccin-mocha"), apps, model.PipelineMetrics{Total: 1}, "..", 120, 40)
 	pm.viewMode = "flat"
@@ -206,7 +236,7 @@ func TestOpenURLKeyFlashesWhenApplicationHasNoURL(t *testing.T) {
 func TestOpenURLKeyEmitsTrackerURL(t *testing.T) {
 	const jobURL = "https://jobs.example.com/triage"
 	apps := []model.CareerApplication{
-		{Company: "Acme", Role: "Triage Engineer", Status: "Evaluated", Score: 4.0, JobURL: jobURL},
+		{Company: "Acme", Role: "Triage Engineer", Status: "Evaluated", Score: 4.0, HasScore: true, JobURL: jobURL},
 	}
 	pm := NewPipelineModel(theme.NewTheme("catppuccin-mocha"), apps, model.PipelineMetrics{Total: 1}, "..", 120, 40)
 	pm.viewMode = "flat"
@@ -227,8 +257,8 @@ func TestOpenURLKeyEmitsTrackerURL(t *testing.T) {
 
 func TestSearchEnterCommitsAndEscClearsCommittedQuery(t *testing.T) {
 	apps := []model.CareerApplication{
-		{Company: "Stripe", Role: "Backend Engineer", Status: "Evaluated", Score: 4.6},
-		{Company: "Anthropic", Role: "AI Engineer", Status: "Evaluated", Score: 4.8},
+		{Company: "Stripe", Role: "Backend Engineer", Status: "Evaluated", Score: 4.6, HasScore: true},
+		{Company: "Anthropic", Role: "AI Engineer", Status: "Evaluated", Score: 4.8, HasScore: true},
 	}
 
 	pm := NewPipelineModel(theme.NewTheme("catppuccin-mocha"), apps, model.PipelineMetrics{Total: len(apps)}, "..", 120, 40)
@@ -272,9 +302,9 @@ func TestSearchEscInInputCancelsAndClears(t *testing.T) {
 	// but forgets to re-apply the filter — the visible count would stay at 1
 	// otherwise even though the underlying state went stale.
 	apps := []model.CareerApplication{
-		{Company: "Stripe", Role: "Backend Engineer", Status: "Evaluated", Score: 4.6},
-		{Company: "Globex", Role: "Platform Engineer", Status: "Evaluated", Score: 4.0},
-		{Company: "Anthropic", Role: "AI Engineer", Status: "Evaluated", Score: 4.8},
+		{Company: "Stripe", Role: "Backend Engineer", Status: "Evaluated", Score: 4.6, HasScore: true},
+		{Company: "Globex", Role: "Platform Engineer", Status: "Evaluated", Score: 4.0, HasScore: true},
+		{Company: "Anthropic", Role: "AI Engineer", Status: "Evaluated", Score: 4.8, HasScore: true},
 	}
 
 	pm := NewPipelineModel(theme.NewTheme("catppuccin-mocha"), apps, model.PipelineMetrics{Total: len(apps)}, "..", 120, 40)
@@ -299,9 +329,9 @@ func TestSearchEscInInputCancelsAndClears(t *testing.T) {
 
 func TestSearchResetsCursorOnQueryChange(t *testing.T) {
 	apps := []model.CareerApplication{
-		{Company: "Acme", Role: "Backend Engineer", Status: "Evaluated", Score: 4.0},
-		{Company: "Beta", Role: "Frontend Engineer", Status: "Evaluated", Score: 4.1},
-		{Company: "Gamma", Role: "AI Engineer", Status: "Evaluated", Score: 4.2},
+		{Company: "Acme", Role: "Backend Engineer", Status: "Evaluated", Score: 4.0, HasScore: true},
+		{Company: "Beta", Role: "Frontend Engineer", Status: "Evaluated", Score: 4.1, HasScore: true},
+		{Company: "Gamma", Role: "AI Engineer", Status: "Evaluated", Score: 4.2, HasScore: true},
 	}
 
 	pm := NewPipelineModel(theme.NewTheme("catppuccin-mocha"), apps, model.PipelineMetrics{Total: len(apps)}, "..", 120, 40)
@@ -320,8 +350,8 @@ func TestSearchResetsCursorOnQueryChange(t *testing.T) {
 
 func TestSearchStatePreservedAcrossReload(t *testing.T) {
 	initial := []model.CareerApplication{
-		{Company: "Stripe", Role: "Backend", Status: "Evaluated", Score: 4.6},
-		{Company: "Acme", Role: "AI", Status: "Evaluated", Score: 4.0},
+		{Company: "Stripe", Role: "Backend", Status: "Evaluated", Score: 4.6, HasScore: true},
+		{Company: "Acme", Role: "AI", Status: "Evaluated", Score: 4.0, HasScore: true},
 	}
 
 	pm := NewPipelineModel(theme.NewTheme("catppuccin-mocha"), initial, model.PipelineMetrics{Total: len(initial)}, "..", 120, 40)
@@ -329,7 +359,7 @@ func TestSearchStatePreservedAcrossReload(t *testing.T) {
 	pm.applyFilterAndSort()
 
 	refreshed := append([]model.CareerApplication{}, initial...)
-	refreshed = append(refreshed, model.CareerApplication{Company: "Globex", Role: "Platform", Status: "Applied", Score: 4.3})
+	refreshed = append(refreshed, model.CareerApplication{Company: "Globex", Role: "Platform", Status: "Applied", Score: 4.3, HasScore: true})
 
 	reloaded := pm.WithReloadedData(refreshed, model.PipelineMetrics{Total: len(refreshed)})
 
@@ -348,6 +378,7 @@ func TestRejectedAndDiscardedTabsFilterCorrectly(t *testing.T) {
 			Role:       "Backend Engineer",
 			Status:     "Rejected",
 			Score:      3.4,
+			HasScore:   true,
 			ReportPath: "reports/001-acme.md",
 		},
 		{
@@ -355,6 +386,7 @@ func TestRejectedAndDiscardedTabsFilterCorrectly(t *testing.T) {
 			Role:       "Platform Engineer",
 			Status:     "Discarded",
 			Score:      2.1,
+			HasScore:   true,
 			ReportPath: "reports/002-beta.md",
 		},
 		{
@@ -362,6 +394,7 @@ func TestRejectedAndDiscardedTabsFilterCorrectly(t *testing.T) {
 			Role:       "AI Engineer",
 			Status:     "Applied",
 			Score:      4.6,
+			HasScore:   true,
 			ReportPath: "reports/003-gamma.md",
 		},
 	}
@@ -395,6 +428,7 @@ func TestRespondedTabFiltersCorrectly(t *testing.T) {
 			Role:       "Backend Engineer",
 			Status:     "Responded",
 			Score:      4.2,
+			HasScore:   true,
 			ReportPath: "reports/001-acme.md",
 		},
 		{
@@ -402,6 +436,7 @@ func TestRespondedTabFiltersCorrectly(t *testing.T) {
 			Role:       "Platform Engineer",
 			Status:     "Applied",
 			Score:      3.8,
+			HasScore:   true,
 			ReportPath: "reports/002-beta.md",
 		},
 		{
@@ -409,6 +444,7 @@ func TestRespondedTabFiltersCorrectly(t *testing.T) {
 			Role:       "AI Engineer",
 			Status:     "Interview",
 			Score:      4.6,
+			HasScore:   true,
 			ReportPath: "reports/003-gamma.md",
 		},
 	}
@@ -444,12 +480,33 @@ func TestRespondedTabSitsBetweenInterviewAndApplied(t *testing.T) {
 	}
 }
 
+func TestAssessmentTabFiltersCorrectly(t *testing.T) {
+	apps := []model.CareerApplication{
+		{Company: "AirAsia", Role: "Data Engineer", Status: "Assessment"},
+		{Company: "AirAsia", Role: "Data Engineer", Status: "Interview"},
+	}
+	pm := NewPipelineModel(
+		theme.NewTheme("catppuccin-mocha"),
+		apps,
+		model.PipelineMetrics{Total: len(apps)},
+		t.TempDir(),
+		120,
+		40,
+	)
+
+	pm.activeTab = tabIndexForFilter(t, filterAssessment)
+	pm.applyFilterAndSort()
+	if len(pm.filtered) != 1 || data.NormalizeStatus(pm.filtered[0].Status) != "assessment" {
+		t.Fatalf("expected assessment tab to isolate assessment rows, got %+v", pm.filtered)
+	}
+}
+
 // Regression: with no committed search query, Esc must NOT close the screen.
 // The help bar advertises only `q quit`, so Esc quitting silently was a bug
 // that surfaced as accidental exits when users hit Esc to "back out" of the UI.
 func TestEscWithoutQueryIsNoOp(t *testing.T) {
 	apps := []model.CareerApplication{
-		{Company: "Stripe", Role: "Backend Engineer", Status: "Evaluated", Score: 4.6},
+		{Company: "Stripe", Role: "Backend Engineer", Status: "Evaluated", Score: 4.6, HasScore: true},
 	}
 
 	pm := NewPipelineModel(theme.NewTheme("catppuccin-mocha"), apps, model.PipelineMetrics{Total: len(apps)}, "..", 120, 40)
@@ -477,8 +534,8 @@ func TestEscWithoutQueryIsNoOp(t *testing.T) {
 // the load is deferred to commit (Enter) / cancel (Esc) instead.
 func TestSearchTypingDoesNotLoadReports(t *testing.T) {
 	apps := []model.CareerApplication{
-		{Company: "Stripe", Role: "Backend Engineer", Status: "Evaluated", Score: 4.6, ReportPath: "reports/001-stripe.md"},
-		{Company: "Anthropic", Role: "AI Engineer", Status: "Evaluated", Score: 4.8, ReportPath: "reports/002-anthropic.md"},
+		{Company: "Stripe", Role: "Backend Engineer", Status: "Evaluated", Score: 4.6, HasScore: true, ReportPath: "reports/001-stripe.md"},
+		{Company: "Anthropic", Role: "AI Engineer", Status: "Evaluated", Score: 4.8, HasScore: true, ReportPath: "reports/002-anthropic.md"},
 	}
 
 	pm := NewPipelineModel(theme.NewTheme("catppuccin-mocha"), apps, model.PipelineMetrics{Total: len(apps)}, "..", 120, 40)
@@ -536,6 +593,60 @@ func previewModelWith(t *testing.T, app model.CareerApplication) PipelineModel {
 	pm.applyFilterAndSort()
 	pm.cursor = 0
 	return pm
+}
+
+// TestPreviewTruncatesTldrToTerminalCells verifies visible truncation across terminal widths and wide runes.
+// @param t The Go test context.
+// @returns No value.
+func TestPreviewTruncatesTldrToTerminalCells(t *testing.T) {
+	tests := []struct {
+		name       string
+		width      int
+		tldr       string
+		wantSuffix string
+	}{
+		{name: "latin at 80 columns", width: 80, tldr: strings.Repeat("a", 120), wantSuffix: "..."},
+		{name: "latin at 120 columns", width: 120, tldr: strings.Repeat("a", 120), wantSuffix: "..."},
+		{name: "latin at 160 columns", width: 160, tldr: strings.Repeat("a", 120), wantSuffix: strings.Repeat("a", 120)},
+		{name: "wide runes at 80 columns", width: 80, tldr: strings.Repeat("界", 117) + "...", wantSuffix: "..."},
+		{name: "wide runes at 120 columns", width: 120, tldr: strings.Repeat("界", 117) + "...", wantSuffix: "..."},
+		{name: "wide runes at 160 columns", width: 160, tldr: strings.Repeat("界", 117) + "...", wantSuffix: "..."},
+		// 14 columns leave exactly three cells for the value: the ellipsis still fits.
+		{name: "exactly three cells left", width: 14, tldr: strings.Repeat("a", 20), wantSuffix: "..."},
+		// ansi.Truncate counts a keycap as one cell where ansi.StringWidth counts two.
+		{name: "keycap emoji at 15 columns", width: 15, tldr: "1️⃣ 2️⃣ 3️⃣ ok", wantSuffix: "..."},
+		{name: "keycap emoji at 24 columns", width: 24, tldr: strings.Repeat("1️⃣ ", 20), wantSuffix: "..."},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := model.CareerApplication{
+				Company:    "Acme",
+				Role:       "Agent Engineer",
+				ReportPath: "reports/001-acme.md",
+			}
+			pm := previewModelWith(t, app)
+			pm.width = tt.width
+			pm.reportCache[app.ReportPath] = reportSummary{tldr: tt.tldr}
+
+			var tldrLine string
+			for _, line := range strings.Split(ansi.Strip(pm.renderPreview()), "\n") {
+				if strings.Contains(line, "TL;DR: ") {
+					tldrLine = line
+					break
+				}
+			}
+			if tldrLine == "" {
+				t.Fatal("expected preview to include the cached TL;DR")
+			}
+			if got := ansi.StringWidth(tldrLine); got > tt.width {
+				t.Fatalf("TL;DR line is %d cells, wider than terminal width %d: %q", got, tt.width, tldrLine)
+			}
+			if !strings.HasSuffix(strings.TrimRight(tldrLine, " "), tt.wantSuffix) {
+				t.Fatalf("TL;DR line should end with %q, got %q", tt.wantSuffix, tldrLine)
+			}
+		})
+	}
 }
 
 func TestPreviewKeepsDiscardReasonWhenTlDrIsCached(t *testing.T) {
@@ -624,6 +735,7 @@ func TestWithReloadedDataPreservesCursorWhenAppRemoved(t *testing.T) {
 			Role:       "Backend Engineer",
 			Status:     "Applied",
 			Score:      4.2,
+			HasScore:   true,
 			ReportPath: "reports/001-acme.md",
 		},
 		{
@@ -631,6 +743,7 @@ func TestWithReloadedDataPreservesCursorWhenAppRemoved(t *testing.T) {
 			Role:       "Platform Engineer",
 			Status:     "Applied",
 			Score:      4.6,
+			HasScore:   true,
 			ReportPath: "reports/002-beta.md",
 		},
 		{
@@ -638,6 +751,7 @@ func TestWithReloadedDataPreservesCursorWhenAppRemoved(t *testing.T) {
 			Role:       "AI Engineer",
 			Status:     "Applied",
 			Score:      4.8,
+			HasScore:   true,
 			ReportPath: "reports/003-gamma.md",
 		},
 	}
@@ -661,6 +775,7 @@ func TestWithReloadedDataPreservesCursorWhenAppRemoved(t *testing.T) {
 			Role:       "Platform Engineer",
 			Status:     "Rejected", // Changed!
 			Score:      4.6,
+			HasScore:   true,
 			ReportPath: "reports/002-beta.md",
 		},
 		initialApps[2],
@@ -676,6 +791,24 @@ func TestWithReloadedDataPreservesCursorWhenAppRemoved(t *testing.T) {
 	}
 }
 
+func TestPipelineTabsIncludeSpeculative(t *testing.T) {
+	found := false
+	for _, tab := range getPipelineTabs() {
+		if tab.filter == filterSpeculative {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected pipeline tabs to include the speculative filter")
+	}
+}
+
+func TestStatusLabelSpeculative(t *testing.T) {
+	if got := statusLabel("speculative"); got != "Speculative" {
+		t.Fatalf("statusLabel(speculative) = %q, want Speculative", got)
+	}
+}
+
 // Regression: the viewer status path starts the discard reason picker (or the
 // hired celebration) on the pipeline model and then immediately reloads data.
 // WithReloadedData must carry that in-progress flow state over — wiping it
@@ -688,6 +821,7 @@ func TestWithReloadedDataPreservesDiscardAndHiredFlow(t *testing.T) {
 			Role:         "Backend Engineer",
 			Status:       "Evaluated",
 			Score:        4.2,
+			HasScore:     true,
 			ReportPath:   "reports/001-acme.md",
 			ReportNumber: "1",
 		},
@@ -764,5 +898,306 @@ func TestGetStatusPairsUnrecognizedStatusFallsBackToStaticOrder(t *testing.T) {
 		if got[i].Canonical != base[i].Canonical {
 			t.Fatalf("got[%d].Canonical = %q, want %q (static order)", i, got[i].Canonical, base[i].Canonical)
 		}
+	}
+}
+
+func TestSpeculativeHasItsOwnStatusColour(t *testing.T) {
+	m := NewPipelineModel(theme.NewTheme(""), nil, model.PipelineMetrics{}, t.TempDir(), 120, 30)
+	colours := m.statusColorMap()
+	spec, ok := colours["speculative"]
+	if !ok {
+		t.Fatal("speculative has no status colour")
+	}
+	for status, c := range colours {
+		if status != "speculative" && c == spec {
+			t.Fatalf("speculative shares its colour with %q", status)
+		}
+	}
+}
+
+// Company and role do not identify a tracker row. Two report-less rows for one
+// company and role — a leveled variant and its bare title — both match the
+// restore, so a status change that reorders them could leave the cursor on the
+// sibling. A retry after a partial save writes to whatever the cursor is on, so
+// the restore has to prefer the row's own identity (#7331 review).
+func TestWithReloadedDataRestoresTheSameRowAmongSiblings(t *testing.T) {
+	initial := []model.CareerApplication{
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Interview"},
+		{Number: 33, Company: "Inbound Co", Role: "Senior Engineer", Status: "Applied"},
+	}
+	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
+	pm.sortMode = sortStatus
+	pm.applyFilterAndSort()
+
+	idx := -1
+	for i, app := range pm.filtered {
+		if app.Number == 32 {
+			idx = i
+		}
+	}
+	if idx == -1 {
+		t.Fatal("premise: #32 is visible")
+	}
+	pm.cursor = idx
+	if app, _ := pm.CurrentApp(); app.Number != 32 {
+		t.Fatalf("premise: the cursor is on #32, got #%d", app.Number)
+	}
+
+	// #32 moves to Discarded, which sorts it behind its Applied sibling.
+	refreshed := []model.CareerApplication{
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Discarded"},
+		{Number: 33, Company: "Inbound Co", Role: "Senior Engineer", Status: "Applied"},
+	}
+	reloaded := pm.WithReloadedData(refreshed, model.PipelineMetrics{Total: len(refreshed)})
+
+	app, ok := reloaded.CurrentApp()
+	if !ok {
+		t.Fatal("no row selected after the reload")
+	}
+	if app.Number != 32 {
+		t.Fatalf("the cursor moved to #%d; a retry would write to the wrong row", app.Number)
+	}
+}
+
+// A row with no identity at all still falls back to company and role, which is
+// better than an index into a re-sorted table.
+func TestWithReloadedDataFallsBackToCompanyAndRole(t *testing.T) {
+	initial := []model.CareerApplication{
+		{Number: 1, TrackerNumberMissing: true, Company: "Acme", Role: "AI", Status: "Evaluated"},
+		{Number: 2, TrackerNumberMissing: true, Company: "Globex", Role: "Platform", Status: "Evaluated"},
+	}
+	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
+	pm.applyFilterAndSort()
+	for i, app := range pm.filtered {
+		if app.Company == "Globex" {
+			pm.cursor = i
+		}
+	}
+
+	reloaded := pm.WithReloadedData([]model.CareerApplication{
+		{Number: 1, TrackerNumberMissing: true, Company: "Zzz Co", Role: "Ops", Status: "Evaluated"},
+		{Number: 2, TrackerNumberMissing: true, Company: "Acme", Role: "AI", Status: "Evaluated"},
+		{Number: 3, TrackerNumberMissing: true, Company: "Globex", Role: "Platform", Status: "Evaluated"},
+	}, model.PipelineMetrics{Total: 3})
+
+	app, ok := reloaded.CurrentApp()
+	if !ok || app.Company != "Globex" {
+		t.Fatalf("want the Globex row selected, got %+v (ok=%v)", app, ok)
+	}
+}
+
+// A duplicate tracker # (#1704) makes several unrelated rows answer to the same
+// `--row 32`. Identity alone cannot pick between them, so company and role
+// decide among exactly those rows.
+//
+// The fixture forces BOTH fields to be used: one twin shares only the company,
+// another only the role, so narrowing on either alone stays ambiguous. A fourth
+// row shares both fields but carries a different #, to check that narrowing
+// never reaches outside the identity matches.
+func TestWithReloadedDataPicksAmongRowsSharingATrackerNumber(t *testing.T) {
+	initial := []model.CareerApplication{
+		{Number: 32, Company: "Acme", Role: "Engineer", Status: "Interview"},
+		{Number: 32, Company: "Acme", Role: "Analyst", Status: "Interview"},
+		{Number: 32, Company: "Zeta", Role: "Engineer", Status: "Interview"},
+		{Number: 40, Company: "Acme", Role: "Engineer", Status: "Interview"},
+	}
+	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
+	pm.applyFilterAndSort()
+	for i, app := range pm.filtered {
+		if app.Number == 32 && app.Company == "Acme" && app.Role == "Engineer" {
+			pm.cursor = i
+		}
+	}
+	if app, _ := pm.CurrentApp(); app.Number != 32 || app.Company != "Acme" || app.Role != "Engineer" {
+		t.Fatalf("premise: the cursor is on #32 Acme/Engineer, got #%d %s/%s", app.Number, app.Company, app.Role)
+	}
+
+	// The selected row is now last among the rows answering to `--row 32`, so a
+	// first-match restore would land on a twin.
+	reloaded := pm.WithReloadedData([]model.CareerApplication{
+		{Number: 32, Company: "Zeta", Role: "Engineer", Status: "Interview"},
+		{Number: 40, Company: "Acme", Role: "Engineer", Status: "Interview"},
+		{Number: 32, Company: "Acme", Role: "Analyst", Status: "Interview"},
+		{Number: 32, Company: "Acme", Role: "Engineer", Status: "Discarded"},
+	}, model.PipelineMetrics{Total: 4})
+
+	app, ok := reloaded.CurrentApp()
+	if !ok {
+		t.Fatal("no row selected after the reload")
+	}
+	if app.Number != 32 || app.Company != "Acme" || app.Role != "Engineer" {
+		t.Fatalf("the cursor moved to #%d %s/%s; want #32 Acme/Engineer", app.Number, app.Company, app.Role)
+	}
+}
+
+// Ambiguity is a property of the tracker, not of the visible rows. A tab filter
+// that hides a row's twin must not make a duplicate # look like a unique match.
+func TestWithReloadedDataCountsDuplicateTrackerNumbersOutsideTheFilter(t *testing.T) {
+	interviewTab := 0
+	for i, tab := range getPipelineTabs() {
+		if tab.filter == filterInterview {
+			interviewTab = i
+		}
+	}
+	// Gamma keeps the retained index pointing somewhere other than Beta, so the
+	// identity restore and the index fallback name different rows.
+	initial := []model.CareerApplication{
+		{Number: 32, Company: "Beta", Role: "Analyst", Status: "Interview"},
+		{Number: 32, Company: "Delta", Role: "Platform", Status: "Interview"},
+		{Number: 41, Company: "Gamma", Role: "Data", Status: "Interview"},
+	}
+	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
+	pm.activeTab = interviewTab
+	pm.applyFilterAndSort()
+	for i, app := range pm.filtered {
+		if app.Company == "Delta" {
+			pm.cursor = i
+		}
+	}
+	if app, _ := pm.CurrentApp(); app.Company != "Delta" {
+		t.Fatalf("premise: the cursor is on Delta, got %q", app.Company)
+	}
+	if pm.cursor != 1 {
+		t.Fatalf("premise: Delta sits at index 1, got %d", pm.cursor)
+	}
+
+	// Delta leaves the Interview tab, so Beta is the only visible `--row 32` —
+	// but the tracker still holds two, so the selector is still ambiguous.
+	reloaded := pm.WithReloadedData([]model.CareerApplication{
+		{Number: 32, Company: "Beta", Role: "Analyst", Status: "Interview"},
+		{Number: 32, Company: "Delta", Role: "Platform", Status: "Rejected"},
+		{Number: 41, Company: "Gamma", Role: "Data", Status: "Interview"},
+	}, model.PipelineMetrics{Total: 3})
+
+	app, ok := reloaded.CurrentApp()
+	if !ok {
+		t.Fatal("no row selected after the reload")
+	}
+	if app.Company == "Beta" {
+		t.Fatal("the cursor landed on the hidden twin's row Beta; it is a different opening")
+	}
+	if app.Company != "Gamma" {
+		t.Fatalf("want the retained index (Gamma), got %q", app.Company)
+	}
+}
+
+// A merge that attaches a report link to the selected row changes which selector
+// a write would prefer, from `--row 32` to `--report-link 7`. The row is the same
+// one, so the cursor must stay on it.
+func TestWithReloadedDataFollowsARowThatGainsAReportLink(t *testing.T) {
+	initial := []model.CareerApplication{
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Evaluated"},
+		{Number: 33, Company: "Other Co", Role: "Ops", Status: "Evaluated"},
+	}
+	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
+	pm.applyFilterAndSort()
+	for i, app := range pm.filtered {
+		if app.Number == 32 {
+			pm.cursor = i
+		}
+	}
+
+	// #32 now links report #7, and sorts second, so the retained index alone
+	// would select the other row.
+	reloaded := pm.WithReloadedData([]model.CareerApplication{
+		{Number: 33, Company: "Other Co", Role: "Ops", Status: "Evaluated"},
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Evaluated", ReportNumber: "7"},
+	}, model.PipelineMetrics{Total: 2})
+
+	app, ok := reloaded.CurrentApp()
+	if !ok {
+		t.Fatal("no row selected after the reload")
+	}
+	if app.Number != 32 {
+		t.Fatalf("the cursor moved to #%d; the row only gained a report link", app.Number)
+	}
+}
+
+// When an identified row is gone from the filtered list, a sibling sharing its
+// company and role is a different opening. Fall through to the index instead of
+// selecting it: the cursor is what a retry after a partial save writes to.
+func TestWithReloadedDataDoesNotFallBackToASiblingOfAnIdentifiedRow(t *testing.T) {
+	// No scores, so the default score sort is stable and keeps input order.
+	initial := []model.CareerApplication{
+		{Number: 33, Company: "Inbound Co", Role: "Senior Engineer", Status: "Interview"},
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Interview"},
+		{Number: 40, Company: "Zeta", Role: "Ops", Status: "Interview"},
+	}
+	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
+	pm.applyFilterAndSort()
+	for i, app := range pm.filtered {
+		if app.Number == 32 {
+			pm.cursor = i
+		}
+	}
+	if pm.cursor != 1 {
+		t.Fatalf("premise: #32 sits at index 1, got %d", pm.cursor)
+	}
+
+	// #32 is gone from the reloaded set; its sibling #33 is now at index 0, so
+	// the company-and-role fallback and the retained index name different rows.
+	reloaded := pm.WithReloadedData([]model.CareerApplication{
+		{Number: 33, Company: "Inbound Co", Role: "Senior Engineer", Status: "Interview"},
+		{Number: 40, Company: "Zeta", Role: "Ops", Status: "Interview"},
+	}, model.PipelineMetrics{Total: 2})
+
+	app, ok := reloaded.CurrentApp()
+	if !ok {
+		t.Fatal("no row selected after the reload")
+	}
+	if app.Number == 33 {
+		t.Fatal("the cursor landed on the sibling #33; a status write there hits a different opening")
+	}
+	if app.Number != 40 {
+		t.Fatalf("want the retained index (#40), got #%d", app.Number)
+	}
+}
+
+// Two rows alike in #, company AND role are indistinguishable to every signal
+// the dashboard has. If the selected one leaves the tab, narrowing must not
+// hand the cursor to the visible twin — a status write there targets the twin's
+// report.
+func TestWithReloadedDataWillNotNarrowOntoAHiddenRowsIdenticalTwin(t *testing.T) {
+	interviewTab := 0
+	for i, tab := range getPipelineTabs() {
+		if tab.filter == filterInterview {
+			interviewTab = i
+		}
+	}
+	// Both #32 rows carry the same company and role; Gamma keeps the retained
+	// index pointing somewhere other than the twin.
+	initial := []model.CareerApplication{
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Interview"},
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Interview", Notes: "the selected one"},
+		{Number: 41, Company: "Gamma", Role: "Data", Status: "Interview"},
+	}
+	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
+	pm.activeTab = interviewTab
+	pm.applyFilterAndSort()
+	for i, app := range pm.filtered {
+		if app.Notes == "the selected one" {
+			pm.cursor = i
+		}
+	}
+	if pm.cursor != 1 {
+		t.Fatalf("premise: the selected twin sits at index 1, got %d", pm.cursor)
+	}
+
+	// The selected twin leaves the Interview tab.
+	reloaded := pm.WithReloadedData([]model.CareerApplication{
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Interview"},
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Rejected", Notes: "the selected one"},
+		{Number: 41, Company: "Gamma", Role: "Data", Status: "Interview"},
+	}, model.PipelineMetrics{Total: 3})
+
+	app, ok := reloaded.CurrentApp()
+	if !ok {
+		t.Fatal("no row selected after the reload")
+	}
+	if app.Number == 32 {
+		t.Fatal("the cursor landed on the hidden row's identical twin; a write there hits the twin")
+	}
+	if app.Company != "Gamma" {
+		t.Fatalf("want the retained index (Gamma), got %q", app.Company)
 	}
 }

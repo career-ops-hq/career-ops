@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Cover Letter — {{NAME}}</title>
+<title>Cover Letter - {{NAME}}</title>
 <style>
   /* Themeable tokens (#1837): overridable via config/profile.yml `style:`, which
      the PDF pipeline injects as a later :root block. Defaults reproduce the
      original hardcoded values, so a profile without a `style:` block is unchanged. */
   :root {
     --accent-color: #1A56A0;
-    --font-family: "Helvetica", Arial, sans-serif;
+    --font-family: "Helvetica", Arial, "Arial Unicode MS", sans-serif;
     --font-size: 10pt;
     /* Matches generate-pdf.mjs's PDF_PAGE_MARGIN — the actual PDF page margin
        comes from the later @page rule injectPrintPageCss appends (which reads
@@ -84,6 +84,10 @@
     margin-bottom: 12pt;
   }
 
+  .recipient {
+    margin-bottom: 12pt;
+  }
+
   .greeting {
     margin-bottom: 8pt;
   }
@@ -100,13 +104,14 @@
   .achievements li {
     margin-bottom: 5pt;
     padding-left: 14pt;
-    position: relative;
+    text-indent: -14pt;
   }
 
   .achievements li::before {
     content: "\2022";
-    position: absolute;
-    left: 0;
+    display: inline-block;
+    width: 14pt;
+    text-indent: 0;
   }
 
   .language-closing {
@@ -142,6 +147,7 @@
 
   <div class="role-title">Cover Letter: {{ROLE_TITLE}}</div>
   <div class="dateline">{{DATELINE}}</div>
+  {{RECIPIENT_BLOCK}}
 
   {{GREETING_BLOCK}}
   <p>{{OPENING}}</p>

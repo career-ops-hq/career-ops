@@ -32,6 +32,7 @@ import { num } from './lib/api.mjs';
 import * as localBackend from './lib/index.mjs';
 import { readCache, writeCache } from './lib/cache.mjs';
 import { classifyTier } from './lib/tier.mjs';
+import { cleanForDisplay } from './lib/clean.mjs';
 
 // Set once main() has chosen a backend. Null while unchosen and after a failed
 // choice, which is what lets the error handler report a source of null instead
@@ -95,19 +96,6 @@ function sourceRef(employerId) {
     : `${backend.source}/employers`;
 }
 
-// Text from the backend goes through this before any non-JSON output, whether
-// it came from an endpoint or off the index: collapse whitespace so a line
-// stays a line, then strip C0, DEL, and C1 control characters so a crafted
-// name cannot smuggle terminal escapes or forged rows into the text output.
-// JSON output keeps the raw fields. The collapse
-// runs first because newlines and tabs are control chars too, and stripping
-// them before the collapse would glue words together instead of separating
-// them; what survives the collapse (ESC, BEL, DEL, C1) is not whitespace.
-// eslint-disable-next-line no-control-regex
-const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/g;
-function displayClean(s) {
-  return String(s || '').replace(/\s+/g, ' ').replace(CONTROL_CHARS, '').trim();
-}
 
 // What the numbers in a cache entry MEAN, versioned. An entry written before
 // this bump carries a certified count in `n_lca`, because that is what the
@@ -128,27 +116,34 @@ async function writeCacheSafe(name, data, opts) {
   try {
     await writeCache(name, { ...data, schema: CACHE_SCHEMA }, opts);
   } catch (err) {
-    const msg = displayClean((err && err.message) ? err.message : err);
+    const msg = cleanForDisplay((err && err.message) ? err.message : err);
     process.stderr.write(`h1b-sponsor: cache write failed (${msg}); continuing without cache\n`);
   }
 }
 
+const CHECK_USAGE = 'Usage: node plugins/h1b-sponsor/check.mjs <company-name> [--json|--summary] [--refresh] [--search] [--cache-dir <path>]\n';
+
 function parseArgs(argv) {
-  const args = { name: null, format: 'summary', refresh: false, cacheDir: null, search: false };
+  const args = { name: null, format: 'summary', refresh: false, cacheDir: null, search: false, help: false, error: null };
   const rest = [];
+  const known = new Set(['--json', '--summary', '--refresh', '--search', '--cache-dir', '--help', '-h']);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--json') args.format = 'json';
+    if (a === '--help' || a === '-h') args.help = true;
+    else if (a === '--json') args.format = 'json';
     else if (a === '--summary') args.format = 'summary';
     else if (a === '--refresh') args.refresh = true;
     else if (a === '--search') args.search = true;
-    else if (a === '--cache-dir') {
-      // Consumes the following argument so it is never read as the company name.
-      const next = argv[i + 1];
-      if (typeof next === 'string' && next.trim()) args.cacheDir = next;
-      i++;
+    else if (a === '--cache-dir' || a.startsWith('--cache-dir=')) {
+      const next = a.startsWith('--cache-dir=') ? a.slice('--cache-dir='.length) : argv[i + 1];
+      if (!a.startsWith('--cache-dir=')) i++;
+      if (typeof next !== 'string' || !next.trim() || next.startsWith('-')) {
+        args.error = 'Error: --cache-dir needs a path';
+      } else args.cacheDir = next;
     } else if (a.startsWith('-')) {
-      // unknown flag - ignore silently for forward compatibility
+      const name = a.split('=')[0];
+      if (!known.has(name)) args.error = `Error: unrecognized flag: ${name}`;
+      else if (a.includes('=')) args.error = `Error: ${name} does not take a value`;
     } else rest.push(a);
   }
   args.name = rest.join(' ').trim();
@@ -157,7 +152,7 @@ function parseArgs(argv) {
 
 
 function formatSummary(result) {
-  const clean = displayClean;
+  const clean = cleanForDisplay;
   if (!result.found) return `unknown: ${clean(result.displayName) || 'unknown company'}`;
   const t = result.totals || {};
   const range = (t.first_year && t.last_year)
@@ -223,7 +218,7 @@ function emit(format, obj) {
 // may need to pick the exact one. Each listed name is checkable on its own: an
 // exact name resolves straight to that entity.
 function emitSearch(format, query, total, results) {
-  const clean = displayClean;
+  const clean = cleanForDisplay;
   if (format === 'json') {
     process.stdout.write(JSON.stringify({ query, total, shown: results.length, results }, null, 2) + '\n');
     return;
@@ -240,9 +235,17 @@ function emitSearch(format, query, total, results) {
 }
 
 async function main() {
-  const { name, format, refresh, cacheDir, search } = parseArgs(process.argv.slice(2));
+  const { name, format, refresh, cacheDir, search, help, error } = parseArgs(process.argv.slice(2));
+  if (error) {
+    process.stderr.write(`${error}\n`);
+    process.exit(1);
+  }
+  if (help) {
+    process.stdout.write(CHECK_USAGE);
+    process.exit(0);
+  }
   if (!name) {
-    process.stderr.write('Usage: node plugins/h1b-sponsor/check.mjs <company-name> [--json|--summary] [--refresh] [--search] [--cache-dir <path>]\n');
+    process.stderr.write(CHECK_USAGE);
     process.exit(2);
   }
 
@@ -318,7 +321,7 @@ async function main() {
 main().catch(err => {
   // The message can embed up to 200 chars of API-controlled response body, and
   // the summary contract is one line: collapse all whitespace before printing.
-  const message = displayClean((err && err.message) ? err.message : err);
+  const message = cleanForDisplay((err && err.message) ? err.message : err);
   const argv = process.argv.slice(2);
   const format = argv.includes('--json') ? 'json' : 'summary';
   // Emit the full documented envelope even on error so consumers reading

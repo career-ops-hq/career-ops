@@ -1,5 +1,5 @@
 // tests/providers/mycareersfuture.test.mjs
-import { pass, fail, ROOT } from '../helpers.mjs';
+import { pass, fail, ROOT, rmSync } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'fs';
@@ -205,12 +205,20 @@ try {
     const withTmpCwd = async (setup, run) => {
       const tmp = mkdtempSync(join(tmpdir(), 'career-ops-mycareersfuture-fallback-'));
       const cwdBefore = process.cwd();
+      const rootEnvBefore = { root: process.env.CAREER_OPS_ROOT, dir: process.env.CAREER_OPS_DATA_DIR };
       try {
         setup(tmp);
         process.chdir(tmp);
+        process.env.CAREER_OPS_ROOT = tmp;
+        process.env.CAREER_OPS_DATA_DIR = '';
         return await run();
       } finally {
+        if (rootEnvBefore.root === undefined) delete process.env.CAREER_OPS_ROOT;
+        else process.env.CAREER_OPS_ROOT = rootEnvBefore.root;
+        if (rootEnvBefore.dir === undefined) delete process.env.CAREER_OPS_DATA_DIR;
+        else process.env.CAREER_OPS_DATA_DIR = rootEnvBefore.dir;
         process.chdir(cwdBefore);
+        rmSync(tmp, { recursive: true, force: true });
       }
     };
 
@@ -354,6 +362,28 @@ try {
       pass('mycareersfuture.fetch(): a failed keyword does not abort keywords that still succeed');
     } else {
       fail(`mycareersfuture.fetch() with one failing keyword returned ${JSON.stringify(fetched)}`);
+    }
+    // The failed keyword was never read, so the result says the board is
+    // partial: scan.mjs logs it partial instead of reachable.
+    if (fetched.truncated?.reason === 'fetch-error' && fetched.truncated.fetched === 1) {
+      pass('mycareersfuture.fetch(): a failed keyword marks the board partial (fetch-error)');
+    } else {
+      fail(`mycareersfuture.fetch() with one failing keyword: truncated = ${JSON.stringify(fetched.truncated)}`);
+    }
+
+    const complete = await mycareersfuture.fetch(
+      { provider: 'mycareersfuture', name: 'Both answer', mycareersfuture: { keywords: ['one', 'two'] } },
+      {
+        fetchJson: async (url, opts) => {
+          const search = JSON.parse(opts.body).search;
+          return { results: [{ ...record, title: search, metadata: { ...record.metadata, jobPostId: search } }] };
+        },
+      },
+    );
+    if (complete.length === 2 && complete.truncated === undefined) {
+      pass('mycareersfuture.fetch(): every keyword answering leaves the board unmarked');
+    } else {
+      fail(`mycareersfuture.fetch() with every keyword answering: ${complete.length} jobs, truncated = ${JSON.stringify(complete.truncated)}`);
     }
   }
 

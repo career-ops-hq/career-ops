@@ -32,6 +32,7 @@ Parse the JSON output:
 | `gaps` | `[{skill, reports, lowFitReports, lowFitShare, weightedScore, tier, sources}]` sorted by weighted score. Weight per report = `5.0 − score` (a 2.1/5 report says more about gaps than a 4.5/5 one); a skill counts once per report, not per mention |
 | `excludedAsKnown` | Skills found in report gaps but already present in `cv.md`/`config/profile.yml` |
 | `knownSkills` | The extracted known-skill set (for transparency) |
+| `skipBlockers` | `{window, skips, blockers: [{label, kind, skips, missing, partial, closeCalls, nudge, reports, wordings}]}`. The critical or high requirements marked `missing` or `partial` in the last `skips` SKIP or Discarded reports, from `requirement_importance`. Known skills are not subtracted: a `partial` on a CV skill means the CV evidence is thin. `nudge` is `learn` or `evidence`. Narrate it as "9 of your last 20 skips" |
 
 Tiers are fixed, explainable thresholds over the share of low-fit (score < 4.0) reports naming the gap — always narrate them that way ("named in 4/9 low-fit reports"), never as an opaque ranking.
 
@@ -71,7 +72,7 @@ Turn the eligible gaps into a resourced, actionable plan. This section is **pure
 
 **Search, budget, and liveness** (the full trust model is frozen in Rules):
 - Hard search budget: **max 2 searches per gap**, capped at **~12 searches per aggregate run**; always include the current year in the query.
-- **Write-time URL liveness:** liveness-check every cited URL at generation time using the check-liveness pattern (`node check-liveness.mjs <url> ...`, backed by `liveness-core.mjs`). Dead links never enter the report.
+- **Write-time URL liveness:** verify every cited resource URL with a lightweight navigation or fetch: require a successful HTTP response, a non-error title, and substantive page content. Reject 4xx/5xx responses, error/challenge pages, empty bodies, and redirects to unrelated destinations. Do not use `check-liveness.mjs` / `liveness-core.mjs`: their Apply-control heuristic is intentionally specific to job postings.
 - **Free-first with explicit failure:** if no free option surfaces for a gap, the plan SAYS so — it never silently substitutes a paid resource.
 - **Scope boundary:** the plan LINKS each resource to `/career-ops training {name}` for a full judging pass; it never runs training's 6-dimension scoring itself. `upskill` finds; `training` judges.
 
@@ -162,7 +163,7 @@ These eight rules are non-negotiable; each is frozen as a CI assertion so a futu
 1. **Search-result-or-nothing (grounding).** Every resource must come from an actual web-search result — never invented from memory. On a cheap model, or when WebSearch is unavailable or weak, **skip the Learning Plan section and say so explicitly** in the report.
 2. **Deterministic degradation.** When search is skipped or weak, the heatmap + Suggested Order still ship WITHOUT resources and the report states why — the plan is purely additive, so its absence never breaks the rest of the report.
 3. **Ephemeral / non-versioned resources.** Resources are regenerated fresh every run, never diffed, never revalidated across runs; only gap-tier changes are stable across reports. The report carries a one-line disclaimer stating this.
-4. **Write-time URL liveness.** Every cited URL gets a cheap liveness check at generation using the check-liveness pattern (`check-liveness.mjs` / `liveness-core.mjs`); dead links never enter the report, and the artifact carries a one-line staleness disclaimer.
+4. **Write-time URL liveness.** Every cited resource gets a lightweight navigation or fetch at generation time. Require a successful HTTP response, a non-error title, and substantive page content; reject 4xx/5xx responses, error/challenge pages, empty bodies, and redirects to unrelated destinations. The job-posting-only `check-liveness.mjs` / `liveness-core.mjs` Apply-control heuristic must not classify learning resources. Dead links never enter the report, and the artifact carries a one-line staleness disclaimer.
 5. **Hard search budget.** Max 2 searches per gap, capped at ~12 searches per aggregate run; always include the current year in queries.
 6. **Free-first with explicit failure.** If no free option is found for a gap, the plan SAYS so — it never silently substitutes a paid resource.
 7. **Effort from stated length only.** Effort estimates come only from the resource's own stated length — never invented.

@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { estimateCost } from '../utils/token-tracker.mjs';
+import { estimateCost, formatK } from '../utils/token-tracker.mjs';
 import { isMainModule } from '../lib/is-main-module.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -23,9 +23,6 @@ export function parseTokenVal(str) {
   return parseInt(str, 10) || 0;
 }
 
-function formatK(tokens) {
-  return (tokens / 1000).toFixed(1) + 'k';
-}
 
 function main() {
   if (!fs.existsSync(STATE_FILE)) {
@@ -241,6 +238,18 @@ function main() {
   console.log(`  ${padTotal}${formatK(grandTotalTokens)} tokens ($${grandCost.toFixed(4)})\n`);
 }
 
+const USAGE = `Usage: node batch/aggregate-tokens.mjs
+
+Prints the token usage and estimated cost of the last batch run, per worker
+and in total, from batch/batch-state.tsv, the worker logs in batch/logs/ and
+the report names in reports/. batch-runner.sh runs it at the end of a batch.
+It writes nothing.`;
+
 if (isMainModule(import.meta.url)) {
-  main();
+  // --help used to fall through and print the last batch's breakdown instead.
+  if (process.argv.includes('--help') || process.argv.includes('-h')) {
+    process.stdout.write(`${USAGE}\n`);
+  } else {
+    main();
+  }
 }

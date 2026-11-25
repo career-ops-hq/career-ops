@@ -1,0 +1,10 @@
+# Copy is not required: career-profile.mjs creates data/career-profile.yml
+# after explicit review. This is the v1 shape of the generated user-layer file.
+schema_version: 1
+candidate: {}
+summary: []
+experiences: []
+projects: []
+education: []
+certifications: []
+skills: []

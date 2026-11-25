@@ -11,8 +11,8 @@
 // mutation, and a community plugin whose files changed since you trusted it
 // WITHOUT a version bump (the postmark-mcp class). Stated plainly in README.
 
-import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync, readdirSync, lstatSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, writeFileSync, readdirSync, lstatSync, renameSync, rmSync } from 'node:fs';
 import path from 'node:path';
 
 const LOCK_VERSION = 1;
@@ -29,13 +29,17 @@ function sha256(buf) {
  * Hash EVERY regular file in a plugin directory tree, recursively. NOT a curated
  * subset — the entry can `import('./anything.mjs')`, so a partial hash would let
  * a rug-pull mutate an un-hashed file. Rejects symlinks (a symlinked file would
- * pass the hash while pointing elsewhere). Excludes node_modules + .git.
+ * pass the hash while pointing elsewhere). Excludes .git, which git refuses to
+ * check out below a clone's root, and node_modules, which a developer's linked
+ * checkout fills with dependencies and symlinks. A community plugin cannot pin
+ * one: install runs plugin-audit.mjs, which fails any tree containing
+ * node_modules. `files` has no prototype, so a file named `__proto__` is kept.
  *
  * @param {string} dir absolute plugin directory
  * @returns {{ files: Record<string,string>, integrity: string }}
  */
 export function hashPluginTree(dir) {
-  const files = {};
+  const files = Object.create(null);
   const walk = (abs, rel) => {
     let entries;
     try { entries = readdirSync(abs, { withFileTypes: true }); }
@@ -71,17 +75,48 @@ export function readLock(root) {
   }
 }
 
+// A torn file is not an empty lock. Reading it as empty and writing it back
+// would drop every other pin.
+export function readLockForUpdate(root) {
+  const file = lockPath(root);
+  if (!existsSync(file)) return { lockfileVersion: LOCK_VERSION, plugins: {} };
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    throw new Error(`plugins.lock at ${file} is not valid JSON, so it was left unchanged.`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !parsed.plugins || typeof parsed.plugins !== 'object' || Array.isArray(parsed.plugins)) {
+    throw new Error(`plugins.lock at ${file} has no plugins map, so it was left unchanged.`);
+  }
+  return parsed;
+}
+
+function saveLock(root, lock) {
+  const file = lockPath(root);
+  const tmp = path.join(root, `.plugins.lock.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    writeFileSync(tmp, JSON.stringify(lock, null, 2) + '\n', 'utf8');
+    renameSync(tmp, file);
+  } catch (err) {
+    try { rmSync(tmp, { force: true }); } catch { /* the temp file may not exist */ }
+    throw err;
+  }
+}
+
 /** Merge a single entry into plugins.lock (never clobber other plugins' entries). */
 export function writeLockEntry(root, id, entry) {
-  const lock = readLock(root);
+  const lock = readLockForUpdate(root);
   lock.lockfileVersion = LOCK_VERSION;
   lock.plugins[id] = entry;
-  writeFileSync(lockPath(root), JSON.stringify(lock, null, 2) + '\n', 'utf8');
+  saveLock(root, lock);
 }
 
 export function removeLockEntry(root, id) {
-  const lock = readLock(root);
-  if (lock.plugins[id]) { delete lock.plugins[id]; writeFileSync(lockPath(root), JSON.stringify(lock, null, 2) + '\n', 'utf8'); }
+  const lock = readLockForUpdate(root);
+  if (!lock.plugins[id]) return;
+  delete lock.plugins[id];
+  saveLock(root, lock);
 }
 
 /**
@@ -89,10 +124,14 @@ export function removeLockEntry(root, id) {
  * `source` is derived by the CALLER from the filesystem (bundled vs local) —
  * NEVER trusted from the lock (a USER-writable file could spoof it).
  *
- * @returns {{ status: 'unpinned'|'match'|'drift-nobump'|'legit-update'|'surface-widened', changedFiles: string[], addedHosts: string[], addedEnv: string[] }}
+ * `changedFiles` is the union of `modified` (in the lock and now different),
+ * `added` (not in the lock) and `removed` (in the lock, gone from the tree).
+ *
+ * @returns {{ status: 'unpinned'|'match'|'drift-nobump'|'legit-update'|'surface-widened', changedFiles: string[], modified: string[], added: string[], removed: string[], addedHosts: string[], addedEnv: string[] }}
  */
 export function diffPlugin(manifest, lockEntry) {
-  if (!lockEntry) return { status: 'unpinned', changedFiles: [], addedHosts: [], addedEnv: [] };
+  const none = { changedFiles: [], modified: [], added: [], removed: [] };
+  if (!lockEntry) return { status: 'unpinned', ...none, addedHosts: [], addedEnv: [] };
   const tree = hashPluginTree(manifest.dir);
   const addedHosts = (manifest.allowedHosts || []).filter(h => !(lockEntry.consent?.allowedHosts || []).includes(h));
   const addedEnv = (manifest.requiredEnv || []).filter(e => !(lockEntry.consent?.requiredEnv || []).includes(e));
@@ -101,17 +140,67 @@ export function diffPlugin(manifest, lockEntry) {
 
   if (tree.integrity === lockEntry.integrity) {
     return surfaceWidened
-      ? { status: 'surface-widened', changedFiles: [], addedHosts, addedEnv }
-      : { status: 'match', changedFiles: [], addedHosts, addedEnv };
+      ? { status: 'surface-widened', ...none, addedHosts, addedEnv }
+      : { status: 'match', ...none, addedHosts, addedEnv };
   }
   // Files changed. Which?
   const prev = lockEntry.files || {};
   const changedFiles = [...new Set([...Object.keys(tree.files), ...Object.keys(prev)])]
     .filter(f => tree.files[f] !== prev[f]);
-  if (surfaceWidened) return { status: 'surface-widened', changedFiles, addedHosts, addedEnv };
+  const inTree = f => Object.hasOwn(tree.files, f);
+  const inLock = f => Object.hasOwn(prev, f);
+  const drift = {
+    changedFiles,
+    modified: changedFiles.filter(f => inTree(f) && inLock(f)).sort(),
+    added: changedFiles.filter(f => inTree(f) && !inLock(f)).sort(),
+    removed: changedFiles.filter(f => !inTree(f)).sort(),
+  };
+  if (surfaceWidened) return { status: 'surface-widened', ...drift, addedHosts, addedEnv };
   // A version bump distinguishes an honest update from a stealth mutation.
   const bumped = compareVersions(manifest.version, lockEntry.version) > 0;
-  return { status: bumped ? 'legit-update' : 'drift-nobump', changedFiles, addedHosts, addedEnv };
+  return { status: bumped ? 'legit-update' : 'drift-nobump', ...drift, addedHosts, addedEnv };
+}
+
+const DRIFT_LIST_CAP = 5;
+
+/**
+ * One-line account of a drifted tree for the tamper warning. Paths of each kind
+ * (modified, removed, added) are grouped: a file at the plugin root is named,
+ * every other path counts toward its top-level directory, and a directory with
+ * a single changed file names that file. A worktree or a log directory
+ * therefore reads as one item whichever kind its files fall under, and an edit
+ * to a root file always has an item of its own. The hash itself is
+ * untouched: this only describes it.
+ *
+ * @param {{ modified: string[], added: string[], removed: string[] }} drift
+ * @returns {string}
+ */
+export function describeDrift({ modified, added, removed }) {
+  const group = (paths) => {
+    const roots = [];
+    const dirs = new Map();
+    for (const f of paths) {
+      const slash = f.indexOf('/');
+      if (slash === -1) roots.push(f);
+      else {
+        const dir = f.slice(0, slash + 1);
+        dirs.set(dir, [...(dirs.get(dir) || []), f]);
+      }
+    }
+    const byName = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+    const items = [
+      ...roots.sort(byName),
+      ...[...dirs].sort(([a, fa], [b, fb]) => fb.length - fa.length || byName(a, b))
+        .map(([d, files]) => (files.length === 1 ? files[0] : `${d} (${files.length})`)),
+    ];
+    return items.slice(0, DRIFT_LIST_CAP).join(', ') +
+      (items.length > DRIFT_LIST_CAP ? ` and ${items.length - DRIFT_LIST_CAP} more groups` : '');
+  };
+  const parts = [];
+  if (modified.length) parts.push(`${modified.length} modified: ${group(modified)}`);
+  if (removed.length) parts.push(`${removed.length} removed: ${group(removed)}`);
+  if (added.length) parts.push(`${added.length} added: ${group(added)}`);
+  return parts.join('; ');
 }
 
 function compareVersions(a, b) {

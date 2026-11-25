@@ -25,7 +25,7 @@ const MAX_JOBS = 500; // generous cap; the board is tiny
 
 /** @param {string} s */
 function clean(s) {
-  return decodeEntities(s.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(s.replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 }
 
 /** Resolve the vacancy-list URL from api:/careers_url; default the DE list. */
@@ -40,6 +40,10 @@ export function resolveListUrl(entry) {
   if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
   const host = u.host.toLowerCase();
   if (host !== 'heckler-koch.com' && !host.endsWith('.heckler-koch.com')) return null;
+  // The apex 301s to www and http 301s to https (same registrable domain). Pin
+  // both here so the transport's redirect:'error' never refuses a URL detect() accepts.
+  if (host === 'heckler-koch.com') u.host = 'www.heckler-koch.com';
+  u.protocol = 'https:';
   // A Stellenangebote path passes through; anything else on the host defaults.
   if (/Stellenangebote/i.test(u.pathname)) return `${u.origin}${u.pathname}`;
   return `${u.origin}/de/Karriere/Stellenangebote`;

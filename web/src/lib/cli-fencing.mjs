@@ -40,6 +40,23 @@ const CODEX_READ_ONLY = "read-only";
 const CODEX_WORKSPACE_WRITE = "workspace-write";
 
 /**
+ * Refuse Hermes for workers that write. This is a check by name, outside FENCERS,
+ * and it covers Hermes alone: every other runtime passes, including the ones
+ * absent from FENCERS, which still run write-capable workers with their default
+ * access (fencingReport reports them as unfenced). Hermes is limited to workers
+ * whose capability record has `writes: false` because career-ops has no verified
+ * way to translate that record into Hermes's own approval/sandbox controls.
+ *
+ * @param {string} cliId
+ * @param {import("./worker-capabilities.mjs").Capabilities} capabilities
+ * @returns {boolean}
+ */
+export function isCliAllowedForCapabilities(cliId, { writes }) {
+  return cliId !== "hermes" || !writes;
+}
+
+
+/**
  * Pick the Codex sandbox policy for a capability record.
  *
  * Note it is `network: "fetch"` — not web access as such — that forces
@@ -301,6 +318,134 @@ export const CODEX_REQUIRED_EXEC_FLAGS = Object.freeze([
 ]);
 
 /**
+ * Pi's built-in tools that only read. Pi has no sandbox; its permission
+ * mechanism is which tools the model is given, the same axis Claude's allow/deny
+ * lists use. `--tools` with plain names REPLACES the default selection (read,
+ * bash, edit, write), and Pi filters built-in, extension and custom tools against
+ * it when it registers them, so an extension cannot activate one the list drops.
+ * Read from earendil-works/pi `agent-session.ts` (`_isAllowedTool`) at v1.5.2.
+ */
+const PI_READ_TOOLS = Object.freeze(["read", "grep", "find", "ls"]);
+
+/**
+ * Pi has no web tool of its own: a worker that has to reach the web does it with
+ * `curl` through `bash`. Granting bash is what makes the run partial (see
+ * fencingReport), because the same shell can write anywhere the user can.
+ */
+const PI_SHELL_READ_TOOLS = Object.freeze(["read", "bash", "grep", "find", "ls"]);
+
+/**
+ * `--tools` does NOT remove MCP tools on Pi 1.0.4+. It keeps them registered for
+ * codemode and tool_search unless an allowlist entry starts with `mcp__`, and an
+ * MCP server can supply a write tool. Pi's own docs name `--exclude-tools
+ * 'mcp__*'` (or `--no-mcp`) as the way to remove them. The exclusion is used
+ * rather than `--no-mcp` because it parses on every Pi the web runs (PI_MIN_VERSION
+ * and later): from 0.99.0 to 1.0.3 `--tools` already removed MCP
+ * tools, and before 0.99.0 Pi had no built-in MCP, so the pattern matches nothing
+ * there. `--no-mcp` exists only from 1.0.4, and an older Pi exits on it with
+ * "Unknown option".
+ */
+const PI_MCP_EXCLUSION = "mcp__*";
+
+/**
+ * Keep the folder untrusted for this run, even when the user saved a `/trust`
+ * for it or set `defaultProjectTrust: always`. A trusted folder loads its
+ * project-local extensions, packages and settings, and an extension's own code
+ * runs with the user's full access, outside any tool allowlist. Matches the
+ * headless Pi command docs/SUPPORTED_CLIS.md gives after #7169. Pi added the
+ * flag in 0.79.0; see PI_MIN_VERSION for why the web needs 0.79.1.
+ */
+const PI_NO_PROJECT_TRUST = "--no-approve";
+
+/**
+ * The oldest Pi the web runs. spawnHeadlessCli refuses an older binary before it
+ * starts a worker, using `pi --version` (cli-fencing-probe.mjs), which exits
+ * before Pi loads any project files.
+ *
+ * - Before 0.79.0, Pi has no project trust and no `--no-approve`. It loads the
+ *   folder's `.pi/extensions` on every run, and it rejects the unknown flag only
+ *   after loading them (checked at v0.78.0: `resourceLoader.reload()` runs
+ *   before the unknown-flag check), so a project extension's code would run
+ *   before the run failed.
+ * - 0.79.0 skips AGENTS.md in an untrusted folder (`loadProjectContextFiles`
+ *   has a trust gate there and not at 0.79.1), so a `--no-approve` worker would
+ *   lose the project's instructions.
+ *
+ * Exported as DATA, like the Codex flag lists, so the probe checks the version
+ * this module's flags need.
+ */
+export const PI_MIN_VERSION = "0.79.1";
+
+/**
+ * Pi options that select tools or trust project files, i.e. options that decide
+ * this run's permissions. Short and long spellings both, from Pi's `args.ts`.
+ * The trust options are here because trusting the project loads project-local
+ * extensions and settings (see PI_NO_PROJECT_TRUST).
+ */
+const PI_PERMISSION_TOKENS = Object.freeze([
+  "--tools",
+  "-t",
+  "--exclude-tools",
+  "-xt",
+  "--no-tools",
+  "-nt",
+  "--no-builtin-tools",
+  "-nbt",
+  "--no-mcp",
+  "--approve",
+  "-a",
+  "--no-approve",
+  "-na",
+]);
+
+/**
+ * Refuse a Pi argv whose caller already chose its tools.
+ *
+ * Same contract as assertCodexArgvUnfenced: the prompt is the last element and
+ * is not scanned, and an option is matched by its name before any `=`.
+ *
+ * @param {string[]} args
+ */
+function assertPiArgvUnfenced(args) {
+  const spelled = args.slice(0, -1).find((arg) => PI_PERMISSION_TOKENS.includes(arg.split("=")[0]));
+  if (spelled !== undefined) {
+    throw new Error(
+      `cli-fencing: pi argv already spells ${JSON.stringify(spelled)}. ` +
+        "Permission belongs to the capability record, not the call site — declare it in worker-capabilities.mjs.",
+    );
+  }
+}
+
+/**
+ * Restrict Pi to the tools a capability record allows.
+ *
+ * A worker that does not write gets a `--tools` allowlist without `edit` or
+ * `write`, plus `--exclude-tools 'mcp__*'` and `--no-approve`. It gets `bash` only when it needs
+ * the web, since `bash` is Pi's only way there. So `pdf` (#2172) runs on read,
+ * grep, find and ls alone. A writing worker keeps Pi's default tools: its record
+ * grants writes and fetches, which is what those tools give.
+ *
+ * Global extensions (`~/.pi/agent/extensions`) still load, and their tools are
+ * filtered by the same allowlist. One that registers its own tool under an
+ * allowed name, such as `read`, is code the user installed for every Pi run, as
+ * Claude's fenced runs still load the user's own settings and hooks. The fence
+ * restricts what the model is handed, not the user's own setup.
+ *
+ * The flags go first. Pi's `-p` takes the element after it as the prompt, so
+ * nothing may be spliced between `-p` and the prompt.
+ *
+ * @param {string[]} args
+ * @param {import("./worker-capabilities.mjs").Capabilities} capabilities
+ * @returns {string[]}
+ */
+function fencePiArgs(args, { writes, network }) {
+  assertPiArgvUnfenced(args);
+  if (writes) return args;
+  const tools = network ? PI_SHELL_READ_TOOLS : PI_READ_TOOLS;
+  return ["--tools", tools.join(","), "--exclude-tools", PI_MCP_EXCLUSION, PI_NO_PROJECT_TRUST, ...args];
+}
+
+/**
  * Per-CLI fencing. The single table: a CLI is fenceable iff it appears here.
  *
  * The runtimes absent from this table are absent because nobody has verified a
@@ -320,6 +465,7 @@ export const CODEX_REQUIRED_EXEC_FLAGS = Object.freeze([
 const FENCERS = Object.freeze({
   claude: verifyClaudeArgs,
   codex: fenceCodexArgs,
+  pi: fencePiArgs,
 });
 
 /**
@@ -351,8 +497,9 @@ export function fencingReport({ cliId, cliName, capabilities }) {
       notice: `${cliName} ${UNFENCED_MARKER} — this agent runs with its default access`,
     };
   }
-  // Codex only. Claude expresses both axes as tool flags, so it is never partial:
-  // verifyClaudeArgs refuses any argv that does not deny what the record forbids.
+  // Codex and Pi only. Claude expresses both axes as tool flags, so it is never
+  // partial: verifyClaudeArgs refuses any argv that does not deny what the record
+  // forbids.
   //
   // "fetch", not any web access: a search-only worker reaches the web through the
   // model's own tool and keeps a genuine read-only sandbox, so grading it partial
@@ -362,6 +509,16 @@ export function fencingReport({ cliId, cliName, capabilities }) {
       level: "partial",
       notice: `${cliName} ${PARTIAL_MARKER}: this worker has to open urls it is handed, which its sandbox ` +
         "only allows alongside write access — its writes are confined to the project folder, not blocked",
+    };
+  }
+  // Pi has no web tool, so any web access, "search" included, comes through
+  // bash (fencePiArgs). Its shell is not sandboxed, so unlike Codex's writes they
+  // are not confined to the project folder.
+  if (cliId === "pi" && !capabilities.writes && capabilities.network) {
+    return {
+      level: "partial",
+      notice: `${cliName} ${PARTIAL_MARKER}: it has no web tool of its own, so this worker reaches the web ` +
+        "through its shell, which can also change files",
     };
   }
   return { level: "full", notice: null };
@@ -389,7 +546,7 @@ export function isFencingNotice(label) {
 /**
  * Apply this CLI's permission mechanism to an argv.
  *
- * A fenceable CLI's entry either rewrites the argv (codex: sandbox flags) or
+ * A fenceable CLI's entry either rewrites the argv (codex: sandbox flags; pi: a tool allowlist) or
  * verifies it (claude: its restriction is already in the flags the caller
  * spelled). Anything absent from FENCERS is passed through untouched — we have no
  * verified mechanism for those runtimes, and inventing one would be worse than
