@@ -206,7 +206,9 @@ export default {
     let truncated = false;
     let fetchFailed = false;
     let unparsablePage = false;
-    let unreadPostings = 0;
+    // Posting IDs a page linked to that no card has returned yet. A later page
+    // or query that returns one takes it off; any left at the end are missing.
+    const unreadIds = new Set();
     let unrestrictedPageReturned = false;
     let firstPageFailures = 0;
     let firstPageError;
@@ -279,13 +281,8 @@ export default {
             ...(coerceId(id) ? { externalId: /** @type {string} */ (coerceId(id)) } : {}),
           });
         }
-        // A posting the page links to that no card on this page or an earlier
-        // one returned: the walk goes on, but the result is not the whole board.
-        const unread = [...linkIds].filter((id) => !byId.has(id)).length;
-        if (unread > 0) {
-          unreadPostings += unread;
-          console.error(`⚠️  google: ${entry.name} could not read ${unread} of the ${postingLinks} posting(s) linked on page ${page} of ${q === '' ? 'the full board' : `"${q}"`}`);
-        }
+        for (const id of unreadIds) if (byId.has(id)) unreadIds.delete(id);
+        for (const id of linkIds) if (!byId.has(id)) unreadIds.add(id);
         // Stop at this query's last page: empty, re-served (no new posting
         // links), or short. "Short" counts every posting link on the page, not the parsed
         // cards, so one unparsable card on a full page does not end the walk.
@@ -306,7 +303,10 @@ export default {
     if (unparsablePage) {
       jobs = markTruncated(jobs, 'unparsable-page', { fetched: jobs.length });
     }
-    if (unreadPostings > 0) {
+    if (unreadIds.size > 0) {
+      // Linked on a page, but no card on any page returned it: the walk went
+      // on, but the result is not the whole board.
+      console.error(`⚠️  google: ${entry.name} could not read ${unreadIds.size} linked posting(s) (${jobs.length} read)`);
       jobs = markTruncated(jobs, 'unread-postings', { fetched: jobs.length });
     }
     if (fetchFailed) {

@@ -429,9 +429,20 @@ try {
       ? pass('a full page with one unparsable posting link is not read as short')
       : fail(`mixed full page: ${calls.length} calls, ${jobs.length} jobs`);
     jobs.truncated?.reason === 'unread-postings' && jobs.truncated?.fetched === PAGE_SIZE + 1
-      && unreadWarn.some((l) => /could not read 1 of the 20 posting\(s\) linked on page 1/.test(l))
+      && unreadWarn.some((l) => /could not read 1 linked posting\(s\) \(21 read\)/.test(l))
       ? pass('a linked posting no card returned marks the result partial and warns')
       : fail(`unread posting: truncated=${JSON.stringify(jobs.truncated)}`);
+    // Page 1 links a posting with no title anywhere; page 2 returns its card.
+    // Every posting is in the result, so it is not marked partial.
+    const titleless = `<!doctype html>${fullPageIds(5000).slice(0, PAGE_SIZE - 1).map((id) => link(id)).join('\n')}
+<a href="jobs/results/5999">x</a>`;
+    const { ctx: lateCtx, calls: lateCalls } = recordingCtx(({ n }) => (n === 0 ? titleless : linkPage(['5999', '6000'])));
+    let late;
+    const lateWarn = await captureErrors(async () => { late = await provider.fetch({ name: 'Google', google: { full_board: true } }, lateCtx); });
+    lateCalls.length === 2 && late.length === PAGE_SIZE + 1 && late.truncated === undefined
+      && !lateWarn.some((l) => /could not read/.test(l))
+      ? pass('a posting a later page returns is not left marked unread')
+      : fail(`late return: ${lateCalls.length} calls, ${late.length} jobs, truncated=${JSON.stringify(late.truncated)}`);
     // Single quotes, no slug, mixed case: the parser reads every link shape the counter counts.
     const shapes = `<!doctype html><h3>Single</h3><a href='jobs/results/71-single'>x</a>
 <h3>Bare</h3><A HREF=jobs/results/72>x</A>`;
