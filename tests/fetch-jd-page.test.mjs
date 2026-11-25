@@ -1,4 +1,4 @@
-// lib/jd-page-fetch.mjs — recovering a JD from the posting page's own JSON-LD
+// fetch-jd.mjs — recovering a JD from the posting page's own JSON-LD
 // when no ATS API covers the host (Phenom and bespoke career sites).
 //
 // Context: a live Robert Half posting came back from the web app as "Needs
@@ -8,8 +8,8 @@
 // the shell. Every case below is offline: fetch and DNS are stubbed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import * as awaitedModule from '../lib/jd-page-fetch.mjs';
-import { pageClosureEvidence, jdFromPageHtml, fetchJdFromPage, capJdText, markCappedAtsText, isLinkedInHost, MIN_PAGE_JD_WORDS, TRUNCATION_NOTICE } from '../lib/jd-page-fetch.mjs';
+import * as awaitedModule from '../fetch-jd.mjs';
+import { pageClosureEvidence, jdFromPageHtml, fetchJdFromPage, capJdText, markCappedAtsText, isLinkedInHost, MIN_PAGE_JD_WORDS, TRUNCATION_NOTICE } from '../fetch-jd.mjs';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -322,7 +322,7 @@ test('fetchJdFromPage fails closed when the connect-time lookup guard is opted o
   const root = fileURLToPath(new URL('../', import.meta.url));
   const script = `
     globalThis.fetch = async () => { console.log('FETCHED'); return new Response('<html></html>', { headers: { 'content-type': 'text/html' } }); };
-    const { fetchJdFromPage } = await import('./lib/jd-page-fetch.mjs');
+    const { fetchJdFromPage } = await import('./fetch-jd.mjs');
     console.log(String(await fetchJdFromPage('https://careers.example.com/job/1')));`;
   const run = (env) => spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: root, encoding: 'utf8', env: { ...process.env, ...env }, timeout: 20000 });
   const off = run({ CAREER_OPS_NO_DNS_CACHE: '1' });
@@ -387,7 +387,7 @@ test('rebinding over a real socket: public pre-check, loopback at connect time, 
     await new Promise((r) => server.once('listening', r));
     const { setHostResolver } = await import('./liveness-browser.mjs');
     setHostResolver(async () => ['93.184.216.34']);
-    const { fetchJdFromPage } = await import('./lib/jd-page-fetch.mjs');
+    const { fetchJdFromPage } = await import('./fetch-jd.mjs');
     const out = await fetchJdFromPage('http://rebind.example.com:' + server.address().port + '/job', 20000, 4000);
     // The guard itself, not just the end result: a lookup for the target made
     // inside the fetch context must be refused as a blocked address.
@@ -424,7 +424,7 @@ test('closure wording inside a script or style is not visible page text', async 
 
 test('NODE_USE_ENV_PROXY without CAREER_OPS_TRUST_PROXY_EGRESS fails closed', async () => {
   const { spawnSync } = await import('node:child_process');
-  const code = `import { fetchJdFromPage } from './lib/jd-page-fetch.mjs'; let hit=0; globalThis.fetch=async()=>{hit++;throw new Error('x')}; const out=await fetchJdFromPage('https://careers.example.com/job/1'); console.log(JSON.stringify({out,hit}));`;
+  const code = `import { fetchJdFromPage } from './fetch-jd.mjs'; let hit=0; globalThis.fetch=async()=>{hit++;throw new Error('x')}; const out=await fetchJdFromPage('https://careers.example.com/job/1'); console.log(JSON.stringify({out,hit}));`;
   const run = (env) => JSON.parse(spawnSync(process.execPath, ['--input-type=module', '-e', code], { cwd: fileURLToPath(new URL('..', import.meta.url)), env: { ...process.env, CAREER_OPS_NO_DNS_CACHE: '', ...env }, encoding: 'utf8' }).stdout.trim());
   assert.deepEqual(run({ NODE_USE_ENV_PROXY: '1', CAREER_OPS_TRUST_PROXY_EGRESS: '' }), { out: null, hit: 0 });
 });

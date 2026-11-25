@@ -17,7 +17,7 @@
 // A stub is not a posting. Same intent as MIN_JD_TEXT_CHARS in browser-extract.mjs.
 export const MIN_PREFETCH_JD_CHARS = 400;
 
-/** Does a prefetched JD carry the cut notice from lib/jd-page-fetch.mjs? Such text is not the whole posting. */
+/** Does a prefetched JD carry the cut notice from fetch-jd.mjs? Such text is not the whole posting. */
 export function isTruncatedJd(text) {
   return typeof text === "string" && /\[Job description truncated here:/.test(text);
 }

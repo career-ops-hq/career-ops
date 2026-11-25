@@ -20,7 +20,7 @@ import { readFileSync, writeFileSync, mkdtempSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { TRUNCATION_NOTICE, capJdText, markCappedAtsText } from '../lib/jd-page-fetch.mjs';
+import { TRUNCATION_NOTICE, capJdText, markCappedAtsText } from '../fetch-jd.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/\r\n/g, '\n');

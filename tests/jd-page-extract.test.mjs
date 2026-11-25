@@ -1,9 +1,9 @@
-// extractJd (lib/jd-page-fetch.mjs): the one place a fetched page becomes a JD.
+// extractJd (fetch-jd.mjs): the one place a fetched page becomes a JD.
 // Closure is a separate question (fetchedPageClosure), asked first.
 // Offline: every case is a string in, an answer out.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractJd, fetchedPageClosure } from '../lib/jd-page-fetch.mjs';
+import { extractJd, fetchedPageClosure } from '../fetch-jd.mjs';
 
 const URL_ = 'https://careers.example.com/jobs/staff-engineer-4471';
 const words = (n) => Array.from({ length: n }, (_, i) => `word${i}`).join(' ');

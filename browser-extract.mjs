@@ -51,7 +51,7 @@ import { LIVENESS_CONTEXT_OPTIONS, rejectPrivateOrInvalid } from './liveness-bro
 import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { resolveAtsApi, JD_TEXT_API_ATS } from './liveness-api.mjs';
 import { resolveHimalayasPosting, retrieveHimalayasPosting } from './himalayas-posting.mjs';
-import { fetchJdFromPage } from './lib/jd-page-fetch.mjs';
+import { fetchJdFromPage } from './fetch-jd.mjs';
 import { fetchJson } from './providers/_http.mjs';
 import { classifyLiveness, cloudflareInterstitial } from './liveness-core.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
