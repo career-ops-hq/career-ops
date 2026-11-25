@@ -116,6 +116,11 @@ test('CLI fail-open leaves an existing discard log byte-for-byte unchanged', () 
     assert.equal(result.discardLogged, false);
     assert.match(failed.stderr, /comp.*Proceeding/);
     assert.deepEqual(readFileSync(log), original);
+    const cadence = cli(profile, 'Title: Backend Engineer\n' + required + '\n## Compensation\nSalary: $40k (depending on experience and location) per month');
+    assert.equal(cadence.status, 0, cadence.stderr);
+    assert.equal(JSON.parse(cadence.stdout).verdict, 'proceed');
+    assert.equal(JSON.parse(cadence.stdout).discardLogged, false);
+    assert.deepEqual(readFileSync(log), original);
     const alternative = cli(profile, 'Title: Backend Engineer\n' + required + '\n## Compensation\nLocation A: $10k+\nLocation B: $105k');
     assert.equal(alternative.status, 0, alternative.stderr);
     assert.equal(JSON.parse(alternative.stdout).verdict, 'proceed');
@@ -129,4 +134,23 @@ test('CLI fail-open leaves an existing discard log byte-for-byte unchanged', () 
   } finally {
     rmSync(root, { recursive: true, force: true, maxRetries: 5 });
   }
+});
+
+for (const cadence of ['per month', 'per hour', 'per week', 'al mes', 'par mois', 'pro Monat']) {
+  test('salary cadence survives an intervening parenthetical: ' + cadence, () => {
+    const salary = '$40k (depending on experience and location) ' + cadence;
+    assert.equal(compScore('Salary: ' + salary).unknown, true);
+    const jd = 'Title: Backend Engineer\n' + required + '\n## Compensation\nSalary: ' + salary;
+    assert.equal(evaluate(jd).verdict, 'proceed');
+    assert.equal(evaluate(jd.replace(cadence, 'per year')).verdict, 'skip');
+  });
+}
+
+test('cadence lookup respects line and clause boundaries without truncating parentheses', () => {
+  assert.equal(compScore('Salary: $40k (depending on experience; location and other factors) per month').unknown, true);
+  assert.equal(compScore('Salary: $40k (depending on experience and location) per year; monthly team meeting').score, 1);
+  assert.equal(compScore('Salary: $40k (depending on experience and location)\nMonthly team meeting').score, 1);
+  const result = extractJdComp('Salary: $105k; '.repeat(2000) + 'Salary: $40k (' + 'details '.repeat(200) + ') per month');
+  assert.equal(result.annual.length, 2000);
+  assert.ok(result.nonAnnual);
 });

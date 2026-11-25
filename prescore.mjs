@@ -848,6 +848,44 @@ function figureContext(text, index, length) {
   };
 }
 
+// Index cadence once per same-line clause. Parenthetical details may be long
+// or contain semicolons; neither truncates the salary's cadence. Currency and
+// open-bound markers still use the bounded local context above.
+function nonAnnualClauseLookup(text) {
+  const ranges = [];
+  let start = 0;
+  let depth = 0;
+  const finish = (end) => {
+    if (NON_ANNUAL_RE.test(text.slice(start, end))) ranges.push([start, end]);
+    start = end + 1;
+  };
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (char === '\r' || char === '\n') {
+      finish(i);
+      depth = 0;
+    } else if (char === '(') {
+      depth++;
+    } else if (char === ')') {
+      depth = Math.max(0, depth - 1);
+    } else if (char === ';' && depth === 0) {
+      finish(i);
+    }
+  }
+  finish(text.length);
+  return (index) => {
+    let lo = 0;
+    let hi = ranges.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >>> 1;
+      if (index < ranges[mid][0]) hi = mid - 1;
+      else if (index >= ranges[mid][1]) lo = mid + 1;
+      else return true;
+    }
+    return false;
+  };
+}
+
 function isOpenLowerBound(before, after, hi) {
   return /^\s*\+/.test(after)
     || (!hi && /\b(?:from|starting\s+at|starts?\s+at|at\s+least)\s*$/i.test(before.trimEnd()));
@@ -952,6 +990,7 @@ function parseCapturedRange(lo, hi) {
  */
 export function extractJdComp(jdText) {
   const text = String(jdText ?? '');
+  const hasNonAnnualCadence = nonAnnualClauseLookup(text);
   const annual = [];
   let nonAnnual = null;
 
@@ -961,8 +1000,7 @@ export function extractJdComp(jdText) {
     const parsed = parseCapturedRange(lo, hi);
     if (!parsed) return;
     const { before, after } = figureContext(text, match.index, match[0].trimEnd().length);
-    const context = before + match[0] + after;
-    if (NON_ANNUAL_RE.test(context)) {
+    if (hasNonAnnualCadence(match.index)) {
       nonAnnual ??= { raw: match[0].trim() };
       return;
     }
