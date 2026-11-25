@@ -739,7 +739,8 @@ export function gateUrlJdResult(url, fetchResult, failure = null) {
  */
 export async function resolveUrlJdBody(url, { textCap = TEXT_CAP, timeoutMs = TIMEOUT_MS } = {}) {
   // Dynamic import: browser-extract pulls Playwright via liveness-browser.
-  const { fetchJdViaKnownApi, jdFailure } = await import('./browser-extract.mjs');
+  const { fetchJdViaKnownApi } = await import('./fetch-jd.mjs');
+  const { jdFailure } = await import('./browser-extract.mjs');
   const result = await fetchJdViaKnownApi(url, textCap, timeoutMs);
   const failure = result ? jdFailure(result, textCap) : null;
   return gateUrlJdResult(url, result, failure);

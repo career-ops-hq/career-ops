@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { normalizeUltiproJob, fetchJdViaKnownApi, JD_FETCHERS } from '../browser-extract.mjs';
+import { normalizeUltiproJob, fetchJdViaKnownApi, JD_FETCHERS } from '../fetch-jd.mjs';
 import { JD_TEXT_API_ATS } from '../liveness-api.mjs';
 import { fetchJdText } from '../jd-years.mjs';
 

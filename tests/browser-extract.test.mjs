@@ -12,12 +12,12 @@ console.log('\nbrowser-extract.mjs (config + normalizers)');
 try {
   const mod = await import(pathToFileURL(join(ROOT, 'browser-extract.mjs')).href);
   const { resolveAtsApi, JD_TEXT_API_ATS } = await import(pathToFileURL(join(ROOT, 'liveness-api.mjs')).href);
+  const { resolveExtractorMode, normalizeJd, normalizeListing, parseArgs } = mod;
   const {
-    resolveExtractorMode, compactText, normalizeJd, normalizeListing, parseArgs,
-    workdayCxsUrl, jdHtmlToText, normalizeWorkdayJob,
+    compactText, workdayCxsUrl, jdHtmlToText, normalizeWorkdayJob,
     normalizeAshbyJob, normalizeGreenhouseJob, normalizeLeverJob, normalizeSmartRecruitersJob,
     normalizeZohoJob, fetchJdViaKnownApi, resolveJdApi, JD_FETCHERS,
-  } = mod;
+  } = await import(pathToFileURL(join(ROOT, 'fetch-jd.mjs')).href);
 
   // resolveExtractorMode — default mcp, explicit cli, garbage → mcp, missing → mcp
   const tmp = mkdtempSync(join(tmpdir(), 'career-ops-extractor-'));

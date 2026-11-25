@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { fetchJdViaKnownApi } from '../browser-extract.mjs';
+import { fetchJdViaKnownApi } from '../fetch-jd.mjs';
 import { resolveAtsApi } from '../liveness-api.mjs';
 
 const bamboo = 'https://acme.bamboohr.com/careers/38?source=job-board';

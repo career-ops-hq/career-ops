@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { normalizeWorkableJob, fetchJdViaKnownApi, JD_FETCHERS } from '../browser-extract.mjs';
+import { normalizeWorkableJob, fetchJdViaKnownApi, JD_FETCHERS } from '../fetch-jd.mjs';
 import { JD_TEXT_API_ATS } from '../liveness-api.mjs';
 import { describeSpawn } from './helpers/describe-spawn.mjs';
 

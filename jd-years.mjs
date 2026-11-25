@@ -56,7 +56,7 @@ import {
   normalizeLeverJob,
   normalizeSmartRecruitersJob,
   normalizeWorkdayJob,
-} from './browser-extract.mjs';
+} from './fetch-jd.mjs';
 import { JD_TEXT_API_ATS, throttleProviderRequest } from './liveness-api.mjs';
 import { fetchJsonWithRetry, makeHttpCtx } from './providers/_http.mjs';
 
@@ -622,7 +622,7 @@ export function resolveExperienceFilter(block, profileYears) {
 // providers/_http.mjs (SSRF-guarded connect, no redirects, body cap) with its
 // shared retry, which honours Retry-After on a 429. The remaining
 // JD_TEXT_API_ATS entries (an embed hop, an HTML page) use
-// fetchJdViaKnownApi as-is. Normalizers are browser-extract.mjs's own, so
+// fetchJdViaKnownApi as-is. Normalizers are fetch-jd.mjs's own, so
 // fetch-jd.mjs, `browser-extract.mjs jd` and this read the same text.
 const JSON_JD = /** @type {Record<string, (json: any, resolved: any, url: string, cap: number) => {text: string}|null>} */ ({
   greenhouse: (json, _r, url, cap) => normalizeGreenhouseJob(json, url, cap),
