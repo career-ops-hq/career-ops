@@ -1,0 +1,96 @@
+// A plugin that caches the JD (apify with field_map.description) hands the
+// scanner `url: local:jds/<file>.md` plus the posting link in `_remote_url`.
+// Those offers must still reach pipeline.md and scan-history.tsv (#7740), while
+// every other non-http(s) url stays refused.
+//
+// Run:  node --test tests/scan-local-jd-offers.test.mjs
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { appendToPipeline, appendToScanHistory } from '../scan.mjs';
+
+const REMOTE = 'https://mx.linkedin.com/jobs/view/manager-4492212791';
+const offer = (over = {}) => ({
+  title: 'Commodity Manager',
+  company: 'Clarios',
+  source: 'apify',
+  url: 'local:jds/clarios-commodity-manager-9d93f8d630.md',
+  _remote_url: REMOTE,
+  ...over,
+});
+
+function fixture() {
+  const dir = mkdtempSync(join(tmpdir(), 'local-jd-'));
+  return { dir, pipelinePath: join(dir, 'pipeline.md'), scanHistoryPath: join(dir, 'scan-history.tsv') };
+}
+
+test('a cached-JD offer is written to the pipeline and the history', async () => {
+  const f = fixture();
+  try {
+    await appendToPipeline([offer()], f);
+    const written = await appendToScanHistory([offer()], '2026-11-26', 'added', { historyPath: f.scanHistoryPath });
+    assert.equal(written, 1);
+    assert.match(readFileSync(f.pipelinePath, 'utf8'), /- \[ \] local:jds\/clarios-commodity-manager-9d93f8d630\.md \| Clarios \| Commodity Manager/);
+    assert.ok(readFileSync(f.scanHistoryPath, 'utf8').includes(REMOTE));
+  } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test('a second scan of the same posting adds nothing', async () => {
+  const f = fixture();
+  try {
+    await appendToPipeline([offer()], f);
+    await appendToScanHistory([offer()], '2026-11-26', 'added', { historyPath: f.scanHistoryPath });
+    const before = readFileSync(f.pipelinePath, 'utf8');
+    await appendToPipeline([offer()], f);
+    assert.equal(readFileSync(f.pipelinePath, 'utf8'), before);
+    assert.equal(await appendToScanHistory([offer()], '2026-11-26', 'added', { historyPath: f.scanHistoryPath }), 0);
+  } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test('other non-http(s) urls are still refused', async () => {
+  const f = fixture();
+  try {
+    const bad = [
+      offer({ url: 'local:../../etc/passwd.md' }),
+      offer({ url: 'local:jds/x.md', _remote_url: 'javascript:alert(1)' }),
+      offer({ url: 'local:jds/x.md', _remote_url: undefined }),
+      offer({ url: 'javascript:alert(1)', _remote_url: REMOTE }),
+    ];
+    await appendToPipeline(bad, f);
+    const written = await appendToScanHistory(bad, '2026-11-26', 'added', { historyPath: f.scanHistoryPath });
+    assert.equal(written, 0);
+    let text = '';
+    try { text = readFileSync(f.pipelinePath, 'utf8'); } catch {}
+    assert.doesNotMatch(text, /local:|javascript:/);
+  } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test('two cached files for the same posting link write one row, whatever the query, fragment or host case', async () => {
+  const f = fixture();
+  try {
+    const a = offer({ url: 'local:jds/a-1111111111.md', _remote_url: 'https://mx.linkedin.com/jobs/view/manager-4492212791?trk=x#top' });
+    const b = offer({ url: 'local:jds/a-2222222222.md', _remote_url: 'https://MX.LinkedIn.com/jobs/view/manager-4492212791' });
+    await appendToPipeline([a, b], f);
+    const rows = readFileSync(f.pipelinePath, 'utf8').split('\n').filter(l => l.startsWith('- [ ] '));
+    assert.equal(rows.length, 1);
+    assert.equal(await appendToScanHistory([a, b], '2026-11-26', 'added', { historyPath: f.scanHistoryPath }), 1);
+  } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test('an aged history row releases the posting, so a cached-JD offer is recorded again', async () => {
+  const f = fixture();
+  try {
+    const policy = { recheckAfterDays: 30, today: '2026-11-26' };
+    await appendToScanHistory([offer()], '2026-01-01', 'added', { historyPath: f.scanHistoryPath, historyPolicy: policy });
+    await appendToPipeline([offer()], { ...f, historyPolicy: policy });
+    assert.match(readFileSync(f.pipelinePath, 'utf8'), /local:jds\/clarios-commodity-manager-9d93f8d630\.md/);
+    const young = fixture();
+    try {
+      await appendToScanHistory([offer()], '2026-11-20', 'added', { historyPath: young.scanHistoryPath, historyPolicy: policy });
+      assert.equal(await appendToScanHistory([offer()], '2026-11-26', 'added', { historyPath: young.scanHistoryPath, historyPolicy: policy }), 0);
+    } finally { rmSync(young.dir, { recursive: true, force: true }); }
+  } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
