@@ -3508,13 +3508,18 @@ export function capturePreUpdateIndex(statusEntries, ctx = {}) {
       } catch {
         entry.worktreeCaptureFailed = true;
       }
-    } else if (stat) {
+    } else if (stat?.isFile()) {
       entry.worktreePerms = stat.mode & 0o7777;
       try {
         entry.worktreeBytes = readFileSync(diskPath);
       } catch {
         entry.worktreeCaptureFailed = true;
       }
+    } else if (stat) {
+      // A directory, FIFO, socket or device is not a regular file: reading it
+      // would block or return nothing meaningful, so the path is reported as
+      // unrecorded and its bytes are left as the checkout wrote them.
+      entry.worktreeCaptureFailed = true;
     }
     state.set(path, entry);
   }
@@ -3637,8 +3642,16 @@ export function restoreWrittenDirtyState(entries, state, ctx = {}) {
               current = lstatSync(diskPath).isSymbolicLink() ? readlinkSync(diskPath) : null;
             } catch { /* absent: recreate below */ }
             if (current !== staged.worktreeSymlink) {
-              rmSync(diskPath, { force: true });
-              symlinkSync(staged.worktreeSymlink, diskPath);
+              // Create the replacement first, then rename it over the path, so a
+              // failed symlink creation leaves the checkout's file in place.
+              const linkTmp = join(dirname(diskPath), `.cor-${randomBytes(4).toString('hex')}`);
+              try {
+                symlinkSync(staged.worktreeSymlink, linkTmp);
+                (ctx.rename || renameSync)(linkTmp, diskPath);
+              } catch (err) {
+                rmSync(linkTmp, { force: true });
+                throw err;
+              }
             }
           } else if (staged.worktreeBytes) {
             // Raw bytes back, written directly: `git restore` would pass them
@@ -3661,7 +3674,9 @@ export function restoreWrittenDirtyState(entries, state, ctx = {}) {
               // permissions, then renamed over the path. A failed write leaves
               // the existing file in place (rename also replaces a symlink
               // itself without following it).
-              const tmpPath = `${diskPath}.restore-${randomBytes(6).toString('hex')}`;
+              // A short basename in the same directory: appending to the file's own name
+              // can exceed NAME_MAX for a long path component.
+              const tmpPath = join(dirname(diskPath), `.cor-${randomBytes(4).toString('hex')}`);
               try {
                 (ctx.writeFile || writeFileSync)(tmpPath, staged.worktreeBytes, { mode: wantedPerms, flag: 'wx' });
                 chmodSync(tmpPath, wantedPerms);
