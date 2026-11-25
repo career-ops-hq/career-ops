@@ -59,11 +59,17 @@ function contents(root) {
 function runDoctor(root, { json = true, target = root, cwd = root, env = {}, extra = [] } = {}) {
   const before = contents(root);
   const beforeCwd = cwd === root ? null : contents(cwd);
+  // Doctor follows CAREER_OPS_PROFILE, CAREER_OPS_PORTALS and CAREER_OPS_PIPELINE,
+  // so one left in the shell would point it past the fixture. Drop them all;
+  // a test that needs one passes it in `env`.
+  const inheritedEnv = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith('CAREER_OPS_')),
+  );
   const result = spawnSync(process.execPath, [join(ROOT, 'doctor.mjs'), '--cli', 'codex',
     ...(json ? ['--json'] : []), ...(target ? ['--target', target] : []), ...extra], {
     cwd, encoding: 'utf8', timeout: 60_000,
     env: {
-      ...process.env, HOME: root, USERPROFILE: root, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: '', ...env,
+      ...inheritedEnv, HOME: root, USERPROFILE: root, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: '', ...env,
       // Keep YAML checks independent of installed browsers, including Windows' LOCALAPPDATA cache.
       PLAYWRIGHT_BROWSERS_PATH: join(root, 'playwright-browsers'),
     },
