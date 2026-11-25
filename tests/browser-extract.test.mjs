@@ -243,7 +243,7 @@ try {
     'https://x/1',
     500,
   );
-  if (wdCapped && wdCapped.text.length <= 501) pass('normalizeWorkdayJob honors the text cap');
+  if (wdCapped && wdCapped.text.endsWith(TRUNCATION_NOTICE(500))) pass('normalizeWorkdayJob honors the text cap');
   else fail(`normalizeWorkdayJob cap => ${wdCapped && wdCapped.text.length}`);
 
   // normalizeAshbyJob — Ashby's public API is ORG-level, so the job is picked
@@ -530,7 +530,7 @@ try {
     normalizeGreenhouseJob({ title: 'X', content: `<p>${'word '.repeat(5000)}</p>` }, 'https://x/1', 400),
     normalizeLeverJob({ text: 'X', descriptionPlain: 'word '.repeat(5000) }, 'https://x/1', 400),
   ];
-  if (apiCapped.every((v) => v && v.text.length <= 401)) pass('every ATS normalizer honors the text cap');
+  if (apiCapped.every((v) => v && v.text.endsWith(TRUNCATION_NOTICE(400)))) pass('every ATS normalizer honors the text cap');
   else fail(`normalizer caps => ${JSON.stringify(apiCapped.map((v) => v && v.text.length))}`);
 
   // fetchJdViaKnownApi — the dispatch gate is pure: a host outside

@@ -35,6 +35,8 @@ test('merge-tracker merges with the status as written when templates/states.yml 
       if (entry.isFile() && /\.(mjs|json)$/.test(entry.name)) cpSync(join(ROOT, entry.name), join(codeRoot, entry.name));
     }
     cpSync(join(ROOT, 'lib'), join(codeRoot, 'lib'), { recursive: true });
+    // lib/jd-parse.mjs decodes entities with the shared providers/ decoder.
+    cpSync(join(ROOT, 'providers'), join(codeRoot, 'providers'), { recursive: true });
     // linkNodeModules() rather than a raw symlinkSync: a bare call leaves a
     // dangling link when the tree is absent, so merge-tracker dies at module
     // load and every assertion below passes vacuously. The helper returns a
@@ -85,6 +87,8 @@ test('an Applied row keeps its posting when templates/states.yml is missing', (t
       if (entry.isFile() && /\.(mjs|json)$/.test(entry.name)) cpSync(join(ROOT, entry.name), join(codeRoot, entry.name));
     }
     cpSync(join(ROOT, 'lib'), join(codeRoot, 'lib'), { recursive: true });
+    // lib/jd-parse.mjs decodes entities with the shared providers/ decoder.
+    cpSync(join(ROOT, 'providers'), join(codeRoot, 'providers'), { recursive: true });
     const depsReason = linkNodeModules(codeRoot, ROOT);
     if (depsReason) return t.skip(depsReason);
 
