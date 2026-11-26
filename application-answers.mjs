@@ -5,6 +5,7 @@ import { resolve } from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { tryAcquireDirLockSync, releaseOrWarn } from './lib/dir-lock.mjs';
+import { JD_HEADING_RE } from './lib/jd-archive-section.mjs';
 
 export const APPLICATION_ANSWERS_HEADING = '## Application Answers';
 
@@ -419,6 +420,29 @@ function findDraftAnswersHeading(report) {
 }
 
 /**
+ * The report above its archived posting. `## Job Description (archived
+ * verbatim)` holds the posting's own text (#2789), which is untrusted: it can
+ * carry a `## ... (draft)` or `## H) ...` heading of its own, and
+ * modes/apply.md adapts what --read-draft returns into a real application.
+ * Every evaluation mode writes Block H above that section, so nothing from its
+ * heading down is searched. The heading pattern is the one check-jd-archive.mjs
+ * reads the section by, tested one line at a time, since its `\s+` also matches
+ * a newline: a bare `##` above a line starting "Job Description" in an answer
+ * would otherwise end the answer there (#7805 review). Fenced lines are not
+ * skipped: an unclosed fence above the archive would turn this bound off,
+ * where a fenced heading above Block H only makes the read come back empty.
+ *
+ * @param {string} report Report markdown, newlines already normalized.
+ * @returns {string}
+ */
+function beforeJdArchive(report) {
+  for (const line of report.matchAll(/^.*$/gm)) {
+    if (JD_HEADING_RE.test(line[0])) return report.slice(0, line.index);
+  }
+  return report;
+}
+
+/**
  * Read the evaluation mode's `## H) Draft Application Answers (draft)` block.
  *
  * A DIFFERENT producer and a different format from the section above.
@@ -444,10 +468,11 @@ function findDraftAnswersHeading(report) {
  * The heading's title may be in any language; only the `## H)` marker is
  * required. A heading with a marker and no title is not Block H.
  *
- * @returns {{freeText: object[]} | null} `null` when the report has no Block H.
+ * @returns {{freeText: object[]} | null} `null` when the report has no Block H
+ * above its archived posting.
  */
 export function parseDraftAnswersBlockH(reportText) {
-  const report = String(reportText ?? '').replace(/\r\n/g, '\n');
+  const report = beforeJdArchive(String(reportText ?? '').replace(/\r\n/g, '\n'));
   const heading = findDraftAnswersHeading(report);
   if (!heading) return null;
 
