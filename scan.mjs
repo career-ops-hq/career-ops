@@ -1450,12 +1450,19 @@ function visaRefusalPhrases() {
   const cross = (prefixes, objects) => prefixes.flatMap(p => objects.map(o => `${p} ${o}`));
   return [
     // "we are unable to offer visa sponsorship", "this role does not support
-    // visa sponsorship", "we can't provide sponsorship", "this position does
-    // not include visa sponsorship"
+    // visa sponsorship", "we can't provide sponsorship"
     ...cross(
       ['not', "n't", 'unable to', 'not able to', 'not currently able to', 'not in a position to']
-        .flatMap(neg => ['offer', 'provide', 'support', 'include'].map(verb => `${neg} ${verb}`)),
+        .flatMap(neg => ['offer', 'provide', 'support'].map(verb => `${neg} ${verb}`)),
       sponsorship,
+    ),
+    // "this position does not include visa sponsorship". Visa objects only,
+    // because "the benefits do not include sponsorship for conferences" is
+    // about something else.
+    ...cross(
+      ['not', "n't", 'unable to', 'not able to', 'not currently able to', 'not in a position to']
+        .map(neg => `${neg} include`),
+      ['visa sponsorship', 'work visa sponsorship'],
     ),
     // "work authorization that does not require sponsorship", "applicants
     // must not require visa sponsorship now or in the future". Only in these
@@ -1474,10 +1481,10 @@ function visaRefusalPhrases() {
     // "you must be able to work without requiring visa sponsorship"
     ...cross(['without requiring', 'without needing', 'without the need for'], anySponsorship),
     // "You must be work authorized in the United States without the need for
-    // new visa sponsorship". Only this measured wording, because a shorter
-    // form such as "without needing new visa sponsorship" can also be welcome
-    // text in a posting that sponsors.
-    'without the need for new visa sponsorship',
+    // new visa sponsorship". Only in this measured framing, because "we
+    // welcome candidates who can work without the need for new visa
+    // sponsorship" can also be welcome text in a posting that sponsors.
+    'authorized in the united states without the need for new visa sponsorship',
     'without visa sponsorship',
     // "this position is not eligible for visa sponsorship"
     'not eligible for sponsorship',
