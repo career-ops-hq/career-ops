@@ -97,6 +97,15 @@ export function atsFromUrl(url) {
       : ((jobIdx > 0 ? seg[jobIdx - 1] : (seg.length > 1 && /^[a-z]{2}-[a-z]{2}$/i.test(seg[0]) ? seg[1] : seg[0])) || '');
     if (site) return { ats: 'workday', slug: `${wd[1]}|${wd[2]}|${site}`.toLowerCase(), host };
   }
+  // The same boards on Workday's other host form, tenant in the path:
+  // /recruiting/{tenant}/{site}/..., optionally after a locale.
+  const wds = host.match(/^(wd\d+)\.myworkdaysite\.com$/);
+  if (wds) {
+    const at = /^[a-z]{2}-[a-z]{2}$/i.test(seg[0] || '') ? 1 : 0;
+    if (seg[at]?.toLowerCase() === 'recruiting' && seg[at + 1] && seg[at + 2]) {
+      return { ats: 'workday', slug: `${seg[at + 1]}|${wds[1]}|${seg[at + 2]}`.toLowerCase(), host, workdayHost: 'site' };
+    }
+  }
   const ic = host.match(/^(?:careers-)?([^.]+)\.icims\.com$/);
   if (ic) return { ats: 'icims', slug: ic[1].toLowerCase(), host };
   // A custom careers domain that embeds Greenhouse: the board token is not in the URL.
@@ -104,7 +113,7 @@ export function atsFromUrl(url) {
   return { ats: null, host };
 }
 
-export function careersUrlFor({ ats, slug }) {
+export function careersUrlFor({ ats, slug, workdayHost }) {
   if (!slug) return null;
   switch (ats) {
     case 'greenhouse': return `https://job-boards.greenhouse.io/${slug}`;
@@ -114,6 +123,7 @@ export function careersUrlFor({ ats, slug }) {
     case 'icims': return `https://careers-${slug}.icims.com/jobs`;
     case 'workday': {
       const [tenant, wd, site] = slug.split('|');
+      if (workdayHost === 'site') return `https://${wd}.myworkdaysite.com/recruiting/${tenant}/${site}`;
       return `https://${tenant}.${wd}.myworkdayjobs.com/${site}`;
     }
     default: return null;
