@@ -3558,7 +3558,7 @@ function recordLanguages(languagesByKey, key, requisitions, languages) {
  * the id it may have had is missing rather than absent.
  * @returns {Set<string>} Existing company+role dedupe keys.
  */
-export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize = defaultCompanyNormalizer, { includeLocation = false, locatedBases = null, requisitionsByBase = null, locatedRequisitionsByBase = null, languagesByBase = null, locatedLanguagesByBase = null } = {}) {
+export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize = defaultCompanyNormalizer, { includeLocation = false, locatedBases = null, requisitionsByBase = null, locatedRequisitionsByBase = null, languagesByBase = null, locatedLanguagesByBase = null, resolveLocalRef = null } = {}) {
   const { applicationsText = '', scanHistoryText = '', pipelineText = '', historyRows = null } = sources;
   const seen = new Set();
   const postingAttributes = collectPostingAttributes(scanHistoryText, historyRows);
@@ -3657,9 +3657,13 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
   for (const line of pipelineText.split('\n')) {
     const pair = extractPipelineCompanyRole(line);
     if (!pair) continue;
-    const attributes = attributesFor(pair.url);
-    let requisition = requisitionIdsForDedup({ url: pair.url, requisitionId: attributes.requisitionId });
-    if (requisition.length === 0 && typeof pair.url === 'string' && pair.url && !recordedInHistory(pair.url)) {
+    // A cached-JD row names its local file, but history is keyed by the posting
+    // url. Resolve the file's own posting url when the caller can read it; a row
+    // it cannot resolve stays unrecorded, the conservative reading.
+    const postingUrl = (typeof resolveLocalRef === 'function' && LOCAL_JD_REF.test(pair.url) && resolveLocalRef(pair.url)) || pair.url;
+    const attributes = attributesFor(postingUrl);
+    let requisition = requisitionIdsForDedup({ url: postingUrl, requisitionId: attributes.requisitionId });
+    if (requisition.length === 0 && typeof postingUrl === 'string' && postingUrl && !recordedInHistory(postingUrl)) {
       requisition = [UNRECORDED_REQUISITION];
     }
     add(pair.company, pair.role, pair.location, requisition,
@@ -4126,6 +4130,7 @@ export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNorm
     locatedRequisitionsByBase,
     languagesByBase: seenCompanyRoleLanguages,
     locatedLanguagesByBase,
+    resolveLocalRef: localJdPostingUrl,
   });
   const fingerprintHistory = collectFingerprintHistory(scanHistoryText, historyRows);
   return { seen, identityPromotableUrls, recheckEligible, seenUrlVariants, seenCompanyRoles, seenCompanyRoleBases, seenCompanyRoleRequisitions, locatedRequisitionsByBase, seenCompanyRoleLanguages, locatedLanguagesByBase, fingerprintHistory };
@@ -4158,6 +4163,26 @@ function sameJobWriteKey(url) {
 // keeps the local reference, as it did before #7591. Only that exact shape
 // counts: any other non-http(s) url stays refused.
 const LOCAL_JD_REF = /^local:jds\/[A-Za-z0-9._-]+\.md$/;
+
+// The posting url a cached JD file recorded in its frontmatter when it was
+// saved. Null when the file is missing, unreadable or carries no safe url.
+function localJdPostingUrl(ref, root = DATA_ROOT) {
+  if (typeof ref !== 'string' || !LOCAL_JD_REF.test(ref)) return null;
+  try {
+    const text = readFileSync(path.join(root, ref.slice('local:'.length)), 'utf-8');
+    const front = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+    return front ? safePostingUrl(loadYaml(front[1])?.url) : null;
+  } catch {
+    return null;
+  }
+}
+
+// The url that liveness checks and their guard must look at: the posting itself
+// for a cached-JD offer, so a local reference is never mistaken for a rejected
+// protocol and recorded against the posting as a permanent status.
+function verifyTargetUrl(offer) {
+  return (LOCAL_JD_REF.test(offer?.url ?? '') && offerPostingUrl(offer)) || offer.url;
+}
 
 function offerPostingUrl(offer) {
   const direct = safePostingUrl(offer?.url);
@@ -4201,12 +4226,18 @@ function releasedHistoryKeys(historyText, policy) {
   return released;
 }
 
-function keysInPipeline(text, released = new Set()) {
+function keysInPipeline(text, released = new Set(), resolveLocalRef = null) {
   const keys = new Set();
   let inProcessed = false;
   for (const line of String(text ?? '').split('\n')) {
     inProcessed = processedSectionAfter(line, inProcessed);
-    const url = extractPipelineUrl(line);
+    let url = extractPipelineUrl(line);
+    if (!url && typeof resolveLocalRef === 'function') {
+      // A cached-JD row has no http url of its own. Its JD file names the posting,
+      // so the same posting cached under another filename still matches.
+      const ref = pipelineEntry(line, PIPELINE_CHECKBOX_RE)?.body.split('|').map((cell) => cell.trim()).find((cell) => LOCAL_JD_REF.test(cell));
+      url = ref ? resolveLocalRef(ref) : null;
+    }
     if (!url) continue;
     const key = sameJobWriteKey(url);
     if (!key) continue;
@@ -4235,9 +4266,9 @@ function localRefPinned(pipelineText, ref, key, released) {
   return false;
 }
 
-function offersMissingFromPipeline(offers, pipelineText, historyText = '', policy = {}) {
+function offersMissingFromPipeline(offers, pipelineText, historyText = '', policy = {}, resolveLocalRef = null) {
   const released = releasedHistoryKeys(historyText, policy);
-  const keys = keysInPipeline(pipelineText, released);
+  const keys = keysInPipeline(pipelineText, released, resolveLocalRef);
   const fresh = [];
   for (const offer of offers) {
     const key = offerWriteKey(offer);
@@ -4293,6 +4324,7 @@ export async function appendToPipeline(offers, {
   pipelinePath = PIPELINE_PATH,
   scanHistoryPath = SCAN_HISTORY_PATH,
   historyPolicy = null,
+  resolveLocalRef = localJdPostingUrl,
 } = {}) {
   if (offers.length === 0) return;
 
@@ -4311,7 +4343,7 @@ export async function appendToPipeline(offers, {
     } catch (err) {
       if (err?.code !== 'EISDIR') throw err;
     }
-    const fresh = offersMissingFromPipeline(offers, text, historyText, policy);
+    const fresh = offersMissingFromPipeline(offers, text, historyText, policy, resolveLocalRef);
     if (fresh.length === 0) return;
     // formatPipelineOffer returns '' for an offer with no safe http(s) URL. The
     // filter is belt-and-braces: offersMissingFromPipeline already drops those
@@ -4890,13 +4922,13 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
   // reorders the output or the subsequent sequential browser checks.
   const verdicts = new Array(offers.length);
   await parallelFetch(offers.map((offer, i) => async () => {
-    const guard = rejectPrivateOrInvalid(offer.url);
+    const guard = rejectPrivateOrInvalid(verifyTargetUrl(offer));
     if (guard) {
       verdicts[i] = { result: 'uncertain', ...guard };
       return;
     }
     try {
-      verdicts[i] = await checkApi(offer.url);
+      verdicts[i] = await checkApi(verifyTargetUrl(offer));
     } catch (err) {
       console.warn(`  ⚠️ API verification failed for ${offer.url}; falling back to Playwright: ${err.message}`);
       verdicts[i] = null;
@@ -4975,7 +5007,7 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
       // as in check-liveness.mjs. Only an inconclusive null needs the browser.
       if (!verdict) {
         offerPage = await browserForOffer();
-        verdict = await checkPage(offerPage, offer.url);
+        verdict = await checkPage(offerPage, verifyTargetUrl(offer));
       }
       const { result, code, reason } = verdict;
       if (result === 'expired') {
