@@ -995,7 +995,7 @@ function nonAnnualFigureLookup(text, matches) {
           if (/^(?:excluding|except|without)$/.test(separator ?? '')) {
             excludedPayClause = false;
           } else if (separator === ',' || /^(?:plus|with)$/.test(separator ?? '')
-            || (/^(?:and|or)$/.test(separator ?? '') && /^\s*paid\b/i.test(clause))) {
+            || (/^(?:and|or)$/.test(separator ?? '') && /^\s*paid\s*$/i.test(clause))) {
             excludedPayClause = null;
           }
           const payItem = /\b(?:stipend|allowance|budget|bonus|sign[- ]on)\b/i.test(clause);

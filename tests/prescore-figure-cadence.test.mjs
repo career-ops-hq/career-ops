@@ -54,6 +54,9 @@ for (const salary of [
   });
 }
 const wrapperCases = [
+  ['Salary $150k excluding bonus and paid time off accrued at 2 days per month', 5, 3.6, 'proceed', 3.5],
+  ['Salary $150k excluding bonus and paid leave accrued per month', 5, 3.6, 'proceed', 3.5],
+  ['Salary $150k excluding bonus and paid training one day per month', 5, 3.6, 'proceed', 3.5],
   ['Salary $40k excluding bonus per month, per year', 1, 2.8, 'skip', 3],
   ['Salary $150k excluding bonus per month, per year', 5, 3.6, 'proceed', 3.5],
   ['Salary $40k excluding bonus and paid per month', 4, 3.4, 'proceed', 3],
