@@ -12,7 +12,7 @@ import { validateFlags } from './lib/cli-flags.mjs';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { machineSummaryStart } from './lib/machine-summary-section.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
-import { parseMarkdownLinks, parseTrackerRow, resolveColumns } from './tracker-parse.mjs';
+import { parseMarkdownLinks, parseTrackerRow, resolveColumns, trackerRowIdentity } from './tracker-parse.mjs';
 import { acquireTrackerLock, resolveWorkspaceRoot, trackerLockDirFor, writeFileAtomic } from './tracker-utils.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
@@ -183,11 +183,12 @@ function loadRow(appsFile, appNum) {
   return row;
 }
 
-function appendDealbreakerNote(appNum, status, sentence, root, { dryRun = false } = {}) {
+function appendDealbreakerNote(appNum, identity, sentence, root, { dryRun = false } = {}) {
   const stdout = execFileSync(process.execPath, [
     join(CODE_ROOT, 'set-status.mjs'),
     '--row', String(appNum),
-    status,
+    '--keep-status',
+    '--expect-row', identity,
     '--note', `Dealbreaker: ${sentence}`,
     '--json',
     ...(dryRun ? ['--dry-run'] : []),
@@ -199,9 +200,9 @@ function appendDealbreakerNote(appNum, status, sentence, root, { dryRun = false 
   return JSON.parse(stdout).changed === true;
 }
 
-function checkDealbreakerNote(appNum, status, sentence, root) {
+function checkDealbreakerNote(appNum, identity, sentence, root) {
   try {
-    appendDealbreakerNote(appNum, status, sentence, root, { dryRun: true });
+    appendDealbreakerNote(appNum, identity, sentence, root, { dryRun: true });
   } catch (err) {
     const detail = String(err.stderr || err.message).replace(/^❌\s*/, '').trim();
     planError('BAD_PLAN', `set-status.mjs would not add the tracker note: ${detail}`);
@@ -217,31 +218,31 @@ export async function applyDebriefSync(plan) {
   let wrote = false;
   try {
     const row = loadRow(appsFile, normalized.appNum);
-    const status = row.status.trim();
+    const identity = trackerRowIdentity(row);
     const company = row.company.trim();
     if (normalized.contacts.length > 0 && !company) {
       planError('BAD_PLAN', 'the tracker row has no company to store with the contact');
     }
-    if (normalized.dealbreaker && !status) {
+    if (normalized.dealbreaker && !row.status.trim()) {
       planError('BAD_PLAN', 'the tracker row has no status to keep while recording the dealbreaker');
     }
     if (normalized.dealbreaker) {
       const reportPath = reportPathFor(row, resolveWorkspaceRoot(appsFile));
       const original = readFileSync(reportPath, 'utf8');
       const next = applyReport(original, normalized.dealbreaker);
-      checkDealbreakerNote(normalized.appNum, status, normalized.dealbreaker, root);
+      checkDealbreakerNote(normalized.appNum, identity, normalized.dealbreaker, root);
       if (next !== original) {
         writeFileAtomic(reportPath, next);
         wrote = true;
       }
     }
-    prepared = { status, company };
+    prepared = { identity, company };
   } finally {
     lock.release();
   }
 
   if (normalized.dealbreaker) {
-    if (appendDealbreakerNote(normalized.appNum, prepared.status, normalized.dealbreaker, root)) wrote = true;
+    if (appendDealbreakerNote(normalized.appNum, prepared.identity, normalized.dealbreaker, root)) wrote = true;
   }
   const contactsPath = join(root, 'data', 'contacts.tsv');
   for (const contact of normalized.contacts) {

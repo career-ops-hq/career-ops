@@ -585,3 +585,35 @@ check('every Step 10 that passes --dealbreaker checks the delimiters before the 
     }
   }
 });
+
+{
+  const root = freshRoot();
+  try {
+    writeFixture(root);
+    const preload = join(root, 'advance-status.mjs');
+    writeFileSync(preload, `
+      import childProcess from 'node:child_process';
+      import { syncBuiltinESMExports } from 'node:module';
+      const execFileSync = childProcess.execFileSync;
+      childProcess.execFileSync = (file, args, options) => {
+        if (args[0].endsWith('set-status.mjs') && args.includes('--note') && !args.includes('--dry-run')) {
+          execFileSync(file, [args[0], '--row', '7', 'Rejected'], options);
+        }
+        return execFileSync(file, args, options);
+      };
+      syncBuiltinESMExports();
+    `);
+    const result = spawnSync(process.execPath, [
+      '--import', preload, SCRIPT, '--app', '7', '--dealbreaker', SENTENCE,
+    ], { env: childEnv(root), encoding: 'utf8' });
+    check('a dealbreaker note preserves a concurrent status change', () => {
+      assert.equal(result.status, 0, describeSpawn(result));
+      const tracker = readRoot(root, 'data/applications.md');
+      assert.match(tracker, /\| Rejected \|/);
+      assert.ok(tracker.includes(`Dealbreaker: ${SENTENCE}`));
+      assert.match(readRoot(root, REPORT_REL), /final_decision: "Skip"/);
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}

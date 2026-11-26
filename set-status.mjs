@@ -175,6 +175,7 @@ const USAGE = `Usage: node set-status.mjs <tracker#|company> <state> [--note "..
   --expect-row HASH  Require the selected row, every cell but Status, to match this
                      hash (trackerRowIdentity in tracker-parse.mjs); checked under
                      the writer lock
+  --keep-status     Append a --note and preserve the status cell. Omit the state.
   --expect-status STATE  Require the row's current status to be STATE, unless it
                      is already <state>; checked under the writer lock
   --undo             Take back the row's last logged status change: restore the
@@ -238,7 +239,7 @@ function renderStatesSection() {
 
 const rawArgs = process.argv.slice(2);
 const positional = [];
-const flags = { note: null, replaceNote: null, role: null, on: null, row: null, report: null, reportLink: null, source: null, force: false, dryRun: false, undo: false, repairStatusLog: false, repairFollowup: false, detachJdArchive: false, json: false, expectTracker: null, expectRow: null, expectStatus: null };
+const flags = { note: null, replaceNote: null, role: null, on: null, row: null, report: null, reportLink: null, source: null, force: false, dryRun: false, undo: false, keepStatus: false, repairStatusLog: false, repairFollowup: false, detachJdArchive: false, json: false, expectTracker: null, expectRow: null, expectStatus: null };
 const VALUE_FLAGS = { '--note': 'note', '--replace-note': 'replaceNote', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--report-link': 'reportLink', '--source': 'source', '--expect-tracker': 'expectTracker', '--expect-row': 'expectRow', '--expect-status': 'expectStatus' };
 
 /**
@@ -313,6 +314,7 @@ for (let i = 0; i < rawArgs.length; i++) {
   else if (a === '--force') { flags.force = true; }
   else if (a === '--dry-run') { flags.dryRun = true; }
   else if (a === '--undo') { flags.undo = true; }
+  else if (a === '--keep-status') { flags.keepStatus = true; }
   else if (a === '--repair-status-log') { flags.repairStatusLog = true; }
   else if (a === '--repair-followup') { flags.repairFollowup = true; }
   else if (a === '--detach-jd-archive') { flags.detachJdArchive = true; }
@@ -333,6 +335,15 @@ if ([flags.row, flags.report, flags.reportLink].filter(value => value !== null).
 }
 const explicitSelector = flags.row !== null || flags.report !== null || flags.reportLink !== null;
 
+if (flags.keepStatus) {
+  if (!cell(flags.note) || flags.undo || flags.on !== null || flags.repairStatusLog || flags.repairFollowup) {
+    failUsage('--keep-status requires --note and cannot be combined with status changes or repairs');
+  }
+  if (positional.length !== (explicitSelector ? 0 : 1)) {
+    failUsage('--keep-status takes the row selector only, without a state');
+  }
+}
+
 if (flags.undo) {
   const conflicting = [
     [flags.note !== null, '--note'], [flags.replaceNote !== null, '--replace-note'], [flags.on !== null, '--on'],
@@ -342,13 +353,13 @@ if (flags.undo) {
   if (positional.length !== (explicitSelector ? 0 : 1)) {
     failUsage('--undo takes the row selector only, not a state');
   }
-} else if (explicitSelector) {
+} else if (!flags.keepStatus && explicitSelector) {
   if (positional.length !== 1) {
     failUsage(positional.length === 0
       ? `Expected the state after ${flags.row !== null ? '--row' : flags.report !== null ? '--report' : '--report-link'}`
       : `With ${flags.row !== null ? '--row' : flags.report !== null ? '--report' : '--report-link'} the only positional argument is the state, got ${positional.length}`);
   }
-} else if (positional.length !== 2) {
+} else if (!flags.keepStatus && positional.length !== 2) {
   failUsage(positional.length === 0 ? null : `Expected 2 arguments (selector, state), got ${positional.length}`);
 }
 
@@ -388,8 +399,9 @@ try {
 } catch (err) {
   failWith(EXIT_USAGE, 'states-error', `Cannot load canonical states from ${STATES_FILE}: ${err.message}`);
 }
-const requestedStatus = flags.undo ? null : resolveCanonicalState(stateInput, states);
-if (!flags.undo && !requestedStatus) {
+const takesState = !flags.undo && !flags.keepStatus;
+const requestedStatus = takesState ? resolveCanonicalState(stateInput, states) : null;
+if (takesState && !requestedStatus) {
   const valid = states.map(s => s.label).join(' · ');
   failWith(EXIT_USAGE, 'invalid-state', `"${stateInput}" is not a canonical state. Valid states: ${valid}`);
 }
@@ -412,7 +424,7 @@ if (selector !== null) {
   if (idList) {
     const nums = idList.filter((part) => /^\d+$/.test(part));
     const shown = nums.slice(0, 8);
-    const action = flags.undo ? '--undo' : requestedStatus;
+    const action = flags.undo ? '--undo' : flags.keepStatus ? '--keep-status' : requestedStatus;
     // These numbers are tracker rows. A bare `14 Applied` is rejected when that
     // row's report id differs, so the command that means "tracker row" is --row.
     const lines = shown.map((id) => `node set-status.mjs --row ${id} ${action}`);
@@ -777,7 +789,10 @@ if (flags.undo) {
       `#${target.num}'s last logged change (to ${undone.to}) has no recorded prior status. Set the status you want instead.`);
   }
 }
-const newStatus = undone ? undone.from : requestedStatus;
+const newStatus = flags.keepStatus ? oldStatus : undone ? undone.from : requestedStatus;
+if (flags.keepStatus && !resolveCanonicalState(stripStatusDecoration(oldStatus), states)) {
+  failWith(EXIT_USAGE, 'invalid-current-state', `Tracker #${target.num} has an unrecognized current status: "${oldStatus}"`);
+}
 if (flags.reportLink !== null && !resolveCanonicalState(oldStatus, states)) {
   failWith(EXIT_USAGE, 'invalid-current-state', `Tracker #${target.num} has an unrecognized current status: "${oldStatus}"`);
 }
@@ -853,7 +868,7 @@ try {
     }
   };
 
-  statusChanged = parts[colmap.status].trim() !== newStatus;
+  statusChanged = !flags.keepStatus && parts[colmap.status].trim() !== newStatus;
   if (statusChanged) replaceCellValue(colmap.status, newStatus);
 
   // Text after a date in the old cell is no part of any state, and replacing the
