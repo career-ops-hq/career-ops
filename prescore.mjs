@@ -992,10 +992,12 @@ function nonAnnualFigureLookup(text, matches) {
         for (let j = 0; j < clauses.length; j += 2) {
           const separator = clauses[j - 1]?.toLowerCase();
           const clause = clauses[j];
+          // Accept payment qualifiers, not benefits such as paid leave or training.
+          const salaryPayment = /^\s*paid(?:\s+(?:in\s+(?:arrears|advance)|out|gross|net|pro\s+rata|via\s+bank\s+transfer))*\s*$/i.test(clause);
           if (/^(?:excluding|except|without)$/.test(separator ?? '')) {
             excludedPayClause = false;
           } else if (separator === ',' || /^(?:plus|with)$/.test(separator ?? '')
-            || (/^(?:and|or)$/.test(separator ?? '') && /^\s*paid\s*$/i.test(clause))) {
+            || (/^(?:and|or)$/.test(separator ?? '') && salaryPayment)) {
             excludedPayClause = null;
           }
           const payItem = /\b(?:stipend|allowance|budget|bonus|sign[- ]on)\b/i.test(clause);

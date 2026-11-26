@@ -54,6 +54,16 @@ for (const salary of [
   });
 }
 const wrapperCases = [
+  ['Salary $40k excluding bonus and paid in arrears per month', 4, 3.4, 'proceed', 3],
+  ['Salary $40k excluding bonus and paid in advance per month', 4, 3.4, 'proceed', 3],
+  ['Salary $40k excluding bonus and paid gross per month', 4, 3.4, 'proceed', 3],
+  ['Salary $40k excluding bonus and paid net per month', 4, 3.4, 'proceed', 3],
+  ['Salary $40k excluding bonus and paid pro rata per month', 4, 3.4, 'proceed', 3],
+  ['Salary $40k excluding bonus and paid out per month', 4, 3.4, 'proceed', 3],
+  ['Salary $40k excluding bonus and paid via bank transfer per month', 4, 3.4, 'proceed', 3],
+  ['Salary $40k excluding bonus and paid out in arrears per month', 4, 3.4, 'proceed', 3],
+  ['Salary $40k excluding bonus and paid via bank transfer in advance per month', 4, 3.4, 'proceed', 3],
+  ['Salary $150k excluding bonus and paid on site training scheduled per month', 5, 3.6, 'proceed', 3.5],
   ['Salary $150k excluding bonus and paid time off accrued at 2 days per month', 5, 3.6, 'proceed', 3.5],
   ['Salary $150k excluding bonus and paid leave accrued per month', 5, 3.6, 'proceed', 3.5],
   ['Salary $150k excluding bonus and paid training one day per month', 5, 3.6, 'proceed', 3.5],
