@@ -731,7 +731,10 @@ export function locationHintFromUrl(url) {
   } catch {
     return '';
   }
-  if (!parsed.hostname.toLowerCase().endsWith('.myworkdayjobs.com')) return '';
+  const host = parsed.hostname.toLowerCase();
+  // myworkdaysite.com uses the same /job/{Location}/{Title} path. The display
+  // line is still "5 Locations", so a blocked country in that path was kept.
+  if (!host.endsWith('.myworkdayjobs.com') && !host.endsWith('.myworkdaysite.com')) return '';
   const segments = parsed.pathname.split('/').filter(Boolean);
   const jobIdx = segments.lastIndexOf('job');
   // Workday also emits /job/{Title}_{ReqId}; a location needs a title after it.
