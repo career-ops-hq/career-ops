@@ -230,3 +230,4 @@ public commit with a stated reason.
 - @luismslopes | Luis Lopes | 2026-11-23 | id:817483 | src:https://github.com/career-ops-hq/career-ops/discussions/7693 | n:182
 - @maljolani | Mohammad Jolani | 2026-11-24 | id:1186743 | src:https://github.com/career-ops-hq/career-ops/discussions/7788 | n:183
 - @witeknatalia | Natalia Witek | 2026-11-25 | id:73383499 | src:https://github.com/career-ops-hq/career-ops/discussions/7803 | n:184
+- @monkey1wizard | YUN Lee | 2026-11-26 | "It takes the anxiety out of job hunting and busywork like finding roles and tailoring CVs." | id:24541350 | src:https://github.com/career-ops-hq/career-ops/discussions/7821 | n:185
