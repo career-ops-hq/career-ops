@@ -160,7 +160,16 @@ func TestStatusTargetStaleStatusNeverMatchesAnotherCell(t *testing.T) {
 				row = strings.ReplaceAll(row, " | ", "\t")
 			}
 			root, path := writeTracker(t, header+row)
-			err := UpdateApplicationStatusAndNotes(root, model.CareerApplication{ReportNumber: "7", Status: "Applied"}, "Interview", "follow-up")
+			// "Applied" is the Company cell and the Notes cell, never the
+			// Status one. --expect-status must be compared against the Status
+			// column, so this expectation is stale and the write is refused.
+			stale := UpdateApplicationStatusAndNotes(root, model.CareerApplication{ReportNumber: "7", Status: "Applied"}, "Interview", "follow-up")
+			if stale == nil || !strings.Contains(stale.Error(), "reloaded, pick the status again") {
+				t.Fatalf("an expectation matching another cell must be refused, got %v", stale)
+			}
+			assertStatusTargetBytes(t, path, header+row)
+
+			err := UpdateApplicationStatusAndNotes(root, model.CareerApplication{ReportNumber: "7", Status: "Responded"}, "Interview", "follow-up")
 			if err != nil {
 				t.Fatal(err)
 			}
