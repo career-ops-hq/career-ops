@@ -204,7 +204,7 @@ export function buildRow(fields, today) {
 // Strict calendar and clock validation: Date.parse accepts or silently rolls over
 // values such as 2026-02-30 and offsets like +99:99, so check the fields explicitly.
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
-const OFFSET_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(Z|([+-])(\d{2}):?(\d{2}))$/;
+const OFFSET_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|([+-])(\d{2}):?(\d{2}))$/;
 const LOCAL_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?$/;
 
 function validCalendarDate(y, m, d) {
