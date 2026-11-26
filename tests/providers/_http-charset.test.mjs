@@ -66,6 +66,20 @@ try {
   ]));
   if (utf8.includes('�') && latin === EXPECTED) pass('the HTTP cache keeps a windows-1252 read apart from a UTF-8 read of the same URL');
   else fail(`cache mixed charsets: ${JSON.stringify([utf8, latin])}`);
+
+  // A charset must not read as the end of a POST body: body "x" decoded as
+  // windows-1252 and body "x\nwindows-1252" decoded as UTF-8 are two requests.
+  const postDir = mkdtempSync(join(tmpdir(), 'career-ops-charset-post-'));
+  const postsBefore = hits;
+  const [named, lookalike] = await via(() => withHttpCache({ dir: postDir, ttlMs: 60_000, write: true }, async () => [
+    await fetchText(`${base}/cached`, { method: 'POST', body: 'x', charset: 'windows-1252' }),
+    await fetchText(`${base}/cached`, { method: 'POST', body: 'x\nwindows-1252' }),
+  ]));
+  if (hits - postsBefore === 2 && named === EXPECTED && lookalike.includes('�')) {
+    pass('the HTTP cache keeps a charset apart from a POST body that ends in the same text');
+  } else {
+    fail(`cache charset vs body: ${hits - postsBefore} request(s), ${JSON.stringify([named, lookalike])}`);
+  }
 } finally {
   await new Promise((r) => server.close(r));
 }
