@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appendToPipeline, appendToScanHistory } from '../scan.mjs';
+import { appendToPipeline, appendToScanHistory, collectSeenCompanyRoles, collectSeenUrls, isOfferSeen, matchesSeenCompanyRole, companyRoleDedupKey } from '../scan.mjs';
 
 const REMOTE = 'https://mx.linkedin.com/jobs/view/manager-4492212791';
 const offer = (over = {}) => ({
@@ -37,7 +37,9 @@ test('a cached-JD offer is written to the pipeline and the history', async () =>
     const written = await appendToScanHistory([offer()], '2026-11-26', 'added', { historyPath: f.scanHistoryPath, historyPolicy: f.historyPolicy });
     assert.equal(written, 1);
     assert.match(readFileSync(f.pipelinePath, 'utf8'), /- \[ \] local:jds\/clarios-commodity-manager-9d93f8d630\.md \| Clarios \| Commodity Manager/);
-    assert.ok(readFileSync(f.scanHistoryPath, 'utf8').split('\n').some((line) => line.split('\t').includes(REMOTE)));
+    // Compare the url column itself, by position, rather than searching the row.
+    const [header, row] = readFileSync(f.scanHistoryPath, 'utf8').split('\n').map((line) => line.split('\t'));
+    assert.strictEqual(row[header.indexOf('url')], REMOTE);
   } finally { rmSync(f.dir, { recursive: true, force: true }); }
 });
 
@@ -111,5 +113,34 @@ test('a finished row under ## Processed is re-queued once history releases the p
     writeFileSync(f.pipelinePath, `# Pipeline\n\n## Pending\n\n## Processed\n\n${row}\n`);
     await appendToPipeline([offer()], { ...f, historyPolicy: { recheckAfterDays: 7, today: '2026-01-03' } });
     assert.equal((readFileSync(f.pipelinePath, 'utf8').match(/- \[ \] local:jds\//g) ?? []).length, 1);
+  } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test('the seen gate matches a cached-JD offer against the history row of its posting', () => {
+  const history = `url\tfirst_seen\tportal\ttitle\tcompany\tstatus\n${REMOTE}\t2026-11-26\tapify\tCommodity Manager\tClarios\tadded\n`;
+  const { seen } = collectSeenUrls({ scanHistoryText: history, pipelineText: '', applicationsText: '' }, { recheckAfterDays: null });
+  assert.equal(isOfferSeen({ url: REMOTE, title: 'x', company: 'y' }, seen), true);
+  assert.equal(isOfferSeen(offer(), seen), true);
+  // An unsafe local reference still has no posting identity.
+  assert.equal(isOfferSeen(offer({ url: 'local:../x.md' }), seen), false);
+});
+
+test('a struck-through finished row still pins its local reference', async () => {
+  const f = fixture();
+  try {
+    const row = '## Processed\n\n- [ ] ~~local:jds/clarios-commodity-manager-9d93f8d630.md | Clarios | Commodity Manager~~\n';
+    writeFileSync(f.pipelinePath, row);
+    await appendToPipeline([offer()], f);
+    assert.equal(readFileSync(f.pipelinePath, 'utf8'), row);
+  } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test('a pending cached-JD row holds back the same role from another cached file', async () => {
+  const f = fixture();
+  try {
+    await appendToPipeline([offer()], f);
+    const seen = collectSeenCompanyRoles({ pipelineText: readFileSync(f.pipelinePath, 'utf8') });
+    const key = companyRoleDedupKey('Clarios', 'Commodity Manager');
+    assert.equal(matchesSeenCompanyRole({ key, baseKey: key, seen, requisitions: new Map(), locatedRequisitions: new Map() }, null), true);
   } finally { rmSync(f.dir, { recursive: true, force: true }); }
 });
