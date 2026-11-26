@@ -231,3 +231,4 @@ public commit with a stated reason.
 - @maljolani | Mohammad Jolani | 2026-11-24 | id:1186743 | src:https://github.com/career-ops-hq/career-ops/discussions/7788 | n:183
 - @witeknatalia | Natalia Witek | 2026-11-25 | id:73383499 | src:https://github.com/career-ops-hq/career-ops/discussions/7803 | n:184
 - @monkey1wizard | YUN Lee | 2026-11-26 | "It takes the anxiety out of job hunting and busywork like finding roles and tailoring CVs." | id:24541350 | src:https://github.com/career-ops-hq/career-ops/discussions/7821 | n:185
+- @gtyree | Greg Tyree | 2026-11-26 | "Thirty years of building with technology. Why would my job search be different?" | id:484214 | src:https://github.com/career-ops-hq/career-ops/discussions/7839 | n:186
