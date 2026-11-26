@@ -32,7 +32,7 @@ import { hasFlag } from './lib/cli-flags.mjs';
 import { LIVENESS_CONTEXT_OPTIONS, rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
 import { browserLaunchOptions } from './lib/browser-launch.mjs';
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
-import { asciiLower, fromLdJson, fromEmbeddedDescription, embeddedDescriptionStrings, ldJsonBlocks, wordCount, htmlToText } from './lib/jd-parse.mjs';
+import { fromLdJson, fromEmbeddedDescription, embeddedDescriptionStrings, ldJsonBlocks, wordCount, htmlToText } from './lib/jd-parse.mjs';
 import { classifyLiveness, cloudflareInterstitial } from './liveness-core.mjs';
 import { resolveAtsApi, JD_TEXT_API_ATS } from './liveness-api.mjs';
 import { resolveHimalayasPosting, retrieveHimalayasPosting } from './himalayas-posting.mjs';
@@ -1230,7 +1230,7 @@ export function extractJd(page, url, { textCap = JD_TEXT_CAP, minWords = MIN_PAG
   if (data.kind === 'ambiguous' || data.kind === 'expired') return null;
   if (data.kind === 'jd') return { url, title: data.jd.title ?? '', text: capJdText(data.jd.text, textCap), method: data.jd.method };
   if (!allowVisibleText) return null;
-  const text = htmlToText(withoutExpiryViews(withoutScripts(html))).replace(/\s+/g, ' ').trim();
+  const text = pageVisibleText(html).replace(/\s+/g, ' ').trim();
   return wordCount(text) >= minWords ? { url, title: '', text: capJdText(text, textCap), method: 'visible-text' } : null;
 }
 
@@ -1277,69 +1277,9 @@ const EXPIRE_TEMPLATE_RE = /\b(?:job-expire-view|expire-job-view|job-expire-bloc
 // The most of a page's markup scanned for closure text.
 const VISIBLE_SCAN_CAP = 1_000_000;
 
-/** The markup with script/style elements and comments removed (linear, indexOf-based). */
-function withoutScripts(html) {
-  const src = String(html).slice(0, VISIBLE_SCAN_CAP);
-  const lower = asciiLower(src);
-  const out = [];
-  let i = 0;
-  while (i < src.length) {
-    const lt = src.indexOf('<', i);
-    if (lt === -1) { out.push(src.slice(i)); break; }
-    out.push(src.slice(i, lt));
-    if (src.startsWith('<!--', lt)) {
-      const end = src.indexOf('-->', lt + 4);
-      i = end === -1 ? src.length : end + 3;
-      continue;
-    }
-    const m = /^<(script|style)\b/.exec(lower.slice(lt, lt + 10));
-    if (m) {
-      const close = lower.indexOf(`</${m[1]}`, lt + 1);
-      const closeEnd = close === -1 ? -1 : src.indexOf('>', close);
-      i = closeEnd === -1 ? src.length : closeEnd + 1;
-      continue;
-    }
-    out.push('<');
-    i = lt + 1;
-  }
-  return out.join('');
-}
-
-const VOID_ELEMENTS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
-
-/**
- * Remove every element whose opening tag carries the expiry-view marker. One forward pass: the next
- * '>' is cached, tags are length-capped before the marker test, and nesting is a counter, so hostile
- * markup (a run of '<a', deep nesting) costs time linear in the page, never quadratic.
- */
-function withoutExpiryViews(html) {
-  const src = String(html);
-  const lower = asciiLower(src);
-  const out = [];
-  let i = 0; let nextGt = -2; let skipName = ''; let depth = 0;
-  while (i < src.length) {
-    const lt = src.indexOf('<', i);
-    if (lt === -1) { if (!skipName) out.push(src.slice(i)); break; }
-    if (!skipName) out.push(src.slice(i, lt));
-    if (nextGt !== -1 && nextGt <= lt) nextGt = src.indexOf('>', lt + 1);
-    const gt = nextGt;
-    const m = /^<(\/?)([a-z][a-z0-9]*)/.exec(lower.slice(lt, lt + 24));
-    if (!m || gt === -1) { if (!skipName) out.push('<'); i = lt + 1; continue; }
-    if (skipName) {
-      if (m[2] === skipName) {
-        if (m[1]) { if (--depth === 0) skipName = ''; } else depth++;
-      }
-      i = gt + 1;
-      continue;
-    }
-    if (!m[1] && EXPIRE_TEMPLATE_RE.test(src.slice(lt, Math.min(gt, lt + 4096)))) {
-      out.push(' ');
-      // A void element (img, br, ...) or a self-closed tag has no end tag: drop just the tag.
-      if (!VOID_ELEMENTS.has(m[2]) && lower[gt - 1] !== '/') { skipName = m[2]; depth = 1; }
-    } else out.push(src.slice(lt, gt + 1));
-    i = gt + 1;
-  }
-  return out.join('');
+/** The page's visible text, without a script-toggled expiry view. One pass over the first VISIBLE_SCAN_CAP chars. */
+function pageVisibleText(html) {
+  return htmlToText(String(html).slice(0, VISIBLE_SCAN_CAP), { skipElement: (tag) => EXPIRE_TEMPLATE_RE.test(tag) });
 }
 
 /**
@@ -1357,8 +1297,7 @@ function visibleClosureEvidence(html, url, finalUrl, now = new Date()) {
   // Only a marker in the page's own markup counts: one inside a script, style or comment
   // (a bundle that merely names the class) must not suppress a separate closure banner.
   // The expiry view itself is dropped; any other closure banner on the page still counts.
-  const markup = withoutExpiryViews(withoutScripts(html));
-  const verdict = classifyLiveness({ status: 200, requestedUrl: url, finalUrl, bodyText: htmlToText(markup), now });
+  const verdict = classifyLiveness({ status: 200, requestedUrl: url, finalUrl, bodyText: pageVisibleText(html), now });
   return verdict.result === 'expired' && VISIBLE_CLOSURE_CODES.has(verdict.code)
     ? `page text: ${verdict.reason}`.slice(0, 200)
     : null;
