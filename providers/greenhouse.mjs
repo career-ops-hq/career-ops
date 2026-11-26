@@ -42,10 +42,12 @@ function parseDetailConfig(entry) {
 
 const LEGACY_BOARD_HOSTS = new Set(['boards.greenhouse.io', 'boards.eu.greenhouse.io']);
 const JOB_BOARD_HOSTS = new Set(['job-boards.greenhouse.io', 'job-boards.eu.greenhouse.io']);
+const BOARD_SLUG_RE = /^[A-Za-z0-9._-]+$/;
 
 const ALLOWED_GREENHOUSE_HOSTS = new Set([
   'boards-api.greenhouse.io',
   'boards.greenhouse.io',
+  'boards.eu.greenhouse.io',
   'job-boards.greenhouse.io',
   'job-boards.eu.greenhouse.io',
 ]);
@@ -86,23 +88,21 @@ function resolveApiUrl(entry) {
     const parsed = new URL(url);
     const boardHost = (JOB_BOARD_HOSTS.has(parsed.hostname) && (parsed.protocol === 'https:' || parsed.protocol === 'http:'))
       || (LEGACY_BOARD_HOSTS.has(parsed.hostname) && parsed.protocol === 'https:');
-    if (boardHost) slug = parsed.pathname.split('/').find(Boolean) ?? null;
+    if (boardHost) {
+      slug = parsed.pathname.split('/').find(Boolean) ?? null;
+      // Embed boards carry the token in ?for= (e.g. /embed/job_board?for=stripe).
+      // The path segment is literally "embed", which resolves to a nonexistent
+      // board and 404s — the token is the only usable slug.
+      if (!slug || slug.toLowerCase() === 'embed') {
+        slug = parsed.searchParams.get('for')?.trim() || null;
+      }
+    }
   } catch {
     // unparseable url: no board to read
   }
-  // Embed boards carry the token in ?for= (e.g. /embed/job_board?for=stripe).
-  // The path segment is literally "embed", which resolves to a nonexistent
-  // board and 404s — the token is the only usable slug.
-  if (!slug || slug === 'embed') {
-    try {
-      // Only a Greenhouse URL names a board in ?for=: on any other site the param
-      // is unrelated (example.com/jobs?for=stripe) and must not select a board.
-      slug = new URL(assertGreenhouseUrl(url)).searchParams.get('for');
-    } catch {
-      // unparseable, non-HTTPS or non-Greenhouse URL: no board to read
-    }
+  if (!slug || slug.toLowerCase() === 'embed' || slug === '.' || slug.includes('..') || !BOARD_SLUG_RE.test(slug)) {
+    return null;
   }
-  if (!slug || slug === 'embed') return null;
   return `https://boards-api.greenhouse.io/v1/boards/${slug}/jobs`;
 }
 
