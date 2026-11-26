@@ -342,9 +342,9 @@ When choosing a budget-friendly model, you need strong reasoning capabilities to
 > ```
 > As with other hosted providers, this sends your CV and job description to the configured endpoint.
 >
-> UberLLM (`https://api.uberllm.dev/v1`) is another OpenAI-compatible endpoint that works the same way, for example with `deepseek/deepseek-v4-flash`. It is prepaid pay-as-you-go, with no free tier:
+> MartLLM (`https://api.martllm.com/v1`) is another OpenAI-compatible endpoint that works the same way, for example with `deepseek/deepseek-v4-flash`. It is prepaid pay-as-you-go, with no free tier:
 > ```bash
-> OPENAI_BASE_URL=https://api.uberllm.dev/v1 \
+> OPENAI_BASE_URL=https://api.martllm.com/v1 \
 > OPENAI_MODEL=deepseek/deepseek-v4-flash \
 > OPENAI_API_KEY=your_uberllm_key \
 > node openai-eval.mjs --file ./jds/job.txt
