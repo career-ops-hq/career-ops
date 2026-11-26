@@ -78,3 +78,48 @@ for (const [signal, code] of [['SIGTERM', 143], ['SIGINT', 130]]) {
     }
   });
 }
+
+// Matches the --seeds pass has found are held in a local array until the pass
+// returns, so a signal mid-pass lost them.
+test('SIGTERM during a --seeds pass keeps the matches that pass already found', { skip: platform() === 'win32' }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ats-signal-seeds-'));
+  try {
+    writeFileSync(join(dir, 'portals.yml'), 'title_filter:\n  positive:\n    - director\n', 'utf-8');
+    mkdirSync(join(dir, 'data'), { recursive: true });
+    writeFileSync(join(dir, 'data', 'pipeline.md'), '# Pipeline\n\n## Pendientes\n', 'utf-8');
+    const url = 'https://jobs.example/seed-co-0/jobs/1';
+    const fetched = join(dir, 'fetched.txt');
+    writeFileSync(fetched, '', 'utf-8');
+    const preload = join(dir, 'preload.mjs');
+    writeFileSync(preload, `
+import { appendFileSync } from 'node:fs';
+import provider from ${JSON.stringify(pathToFileURL(join(ROOT, 'providers', 'greenhouse.mjs')).href)};
+import { SEED_SOURCES } from ${JSON.stringify(pathToFileURL(join(ROOT, 'seeds', 'vc-portfolios.mjs')).href)};
+SEED_SOURCES.yc.fetch = async () => Array.from({ length: 6 }, (_, i) => ({ name: 'Seed Co ' + i, slug: 'seed-co-' + i, url: '', source: 'test' }));
+provider.fetch = async (entry) => {
+  appendFileSync(${JSON.stringify(fetched)}, entry.name + '\\n');
+  if (entry.name === 'Seed Co 0') return [{ title: 'Director of Engineering', url: ${JSON.stringify(url)}, company: 'Seed Co', location: 'Remote', postedAt: Date.now(), description: '' }];
+  await new Promise(() => {});
+};
+globalThis.fetch = async () => new Response('{}', { status: 404 });
+setInterval(() => {}, 1000);
+`, 'utf-8');
+    const result = await new Promise((resolve) => {
+      const child = spawn(process.execPath, ['--import', pathToFileURL(preload).href, SCAN, '--seeds', 'yc', '--since', '7'], { cwd: dir, env: env(dir) });
+      let out = '';
+      let sent = false;
+      const hard = setTimeout(() => child.kill('SIGKILL'), 20_000);
+      const poll = setInterval(() => {
+        if (!sent && fetchedCount(fetched) >= 3) { sent = true; clearInterval(poll); setTimeout(() => child.kill('SIGTERM'), 300); }
+      }, 50);
+      child.stderr.on('data', (b) => { out += b.toString(); });
+      child.stdout.on('data', (b) => { out += b.toString(); });
+      child.on('close', (status) => { clearInterval(poll); clearTimeout(hard); resolve({ status, out }); });
+    });
+    assert.equal(result.status, 143, result.out.slice(-600));
+    assert.match(result.out, /SIGTERM: sweep stopped — 1 matches so far, saved to pipeline/);
+    assert.ok(readFileSync(join(dir, 'data', 'pipeline.md'), 'utf-8').includes(url));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

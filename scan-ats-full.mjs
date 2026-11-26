@@ -1423,7 +1423,9 @@ export async function probeSeedBoards(candidates, providers, fetchBoard) {
  * @param {object}   [idCaches]  Store from openProviderIdCache(); each provider gets its slice as ctx.idCache.
  * @returns {Promise<object[]>}  New job offers (same shape as ATS scan offers).
  */
-export async function runSeedScan(seedId, opts, ctx, seenUrls, label, idCaches) {
+// `sink`, when given, receives matches as they are found (a stop signal mid-pass
+// still sees them) and is returned as `offers`.
+export async function runSeedScan(seedId, opts, ctx, seenUrls, label, idCaches, sink) {
   const source = SEED_SOURCES[seedId];
   if (!source) throw new Error(`runSeedScan: unknown seed "${seedId}"`);
 
@@ -1443,7 +1445,7 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label, idCaches) 
     : companies;
 
   const cutoff = Date.now() - opts.sinceDays * 86_400_000;
-  const offers = [];
+  const offers = sink ?? [];
   let errors = 0;
   let noBoard = 0;
   // Ashby, Greenhouse and Lever each answer every board from one API host, and
@@ -2552,12 +2554,13 @@ async function main() {
   for (const seedId of opts.seeds) {
     const seedSource = SEED_SOURCES[seedId];
     log(`\n🌱 ${seedSource.label} (${seedId}-seed) — fetching portfolio...`);
-    const result = await runSeedScan(seedId, opts, ctx, seenUrls, seedSource.label, idCaches);
+    const before = newOffers.length;
+    const result = await runSeedScan(seedId, opts, ctx, seenUrls, seedSource.label, idCaches, newOffers);
     if (result && result.offers) {
       totalCompaniesScanned += result.total || 0;
       totalErrors += result.errors || 0;
-      newOffers.push(...result.offers);
-      log(`  done — ${result.total} companies probed, ${result.offers.length} matches (${result.errors} errors, ${result.noBoard} with no board found)`);
+      const found = result.offers.length - before;
+      log(`  done — ${result.total} companies probed, ${found} matches (${result.errors} errors, ${result.noBoard} with no board found)`);
     }
   }
   // The history and VC seed passes run after every directory source has
