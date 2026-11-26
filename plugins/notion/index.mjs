@@ -49,7 +49,13 @@ async function applicationsDb(client) {
  * @returns {number} Parsed score, or NaN if no valid number is present.
  */
 export function parseScore(s) {
-  const m = String(s ?? '').replace(/\*\*/g, '').match(/([\d.]+)/);
+  // Fullwidth digits are the same number. Left alone, "４.２/5" matches the
+  // ASCII 5 after the slash and the Notion score is 5.
+  const folded = String(s ?? '').replace(/[\uFF10-\uFF19\uFF0E]/g, (ch) => {
+    const code = ch.charCodeAt(0);
+    return code === 0xFF0E ? '.' : String.fromCharCode(code - 0xFEE0);
+  });
+  const m = folded.replace(/\*\*/g, '').match(/([\d.]+)/);
   return m ? parseFloat(m[1]) : NaN;
 }
 
