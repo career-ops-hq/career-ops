@@ -1471,12 +1471,13 @@ function visaRefusalPhrases() {
       ],
       anySponsorship,
     ),
-    // "you must be able to work without requiring visa sponsorship", "you
-    // must be work authorized without the need for new visa sponsorship"
-    ...cross(
-      ['without requiring', 'without needing', 'without the need for'],
-      [...anySponsorship, 'new sponsorship', 'new visa sponsorship'],
-    ),
+    // "you must be able to work without requiring visa sponsorship"
+    ...cross(['without requiring', 'without needing', 'without the need for'], anySponsorship),
+    // "You must be work authorized in the United States without the need for
+    // new visa sponsorship". Only this measured wording, because a shorter
+    // form such as "without needing new visa sponsorship" can also be welcome
+    // text in a posting that sponsors.
+    'without the need for new visa sponsorship',
     'without visa sponsorship',
     // "this position is not eligible for visa sponsorship"
     'not eligible for sponsorship',

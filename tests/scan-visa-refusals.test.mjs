@@ -71,6 +71,9 @@ const OFFERS = [
   // An offer that hedges. "aren't able to successfully sponsor" must not read
   // as a refusal.
   "Visa sponsorship: We do sponsor visas! However, we aren't able to successfully sponsor visas for every role and every candidate.",
+  // Welcome text next to an offer. Only the measured mandatory wording
+  // "without the need for new visa sponsorship" is a refusal.
+  'We sponsor visas and welcome candidates who can work without needing new visa sponsorship.',
   'Not sure whether you qualify? We provide visa sponsorship for every hire.',
 ];
 
