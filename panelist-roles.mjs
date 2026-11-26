@@ -233,7 +233,8 @@ export function extractPanelists(text, table) {
       if (!title || /^\d/.test(title)) return;
       if (c.form === 'comma' && !hasKeyword(title, table)) return;
       // A signature line "Talent Acquisition Partner | Acme Corp" is a title, then the company.
-      if (signoffLines.has(lineIndex) && hasKeyword(c.name, table) && !hasKeyword(title, table)) return;
+      // Only a line that starts with it: "You will meet Pat Head - Biostatistician" names a person.
+      if (signoffLines.has(lineIndex) && !line.slice(0, c.start).trim() && hasKeyword(c.name, table) && !hasKeyword(title, table)) return;
       add(c.name, title, c.form === 'dash' ? 'name-dash-title' : 'name-comma-title');
     });
 

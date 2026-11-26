@@ -85,6 +85,9 @@ eq('prefix name after a dropped greeting', brief(analyzePanel('Hello Al Alvarez 
   eq('title | company: no panelist named after the title', r.panelists.map((p) => p.name), ['Robin Hale', 'Taylor Morgan']);
   eq('title | company: a surname that is a title word keeps its title', brief(analyzePanel('Meeting with Pat Head | Engineering Manager', table)).map((x) => x.slice(0, 2)), [['Pat Head', 'Engineering Manager']]);
   eq('title | company: outside a sign-off, an unmatched title still keeps its person', brief(analyzePanel('Meeting with Pat Head | Biostatistician', table)).map((x) => x.slice(0, 2)), [['Pat Head', 'Biostatistician']]);
+  for (const line of ['You will meet Pat Head - Biostatistician', 'Meeting with Pat Head | Biostatistician']) {
+    eq(`title | company: inside a sign-off, "${line}" keeps its title`, brief(analyzePanel(`Thanks,\n${line}`, table)).filter((x) => x[0]).map((x) => x.slice(0, 2)), [['Pat Head', 'Biostatistician']]);
+  }
 }
 
 // 3. A title that itself contains commas stays whole, and its inner words are not a second panelist
