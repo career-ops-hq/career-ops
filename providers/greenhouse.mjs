@@ -236,13 +236,19 @@ export function buildOfficeMap(json) {
 // tags are gone. That pipeline (and its rationale) now lives in
 // _html-to-text.mjs, shared with the providers added in #3175's phase 2;
 // this wrapper keeps greenhouse's tested export name.
+//
+// The body is kept whole (no DESCRIPTION_CAP), like ashby, lever, gem and
+// join, because the description filters read the end of a JD too, where visa
+// wording usually sits. Measured on 7,933 public Greenhouse postings (2026-11-26),
+// 6,959 ran past 4,000 characters (median 6,161), and the cut hid 106
+// sponsorship refusals from visa_filter and 538 offers from strict mode.
 
 /**
  * Entity-decoded markup → stripped plain text. Exported for tests.
  * @param {unknown} content
  */
 export function contentToText(content) {
-  return htmlToText(content);
+  return htmlToText(content, { cap: Infinity });
 }
 
 /** @type {Provider} */

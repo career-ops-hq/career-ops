@@ -6,7 +6,7 @@
 // drifted across four files (#1555/#1639/#2623).
 import { decodeEntities } from './_html-entities.mjs';
 
-// Capped like greenhouse/alibaba full-text JDs: a 10 KB/posting body is
+// Capped like alibaba full-text JDs: a 10 KB/posting body is
 // normal on these boards, and scan payloads must stay sane.
 export const DESCRIPTION_CAP = 4000;
 

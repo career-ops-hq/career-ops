@@ -1438,17 +1438,23 @@ export const DEFAULT_VISA_NEGATIVE = [
 // mention of sponsorship was a refusal, most often "visa sponsorship is not
 // offered for this role" and "we are unable to offer visa sponsorship".
 // Curly apostrophes are folded to straight ones before matching, so "n't"
-// covers "can’t" and "won’t" as well.
+// covers "can’t" and "won’t" as well. Reading whole Greenhouse bodies
+// (2026-11-26, 7,933 postings) turned up four more refusals that sat past the
+// old 4,000-character cut, so they are listed too ("does not include visa
+// sponsorship", "without the need for new visa sponsorship", "visa
+// sponsorship and relocation support are not available" and "Visa
+// Sponsorship is not offer").
 function visaRefusalPhrases() {
   const sponsorship = ['sponsorship', 'visa sponsorship', 'work visa sponsorship'];
   const anySponsorship = [...sponsorship, 'company sponsorship', 'employer sponsorship'];
   const cross = (prefixes, objects) => prefixes.flatMap(p => objects.map(o => `${p} ${o}`));
   return [
     // "we are unable to offer visa sponsorship", "this role does not support
-    // visa sponsorship", "we can't provide sponsorship"
+    // visa sponsorship", "we can't provide sponsorship", "this position does
+    // not include visa sponsorship"
     ...cross(
       ['not', "n't", 'unable to', 'not able to', 'not currently able to', 'not in a position to']
-        .flatMap(neg => ['offer', 'provide', 'support'].map(verb => `${neg} ${verb}`)),
+        .flatMap(neg => ['offer', 'provide', 'support', 'include'].map(verb => `${neg} ${verb}`)),
       sponsorship,
     ),
     // "work authorization that does not require sponsorship", "applicants
@@ -1465,8 +1471,12 @@ function visaRefusalPhrases() {
       ],
       anySponsorship,
     ),
-    // "you must be able to work without requiring visa sponsorship"
-    ...cross(['without requiring', 'without needing', 'without the need for'], anySponsorship),
+    // "you must be able to work without requiring visa sponsorship", "you
+    // must be work authorized without the need for new visa sponsorship"
+    ...cross(
+      ['without requiring', 'without needing', 'without the need for'],
+      [...anySponsorship, 'new sponsorship', 'new visa sponsorship'],
+    ),
     'without visa sponsorship',
     // "this position is not eligible for visa sponsorship"
     'not eligible for sponsorship',
@@ -1482,6 +1492,12 @@ function visaRefusalPhrases() {
     'sponsorship will not be provided',
     'sponsorship cannot be offered',
     'sponsorship cannot be provided',
+    // "Visa Sponsorship is not offer for this position", a typo one employer
+    // repeats on every posting
+    'sponsorship is not offer',
+    // "visa sponsorship and relocation support are not available"
+    'sponsorship and relocation support are not available',
+    'sponsorship and relocation are not available',
     // "we won't sponsor visas", "we are not currently able to sponsor visas"
     "n't sponsor",
     'will not sponsor',
