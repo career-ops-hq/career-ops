@@ -316,6 +316,173 @@ try {
       : fail(`google probe rejection: ${threw?.message}`);
   }
 
+  // ── full_board: one unqueried walk of the whole listing ──
+  {
+    const FULL = { name: 'Google', google: { full_board: true, queries: ['strategy', 'ops'], location: 'United States' } };
+    // Page 1 is the real card markup (title, employer, locations); pages 2..N
+    // are full link pages; the last is short.
+    const lastPage = 60;
+    const respond = (c) => {
+      const page = Number(pageOf(c.url) || '1');
+      if (page === 1) return CARDS_HTML.replace('</ul>', linkPage(fullPageIds(900000).slice(0, PAGE_SIZE - 2)) + '</ul>');
+      if (page < lastPage) return linkPage(fullPageIds(1000000 + page * PAGE_SIZE));
+      return linkPage(['7', '8', '9']);
+    };
+    const { ctx, calls } = recordingCtx(respond);
+    let jobs;
+    const logged = await captureErrors(async () => { jobs = await provider.fetch(FULL, ctx); });
+
+    calls.every((c) => qOf(c.url) === null && /[?&]location=United\+States\b/.test(c.url) && /[?&]sort_by=date\b/.test(c.url) && c.opts?.redirect === 'error')
+      ? pass('full_board requests the listing with no q, keeps location and sort_by=date, redirect:"error" throughout')
+      : fail(`full_board request URLs: ${calls.slice(0, 3).map((c) => c.url).join(' ')}`);
+    calls.length === lastPage
+      ? pass('full_board walks one listing past the 50-page query cap to its short last page, and ignores queries')
+      : fail(`full_board made ${calls.length} requests, expected ${lastPage}`);
+    jobs.truncated === undefined && !logged.some((l) => /cap/.test(l))
+      ? pass('full_board that reaches the end of the listing is not marked partial')
+      : fail(`full_board end: truncated=${JSON.stringify(jobs.truncated)}, logged ${JSON.stringify(logged)}`);
+    const yt = jobs.find((x) => x.externalId === '127792359805985478');
+    yt?.title === 'Product Manager II, YouTube Ads & AI/ML' && yt?.company === 'YouTube'
+      && yt?.location === 'Kirkland, WA, USA; Mountain View, CA, USA'
+      ? pass('full_board rows carry the card\'s real title, employer and locations, so title, blacklist and location filters see them')
+      : fail(`full_board card row = ${JSON.stringify(yt)}`);
+    JSON.stringify(yt?.locations) === JSON.stringify(['Kirkland, WA, USA', 'Mountain View, CA, USA'])
+      && !('locations' in (jobs.find((x) => x.externalId === '7') || { locations: 1 }))
+      ? pass('google.fetch() returns the card\'s separate locations as locations, omitted when the card names none')
+      : fail(`locations = ${JSON.stringify(yt?.locations)}`);
+  }
+  {
+    // The full-board budget: 200 pages by default, max_pages overrides up to 300.
+    resolveMaxPages({ google: { full_board: true } }) === 200
+      && resolveMaxPages({ google: { full_board: true }, max_pages: 120 }) === 120
+      && resolveMaxPages({ google: { full_board: true }, max_pages: 9999 }) === 300
+      && resolveMaxPages({ google: { queries: ['x'] }, max_pages: 9999 }) === 50
+      && resolveMaxPages({ google: {} }) === 10
+      ? pass('resolveMaxPages() gives full_board its own budget (default 200, cap 300) and leaves query mode at 10/50')
+      : fail('resolveMaxPages() full_board budget wrong');
+    const { ctx, calls } = recordingCtx((c) => linkPage(fullPageIds(5000000 + Number(pageOf(c.url) || '1') * PAGE_SIZE)));
+    let jobs;
+    const logged = await captureErrors(async () => { jobs = await provider.fetch({ name: 'Google', google: { full_board: true }, max_pages: 3 }, ctx); });
+    calls.length === 3 && jobs.truncated?.reason === 'page-cap' && jobs.truncated?.fetched === PAGE_SIZE * 3
+      && logged.some((l) => /3-page cap on the full board \(60 postings read\) — raise max_pages on this entry for more \(up to 300\)/.test(l))
+      ? pass('full_board at its page cap marks page-cap and names the full-board budget')
+      : fail(`full_board cap: ${calls.length} calls, truncated=${JSON.stringify(jobs?.truncated)}, logged ${JSON.stringify(logged)}`);
+  }
+  {
+    const { ctx, calls } = recordingCtx((c) => linkPage(fullPageIds(6000000 + Number(pageOf(c.url) || '1') * PAGE_SIZE)));
+    await provider.fetch({ name: 'Google', google: { full_board: true } }, { ...ctx, maxPages: 1 });
+    calls.length === 1 && qOf(calls[0].url) === null
+      ? pass('full_board under ctx.maxPages makes one request')
+      : fail(`full_board probe: ${calls.length} calls`);
+    const boom = new Error('down');
+    let thrown = null;
+    try {
+      await provider.fetch({ name: 'Google', google: { full_board: true } }, { ...recordingCtx(() => { throw boom; }).ctx, maxPages: 1 });
+    } catch (e) { thrown = e; }
+    thrown === boom
+      ? pass('full_board propagates a rejection unwrapped during a probe')
+      : fail(`full_board probe rejection: ${thrown}`);
+  }
+
+  // ── page 1 links to postings but no card parses -> throw, not an empty board ──
+  {
+    // A posting ID that is not numeric: counted as a posting link, never parsed.
+    const odd = (id) => `<a href="jobs/results/${id}-role">x</a>`;
+    const page1 = `<!doctype html>${['aaa', 'bbb', 'ccc'].map(odd).join('\n')}`;
+    let thrown = null;
+    try {
+      await provider.fetch({ name: 'Google', google: { full_board: true } }, recordingCtx(() => page1).ctx);
+    } catch (e) { thrown = e; }
+    thrown && /no card could be parsed/.test(thrown.message)
+      ? pass('page 1 with posting links but no parsed cards throws')
+      : fail(`unparsable page 1 should throw, got ${thrown}`);
+    const empty = await provider.fetch({ name: 'Google', google: { full_board: true } },
+      recordingCtx(() => '<!doctype html><a href="jobs/results/?location=US">all</a>').ctx);
+    Array.isArray(empty) && empty.length === 0
+      ? pass('page 1 with no posting links still returns []')
+      : fail(`empty page 1 should return [], got ${JSON.stringify(empty)}`);
+    const { ctx, calls } = recordingCtx(({ n }) => (n === 0 ? linkPage(fullPageIds(1000)) : page1));
+    let later;
+    const warned = await captureErrors(async () => { later = await provider.fetch({ name: 'Google', google: { full_board: true } }, ctx); });
+    later.length === PAGE_SIZE && calls.length === 2
+      && later.truncated?.reason === 'unparsable-page' && later.truncated?.fetched === PAGE_SIZE
+      && warned.some((l) => /stopped the full board at page 2/.test(l))
+      ? pass('an unparsable later page ends the walk, warns, and marks the result partial')
+      : fail(`later unparsable page: ${later.length} jobs, ${calls.length} calls, truncated=${JSON.stringify(later.truncated)}`);
+    const { ctx: endCtx } = recordingCtx(({ n }) => (n === 0 ? linkPage(fullPageIds(1000)) : '<!doctype html><p>No more results</p>'));
+    const ended = await provider.fetch({ name: 'Google', google: { full_board: true } }, endCtx);
+    ended.length === PAGE_SIZE && ended.truncated === undefined
+      ? pass('a later page with no posting links is the normal end (no marker)')
+      : fail(`later empty page: truncated=${JSON.stringify(ended.truncated)}`);
+  }
+
+  // ── short-page stop counts posting links, not parsed cards ──
+  {
+    const { countPostingLinks, postingLinkIds } = mod;
+    // 19 cards + 1 posting whose ID the parser cannot read = a full page of 20.
+    const mixed = (start) => `<!doctype html>${fullPageIds(start).slice(0, PAGE_SIZE - 1).map((id) => link(id)).join('\n')}
+<a href="jobs/results/x${start}-odd">x</a>`;
+    const { ctx, calls } = recordingCtx(({ n }) => (n === 0 ? mixed(2000) : linkPage(['3000', '3001'])));
+    let jobs;
+    const unreadWarn = await captureErrors(async () => { jobs = await provider.fetch({ name: 'Google', google: { full_board: true } }, ctx); });
+    calls.length === 2 && jobs.length === PAGE_SIZE - 1 + 2
+      ? pass('a full page with one unparsable posting link is not read as short')
+      : fail(`mixed full page: ${calls.length} calls, ${jobs.length} jobs`);
+    jobs.truncated?.reason === 'unread-postings' && jobs.truncated?.fetched === PAGE_SIZE + 1
+      && unreadWarn.some((l) => /could not read 1 linked posting\(s\) \(21 read\)/.test(l))
+      ? pass('a linked posting no card returned marks the result partial and warns')
+      : fail(`unread posting: truncated=${JSON.stringify(jobs.truncated)}`);
+    // Page 1 links a posting with no title anywhere; page 2 returns its card.
+    // Every posting is in the result, so it is not marked partial.
+    const titleless = `<!doctype html>${fullPageIds(5000).slice(0, PAGE_SIZE - 1).map((id) => link(id)).join('\n')}
+<a href="jobs/results/5999">x</a>`;
+    const { ctx: lateCtx, calls: lateCalls } = recordingCtx(({ n }) => (n === 0 ? titleless : linkPage(['5999', '6000'])));
+    let late;
+    const lateWarn = await captureErrors(async () => { late = await provider.fetch({ name: 'Google', google: { full_board: true } }, lateCtx); });
+    lateCalls.length === 2 && late.length === PAGE_SIZE + 1 && late.truncated === undefined
+      && !lateWarn.some((l) => /could not read/.test(l))
+      ? pass('a posting a later page returns is not left marked unread')
+      : fail(`late return: ${lateCalls.length} calls, ${late.length} jobs, truncated=${JSON.stringify(late.truncated)}`);
+    // Single quotes, no slug, mixed case: the parser reads every link shape the counter counts.
+    const shapes = `<!doctype html><h3>Single</h3><a href='jobs/results/71-single'>x</a>
+<h3>Bare</h3><A HREF=jobs/results/72>x</A>`;
+    const shaped = mod.parseResultsPage(shapes);
+    shaped.map((c) => `${c.id}:${c.title}`).join(',') === '71:Single,72:Bare'
+      && countPostingLinks(shapes) === shaped.length
+      ? pass('parseResultsPage reads every link shape countPostingLinks counts')
+      : fail(`link shapes: ${JSON.stringify(shaped)}`);
+    const { ctx: bareCtx } = recordingCtx(() => `<!doctype html><h3>Bare</h3><a href="jobs/results/72">x</a>`);
+    const bare = await provider.fetch({ name: 'Google', google: { full_board: true } }, bareCtx);
+    bare[0]?.url.endsWith('/jobs/results/72') && bare.truncated === undefined
+      ? pass('a posting link with no slug keeps a working URL')
+      : fail(`bare link url: ${bare[0]?.url}`);
+    // Page 2 repeats 19 postings from page 1 and adds one new posting whose
+    // card does not parse: that is new content, so the walk goes on to page 3.
+    const repeatPlusOdd = `<!doctype html>${fullPageIds(2000).slice(0, PAGE_SIZE - 1).map((id) => link(id)).join('\n')}
+<a href='jobs/results/2500-odd'>x</a>`;
+    const { ctx: rpCtx, calls: rpCalls } = recordingCtx(({ n }) => (n === 0 ? linkPage(fullPageIds(2000))
+      : n === 1 ? repeatPlusOdd : linkPage(['4000', '4001'])));
+    const rp = await provider.fetch({ name: 'Google', google: { full_board: true } }, rpCtx);
+    rpCalls.length === 3 && rp.length === PAGE_SIZE + 1 + 2 && rp.truncated === undefined
+      && rp.some((j) => j.externalId === '2500')
+      ? pass('a repeated page with one new single-quoted posting returns it and walks on')
+      : fail(`repeat + odd: ${rpCalls.length} calls, ${rp.length} jobs, truncated=${JSON.stringify(rp.truncated)}`);
+    // A page that only repeats earlier postings still ends the walk.
+    const { ctx: reCtx, calls: reCalls } = recordingCtx(() => linkPage(fullPageIds(2000)));
+    await provider.fetch({ name: 'Google', google: { full_board: true } }, reCtx);
+    reCalls.length === 2
+      ? pass('a page that only repeats earlier postings still ends the walk')
+      : fail(`re-served page: ${reCalls.length} calls`);
+    [...postingLinkIds(`${link('77')}<a href='jobs/results/77-other'>y</a><a href="jobs/results/abc">z</a>`)].join(',') === '77,abc'
+      ? pass('postingLinkIds keys a posting by its numeric ID')
+      : fail('postingLinkIds keyed wrongly');
+    countPostingLinks(mixed(2000)) === PAGE_SIZE
+      && countPostingLinks('<a href="jobs/results/?q=x">a</a><a href="https://www.google.com/about/careers/applications/jobs/results/">b</a>') === 0
+      && countPostingLinks(`${link('5')}${link('5')}`) === 1
+      ? pass('countPostingLinks counts distinct postings and skips listing links')
+      : fail('countPostingLinks miscounted');
+  }
+
 } catch (e) {
   fail(`google provider tests crashed: ${e.message}`);
 }
