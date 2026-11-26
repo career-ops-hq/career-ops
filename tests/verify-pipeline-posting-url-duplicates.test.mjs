@@ -54,9 +54,14 @@ try {
     writeFileSync(tracker, table, "utf-8");
     const env = {
       ...process.env,
+      CAREER_OPS_ROOT: tmp,
       CAREER_OPS_TRACKER: tracker,
       CAREER_OPS_REPORTS: reports,
     };
+    delete env.CAREER_OPS_DATA_DIR;
+    delete env.CAREER_OPS_PROFILE;
+    delete env.CAREER_OPS_JDS;
+    delete env.CAREER_OPS_PORTALS;
     try {
       const out = execFileSync(NODE, [join(ROOT, "verify-pipeline.mjs")], {
         cwd: ROOT,
