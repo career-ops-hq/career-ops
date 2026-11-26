@@ -2546,7 +2546,8 @@ export function extractPipelineCompanyRole(line) {
   const cells = entry.body.split('|').map(cell => cell.trim());
   if (cells[0].startsWith('#--')) return null;
 
-  const urlIndex = cells.findIndex(cell => PIPELINE_URL_RE.test(cell));
+  // A cached-JD row leads with its local reference instead of an http(s) url.
+  const urlIndex = cells.findIndex(cell => PIPELINE_URL_RE.test(cell) || LOCAL_JD_REF.test(cell));
   if (urlIndex === -1) return null;
 
   const [company = '', role = '', third = ''] = cells.slice(urlIndex + 1);
@@ -3557,7 +3558,7 @@ function recordLanguages(languagesByKey, key, requisitions, languages) {
  * the id it may have had is missing rather than absent.
  * @returns {Set<string>} Existing company+role dedupe keys.
  */
-export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize = defaultCompanyNormalizer, { includeLocation = false, locatedBases = null, requisitionsByBase = null, locatedRequisitionsByBase = null, languagesByBase = null, locatedLanguagesByBase = null } = {}) {
+export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize = defaultCompanyNormalizer, { includeLocation = false, locatedBases = null, requisitionsByBase = null, locatedRequisitionsByBase = null, languagesByBase = null, locatedLanguagesByBase = null, resolveLocalRef = null } = {}) {
   const { applicationsText = '', scanHistoryText = '', pipelineText = '', historyRows = null } = sources;
   const seen = new Set();
   const postingAttributes = collectPostingAttributes(scanHistoryText, historyRows);
@@ -3656,9 +3657,13 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
   for (const line of pipelineText.split('\n')) {
     const pair = extractPipelineCompanyRole(line);
     if (!pair) continue;
-    const attributes = attributesFor(pair.url);
-    let requisition = requisitionIdsForDedup({ url: pair.url, requisitionId: attributes.requisitionId });
-    if (requisition.length === 0 && typeof pair.url === 'string' && pair.url && !recordedInHistory(pair.url)) {
+    // A cached-JD row names its local file, but history is keyed by the posting
+    // url. Resolve the file's own posting url when the caller can read it; a row
+    // it cannot resolve stays unrecorded, the conservative reading.
+    const postingUrl = (typeof resolveLocalRef === 'function' && LOCAL_JD_REF.test(pair.url) && resolveLocalRef(pair.url)) || pair.url;
+    const attributes = attributesFor(postingUrl);
+    let requisition = requisitionIdsForDedup({ url: postingUrl, requisitionId: attributes.requisitionId });
+    if (requisition.length === 0 && typeof postingUrl === 'string' && postingUrl && !recordedInHistory(postingUrl)) {
       requisition = [UNRECORDED_REQUISITION];
     }
     add(pair.company, pair.role, pair.location, requisition,
@@ -3845,7 +3850,9 @@ export function formatTrustSegment(offer) {
 }
 
 export function formatPipelineOffer(offer) {
-  const url = sanitizePipelineUrl(offer.url);
+  const url = LOCAL_JD_REF.test(offer?.url ?? '') && offerPostingUrl(offer)
+    ? offer.url
+    : sanitizePipelineUrl(offer.url);
   // No safe http(s) URL, no row: an offer the board could not describe as a
   // posting must not become a line the pipeline mode then tries to evaluate.
   if (!url) return '';
@@ -3894,7 +3901,7 @@ function postedAtIsoDate(postedAt) {
 }
 export function formatScanHistoryRow(offer, date, status = 'added') {
   const record = {
-    url: safePostingUrl(offer.url),
+    url: offerPostingUrl(offer),
     first_seen: date,
     portal: offer.source,
     title: offer.title,
@@ -3962,7 +3969,7 @@ export function refreshListingKey(offer) {
 
 
 export function isOfferSeen(offer, seenUrls, identityPromotableUrls = null) {
-  const urlToken = seenJobKey(offer?.url);
+  const urlToken = seenJobKey(offerPostingUrl(offer) || offer?.url);
   const identityToken = listingIdentityToken(offer);
   if (seenUrls.has(urlToken)) {
     const historicalKeys = identityPromotableUrls?.get(urlToken);
@@ -3975,7 +3982,7 @@ export function isOfferSeen(offer, seenUrls, identityPromotableUrls = null) {
 }
 
 export function markOfferSeen(offer, seenUrls, { includeIdentity = true } = {}) {
-  const urlToken = seenJobKey(offer?.url);
+  const urlToken = seenJobKey(offerPostingUrl(offer) || offer?.url);
   const identityToken = listingIdentityToken(offer);
   seenUrls.add(urlToken);
   if (identityToken && includeIdentity) {
@@ -4123,6 +4130,7 @@ export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNorm
     locatedRequisitionsByBase,
     languagesByBase: seenCompanyRoleLanguages,
     locatedLanguagesByBase,
+    resolveLocalRef: localJdPostingUrl,
   });
   const fingerprintHistory = collectFingerprintHistory(scanHistoryText, historyRows);
   return { seen, identityPromotableUrls, recheckEligible, seenUrlVariants, seenCompanyRoles, seenCompanyRoleBases, seenCompanyRoleRequisitions, locatedRequisitionsByBase, seenCompanyRoleLanguages, locatedLanguagesByBase, fingerprintHistory };
@@ -4147,6 +4155,44 @@ function sameJobWriteKey(url) {
   // non-empty key, so it was written to pipeline.md and scan-history.tsv —
   // exactly the board-authored text the sanitizer above exists to keep out.
   return canonicalJobKey(url);
+}
+
+// An offer whose JD the plugin cached carries `url: local:jds/<file>.md` and the
+// posting's own link in `_remote_url`. The posting link is what identifies the
+// job, so it supplies the dedup key and the scan-history url; the pipeline row
+// keeps the local reference, as it did before #7591. Only that exact shape
+// counts: any other non-http(s) url stays refused.
+const LOCAL_JD_REF = /^local:jds\/[A-Za-z0-9._-]+\.md$/;
+
+// The posting url a cached JD file recorded in its frontmatter when it was
+// saved. Null when the file is missing, unreadable or carries no safe url.
+function localJdPostingUrl(ref, root = DATA_ROOT) {
+  if (typeof ref !== 'string' || !LOCAL_JD_REF.test(ref)) return null;
+  try {
+    const text = readFileSync(path.join(root, ref.slice('local:'.length)), 'utf-8');
+    const front = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+    return front ? safePostingUrl(loadYaml(front[1])?.url) : null;
+  } catch {
+    return null;
+  }
+}
+
+// The url that liveness checks and their guard must look at: the posting itself
+// for a cached-JD offer, so a local reference is never mistaken for a rejected
+// protocol and recorded against the posting as a permanent status.
+function verifyTargetUrl(offer) {
+  return (LOCAL_JD_REF.test(offer?.url ?? '') && offerPostingUrl(offer)) || offer.url;
+}
+
+function offerPostingUrl(offer) {
+  const direct = safePostingUrl(offer?.url);
+  if (direct) return direct;
+  if (typeof offer?.url === 'string' && LOCAL_JD_REF.test(offer.url)) return safePostingUrl(offer._remote_url);
+  return '';
+}
+
+function offerWriteKey(offer) {
+  return sameJobWriteKey(offerPostingUrl(offer));
 }
 
 // Keys whose history rows no longer pin. A still-pinning row of the same
@@ -4180,12 +4226,18 @@ function releasedHistoryKeys(historyText, policy) {
   return released;
 }
 
-function keysInPipeline(text, released = new Set()) {
+function keysInPipeline(text, released = new Set(), resolveLocalRef = null) {
   const keys = new Set();
   let inProcessed = false;
   for (const line of String(text ?? '').split('\n')) {
     inProcessed = processedSectionAfter(line, inProcessed);
-    const url = extractPipelineUrl(line);
+    let url = extractPipelineUrl(line);
+    if (!url && typeof resolveLocalRef === 'function') {
+      // A cached-JD row has no http url of its own. Its JD file names the posting,
+      // so the same posting cached under another filename still matches.
+      const ref = pipelineEntry(line, PIPELINE_CHECKBOX_RE)?.body.split('|').map((cell) => cell.trim()).find((cell) => LOCAL_JD_REF.test(cell));
+      url = ref ? resolveLocalRef(ref) : null;
+    }
     if (!url) continue;
     const key = sameJobWriteKey(url);
     if (!key) continue;
@@ -4197,12 +4249,33 @@ function keysInPipeline(text, released = new Set()) {
   return keys;
 }
 
-function offersMissingFromPipeline(offers, pipelineText, historyText = '', policy = {}) {
-  const keys = keysInPipeline(pipelineText, releasedHistoryKeys(historyText, policy));
+// Same pinning rule as keysInPipeline, for a row that carries the local JD
+// reference instead of an http(s) url: an open row stays pinned, a finished
+// one (under ## Processed or ticked) only until history releases the posting.
+function localRefPinned(pipelineText, ref, key, released) {
+  let inProcessed = false;
+  for (const line of String(pipelineText ?? '').split('\n')) {
+    inProcessed = processedSectionAfter(line, inProcessed);
+    // Read the row body the way the http parser does, so a struck-through
+    // row (`- [ ] ~~local:jds/a.md | Company | Role~~`) still matches.
+    const body = pipelineEntry(line, PIPELINE_CHECKBOX_RE)?.body;
+    if (!body || !body.split('|').some((cell) => cell.trim() === ref)) continue;
+    if (pipelineRowIsFinished(line, inProcessed) && released.has(key)) continue;
+    return true;
+  }
+  return false;
+}
+
+function offersMissingFromPipeline(offers, pipelineText, historyText = '', policy = {}, resolveLocalRef = null) {
+  const released = releasedHistoryKeys(historyText, policy);
+  const keys = keysInPipeline(pipelineText, released, resolveLocalRef);
   const fresh = [];
   for (const offer of offers) {
-    const key = sameJobWriteKey(offer?.url);
+    const key = offerWriteKey(offer);
     if (!key || keys.has(key)) continue;
+    // A row that already carries this offer's local JD reference has no http
+    // key of its own, so it is matched on the reference itself.
+    if (LOCAL_JD_REF.test(offer?.url ?? '') && localRefPinned(pipelineText, offer.url, key, released)) continue;
     keys.add(key);
     fresh.push(offer);
   }
@@ -4230,7 +4303,7 @@ function offersMissingFromHistory(offers, status, historyText, policy = {}) {
   const keys = keysInScanHistory(historyText, status, policy);
   const fresh = [];
   for (const offer of offers) {
-    const key = sameJobWriteKey(offer?.url);
+    const key = offerWriteKey(offer);
     if (!key || keys.has(key)) continue;
     keys.add(key);
     fresh.push(offer);
@@ -4251,6 +4324,7 @@ export async function appendToPipeline(offers, {
   pipelinePath = PIPELINE_PATH,
   scanHistoryPath = SCAN_HISTORY_PATH,
   historyPolicy = null,
+  resolveLocalRef = localJdPostingUrl,
 } = {}) {
   if (offers.length === 0) return;
 
@@ -4269,7 +4343,7 @@ export async function appendToPipeline(offers, {
     } catch (err) {
       if (err?.code !== 'EISDIR') throw err;
     }
-    const fresh = offersMissingFromPipeline(offers, text, historyText, policy);
+    const fresh = offersMissingFromPipeline(offers, text, historyText, policy, resolveLocalRef);
     if (fresh.length === 0) return;
     // formatPipelineOffer returns '' for an offer with no safe http(s) URL. The
     // filter is belt-and-braces: offersMissingFromPipeline already drops those
@@ -4347,7 +4421,7 @@ export async function appendToScanHistory(offers, date, status = 'added', {
     // http(s). sameJobWriteKey already drops those; the filter keeps a future
     // caller from writing a row with an empty url, which every reader skips
     // silently and so would look like data loss.
-    const recorded = fresh.filter(o => safePostingUrl(o.url));
+    const recorded = fresh.filter(o => offerPostingUrl(o));
     if (recorded.length === 0) return 0;
 
     const lines = recorded.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
@@ -4848,13 +4922,13 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
   // reorders the output or the subsequent sequential browser checks.
   const verdicts = new Array(offers.length);
   await parallelFetch(offers.map((offer, i) => async () => {
-    const guard = rejectPrivateOrInvalid(offer.url);
+    const guard = rejectPrivateOrInvalid(verifyTargetUrl(offer));
     if (guard) {
       verdicts[i] = { result: 'uncertain', ...guard };
       return;
     }
     try {
-      verdicts[i] = await checkApi(offer.url);
+      verdicts[i] = await checkApi(verifyTargetUrl(offer));
     } catch (err) {
       console.warn(`  ⚠️ API verification failed for ${offer.url}; falling back to Playwright: ${err.message}`);
       verdicts[i] = null;
@@ -4933,7 +5007,7 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
       // as in check-liveness.mjs. Only an inconclusive null needs the browser.
       if (!verdict) {
         offerPage = await browserForOffer();
-        verdict = await checkPage(offerPage, offer.url);
+        verdict = await checkPage(offerPage, verifyTargetUrl(offer));
       }
       const { result, code, reason } = verdict;
       if (result === 'expired') {
@@ -5939,7 +6013,7 @@ async function main() {
           st.other++;
           continue;
         }
-        const dedupUrl = seenJobKey(job.url);
+        const dedupUrl = seenJobKey(offerPostingUrl(job) || job.url);
         const language = languageFormsForDedup(job.language);
         // A seen URL key passes only as a language version of that posting no
         // seen row was in; a match on the provider's listing identity stays a
