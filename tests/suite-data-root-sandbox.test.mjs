@@ -151,7 +151,9 @@ try {
     if (r.status === 1 && /Results: 0 passed, 1 failed/.test(r.out) && r.out.includes('TESTS FAILED')
         && !r.out.includes('All tests passed')
         && r.out.indexOf('changed the real data root') < r.out.indexOf('Results:')
-        && r.out.split('changed the real data root').length === 2) {
+        // Once as a verdict: the recap above the totals (tests/failure-recap.mjs)
+        // names it again, but as a pointer, not a second failure.
+        && r.out.split('\n').filter((l) => /^\s*❌.*changed the real data root/u.test(l)).length === 1) {
       pass('the summary counts the write as a failure, once, above the totals');
     } else {
       fail(`the summary did not turn red: exit ${r.status}\n${r.out}`);

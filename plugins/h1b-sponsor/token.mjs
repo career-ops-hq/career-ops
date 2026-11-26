@@ -11,7 +11,7 @@
 
 import { isMainModule } from '../../lib/is-main-module.mjs';
 import { apiBase, fetchWithTimeout, readBoundedText } from './lib/api.mjs';
-import { CONTROL_CHARS, cleanForDisplay } from './lib/clean.mjs';
+import { cleanForDisplay } from './lib/clean.mjs';
 
 const USER_AGENT = 'career-ops-plugin-h1b-sponsor/1.0';
 const TIMEOUT_MS = 10_000;
