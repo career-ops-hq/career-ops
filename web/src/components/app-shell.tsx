@@ -110,7 +110,8 @@ export function AppShell({ children, followupsEnabled }: { children: React.React
             <PanelLeftOpen className="size-4" />
           </button>
         )}
-        <main id="main-content" tabIndex={-1} className="flex-1 overflow-x-hidden focus:outline-none">{children}</main>
+        {/* Horizontal clipping must not create a scroll container for the sticky review pane. */}
+        <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 overflow-x-hidden focus:outline-none xl:[&:has(#pipeline-report-review)]:overflow-x-clip">{children}</main>
         <div className="print:hidden">
           <AssistantConsole />
           <BackToTop />
