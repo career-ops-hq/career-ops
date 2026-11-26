@@ -61,14 +61,18 @@ export async function POST(req: Request) {
   let source = "";
   if (!fs.existsSync(file)) {
     // First create: seed from the example so we never leave a one-key profile.
+    // Without a usable template there is nothing to seed from, so write nothing.
+    let seeded: unknown;
     try {
       source = firstProfileText(fs.readFileSync(path.join(codeRoot, "config", "profile.example.yml"), "utf8"));
-      const seeded = yaml.load(source);
-      base = isMapping(seeded) ? (seeded as Record<string, unknown>) : {};
+      seeded = yaml.load(source);
     } catch {
-      source = "";
-      base = {};
+      seeded = undefined;
     }
+    if (!isMapping(seeded)) {
+      return Response.json({ error: "config/profile.example.yml could not be read as a profile, so config/profile.yml was not created." }, { status: 500 });
+    }
+    base = seeded as Record<string, unknown>;
   } else {
     // DATA-LOSS GUARD (mirrors /api/profile): a profile that EXISTS but cannot be
     // read or parsed must never be overwritten with a one-key file.

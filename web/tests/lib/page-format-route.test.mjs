@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -203,6 +203,32 @@ test("POST creates a missing profile from the template, carrying nothing of its 
     assert.equal(written.candidate.full_name, "", "the example person's name is not seeded");
     assert.deepEqual(readdirSync(config), ["profile.yml"]);
   });
+});
+
+test("POST creates no profile when the template cannot be used", needsCore, async () => {
+  // A code root with the real core and a template that is absent or unusable.
+  const templates = {
+    missing: undefined,
+    malformed: "candidate: [broken\n",
+    list: "- candidate\n",
+    "comments only": "# nothing but comments\n",
+  };
+  for (const [label, template] of Object.entries(templates)) {
+    const codeRoot = (root) => {
+      const dir = path.join(root, "code");
+      mkdirSync(path.join(dir, "config"), { recursive: true });
+      symlinkSync(path.join(CODE_ROOT, "lib"), path.join(dir, "lib"), "junction");
+      if (template !== undefined) writeFileSync(path.join(dir, "config", "profile.example.yml"), template);
+      return dir;
+    };
+    await withFixture(undefined, async ({ config, file }) => {
+      const response = await send({ page_format: "a4" });
+      assert.equal(response.status, 500, label);
+      assert.match((await response.json()).error, /profile\.example\.yml/, label);
+      assert.equal(existsSync(file), false, `${label}: no one-key profile`);
+      assert.deepEqual(readdirSync(config), [], `${label}: no backup or temp files`);
+    }, { CAREER_OPS_CODE_ROOT: codeRoot });
+  }
 });
 
 test("POST of no preference with no profile does not create one", needsCore, async () => {
