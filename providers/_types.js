@@ -292,6 +292,7 @@
  * @property {(string|null)}         [body]
  * @property {('error'|'follow'|'manual')} [redirect]
  * @property {number}                [maxBytes] Response-body ceiling for fetchJson/fetchText; defaults to _http.mjs DEFAULT_MAX_BODY_BYTES. Over-cap throws `code: 'response_too_large'`.
+ * @property {string}                [charset] fetchText / fetchJson: decode the body with this encoding (a WHATWG label such as `windows-1252`) instead of UTF-8, for a page served in a legacy single-byte encoding. An unknown label throws before the request.
  * @property {(res: { status: number, headers: Headers }) => void} [onResponse] Called with the response (status and headers) before the body is read, including on a non-2xx just before it throws. themuse.mjs reads `cf-mitigated` this way.
  */
 

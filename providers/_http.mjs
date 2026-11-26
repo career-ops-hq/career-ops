@@ -344,12 +344,16 @@ function resolveMaxBytes(value) {
  * read stops at the cap and returns what it has instead of throwing. The body
  * is cancelled either way, so the connection is released.
  *
+ * `charset` decodes the bytes with that encoding instead of UTF-8 (see
+ * FetchOptions.charset). The cap counts bytes either way.
+ *
  * @param {Response} res
  * @param {number} maxBytes
- * @param {{truncate?: boolean}} [opts]
- * @returns {Promise<string>} The body, decoded as UTF-8.
+ * @param {{truncate?: boolean, charset?: string}} [opts]
+ * @returns {Promise<string>} The body, decoded as UTF-8 unless `charset` names another encoding.
  */
-async function readBodyCapped(res, maxBytes, { truncate = false } = {}) {
+async function readBodyCapped(res, maxBytes, { truncate = false, charset } = {}) {
+  const decoder = charset ? new TextDecoder(charset) : null;
   const declared = Number(res.headers.get('content-length'));
   if (!truncate && Number.isFinite(declared) && declared > maxBytes) {
     // Cancel before refusing: an unread body keeps its socket alive, and a
@@ -363,6 +367,12 @@ async function readBodyCapped(res, maxBytes, { truncate = false } = {}) {
     throw bodyTooLarge(declared, maxBytes);
   }
   const reader = res.body?.getReader?.();
+  if (!reader && decoder) {
+    // Same as below, but the bytes are needed to decode them.
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (bytes.length > maxBytes && !truncate) throw bodyTooLarge(bytes.length, maxBytes);
+    return decoder.decode(bytes.subarray(0, maxBytes));
+  }
   if (!reader) {
     // No stream to count (a mocked or exotic response): the whole body is
     // already in memory here, so the cap can only shorten what is kept.
@@ -399,7 +409,8 @@ async function readBodyCapped(res, maxBytes, { truncate = false } = {}) {
       /* body already closed */
     }
   }
-  return Buffer.concat(chunks).toString('utf8');
+  const body = Buffer.concat(chunks);
+  return decoder ? decoder.decode(body) : body.toString('utf8');
 }
 
 function boardText(text) {
@@ -414,7 +425,7 @@ async function readBoardText(url, opts, maxBytes, conditional) {
   const acceptNotModified = headers.has('if-none-match');
   return fetchWithTimeout(url, { ...opts, headers, acceptNotModified }, async (res) => {
     if (acceptNotModified && res.status === 304) return { notModified: true };
-    const text = await readBodyCapped(res, maxBytes);
+    const text = await readBodyCapped(res, maxBytes, { charset: opts.charset });
     const cacheControl = res.headers.get('cache-control') || '';
     return {
       body: text,
@@ -425,6 +436,8 @@ async function readBoardText(url, opts, maxBytes, conditional) {
 }
 
 function fetchCachedBody(url, opts, maxBytes, json) {
+  // An unknown charset label is a provider bug: say so before any request.
+  if (opts.charset) new TextDecoder(opts.charset);
   return cachedText(url, opts, async (requestUrl, requestOpts, conditional) => {
     const loaded = await readBoardText(requestUrl, requestOpts, maxBytes, conditional);
     // A body that does not parse is not a board we should serve again.
@@ -496,13 +509,16 @@ export async function fetchTextHead(url, opts = {}) {
 /**
  * Fetch a response body as text, with the shared timeout and non-2xx guard.
  *
- * The body is read through the capped reader (see DEFAULT_MAX_BODY_BYTES).
+ * The body is read through the capped reader (see DEFAULT_MAX_BODY_BYTES) and
+ * decoded as UTF-8, or with `opts.charset` when the page is served in another
+ * encoding (net-empregos.com is ISO-8859-1).
  *
  * @param {string} url
  * @param {FetchOptions} [opts]
  * @returns {Promise<string>}
  * @throws {HttpError} On a non-2xx response.
  * @throws {Error} `code: 'response_too_large'` when the body exceeds `opts.maxBytes` (default DEFAULT_MAX_BODY_BYTES).
+ * @throws {RangeError} When `opts.charset` is not an encoding label, before any request.
  */
 export async function fetchText(url, opts = {}) {
   return fetchCachedBody(url, opts, resolveMaxBytes(opts.maxBytes), false);
