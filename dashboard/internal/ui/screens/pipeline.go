@@ -2488,6 +2488,10 @@ func (m PipelineModel) renderAppLine(app model.CareerApplication, selected bool)
 			Background(m.theme.Overlay).
 			Width(inner).
 			MaxHeight(1)
+		// Every cell above ends with an ANSI reset, which would cancel the row
+		// background after the first column. Re-apply it after each reset so the
+		// whole line is highlighted.
+		line = keepBackground(line, selStyle)
 		return padStyle.MaxWidth(max(1, m.width)).MaxHeight(1).Render(selStyle.Render(line))
 	}
 	return padStyle.MaxWidth(max(1, m.width)).MaxHeight(1).Render(line)
@@ -2517,6 +2521,21 @@ func truncateToCells(s string, width int) string {
 		}
 	}
 	return ""
+}
+
+// keepBackground re-applies style's background escape after every ANSI reset
+// in s, so pre-styled cells do not cut the highlight short. It is a no-op when
+// the terminal profile emits no colour sequences.
+func keepBackground(s string, style lipgloss.Style) string {
+	const marker = "\x00"
+	rendered := style.UnsetWidth().UnsetMaxHeight().Render(marker)
+	idx := strings.Index(rendered, marker)
+	if idx <= 0 {
+		return s
+	}
+	bg := rendered[:idx]
+	const reset = "\x1b[0m"
+	return strings.ReplaceAll(s, reset, reset+bg)
 }
 
 // renderPreview renders the selected application's details within the current terminal width.
