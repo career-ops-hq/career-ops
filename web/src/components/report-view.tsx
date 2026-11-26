@@ -198,7 +198,9 @@ export function ReportView({
                 )}
                 {prepLink}
                 <MarkPdfReadyButton reportNum={reportNum} ready={disk.exists} trackerMarked={trackerMarkedPdf} />
-                <ApplyButton n={id} url={applyUrl} company={companyName} pdfReady={applyPdfReady} quiet={quietApply} />
+                {app?.status !== "Applied" && (
+                  <ApplyButton n={id} url={applyUrl} company={companyName} pdfReady={applyPdfReady} quiet={quietApply}/>
+                )}
                 {coverReady && (
                   <a
                     href={`/api/cover-pdf?application=${encodeURIComponent(id)}`}
