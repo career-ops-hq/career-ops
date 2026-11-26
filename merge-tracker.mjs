@@ -801,7 +801,14 @@ export async function mergeTracker(options = {}) {
       const { applyManifestRow } = await import('./generate-pdf.mjs');
       const moved = await withPipelineLock(PDF_INDEX_FILE, () => {
         if (!existsSync(PDF_INDEX_FILE)) return false;
-        const lines = readFileSync(PDF_INDEX_FILE, 'utf-8').split(/\r?\n/);
+        const contents = readFileSync(PDF_INDEX_FILE, 'utf-8');
+        const currentPdf = parsePdfIndex(contents).get(newKey);
+        // A render can publish the new report's CV after the initial index read.
+        if (currentPdf && livePdfIndex(new Map([[newKey, currentPdf]]), DATA_ROOT).has(newKey)) {
+          pdfIndex.set(newKey, currentPdf);
+          return false;
+        }
+        const lines = contents.split(/\r?\n/);
         const row = lines
           .filter((line) => line.trim() && !line.startsWith('#'))
           .map((line) => line.split('\t'))
