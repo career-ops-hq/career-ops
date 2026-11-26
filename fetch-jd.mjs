@@ -237,8 +237,8 @@ async function fetchApiBody(apiUrl, { timeoutMs, as = 'json', headers = {} }) {
  * @param {number} textCap
  * @param {number} timeoutMs
  */
-async function fetchWorkdayJd(apiUrl, postingUrl, textCap, timeoutMs) {
-  const json = await fetchApiBody(apiUrl, { timeoutMs: Math.max(timeoutMs, API_TIMEOUT_MS) });
+async function fetchWorkdayJd(resolved, postingUrl, textCap, timeoutMs) {
+  const json = await fetchApiBody(resolved.apiUrl, { timeoutMs: Math.max(timeoutMs, API_TIMEOUT_MS) });
   return json && normalizeWorkdayJob(json, postingUrl, textCap);
 }
 
@@ -315,9 +315,9 @@ export function normalizeAshbyJob(json, jobId, postingUrl, textCap = JD_TEXT_CAP
  * @param {number} textCap
  * @param {number} timeoutMs
  */
-async function fetchAshbyJd(apiUrl, jobId, postingUrl, textCap, timeoutMs) {
-  const json = await fetchApiBody(apiUrl, { timeoutMs });
-  return json && normalizeAshbyJob(json, jobId, postingUrl, textCap);
+async function fetchAshbyJd(resolved, postingUrl, textCap, timeoutMs) {
+  const json = await fetchApiBody(resolved.apiUrl, { timeoutMs });
+  return json && normalizeAshbyJob(json, resolved.parts.jobId, postingUrl, textCap);
 }
 
 /**
@@ -384,8 +384,8 @@ export function normalizeGreenhouseJob(json, postingUrl, textCap = JD_TEXT_CAP) 
  * @param {number} textCap
  * @param {number} timeoutMs
  */
-async function fetchGreenhouseJd(apiUrl, postingUrl, textCap, timeoutMs) {
-  const json = await fetchApiBody(`${apiUrl}?content=true`, { timeoutMs });
+async function fetchGreenhouseJd(resolved, postingUrl, textCap, timeoutMs) {
+  const json = await fetchApiBody(`${resolved.apiUrl}?content=true`, { timeoutMs });
   return json && normalizeGreenhouseJob(json, postingUrl, textCap);
 }
 
@@ -460,8 +460,8 @@ export function normalizeLeverJob(json, postingUrl, textCap = JD_TEXT_CAP) {
  * @param {number} textCap
  * @param {number} timeoutMs
  */
-async function fetchLeverJd(apiUrl, postingUrl, textCap, timeoutMs) {
-  const json = await fetchApiBody(apiUrl, { timeoutMs });
+async function fetchLeverJd(resolved, postingUrl, textCap, timeoutMs) {
+  const json = await fetchApiBody(resolved.apiUrl, { timeoutMs });
   return json && normalizeLeverJob(json, postingUrl, textCap);
 }
 
@@ -489,7 +489,7 @@ async function fetchGreenhouseEmbeddedJd(resolved, postingUrl, textCap, timeoutM
   } finally {
     clearTimeout(timer);
   }
-  return jobApiUrl ? fetchGreenhouseJd(jobApiUrl, postingUrl, textCap, timeoutMs) : null;
+  return jobApiUrl ? fetchGreenhouseJd({ ...resolved, apiUrl: jobApiUrl }, postingUrl, textCap, timeoutMs) : null;
 }
 
 /**
@@ -534,8 +534,8 @@ export function normalizeSmartRecruitersJob(json, postingUrl, textCap = JD_TEXT_
   };
 }
 
-async function fetchSmartRecruitersJd(apiUrl, postingUrl, textCap, timeoutMs) {
-  const json = await fetchApiBody(apiUrl, { timeoutMs });
+async function fetchSmartRecruitersJd(resolved, postingUrl, textCap, timeoutMs) {
+  const json = await fetchApiBody(resolved.apiUrl, { timeoutMs });
   return json && normalizeSmartRecruitersJob(json, postingUrl, textCap);
 }
 
@@ -574,9 +574,9 @@ export function normalizeZohoJob(html, id, postingUrl, textCap = JD_TEXT_CAP) {
   };
 }
 
-async function fetchZohoJd(apiUrl, id, postingUrl, textCap, timeoutMs) {
-  const html = await fetchApiBody(apiUrl, { timeoutMs, as: 'text' });
-  return html && normalizeZohoJob(html, id, postingUrl, textCap);
+async function fetchZohoJd(resolved, postingUrl, textCap, timeoutMs) {
+  const html = await fetchApiBody(resolved.apiUrl, { timeoutMs, as: 'text' });
+  return html && normalizeZohoJob(html, resolved.parts.id, postingUrl, textCap);
 }
 
 /**
@@ -607,9 +607,9 @@ export function normalizeHireHiveJob(json, id, postingUrl, textCap = JD_TEXT_CAP
   };
 }
 
-async function fetchHireHiveJd(apiUrl, id, postingUrl, textCap, timeoutMs) {
-  const json = await fetchApiBody(apiUrl, { timeoutMs });
-  return json && normalizeHireHiveJob(json, id, postingUrl, textCap);
+async function fetchHireHiveJd(resolved, postingUrl, textCap, timeoutMs) {
+  const json = await fetchApiBody(resolved.apiUrl, { timeoutMs });
+  return json && normalizeHireHiveJob(json, resolved.parts.id, postingUrl, textCap);
 }
 
 // `JobLocationType` as the board labels it. The page maps the number in script
@@ -724,9 +724,9 @@ export function normalizeUltiproJob(html, id, postingUrl, textCap = JD_TEXT_CAP)
   };
 }
 
-async function fetchUltiproJd(apiUrl, id, postingUrl, textCap, timeoutMs) {
-  const html = await fetchApiBody(apiUrl, { timeoutMs, as: 'text' });
-  return html && normalizeUltiproJob(html, id, postingUrl, textCap);
+async function fetchUltiproJd(resolved, postingUrl, textCap, timeoutMs) {
+  const html = await fetchApiBody(resolved.apiUrl, { timeoutMs, as: 'text' });
+  return html && normalizeUltiproJob(html, resolved.parts.id, postingUrl, textCap);
 }
 
 /**
@@ -852,6 +852,20 @@ export function resolveJdApi(url) {
   return resolveAtsApi(url);
 }
 
+/**
+ * Shape a BambooHR posting JSON into a JD, or null when the posting is not open
+ * or its share URL is not the posting that was asked for. Pure — exported for tests.
+ */
+export function normalizeBambooHrJob(data, postingPath, url, textCap = JD_TEXT_CAP) {
+  const job = data?.result?.jobOpening;
+  if (job?.jobOpeningStatus !== 'Open' || typeof job.jobOpeningShareUrl !== 'string') return null;
+  const shareUrl = new URL(job.jobOpeningShareUrl);
+  const sharePath = shareUrl.origin + shareUrl.pathname.replace(/\/$/, '');
+  if (shareUrl.username || shareUrl.password || sharePath !== postingPath) return null;
+  const text = htmlToText(job.description);
+  if (!text) return null;
+  return { url, title: compactText(htmlToText(job.jobOpeningName), 300), text: jdText(text, textCap) };
+}
 async function fetchBambooHrJd(resolved, url, textCap, timeoutMs) {
   try {
     const data = await fetchJson(resolved.apiUrl, {
@@ -860,25 +874,23 @@ async function fetchBambooHrJd(resolved, url, textCap, timeoutMs) {
       timeoutMs,
       maxBytes: 1024 * 1024,
     });
-    const job = data?.result?.jobOpening;
-    if (job?.jobOpeningStatus !== 'Open' || typeof job.jobOpeningShareUrl !== 'string') return null;
-    const shareUrl = new URL(job.jobOpeningShareUrl);
-    const postingPath = shareUrl.origin + shareUrl.pathname.replace(/\/$/, '');
-    if (shareUrl.username || shareUrl.password || postingPath !== resolved.postingPath) return null;
-    const text = htmlToText(job.description);
-    if (!text) return null;
-    return { url, title: compactText(htmlToText(job.jobOpeningName), 300), text: jdText(text, textCap) };
+    return normalizeBambooHrJob(data, resolved.postingPath, url, textCap);
   } catch {
     return null;
   }
 }
-
-async function fetchHimalayasJd(_resolved, url, textCap, timeoutMs) {
-  const result = await retrieveHimalayasPosting(url, { timeoutMs });
+/**
+ * Shape a Himalayas posting (retrieveHimalayasPosting's result) into a JD, or
+ * null when the publisher does not list it as open. Pure — exported for tests.
+ */
+export function normalizeHimalayasJob(result, url, textCap = JD_TEXT_CAP) {
   if (result.publisherStatus !== 'open') return null;
   const text = htmlToText(result.job.description);
   if (!text) return null;
   return { url, title: compactText(result.job.title, 300), text: jdText(text, textCap) };
+}
+async function fetchHimalayasJd(_resolved, url, textCap, timeoutMs) {
+  return normalizeHimalayasJob(await retrieveHimalayasPosting(url, { timeoutMs }), url, textCap);
 }
 
 /**
@@ -890,34 +902,24 @@ async function fetchHimalayasJd(_resolved, url, textCap, timeoutMs) {
  * test never touches the dispatcher. A map's keys ARE the dispatcher, so the
  * same deletion reddens it.
  *
- * Every entry takes the same `(resolved, url, textCap, timeoutMs)` shape so
- * dispatch stays a lookup; the extra `parts` arguments (Ashby's `jobId`, Zoho
- * Recruit's, UltiPro's and HireHive's `id`) are unpacked inside their own
- * entries rather than widening the shared signature.
+ * Every entry is `fetch<Ats>Jd(resolved, url, textCap, timeoutMs)`: it takes what
+ * it needs from `resolved` (`apiUrl`, `parts`, `headers`), gets the body, and
+ * hands it to that ATS's `normalize<Ats>Job`. Dispatch stays a lookup.
  */
 export const JD_FETCHERS = {
   bamboohr: fetchBambooHrJd,
   himalayas: fetchHimalayasJd,
   workable: fetchWorkableJd,
   'workable-short': fetchWorkableJd,
-  workday: (resolved, url, textCap, timeoutMs) =>
-    fetchWorkdayJd(resolved.apiUrl, url, textCap, timeoutMs),
-  ashby: (resolved, url, textCap, timeoutMs) =>
-    fetchAshbyJd(resolved.apiUrl, resolved.parts.jobId, url, textCap, timeoutMs),
-  greenhouse: (resolved, url, textCap, timeoutMs) =>
-    fetchGreenhouseJd(resolved.apiUrl, url, textCap, timeoutMs),
-  lever: (resolved, url, textCap, timeoutMs) =>
-    fetchLeverJd(resolved.apiUrl, url, textCap, timeoutMs),
-  'greenhouse-embedded': (resolved, url, textCap, timeoutMs) =>
-    fetchGreenhouseEmbeddedJd(resolved, url, textCap, timeoutMs),
-  smartrecruiters: (resolved, url, textCap, timeoutMs) =>
-    fetchSmartRecruitersJd(resolved.apiUrl, url, textCap, timeoutMs),
-  'zoho-recruit': (resolved, url, textCap, timeoutMs) =>
-    fetchZohoJd(resolved.apiUrl, resolved.parts.id, url, textCap, timeoutMs),
-  ultipro: (resolved, url, textCap, timeoutMs) =>
-    fetchUltiproJd(resolved.apiUrl, resolved.parts.id, url, textCap, timeoutMs),
-  hirehive: (resolved, url, textCap, timeoutMs) =>
-    fetchHireHiveJd(resolved.apiUrl, resolved.parts.id, url, textCap, timeoutMs),
+  workday: fetchWorkdayJd,
+  ashby: fetchAshbyJd,
+  greenhouse: fetchGreenhouseJd,
+  lever: fetchLeverJd,
+  'greenhouse-embedded': fetchGreenhouseEmbeddedJd,
+  smartrecruiters: fetchSmartRecruitersJd,
+  'zoho-recruit': fetchZohoJd,
+  ultipro: fetchUltiproJd,
+  hirehive: fetchHireHiveJd,
   hibob: fetchHibobJd,
 };
 
