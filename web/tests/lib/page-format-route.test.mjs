@@ -38,8 +38,10 @@ async function withFixture(source, fn, env = {}) {
   const file = path.join(config, "profile.yml");
   mkdirSync(config);
   if (source !== undefined) writeFileSync(file, source);
-  const names = ["CAREER_OPS_ROOT", "CAREER_OPS_CODE_ROOT", ...Object.keys(env)];
+  const names = ["CAREER_OPS_ROOT", "CAREER_OPS_CODE_ROOT", "CAREER_OPS_PROFILE", ...Object.keys(env)];
   const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  // An ambient override would send a case's writes to a real profile.
+  delete process.env.CAREER_OPS_PROFILE;
   process.env.CAREER_OPS_ROOT = root;
   process.env.CAREER_OPS_CODE_ROOT = CODE_ROOT;
   for (const [name, value] of Object.entries(env)) process.env[name] = typeof value === "function" ? value(root) : value;
@@ -221,6 +223,27 @@ test("POST follows CAREER_OPS_PROFILE like every other reader of the profile", n
     assert.equal(Object.hasOwn(yaml.load(readFileSync(file, "utf8")), "page_format"), false);
     assert.equal((await read()).override, "a4");
   }, env);
+});
+
+test("a fixture ignores a CAREER_OPS_PROFILE it did not set, and puts it back", needsCore, async () => {
+  const outside = mkdtempSync(path.join(tmpdir(), "career-ops-page-format-ambient-"));
+  const ambient = path.join(outside, "me.yml");
+  const source = "candidate:\n  full_name: Ambient\n";
+  writeFileSync(ambient, source);
+  const previous = process.env.CAREER_OPS_PROFILE;
+  process.env.CAREER_OPS_PROFILE = ambient;
+  try {
+    await withFixture("candidate:\n  full_name: Fixture\n", async ({ file }) => {
+      assert.equal((await send({ page_format: "a4" })).status, 200);
+      assert.equal(readFileSync(ambient, "utf8"), source, "the ambient profile is not written");
+      assert.equal(yaml.load(readFileSync(file, "utf8")).page_format, "a4");
+    });
+    assert.equal(process.env.CAREER_OPS_PROFILE, ambient);
+  } finally {
+    if (previous === undefined) delete process.env.CAREER_OPS_PROFILE;
+    else process.env.CAREER_OPS_PROFILE = previous;
+    rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 test("POST rejects a body that is not a JSON object, or has no page_format key", needsCore, async () => {
