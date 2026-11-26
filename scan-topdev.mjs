@@ -56,6 +56,7 @@ import { createAdmissionGate } from './lib/admission-gate.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
+import { exitIfEveryTargetFailed } from './lib/scan-exit.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { browserLaunchOptions } from './lib/browser-launch.mjs';
@@ -128,7 +129,9 @@ const USAGE = `Usage:
   node scan-topdev.mjs --dry-run
   node scan-topdev.mjs --keyword "backend"
   node scan-topdev.mjs --debug            # save screenshot + page HTML to output/
-  node scan-topdev.mjs --help|-h          # print this usage block and exit`;
+  node scan-topdev.mjs --help|-h          # print this usage block and exit
+
+Exit status: 0 when the scan ran, 1 on a configuration or fatal error, 2 when every search failed.`;
 
 /**
  * Parse CLI arguments. Kept pure and argv-injected so a test can drive it
@@ -551,20 +554,29 @@ export async function main({ argv = [] } = {}) {
   const handledThisRun = new Set();
 
   let totalFound = 0;
+  let searchesAttempted = 0;
+  let searchesRead = 0;
 
   const browser = await chromium.launch(browserLaunchOptions(
     { headless: true },
     { projectRoot: SCAN_DATA_ROOT, processEnv: BROWSER_PROCESS_ENV },
   ));
-  const context = await browser.newContext({ locale: 'vi-VN', timezoneId: 'Asia/Ho_Chi_Minh' });
-  const page = await context.newPage();
-
+  // Context and page are created inside the try, so a setup that fails still
+  // reaches the finally that closes the browser: the runner sets
+  // process.exitCode rather than calling process.exit(), and an open browser
+  // would keep the process alive (#7741 review).
+  let context;
   try {
+    context = await browser.newContext({ locale: 'vi-VN', timezoneId: 'Asia/Ho_Chi_Minh' });
+    const page = await context.newPage();
+
     searches: for (const search of searches) {
       const keywords = singleKeyword ? [singleKeyword] : [search.keyword];
 
       for (const keyword of keywords) {
         const seenUrls = new Set();
+        searchesAttempted++;
+        let readThisSearch = false;
 
         for (let pageNum = 1; pageNum <= search.maxPages; pageNum++) {
           if (pageNum > 1) await sleep(INTER_PAGE_DELAY_MS);
@@ -587,6 +599,8 @@ export async function main({ argv = [] } = {}) {
             }
             break;
           }
+
+          if (!readThisSearch) { readThisSearch = true; searchesRead++; }
 
           totalFound += pageJobs.jobs.length;
           process.stdout.write(`${pageJobs.jobs.length} found\n`);
@@ -623,7 +637,7 @@ export async function main({ argv = [] } = {}) {
       }
     }
   } finally {
-    await context.close();
+    await context?.close();
     await browser.close();
   }
 
@@ -656,10 +670,10 @@ export async function main({ argv = [] } = {}) {
   }
 
   console.log('\n→ Run /career-ops pipeline to evaluate new offers.');
-  // Errors are reported in the summary above, not through the exit code —
-  // same convention as scan-interamt.mjs and scan-dayforce.mjs, so a scheduled
-  // caller does not treat one challenged keyword as a crashed scan.
-  return 0;
+  // One failed keyword stays in the summary above and exits 0, so a scheduled
+  // caller does not treat one challenged keyword as a crashed scan. A run that
+  // read no search at all is an outage, and exits 2 like scan.mjs (#5720).
+  return exitIfEveryTargetFailed({ attempted: searchesAttempted, read: searchesRead, unit: 'TopDev search', thing: 'search' }) ? 2 : 0;
 }
 
 // Guarded so importing this module (a test, or anything else) never drives a
@@ -669,9 +683,11 @@ if (isMainModule(import.meta.url)) {
   const argv = process.argv.slice(2);
   validateFlags(argv, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
   main({ argv })
-    .then((code) => { if (code) process.exit(code); })
+    // process.exitCode, not process.exit(): on Windows Node 24 aborts when
+    // process.exit() runs right after a request (nodejs/node#56645, #3788).
+    .then((code) => { if (code) process.exitCode = code; })
     .catch((err) => {
       console.error('Fatal:', err.message);
-      process.exit(1);
+      process.exitCode = 1;
     });
 }

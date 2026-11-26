@@ -96,6 +96,7 @@ import { BOT_CHALLENGE_PATTERNS } from './liveness-core.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { browserLaunchOptions } from './lib/browser-launch.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
+import { exitIfEveryTargetFailed } from './lib/scan-exit.mjs';
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -673,6 +674,7 @@ async function main() {
   const date = localToday();
 
   let totalFound = 0;
+  let boardsRead = 0;
   const newOffers = [];
   const titleSkipped = [];
   const locationSkipped = [];
@@ -692,6 +694,8 @@ async function main() {
       process.stdout.write(error instanceof DayforceChallengeError ? 'SKIPPED (interactive challenge)\n' : 'ERROR\n');
       continue;
     }
+
+    boardsRead++;
 
     totalFound += result.totalFound;
     process.stdout.write(`${result.totalFound} found, ${result.found.length} passed filters\n`);
@@ -752,6 +756,9 @@ async function main() {
   }
 
   console.log('\n→ Run /career-ops pipeline to evaluate new offers.');
+
+  // A run that read no board at all is an outage: exit 2 like scan.mjs (#5720).
+  exitIfEveryTargetFailed({ attempted: boards.length, read: boardsRead, unit: 'Dayforce board', thing: 'board' });
 }
 
 // Guarded like every sibling scanner (scan-hn.mjs, scan-interamt.mjs,
@@ -771,6 +778,8 @@ browser via Playwright.
   --dry-run       scan and report, write nothing to the pipeline or history
   --debug         keep the browser visible and log each navigation
   --help, -h      show this message
+
+Exit status: 0 when the scan ran, 1 on a configuration or fatal error, 2 when every board failed.
 `;
 
 if (isMainModule(import.meta.url)) {
@@ -787,6 +796,8 @@ if (isMainModule(import.meta.url)) {
   validateFlags(process.argv.slice(2), KNOWN_FLAGS, USAGE);
   main().catch(err => {
     console.error('Fatal:', err.message);
-    process.exit(1);
+    // process.exitCode, not process.exit(): on Windows Node 24 aborts when
+    // process.exit() runs right after a request (nodejs/node#56645, #3788).
+    process.exitCode = 1;
   });
 }
