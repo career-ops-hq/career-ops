@@ -90,6 +90,15 @@ export function titleContains(a, b) {
 
 // ── Boards ─────────────────────────────────────────────────────────────
 const hostOf = (u) => { try { return new URL(u).hostname.toLowerCase(); } catch { return ''; } };
+const SUBDOMAIN_BOARD_HOSTS = {
+  'recruitee.com': 'recruitee',
+  'bamboohr.com': 'bamboohr',
+  'breezy.hr': 'breezy',
+  'pinpointhq.com': 'pinpoint',
+};
+const SUBDOMAIN_BOARD_RE = /^([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)\.(recruitee\.com|bamboohr\.com|breezy\.hr|pinpointhq\.com)$/;
+const NON_TENANT_SUBDOMAINS = new Set(['www', 'app', 'api']);
+const RIPPLING_SLUG_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/;
 
 /**
  * The careers URL of the board a posting URL belongs to, or '' when the URL is
@@ -106,17 +115,30 @@ export function boardOfPosting(url) {
       case 'ashby': return buildBoardUrl({ ats: 'ashby', board: p.org }) || '';
       case 'smartrecruiters': return buildBoardUrl({ ats: 'smartrecruiters', board: p.company }) || '';
       case 'workable': return buildBoardUrl({ ats: 'workable', board: p.account }) || '';
-      case 'workday': return p.tenant && p.shard && p.site ? `https://${p.tenant}.${p.shard}.myworkdayjobs.com/${p.site}` : '';
+      case 'workday':
+        if (!p.tenant || !p.shard || !p.site) return '';
+        return p.hostKind === 'site'
+          ? `https://${p.shard}.myworkdaysite.com/recruiting/${p.tenant}/${p.site}`
+          : `https://${p.tenant}.${p.shard}.myworkdayjobs.com/${p.site}`;
+      case 'hibob': return buildBoardUrl({ ats: 'hibob', board: p.tenant }) || '';
+      case 'hirehive': return p.host ? `https://${p.host}` : '';
+      case 'zoho-recruit': return p.host ? `https://${p.host}/jobs/Careers` : '';
       default: break;
     }
   }
   let u;
   try { u = new URL(url); } catch { return ''; }
+  if (u.protocol !== 'https:') return '';
   const seg = u.pathname.split('/').filter(Boolean);
-  const sub = host.split('.')[0];
-  if (/\.recruitee\.com$/.test(host)) return buildBoardUrl({ ats: 'recruitee', board: sub }) || '';
+  const subMatch = host.match(SUBDOMAIN_BOARD_RE);
+  if (subMatch && !NON_TENANT_SUBDOMAINS.has(subMatch[1])) {
+    return buildBoardUrl({ ats: SUBDOMAIN_BOARD_HOSTS[subMatch[2]], board: subMatch[1] }) || '';
+  }
+  if (host === 'ats.rippling.com' && seg[0] && seg[0].toLowerCase() !== 'api' && RIPPLING_SLUG_RE.test(seg[0])) {
+    return buildBoardUrl({ ats: 'rippling', board: seg[0] }) || '';
+  }
   if (host === 'join.com' && seg[0] === 'companies' && seg[1]) return buildBoardUrl({ ats: 'join', board: seg[1] }) || '';
-  if (/^[a-z0-9-]+\.jobs\.personio\.(de|com)$/.test(host)) return `https://${host}`;
+  if (/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.jobs\.personio\.(de|com)$/.test(host)) return `https://${host}`;
   return '';
 }
 
