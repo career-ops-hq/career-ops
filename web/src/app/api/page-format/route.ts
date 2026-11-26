@@ -59,6 +59,8 @@ export async function POST(req: Request) {
   const file = getProfilePath(root);
   let base: Record<string, unknown> = {};
   let source = "";
+  // No preference and no profile: nothing to remove, so no template is needed.
+  if (!chosen && !fs.existsSync(file)) return Response.json({ ok: true, override: null });
   if (!fs.existsSync(file)) {
     // First create: seed from the example so we never leave a one-key profile.
     // Without a usable template there is nothing to seed from, so write nothing.
@@ -70,7 +72,7 @@ export async function POST(req: Request) {
       seeded = undefined;
     }
     if (!isMapping(seeded)) {
-      return Response.json({ error: "config/profile.example.yml could not be read as a profile, so config/profile.yml was not created." }, { status: 500 });
+      return Response.json({ error: "config/profile.example.yml could not be read as a profile, so no profile was created." }, { status: 500 });
     }
     base = seeded as Record<string, unknown>;
   } else {

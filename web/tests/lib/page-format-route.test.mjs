@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -205,8 +205,19 @@ test("POST creates a missing profile from the template, carrying nothing of its 
   });
 });
 
+// A code root that re-exports the real core and holds the given example profile,
+// or none. A re-export needs no link into the checkout, so cleanup cannot follow one.
+const codeRootWithTemplate = (template) => (root) => {
+  const dir = path.join(root, "code");
+  mkdirSync(path.join(dir, "config"), { recursive: true });
+  mkdirSync(path.join(dir, "lib"));
+  const real = pathToFileURL(path.join(CODE_ROOT, "lib", "page-format.mjs")).href;
+  writeFileSync(path.join(dir, "lib", "page-format.mjs"), `export * from ${JSON.stringify(real)};\n`);
+  if (template !== undefined) writeFileSync(path.join(dir, "config", "profile.example.yml"), template);
+  return dir;
+};
+
 test("POST creates no profile when the template cannot be used", needsCore, async () => {
-  // A code root with the real core and a template that is absent or unusable.
   const templates = {
     missing: undefined,
     malformed: "candidate: [broken\n",
@@ -214,21 +225,24 @@ test("POST creates no profile when the template cannot be used", needsCore, asyn
     "comments only": "# nothing but comments\n",
   };
   for (const [label, template] of Object.entries(templates)) {
-    const codeRoot = (root) => {
-      const dir = path.join(root, "code");
-      mkdirSync(path.join(dir, "config"), { recursive: true });
-      symlinkSync(path.join(CODE_ROOT, "lib"), path.join(dir, "lib"), "junction");
-      if (template !== undefined) writeFileSync(path.join(dir, "config", "profile.example.yml"), template);
-      return dir;
-    };
     await withFixture(undefined, async ({ config, file }) => {
       const response = await send({ page_format: "a4" });
       assert.equal(response.status, 500, label);
       assert.match((await response.json()).error, /profile\.example\.yml/, label);
       assert.equal(existsSync(file), false, `${label}: no one-key profile`);
       assert.deepEqual(readdirSync(config), [], `${label}: no backup or temp files`);
-    }, { CAREER_OPS_CODE_ROOT: codeRoot });
+    }, { CAREER_OPS_CODE_ROOT: codeRootWithTemplate(template) });
   }
+});
+
+test("POST of no preference with no profile needs no template", needsCore, async () => {
+  await withFixture(undefined, async ({ config, file }) => {
+    const response = await send({ page_format: null });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true, override: null });
+    assert.equal(existsSync(file), false);
+    assert.deepEqual(readdirSync(config), []);
+  }, { CAREER_OPS_CODE_ROOT: codeRootWithTemplate(undefined) });
 });
 
 test("POST of no preference with no profile does not create one", needsCore, async () => {
