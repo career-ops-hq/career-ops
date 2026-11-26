@@ -3845,7 +3845,9 @@ export function formatTrustSegment(offer) {
 }
 
 export function formatPipelineOffer(offer) {
-  const url = sanitizePipelineUrl(offer.url);
+  const url = LOCAL_JD_REF.test(offer?.url ?? '') && offerPostingUrl(offer)
+    ? offer.url
+    : sanitizePipelineUrl(offer.url);
   // No safe http(s) URL, no row: an offer the board could not describe as a
   // posting must not become a line the pipeline mode then tries to evaluate.
   if (!url) return '';
@@ -3894,7 +3896,7 @@ function postedAtIsoDate(postedAt) {
 }
 export function formatScanHistoryRow(offer, date, status = 'added') {
   const record = {
-    url: safePostingUrl(offer.url),
+    url: offerPostingUrl(offer),
     first_seen: date,
     portal: offer.source,
     title: offer.title,
@@ -4149,6 +4151,24 @@ function sameJobWriteKey(url) {
   return canonicalJobKey(url);
 }
 
+// An offer whose JD the plugin cached carries `url: local:jds/<file>.md` and the
+// posting's own link in `_remote_url`. The posting link is what identifies the
+// job, so it supplies the dedup key and the scan-history url; the pipeline row
+// keeps the local reference, as it did before #7591. Only that exact shape
+// counts: any other non-http(s) url stays refused.
+const LOCAL_JD_REF = /^local:jds\/[A-Za-z0-9._-]+\.md$/;
+
+function offerPostingUrl(offer) {
+  const direct = safePostingUrl(offer?.url);
+  if (direct) return direct;
+  if (typeof offer?.url === 'string' && LOCAL_JD_REF.test(offer.url)) return safePostingUrl(offer._remote_url);
+  return '';
+}
+
+function offerWriteKey(offer) {
+  return sameJobWriteKey(offerPostingUrl(offer));
+}
+
 // Keys whose history rows no longer pin. A still-pinning row of the same
 // posting wins, so an older released row cannot un-pin a newer one.
 function releasedHistoryKeys(historyText, policy) {
@@ -4197,12 +4217,30 @@ function keysInPipeline(text, released = new Set()) {
   return keys;
 }
 
+// Same pinning rule as keysInPipeline, for a row that carries the local JD
+// reference instead of an http(s) url: an open row stays pinned, a finished
+// one (under ## Processed or ticked) only until history releases the posting.
+function localRefPinned(pipelineText, ref, key, released) {
+  let inProcessed = false;
+  for (const line of String(pipelineText ?? '').split('\n')) {
+    inProcessed = processedSectionAfter(line, inProcessed);
+    if (!line.includes(`- [ ] ${ref} |`) && !line.includes(`- [x] ${ref} |`)) continue;
+    if (pipelineRowIsFinished(line, inProcessed) && released.has(key)) continue;
+    return true;
+  }
+  return false;
+}
+
 function offersMissingFromPipeline(offers, pipelineText, historyText = '', policy = {}) {
-  const keys = keysInPipeline(pipelineText, releasedHistoryKeys(historyText, policy));
+  const released = releasedHistoryKeys(historyText, policy);
+  const keys = keysInPipeline(pipelineText, released);
   const fresh = [];
   for (const offer of offers) {
-    const key = sameJobWriteKey(offer?.url);
+    const key = offerWriteKey(offer);
     if (!key || keys.has(key)) continue;
+    // A row that already carries this offer's local JD reference has no http
+    // key of its own, so it is matched on the reference itself.
+    if (LOCAL_JD_REF.test(offer?.url ?? '') && localRefPinned(pipelineText, offer.url, key, released)) continue;
     keys.add(key);
     fresh.push(offer);
   }
@@ -4230,7 +4268,7 @@ function offersMissingFromHistory(offers, status, historyText, policy = {}) {
   const keys = keysInScanHistory(historyText, status, policy);
   const fresh = [];
   for (const offer of offers) {
-    const key = sameJobWriteKey(offer?.url);
+    const key = offerWriteKey(offer);
     if (!key || keys.has(key)) continue;
     keys.add(key);
     fresh.push(offer);
@@ -4347,7 +4385,7 @@ export async function appendToScanHistory(offers, date, status = 'added', {
     // http(s). sameJobWriteKey already drops those; the filter keeps a future
     // caller from writing a row with an empty url, which every reader skips
     // silently and so would look like data loss.
-    const recorded = fresh.filter(o => safePostingUrl(o.url));
+    const recorded = fresh.filter(o => offerPostingUrl(o));
     if (recorded.length === 0) return 0;
 
     const lines = recorded.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
