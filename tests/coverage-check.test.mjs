@@ -17,6 +17,8 @@ const cases = [
   ['https://jobs.ashbyhq.com/Solana%20Foundation/abc', 'ashby', 'solana foundation'],
   ['https://wf.wd1.myworkdayjobs.com/en-US/WellsFargoJobs/job/NC/X_R1', 'workday', 'wf|wd1|wellsfargojobs'],
   ['https://wf.wd1.myworkdayjobs.com/wday/cxs/wf/WellsFargoJobs/jobs', 'workday', 'wf|wd1|wellsfargojobs'],
+  ['https://wd5.myworkdaysite.com/recruiting/guidewire/external/job/Foster-City/X_R1', 'workday', 'guidewire|wd5|external'],
+  ['https://wd5.myworkdaysite.com/en-US/recruiting/guidewire/external/job/Foster-City/X_R1', 'workday', 'guidewire|wd5|external'],
   ['https://careers-acme.icims.com/jobs/1/job', 'icims', 'acme'],
   ['https://apply.workable.com/anza/j/ABC/', 'workable', 'anza'],
   ['https://apply.workable.com/api/v1/widget/accounts/Anza?details=true', 'workable', 'anza'],
@@ -45,6 +47,9 @@ for (const incomplete of [
 }
 check(atsFromUrl('https://acme.notion.site/Role').ats === null, 'atsFromUrl: unknown host has no ATS');
 check(careersUrlFor({ ats: 'workday', slug: 'wf|wd1|wellsfargojobs' }) === 'https://wf.wd1.myworkdayjobs.com/wellsfargojobs', 'careersUrlFor rebuilds a Workday board');
+check(careersUrlFor(atsFromUrl('https://wd5.myworkdaysite.com/recruiting/guidewire/external/job/X_R1')) === 'https://wd5.myworkdaysite.com/recruiting/guidewire/external',
+  'careersUrlFor rebuilds a myworkdaysite board on its own host');
+check(atsFromUrl('https://wd5.myworkdaysite.com/recruiting/guidewire').ats === null, 'atsFromUrl: a myworkdaysite path without a site has no ATS match');
 
 // 2. Tracked-entry lookup: by board slug, or by name with the parenthetical note dropped
 const entries = [
@@ -141,6 +146,12 @@ check(untracked.evidence.some(e => e.includes('in the reverse-sweep company list
 check(untracked.evidence.includes('title_filter_full drops this title in the reverse sweep'), 'untracked: reports the full-sweep title verdict');
 check(diagnose({ url: 'https://jobs.ashbyhq.com/zeta/3', company: 'Zeta', title: 'Head of Sales', location: '' }, ctx()).fix.startsWith('add the company only with a title keyword'), 'untracked: a title the filter drops is not proposed as a plain add');
 check(gap({ url: 'https://zeta.notion.site/Role', company: 'Zeta', title: 'Rust Engineer' }) === 'untracked-unsupported-ats', 'untracked company on an unknown site');
+const wdSite = diagnose({ url: 'https://wd5.myworkdaysite.com/recruiting/guidewire/external/job/X_R1', company: 'Guidewire', title: 'Rust Engineer', location: '' }, ctx());
+check(wdSite.gap === 'untracked' && wdSite.fix.includes('careers_url: https://wd5.myworkdaysite.com/recruiting/guidewire/external'),
+  'untracked: a myworkdaysite posting is on a known ATS, and the fix proposes its board');
+check(findTrackedEntry([{ name: 'Guidewire Software', careers_url: 'https://wd5.myworkdaysite.com/recruiting/guidewire/external' }],
+  { ...atsFromUrl('https://wd5.myworkdaysite.com/en-US/recruiting/guidewire/external/job/X_R1'), company: 'Guidewire' })?.name === 'Guidewire Software',
+'findTrackedEntry matches a myworkdaysite entry on its board');
 
 // 3b. A site no provider reads: count the host, and lead with the platform when other companies post there
 const ON_HOST = 'https://app.tenantats.example/apply/Zeta/1';
