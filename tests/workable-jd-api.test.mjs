@@ -116,7 +116,7 @@ test('real CLIs use shared API dispatch: success and silent fetch-jd miss', () =
   try {
     const preload = join(dir, 'fetch-fixture.mjs');
     writeFileSync(preload, `globalThis.fetch = async (url, options) => {
-      if (process.env.FIXTURE_MISS) return new Response('', {status:404});
+      if (process.env.FIXTURE_MISS) return new Response('', {status:500});
       if (String(url) === ${JSON.stringify(SHORT)}) return new Response(null,{status:302,headers:{location:'/fictional-employer/j/FIXTURE123'}});
       if (String(url) !== ${JSON.stringify(API)}) throw new Error('unexpected request');
       return new Response(${JSON.stringify(JSON.stringify({ ...posting, description: '<p>' + 'x'.repeat(4500) + '</p>' }))});

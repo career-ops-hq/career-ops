@@ -58,6 +58,18 @@ export function isCurrencyCode(token) {
   return ISO_4217_CODES.has(String(token ?? '').toUpperCase());
 }
 
+/**
+ * Canonical ISO-4217 currency code for a token (mapping RMB to CNY), or null.
+ *
+ * @param {unknown} token
+ * @returns {string | null}
+ */
+function canonicalCurrencyCode(token) {
+  const upper = String(token ?? '').toUpperCase();
+  if (upper === 'RMB') return 'CNY';
+  return ISO_4217_CODES.has(upper) ? upper : null;
+}
+
 // Chinese spellings: 万/萬 (x10,000), "N薪" (months of pay per year), the
 // 年薪 / 月薪 period words, 税前 (gross) and the 人民币 / 元 currency words.
 const ZH_HINT_RE = /[万萬薪元]|人民币|人民幣|[税稅][前后後]|[\/／]\s*[年月]|每[年月]/;
@@ -114,7 +126,8 @@ function parseChineseAmount(raw) {
   s = s
     .replace(ZH_MONTHS_RE, ' ')
     .replace(/年薪|月薪|[税稅]前|每[年月]|\/\s*[年月]/g, ' ')
-    .replace(/人民[币幣]|(?<![A-Za-z])(?:[A-Z]{3}|rmb|cny)(?![A-Za-z])|[€$£¥元]/g, ' ')
+    .replace(/人民[币幣]|[€$£¥元]/g, ' ')
+    .replace(/(?<![A-Za-z])([A-Z]{3}|rmb|cny)(?![A-Za-z])/g, (token, code) => (canonicalCurrencyCode(code) ? ' ' : token))
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -191,7 +204,7 @@ export function parseAmount(raw) {
   // (or a no-break / thin space) followed by exactly three digits and no fourth
   // is grouping, so "80 - 90k" and other spaced ranges keep their meaning.
   s = s
-    .replace(/(^|[\s–—-])(?:[Kk][Rr]\.?|[A-Z]{3})\s*(?=\d)/g, '$1')
+    .replace(/(^|[\s–—-])(?:([Kk][Rr]\.?)|([A-Z]{3}))\s*(?=\d)/g, (token, lead, kr, code) => (kr || canonicalCurrencyCode(code) ? lead : token))
     .replace(/\s*[Kk][Rr]\.?$/, '')
     .replace(/,-(?=\s|$|[–—-])/g, '')
     .replace(/(\d)[    ](?=\d{3}(?!\d))/g, '$1')
@@ -204,7 +217,7 @@ export function parseAmount(raw) {
   // it counts. A three-letter token also never eats the lone "k" magnitude
   // suffix ("80k").
   s = s.replace(/[€$£¥]/g, '')
-    .replace(/\s*([A-Za-z]{3})\s*$/, (token, code) => (isCurrencyCode(code) || /^rmb$/i.test(code) ? '' : token))
+    .replace(/\s*([A-Za-z]{3})\s*$/, (token, code) => (canonicalCurrencyCode(code) ? '' : token))
     .trim();
   s = stripAnnual(s);
   const toNum = (numStr, kFlag) => {
@@ -265,7 +278,7 @@ const CURRENCY_CODE_RE = /(?<![A-Za-z])[A-Z]{3}(?![A-Za-z])/g;
  */
 export function compensationCurrency(raw) {
   const text = String(raw ?? '');
-  const codes = new Set(text.match(CURRENCY_CODE_RE) || []);
+  const codes = new Set((text.match(CURRENCY_CODE_RE) || []).map(canonicalCurrencyCode).filter(Boolean));
   const symbols = new Set([...text].map((c) => CURRENCY_SYMBOLS[c]).filter(Boolean));
   if (codes.size === 1) return [...codes][0];
   if (codes.size === 0 && symbols.size === 1) return [...symbols][0];
@@ -285,5 +298,7 @@ export function parseAnnualCompensation(raw) {
   const text = String(raw ?? '');
   const period = compensationPeriod(text);
   if (period && period !== 'annual') return null;
-  return parseAmount(text.replace(CURRENCY_CODE_RE, ' ').replace(/\s+/g, ' '));
+  return parseAmount(
+    text.replace(CURRENCY_CODE_RE, (code) => (canonicalCurrencyCode(code) ? ' ' : code)).replace(/\s+/g, ' '),
+  );
 }

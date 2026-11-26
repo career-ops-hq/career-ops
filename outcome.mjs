@@ -23,7 +23,7 @@ import { join, dirname, resolve, extname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
-import { parseTrackerRow, resolveColumns, extractTrackerReportNumbers, linkedReportNumbers } from './tracker-parse.mjs';
+import { parseTrackerRow, resolveColumns, extractTrackerReportNumbers, linkedReportNumbers, trackerRowIdentity } from './tracker-parse.mjs';
 // The vocabulary this CLI accepts is also READ by calibrate.mjs, which cannot
 // import this file (top-level CLI, exits on load). Shared so the two cannot
 // drift — they already had (#3315 shipped a 7-entry copy of these 14).
@@ -646,6 +646,26 @@ const releaseJournal = () => releaseOrWarn(journalLock);
 // failExit exits synchronously; its error paths must release the lock too.
 process.once('exit', releaseJournal);
 try {
+  // Another recorded outcome can append notes and change status while this
+  // one waits for the journal lock. Accept that append on the same application,
+  // then guard the complete refreshed row under set-status's own tracker lock.
+  const currentLines = readFileSync(appsFile, 'utf-8').split('\n');
+  const currentColumns = resolveColumns(currentLines);
+  let currentMatches = currentLines
+    .map(line => parseTrackerRow(line, currentColumns))
+    .filter(row => row?.num === matchedRow.num);
+  if (currentMatches.length > 1 && flags.role) {
+    currentMatches = currentMatches.filter(row => roleFuzzyMatch(row.role, flags.role));
+  }
+  const [currentRow] = currentMatches;
+  const previousNotes = matchedRow.notes;
+  const notesMatch = currentRow && (currentRow.notes === previousNotes
+    || ['', '-', '—'].includes(previousNotes) || currentRow.notes.startsWith(`${previousNotes}; `));
+  if (currentMatches.length !== 1 || !notesMatch
+    || trackerRowIdentity({ ...currentRow, notes: null }) !== trackerRowIdentity({ ...matchedRow, notes: null })) {
+    failExit(`Tracker #${matchedRow.num} changed while recording the outcome. Review the row before retrying.`, 'row-changed', EXIT_AMBIGUOUS);
+  }
+  setStatusArgs.push('--expect-row', trackerRowIdentity(currentRow));
   try {
     const statusOutput = execFileSync(NODE, setStatusArgs, { cwd: CODE_ROOT, env: process.env, encoding: 'utf-8' });
     setStatusResult = JSON.parse(statusOutput);

@@ -15,8 +15,8 @@
  *
  * JD text on stdout, exit 0, when a known ATS answers with real content.
  * Exit 3 with `CLOSED_POSTING <evidence>` on stdout when the page itself says the
- * posting is closed: a JobPosting past its validThrough date, or closure text
- * in the visible page.
+ * posting is closed: a JobPosting past its validThrough date, closure text
+ * in the visible page, or a page that answers HTTP 404 or 410.
  * Exit 1 with empty stdout and no stderr noise otherwise — a miss is the
  * expected "fall back to the browser path" case, not an error condition, and
  * a visible miss is the whole point: never a fabricated JD.

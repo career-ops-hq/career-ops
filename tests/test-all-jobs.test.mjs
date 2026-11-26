@@ -56,6 +56,16 @@ try {
   check('a test-runner suite still reports as one line with its count',
     parallel.verdicts.includes('✅ tests/order/d-runner.test.mjs — node:test suite passed (2 tests)'), JSON.stringify(parallel.verdicts));
   check('a parallel run says how many suites ran and how many at a time', /5 discovered suites in \d+s, 4 at a time/.test(parallel.timing), parallel.timing || parallel.stdout);
+  {
+    // Order by time is not checked: on a slow runner process startup swamps
+    // the fixtures' differences. That every suite is named with seconds is.
+    const slowest = (parallel.stdout.match(/⏱ {2}slowest: (.*)/u) ?? [])[1] ?? '';
+    const named = slowest.split(', ').map((s) => s.replace(/ \d+s$/u, '').replace(/\\/g, '/'));
+    check('a parallel run names its slowest suites with their seconds (#7713)',
+      slowest.split(', ').every((s) => / \d+s$/u.test(s))
+        && JSON.stringify([...named].sort()) === JSON.stringify(['a-slow', 'b-fast', 'c-mid', 'd-runner', 'e-fast'].map((n) => `tests/order/${n}.test.mjs`)),
+      slowest || parallel.stdout);
+  }
   check('--jobs 1 is the in-process loop: no parallel timing line', serial.timing === '', serial.timing);
 
   // ── how N is chosen ───────────────────────────────────────────────────────

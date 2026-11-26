@@ -6,7 +6,7 @@
  */
 
 import { createHash } from 'crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'path';
 import { createInterface } from 'readline';
 import * as yaml from 'js-yaml';
@@ -16,6 +16,7 @@ import { withPipelineLock } from './pipeline-lock.mjs';
 import { validateProfile, loadValidatedProfile } from './lib/career-profile.mjs';
 import { prepareCvSelection, verifyCvSelection } from './lib/profile-cv-selection.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { renameSyncWithRetry } from './lib/rename-retry.mjs';
 
 const root = getCareerOpsRoot();
 const profilePath = join(root, 'data', 'career-profile.yml');
@@ -322,7 +323,7 @@ async function doImport(args) {
     const tmpPath = `${profilePath}.tmp`;
     try {
       writeFileSync(tmpPath, yaml.dump(merged, { noRefs: true, lineWidth: 100 }), { encoding: 'utf8', flag: 'w' });
-      renameSync(tmpPath, profilePath);
+      renameSyncWithRetry(tmpPath, profilePath);
     } catch (error) {
       try { rmSync(tmpPath, { force: true }); } catch { /* keep the save error, not the cleanup one */ }
       throw error;

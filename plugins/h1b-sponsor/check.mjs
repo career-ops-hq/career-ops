@@ -32,7 +32,7 @@ import { num } from './lib/api.mjs';
 import * as localBackend from './lib/index.mjs';
 import { readCache, writeCache } from './lib/cache.mjs';
 import { classifyTier } from './lib/tier.mjs';
-import { CONTROL_CHARS, cleanForDisplay } from './lib/clean.mjs';
+import { cleanForDisplay } from './lib/clean.mjs';
 
 // Set once main() has chosen a backend. Null while unchosen and after a failed
 // choice, which is what lets the error handler report a source of null instead
@@ -121,22 +121,29 @@ async function writeCacheSafe(name, data, opts) {
   }
 }
 
+const CHECK_USAGE = 'Usage: node plugins/h1b-sponsor/check.mjs <company-name> [--json|--summary] [--refresh] [--search] [--cache-dir <path>]\n';
+
 function parseArgs(argv) {
-  const args = { name: null, format: 'summary', refresh: false, cacheDir: null, search: false };
+  const args = { name: null, format: 'summary', refresh: false, cacheDir: null, search: false, help: false, error: null };
   const rest = [];
+  const known = new Set(['--json', '--summary', '--refresh', '--search', '--cache-dir', '--help', '-h']);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--json') args.format = 'json';
+    if (a === '--help' || a === '-h') args.help = true;
+    else if (a === '--json') args.format = 'json';
     else if (a === '--summary') args.format = 'summary';
     else if (a === '--refresh') args.refresh = true;
     else if (a === '--search') args.search = true;
-    else if (a === '--cache-dir') {
-      // Consumes the following argument so it is never read as the company name.
-      const next = argv[i + 1];
-      if (typeof next === 'string' && next.trim()) args.cacheDir = next;
-      i++;
+    else if (a === '--cache-dir' || a.startsWith('--cache-dir=')) {
+      const next = a.startsWith('--cache-dir=') ? a.slice('--cache-dir='.length) : argv[i + 1];
+      if (!a.startsWith('--cache-dir=')) i++;
+      if (typeof next !== 'string' || !next.trim() || next.startsWith('-')) {
+        args.error = 'Error: --cache-dir needs a path';
+      } else args.cacheDir = next;
     } else if (a.startsWith('-')) {
-      // unknown flag - ignore silently for forward compatibility
+      const name = a.split('=')[0];
+      if (!known.has(name)) args.error = `Error: unrecognized flag: ${name}`;
+      else if (a.includes('=')) args.error = `Error: ${name} does not take a value`;
     } else rest.push(a);
   }
   args.name = rest.join(' ').trim();
@@ -228,9 +235,17 @@ function emitSearch(format, query, total, results) {
 }
 
 async function main() {
-  const { name, format, refresh, cacheDir, search } = parseArgs(process.argv.slice(2));
+  const { name, format, refresh, cacheDir, search, help, error } = parseArgs(process.argv.slice(2));
+  if (error) {
+    process.stderr.write(`${error}\n`);
+    process.exit(1);
+  }
+  if (help) {
+    process.stdout.write(CHECK_USAGE);
+    process.exit(0);
+  }
   if (!name) {
-    process.stderr.write('Usage: node plugins/h1b-sponsor/check.mjs <company-name> [--json|--summary] [--refresh] [--search] [--cache-dir <path>]\n');
+    process.stderr.write(CHECK_USAGE);
     process.exit(2);
   }
 

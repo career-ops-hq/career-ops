@@ -1,7 +1,7 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
-import { fetchTextWithRetry } from './_http.mjs';
+import { fetchTextWithRetry, parseRetryAfterMs, sleep } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
 
 // Paylocity provider — single-company ATS adapter for `tracked_companies:`.
@@ -47,11 +47,74 @@ const NOT_FOUND_PATH_RE = /^(?:https:\/\/recruiting\.paylocity\.com)?\/recruitin
 // The biggest observed board (2,000+ postings) took ~5 s; the shared 10 s
 // default leaves too little headroom on a slow day.
 const TIMEOUT_MS = 30_000;
-// recruiting.paylocity.com serves every tenant's board and answers 429 once a
-// client sends requests faster than a few per second. The shared retry honours
-// a Retry-After header (up to maxDelayMs * 4) and otherwise backs off
-// exponentially; a 302 is not retried.
+// recruiting.paylocity.com serves every tenant's board and holds each client to
+// a request rate, not a concurrency: measured 2026-11-22 from one IP, 20
+// requests at ~2.8/s all answered 200, while 5 requests inside about a second
+// were followed by HTTP 429 with `Retry-After: 30` on every request until the
+// 30 s block ended (24 requests at 5/s: 5 x 200, then 19 x 429). A board answers
+// in ~0.1 s, so two workers offered ~15-20 requests/s and the sweep spent its
+// time inside 30 s blocks (9,052 of 10,252 boards got a 429; 10 h run).
+// The provider therefore spaces requests itself, for every worker, and treats a
+// 429 as a host-wide pause rather than a per-board retry.
+const MIN_INTERVAL_MS = Number.isFinite(Number(process.env.CAREER_OPS_PAYLOCITY_MIN_INTERVAL_MS))
+  && process.env.CAREER_OPS_PAYLOCITY_MIN_INTERVAL_MS !== undefined
+  ? Number(process.env.CAREER_OPS_PAYLOCITY_MIN_INTERVAL_MS)
+  : 400;
+const DEFAULT_BLOCK_MS = 30_000;
+// The shared retry honours a Retry-After header (up to maxDelayMs * 4) and
+// otherwise backs off exponentially; a 302 is not retried.
 const RETRY_POLICY = { retries: 3, baseDelayMs: 2_000, maxDelayMs: 15_000 };
+
+/** Shared by every board fetch in the process. */
+export const pacing = { nextSlot: 0, blockedUntil: 0, lastDispatch: -Infinity };
+
+/**
+ * Wait for this request's turn: at least `minIntervalMs` after the previous
+ * dispatch, and not before a 429 block has ended. Reserves the slot and records
+ * the dispatch synchronously, so concurrent workers queue instead of racing.
+ * @param {{ sleep?: (ms: number) => Promise<void> }} ctx
+ * @param {{ now?: () => number, minIntervalMs?: number }} [opts]
+ */
+export async function waitForSlot(ctx, { now = Date.now, minIntervalMs = MIN_INTERVAL_MS } = {}) {
+  // A 429 can land while this caller sleeps, and a stalled event loop can wake
+  // several sleepers in one turn; re-reserve until neither applies.
+  for (;;) {
+    const at = Math.max(now(), pacing.nextSlot, pacing.blockedUntil, pacing.lastDispatch + minIntervalMs);
+    pacing.nextSlot = at + minIntervalMs;
+    const wait = at - now();
+    if (wait > 0) await sleep(wait, ctx);
+    if (pacing.blockedUntil <= at && now() >= pacing.lastDispatch + minIntervalMs) {
+      pacing.lastDispatch = now();
+      return;
+    }
+  }
+}
+
+/** @param {unknown} err @param {() => number} [now] */
+export function noteRateLimit(err, now = Date.now) {
+  const status = /** @type {any} */ (err)?.status;
+  if (status !== 429) return;
+  const retryMs = parseRetryAfterMs(/** @type {any} */ (err)?.retryAfter);
+  const ms = retryMs > 0 ? Math.min(retryMs, 120_000) : DEFAULT_BLOCK_MS;
+  pacing.blockedUntil = Math.max(pacing.blockedUntil, now() + ms);
+}
+
+/** Context whose fetchText waits its turn and records a 429 block. Only the real HTTP transport is paced. */
+function pacedCtx(ctx) {
+  if (ctx?.transport !== 'http' || MIN_INTERVAL_MS <= 0) return ctx;
+  return {
+    ...ctx,
+    fetchText: async (url, opts) => {
+      await waitForSlot(ctx);
+      try {
+        return await ctx.fetchText(url, opts);
+      } catch (err) {
+        noteRateLimit(err);
+        throw err;
+      }
+    },
+  };
+}
 // The board page labels a posting from `IndeedRemoteType`, and only when
 // `IsRemote` is true: 0 "Temporarily WFH due to COVID-19", 1 "Hybrid Remote",
 // 2 "Fully Remote", any other value no label. The label is shown whether or not
@@ -184,7 +247,7 @@ export default {
     if (!url) throw new Error(`paylocity: cannot derive board URL for ${entry?.name}`);
     let html;
     try {
-      html = await fetchTextWithRetry(ctx, url, { redirect: 'manual', timeoutMs: TIMEOUT_MS }, RETRY_POLICY);
+      html = await fetchTextWithRetry(pacedCtx(ctx), url, { redirect: 'manual', timeoutMs: TIMEOUT_MS }, RETRY_POLICY);
     } catch (err) {
       if (typeof err?.status === 'number' && err.status >= 300 && err.status < 400
         && NOT_FOUND_PATH_RE.test(String(err.location || ''))) {
