@@ -2546,7 +2546,8 @@ export function extractPipelineCompanyRole(line) {
   const cells = entry.body.split('|').map(cell => cell.trim());
   if (cells[0].startsWith('#--')) return null;
 
-  const urlIndex = cells.findIndex(cell => PIPELINE_URL_RE.test(cell));
+  // A cached-JD row leads with its local reference instead of an http(s) url.
+  const urlIndex = cells.findIndex(cell => PIPELINE_URL_RE.test(cell) || LOCAL_JD_REF.test(cell));
   if (urlIndex === -1) return null;
 
   const [company = '', role = '', third = ''] = cells.slice(urlIndex + 1);
@@ -3964,7 +3965,7 @@ export function refreshListingKey(offer) {
 
 
 export function isOfferSeen(offer, seenUrls, identityPromotableUrls = null) {
-  const urlToken = seenJobKey(offer?.url);
+  const urlToken = seenJobKey(offerPostingUrl(offer) || offer?.url);
   const identityToken = listingIdentityToken(offer);
   if (seenUrls.has(urlToken)) {
     const historicalKeys = identityPromotableUrls?.get(urlToken);
@@ -3977,7 +3978,7 @@ export function isOfferSeen(offer, seenUrls, identityPromotableUrls = null) {
 }
 
 export function markOfferSeen(offer, seenUrls, { includeIdentity = true } = {}) {
-  const urlToken = seenJobKey(offer?.url);
+  const urlToken = seenJobKey(offerPostingUrl(offer) || offer?.url);
   const identityToken = listingIdentityToken(offer);
   seenUrls.add(urlToken);
   if (identityToken && includeIdentity) {
@@ -4224,7 +4225,10 @@ function localRefPinned(pipelineText, ref, key, released) {
   let inProcessed = false;
   for (const line of String(pipelineText ?? '').split('\n')) {
     inProcessed = processedSectionAfter(line, inProcessed);
-    if (!line.includes(`- [ ] ${ref} |`) && !line.includes(`- [x] ${ref} |`)) continue;
+    // Read the row body the way the http parser does, so a struck-through
+    // row (`- [ ] ~~local:jds/a.md | Company | Role~~`) still matches.
+    const body = pipelineEntry(line, PIPELINE_CHECKBOX_RE)?.body;
+    if (!body || !body.split('|').some((cell) => cell.trim() === ref)) continue;
     if (pipelineRowIsFinished(line, inProcessed) && released.has(key)) continue;
     return true;
   }
@@ -5977,7 +5981,7 @@ async function main() {
           st.other++;
           continue;
         }
-        const dedupUrl = seenJobKey(job.url);
+        const dedupUrl = seenJobKey(offerPostingUrl(job) || job.url);
         const language = languageFormsForDedup(job.language);
         // A seen URL key passes only as a language version of that posting no
         // seen row was in; a match on the provider's listing identity stays a
