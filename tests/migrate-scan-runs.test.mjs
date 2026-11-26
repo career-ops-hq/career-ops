@@ -24,7 +24,7 @@ import { pass, fail, ROOT, NODE, rmSync } from './helpers.mjs';
 // URL scheme and dynamic import rejects it. Windows is one of the three CI
 // platforms, so a bare path fails there and nowhere a local run would show it.
 const load = (m) => import(pathToFileURL(join(ROOT, m)).href);
-const { migrateScanRuns, schemasByWidth, CURRENT_COLUMNS, writeMigrated } = await load('migrate-scan-runs.mjs');
+const { migrateScanRuns, schemasByWidth, CURRENT_COLUMNS, writeMigrated, runMigration } = await load('migrate-scan-runs.mjs');
 const { computeRunStats } = await load('stats.mjs');
 const { SCAN_RUNS_HEADER } = await load('scan.mjs');
 
@@ -243,6 +243,61 @@ console.log('\n🧪 Testing migrate-scan-runs (#4423)...');
       pass('control: writeMigrated replaces the file and backs up the snapshot when it is unchanged');
     } else {
       fail(`unchanged file was not written: ${JSON.stringify(ok)}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ------------------------------- --json reports the write's outcome, not intent
+// The summary used to print before the write, so a refused write said
+// `applied: true` and then exited 2.
+{
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-msr-json-'));
+  try {
+    const file = join(dir, 'scan-runs.tsv');
+    const snapshot = [GEN14.join('\t'), rowFor(GEN14, 1)].join('\n') + '\n';
+    const lines = [];
+    const quiet = { apply: true, asJson: true, log: (l) => lines.push(l), error: () => {} };
+
+    writeFileSync(file, `${snapshot}${rowFor(GEN14, 2)}\n`, 'utf-8');
+    const refusedCode = await runMigration(file, snapshot, quiet);
+    const refused = JSON.parse(lines.join('\n'));
+    if (refusedCode === 2 && refused.applied === false) {
+      pass('--apply --json reports applied: false when the write is refused');
+    } else {
+      fail(`refused write reported code=${refusedCode} applied=${refused.applied}`);
+    }
+
+    // Control: an untouched file is written and reported as applied.
+    lines.length = 0;
+    writeFileSync(file, snapshot, 'utf-8');
+    const okCode = await runMigration(file, snapshot, quiet);
+    const ok = JSON.parse(lines.join('\n'));
+    if (okCode === 0 && ok.applied === true && readFileSync(file, 'utf-8') !== snapshot) {
+      pass('control: --apply --json reports applied: true when the write lands');
+    } else {
+      fail(`landed write reported code=${okCode} applied=${ok.applied}`);
+    }
+
+    // A write that throws (here the pipeline lock times out) still prints the
+    // summary, with applied: false and a non-zero code. Before, the throw
+    // escaped runMigration and --json printed nothing.
+    const { acquirePipelineLock } = await load('pipeline-lock.mjs');
+    lines.length = 0;
+    writeFileSync(file, snapshot, 'utf-8');
+    const held = await acquirePipelineLock(file, { timeoutMs: 2_000 });
+    let thrownCode;
+    try {
+      thrownCode = await runMigration(file, snapshot, { ...quiet, lockOptions: { timeoutMs: 150 } });
+    } finally {
+      await held.release();
+    }
+    const thrown = lines.length ? JSON.parse(lines.join('\n')) : null;
+    if (thrownCode === 1 && thrown?.applied === false && readFileSync(file, 'utf-8') === snapshot) {
+      pass('--apply --json reports applied: false and exits 1 when the write throws');
+    } else {
+      fail(`thrown write reported code=${thrownCode} summary=${JSON.stringify(thrown)}`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
