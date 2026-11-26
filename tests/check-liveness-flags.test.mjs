@@ -25,14 +25,23 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
-import { ROOT } from './helpers.mjs';
+import { ROOT, DEFAULT_SCRIPT_TIMEOUT_MS, NODE_TEST_BUDGET_FACTOR } from './helpers.mjs';
 
 const SCRIPT = join(ROOT, 'check-liveness.mjs');
+
+// Per-child limit for the check-liveness processes below. Each one finishes in
+// about a second alone, but under the parallel run on windows-latest process
+// start-up and module loading for one child overran the old fixed 20s/15s and
+// spawnSync returned ETIMEDOUT for a CLI that behaved correctly (#7714).
+// Windows gets double, the same ratio #7715 gave the suite budget. A child
+// that really hangs still fails: the limit stays well inside the suite's own
+// budget (DEFAULT_SCRIPT_TIMEOUT_MS * NODE_TEST_BUDGET_FACTOR).
+const CHILD_TIMEOUT_MS = DEFAULT_SCRIPT_TIMEOUT_MS * (process.platform === 'win32' ? 2 : 1);
 
 function run(args, extra = {}) {
   return spawnSync(process.execPath, [SCRIPT, ...args], {
     encoding: 'utf-8',
-    timeout: 20000,
+    timeout: CHILD_TIMEOUT_MS,
     env: { ...process.env, ...extra.env },
     cwd: extra.cwd || ROOT,
   });
@@ -59,7 +68,7 @@ test('importing invite-match does not exit when argv has a bare --file', () => {
   try {
     const result = spawnSync(process.execPath, [importer, '--file'], {
       encoding: 'utf-8',
-      timeout: 15000,
+      timeout: CHILD_TIMEOUT_MS,
       cwd: ROOT,
     });
     const text = out(result);
@@ -128,4 +137,12 @@ test('the space form of --throttle is the wait, not another URL', () => {
   assert.match(text, /Checking 1 URL/);
   assert.match(text, /throttle ~1-2s/);
   assert.doesNotMatch(text, /Checking 2 URL/);
+});
+
+test('the per-child timeout leaves room inside the suite budget', () => {
+  const suiteBudget = DEFAULT_SCRIPT_TIMEOUT_MS * NODE_TEST_BUDGET_FACTOR;
+  assert.ok(
+    CHILD_TIMEOUT_MS * 2 <= suiteBudget,
+    `a hung child must fail by ETIMEDOUT before the suite is killed (${CHILD_TIMEOUT_MS}ms vs ${suiteBudget}ms)`,
+  );
 });
