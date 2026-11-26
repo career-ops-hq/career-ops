@@ -29,6 +29,17 @@ import { markTruncated } from '../lib/board-truncation.mjs';
 // page (fewer than a full page of cards), and is otherwise bounded by
 // `max_pages` per query (default DEFAULT_MAX_PAGES, hard ceiling MAX_PAGES_CAP).
 //
+// POSTED DATE. The cards show no date, but the same document carries the
+// results as data in an inline
+//   AF_initDataCallback({key: 'ds:N', hash: '…', data: <JSON>, sideChannel: {}});
+// block whose data is [jobs[], <unused>, total, pageSize], each job an array
+// with [0] the numeric id (the one in the card's link) and [12]
+// [postedEpochSeconds, nanos]. Observed live 2026-11-23: key 'ds:1', every card
+// on the page matched a row by id. The block is found by SHAPE, not by key, and
+// is only a date lookup: the cards stay the source of every job, so a missing or
+// changed block just leaves `postedAt` absent (read as "unknown", never "stale")
+// instead of blanking the board.
+//
 // Config (portals.yml):
 //   provider: google
 //   google:
@@ -52,6 +63,19 @@ const EMPLOYER_LINE_RE = /<p class="l103df">([\s\S]*?)<\/p>/g;
 const ARIA_TITLE_RE = /\baria-label="Learn more about ([^"]+)"/;
 // "+2 more" is Google collapsing the rest of the list, not a place.
 const MORE_RE = /^\+\d+ more$/;
+// The start of each inline data block; its JSON runs to a later ", sideChannel:".
+const CALLBACK_START_RE = /AF_initDataCallback\(\{key:\s*'[^']*',\s*hash:\s*'[^']*',\s*data:/g;
+const SIDE_CHANNEL_RE = /,\s*sideChannel:/g;
+// Job descriptions ride in the block, so ", sideChannel:" (or the text
+// "AF_initDataCallback(") can also occur inside a JSON string. No text is
+// trusted as a boundary: each later ", sideChannel:" is tried as the end until
+// the JSON parses, up to this many.
+const MAX_BLOCK_END_TRIES = 20;
+// A posted epoch before 2000 is a misread field, not a date: emitting it would
+// make max_posting_age_days drop a live posting as stale. One more than a day in
+// the future is a misread too (milliseconds read as seconds, say).
+const MIN_POSTED_EPOCH_S = 946684800;
+const MAX_POSTED_SKEW_S = 86_400;
 const DEFAULT_QUERIES = [
   'business strategy', 'business operations', 'strategy and operations',
   'corporate development', 'financial planning',
@@ -118,6 +142,42 @@ export function parseResultsPage(html) {
   return cards;
 }
 
+/**
+ * Map each job id on a results page to its posted date (epoch ms), read from the
+ * page's inline AF_initDataCallback data block. Never throws: a page without a
+ * recognizable block, or a row without a usable date, contributes nothing.
+ *
+ * @param {string} html
+ * @param {number} [nowMs] clock for the future-date bound (tests pin it)
+ * @returns {Map<string, number>}
+ */
+export function parsePostedDates(html, nowMs = Date.now()) {
+  const page = String(html);
+  const maxEpochS = nowMs / 1000 + MAX_POSTED_SKEW_S;
+  const dates = new Map();
+  for (const start of page.matchAll(CALLBACK_START_RE)) {
+    const from = /** @type {number} */ (start.index) + start[0].length;
+    const ends = new RegExp(SIDE_CHANNEL_RE.source, 'g');
+    ends.lastIndex = from;
+    let data;
+    for (let tries = 0, end; tries < MAX_BLOCK_END_TRIES && (end = ends.exec(page)); tries++) {
+      try { data = JSON.parse(page.slice(from, end.index)); break; } catch { /* try the next end */ }
+    }
+    if (!Array.isArray(data) || !Array.isArray(data[0]) || typeof data[2] !== 'number') continue;
+    for (const row of data[0]) {
+      if (!Array.isArray(row) || typeof row[0] !== 'string' || !/^\d+$/.test(row[0])) continue;
+      const raw = Array.isArray(row[12]) ? row[12][0] : undefined;
+      // An int64 may be serialized as a digit string.
+      const posted = typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : raw;
+      if (typeof posted !== 'number' || !Number.isFinite(posted)) continue;
+      if (posted < MIN_POSTED_EPOCH_S || posted > maxEpochS) continue;
+      dates.set(row[0], Math.round(posted * 1000));
+    }
+    if (dates.size > 0) break;
+  }
+  return dates;
+}
+
 /** @type {Provider} */
 
 export default {
@@ -180,15 +240,22 @@ export default {
         requestsMade += 1;
         if (!String(q).trim()) unrestrictedPageReturned = true;
         const cards = parseResultsPage(html);
+        const postedDates = parsePostedDates(html);
         let newThisQuery = 0;
         for (const { id, slug, title, employer, locations } of cards) {
           if (!seenThisQuery.has(id)) { seenThisQuery.add(id); newThisQuery += 1; }
-          if (byId.has(id)) continue;
+          const known = byId.get(id);
+          if (known) {
+            // Kept from an earlier query; a date this page has fills one it lacked.
+            if (known.postedAt === undefined && postedDates.has(id)) known.postedAt = postedDates.get(id);
+            continue;
+          }
           byId.set(id, {
             title,
             url: `${BASE}${id}-${slug}`,
             company: employer || entry.name,
             location: locations.join('; '),
+            ...(postedDates.has(id) ? { postedAt: /** @type {number} */ (postedDates.get(id)) } : {}),
             ...(coerceId(id) ? { externalId: /** @type {string} */ (coerceId(id)) } : {}),
           });
         }
@@ -202,6 +269,11 @@ export default {
       throw firstPageError;
     }
     let jobs = [...byId.values()];
+    // Cards but not one date: the inline data block moved or changed shape, so
+    // max_posting_age_days has stopped applying to this board. Say so once.
+    if (!probing && jobs.length > 0 && !jobs.some((j) => typeof j.postedAt === 'number')) {
+      console.error(`⚠️  google: ${entry.name} returned ${jobs.length} jobs but no posting dates — the results page's data block may have changed, so max_posting_age_days cannot drop old Google postings`);
+    }
     if (truncated) {
       console.error(`⚠️  google: ${entry.name} hit the ${maxPages}-page cap on at least one query — raise max_pages on this entry for more`);
       jobs = markTruncated(jobs, 'page-cap', { fetched: jobs.length });
