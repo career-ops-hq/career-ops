@@ -51,242 +51,19 @@ const MAX_REDIRECTS = 5;
 // The most of one page ever downloaded, and of it ever inspected for a JD or closure.
 const MAX_BODY_BYTES = 3 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 15_000;
-// What the page tier and this script's own command line keep of a JD: a batch
-// report reads the whole posting, so there is no token-budget reason to cap tighter.
-export const PAGE_TEXT_CAP = 20_000;
+// What this script's own command line keeps of a JD: a batch report reads the
+// whole posting, so there is no token-budget reason to cap tighter than the
+// library default (JD_TEXT_CAP).
+export const CLI_TEXT_CAP = 20_000;
 // Below this many words the "JD" is a stub, not a posting.
 export const MIN_PAGE_JD_WORDS = 80;
 
 // ========================================================================
-// Tier 2 — the page's own bytes: fetch it and read its structured data
+// Shared — text helpers every tier uses
 // ========================================================================
 
-/** LinkedIn hosts, which this module never requests. */
-export function isLinkedInHost(hostname) {
-  const host = String(hostname || '').toLowerCase().replace(/\.$/, '');
-  return host === 'linkedin.com' || host.endsWith('.linkedin.com');
-}
-
-async function readCapped(res, maxBytes) {
-  const reader = res.body?.getReader();
-  if (!reader) return '';
-  const chunks = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > maxBytes) { await reader.cancel().catch(() => {}); return null; }
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks).toString('utf8');
-}
-
-/**
- * GET one HTML document, following redirects by hand so each hop is guarded.
- * Null on any failure: the caller falls through to its next source.
- *
- * @param {string} url
- * @param {number} timeoutMs
- * @returns {Promise<{html: string, finalUrl: string}|{gone: number, finalUrl: string}|null>}
- */
-async function fetchHtml(url, timeoutMs) {
-  // The connect-time guard lives in the patched dns.lookup. With the patch opted
-  // out (CAREER_OPS_NO_DNS_CACHE=1) a name could pass the pre-check and resolve
-  // to a private address at connect time, so fail closed: a miss sends the
-  // worker back to WebFetch.
-  if (!dnsLookupPatched()) return null;
-  // NODE_USE_ENV_PROXY=1 makes Node's own fetch go through HTTP(S)_PROXY, where
-  // the address check above no longer sees the destination. Providers only use a
-  // proxy when CAREER_OPS_TRUST_PROXY_EGRESS=1 says it blocks private addresses;
-  // hold this fetch to the same rule and miss otherwise.
-  if (/^(1|true)$/i.test(process.env.NODE_USE_ENV_PROXY ?? '') && process.env.CAREER_OPS_TRUST_PROXY_EGRESS !== '1') return null;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let transportFailed = false;
-  try {
-    let current = url;
-    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-      if (rejectPrivateOrInvalid(current)) return null;
-      if (isLinkedInHost(new URL(current).hostname)) return null;
-      await validateUrlSecurity(current);
-      const targetHost = new URL(current).hostname.replace(/^\[|\]$/g, '');
-      // The whole hop, body read included, runs inside the provider-fetch
-      // context: the socket's DNS lookup happens inside fetch(), after its
-      // synchronous part returns, and the context has to still be entered then.
-      const outcome = await providerFetchContext.run({ url: current, targetHost }, async () => {
-        let res;
-        try {
-          res = await fetch(current, {
-            headers: { accept: 'text/html,application/xhtml+xml', 'user-agent': DEFAULT_USER_AGENT },
-            redirect: 'manual',
-            signal: controller.signal,
-          });
-        } catch (err) {
-          // No HTTP response at all (DNS, refused, timeout, TLS): the caller can retry
-          // this. The address guard refusing a private address is a verdict on the
-          // destination, not a transport problem, so a retry would change nothing.
-          if ((err?.cause?.code ?? err?.code) !== 'ECAREEROPS_BLOCKED_ADDRESS') transportFailed = true;
-          throw err;
-        }
-        if (res.status >= 300 && res.status < 400) {
-          const location = res.headers.get('location');
-          await res.body?.cancel().catch(() => {});
-          return location ? { redirect: new URL(location, current).href } : null;
-        }
-        // 404/410 is the server saying the posting is gone, the same answer
-        // classifyLiveness reads as expired. Any other error status may be a
-        // block or an outage, so it stays a miss.
-        if (res.status === 404 || res.status === 410) { await res.body?.cancel().catch(() => {}); return { gone: res.status, finalUrl: current }; }
-        if (!res.ok) { await res.body?.cancel().catch(() => {}); return null; }
-        const type = res.headers.get('content-type') || '';
-        if (type && !/html|xml/i.test(type)) { await res.body?.cancel().catch(() => {}); return null; }
-        const html = await readCapped(res, MAX_BODY_BYTES);
-        return html == null ? null : { html, finalUrl: current };
-      });
-      if (!outcome) return null;
-      if (outcome.redirect) { current = outcome.redirect; continue; }
-      return outcome;
-    }
-    return null;
-  } catch {
-    return transportFailed ? { unreachable: true } : null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/**
- * Every schema.org JobPosting node in the page's JSON-LD blocks. A malformed
- * block is skipped, and a block may be an array or an @graph wrapper.
- *
- * @param {string} html
- * @returns {object[]}
- */
-function jobPostingNodes(html) {
-  const found = [];
-  for (const block of ldJsonBlocks(html)) {
-    let parsed;
-    try { parsed = JSON.parse(block.trim()); } catch { continue; }
-    const queue = [parsed];
-    for (let qi = 0; qi < queue.length; qi += 1) {
-      const node = queue[qi];
-      if (!node || typeof node !== 'object') continue;
-      if (Array.isArray(node)) { for (const child of node) queue.push(child); continue; }
-      if (Array.isArray(node['@graph'])) for (const child of node['@graph']) queue.push(child);
-      const type = node['@type'];
-      if (Array.isArray(type) ? type.includes('JobPosting') : type === 'JobPosting') found.push(node);
-    }
-  }
-  return found;
-}
-
-/** Distinct large description-like strings in a hydration payload (see fromEmbeddedDescription). */
-function embeddedDescriptionCount(html) {
-  const seen = new Set();
-  for (const raw of embeddedDescriptionStrings(html, { lenient: true })) {
-    if (wordCount(String(raw).replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag))) >= MIN_PAGE_JD_WORDS) seen.add(String(raw).replace(/\s+/g, ' ').trim());
-  }
-  return seen.size;
-}
-
-const collapseWs = (v) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : v);
-
-/** Stable form of a JSON value: object keys sorted at every depth, strings whitespace-collapsed. */
-function canonicalJson(v) {
-  if (Array.isArray(v)) return v.map(canonicalJson);
-  if (v && typeof v === 'object') return Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonicalJson(v[k])]));
-  return collapseWs(v);
-}
-
-// Tokens that identify a job in a posting URL: path segments containing a digit, and id-like query values.
-function jobIdTokens(u) {
-  try {
-    const x = new URL(u);
-    // SPA routes carry the job id in the fragment (/careers#/job/2), so read it like the path.
-    const toks = `${x.pathname}/${x.hash.replace(/^#/, '').split('?')[0]}`.split('/').filter((seg) => /\d/.test(seg)).map((seg) => seg.toLowerCase());
-    // id-like query values, from the real query and from a query inside the fragment (#/job?jobId=1).
-    const fragQuery = x.hash.includes('?') ? x.hash.slice(x.hash.indexOf('?') + 1) : '';
-    for (const params of [x.searchParams, new URLSearchParams(fragQuery)]) {
-      for (const [k, val] of params) if (/(^|_)(id|jid|jobid|job_id|reqid|req)$/i.test(k) && val) toks.push(val.toLowerCase());
-    }
-    return toks;
-  } catch { return []; }
-}
-
-// A bare year or version segment (/2024/, /v2/) is shared structure, not a job id.
-const STRUCTURAL_TOKEN_RE = /^(?:(?:19|20)\d\d|v\d+(?:\.\d+)*)$/;
-
-/**
- * Does this JobPosting's own URL clearly name a different job than the one requested? Only when both are
- * absolute URLs on the same host, both carry id-like tokens, and the tokens share nothing. Postings with no
- * URL, a different host (CDN or alias), or no identifying tokens are not rejected.
- */
-function postingNamesOtherJob(node, requestedUrl) {
-  if (!requestedUrl) return false;
-  const own = typeof node?.url === 'string' ? node.url : (typeof node?.['@id'] === 'string' ? node['@id'] : '');
-  if (!own) return false;
-  try {
-    const a = new URL(requestedUrl); const b = new URL(own);
-    if (a.hostname.replace(/^www\./, '').toLowerCase() !== b.hostname.replace(/^www\./, '').toLowerCase()) return false;
-  } catch { return false; }
-  let want = jobIdTokens(requestedUrl); let got = jobIdTokens(own);
-  // Compare without year/version segments when both sides still have a real id; otherwise the
-  // raw tokens are the only identity there is (/job/2031 vs /job/2044 must still differ).
-  const wantStrong = want.filter((t) => !STRUCTURAL_TOKEN_RE.test(t));
-  const gotStrong = got.filter((t) => !STRUCTURAL_TOKEN_RE.test(t));
-  if (wantStrong.length && gotStrong.length) { want = wantStrong; got = gotStrong; }
-  if (!want.length || !got.length) return false;
-  return !want.some((t) => got.includes(t));
-}
-
-/**
- * What a page's own structured data (JSON-LD, then an embedded payload) says about
- * the one posting it should hold. The single reader both extractJd (is there a JD?)
- * and pageClosureEvidence (is the posting closed?) ask, so they cannot disagree
- * about which posting the page is about. Pure — exported for tests.
- *
- *   `ambiguous` — the page names several postings, one for another job, or holds
- *                 several description-sized payloads: nothing on it, closure
- *                 included, belongs to one URL.
- *   `expired`   — its JobPosting is past `validThrough`; `evidence` says so.
- *   `jd`        — one posting of at least MIN_PAGE_JD_WORDS words: `{text, title, method}`.
- *   `none`      — no usable structured data.
- *
- * @param {string} html
- * @param {string} [requestedUrl] when given, a posting that names another job is `ambiguous`
- * @param {number} [now] epoch ms, injectable for tests
- * @returns {{kind: 'ambiguous'|'none'}|{kind: 'expired', evidence: string}|{kind: 'jd', jd: {text: string, title: string, method: string}}}
- */
-export function readPostingData(html, requestedUrl = '', now = Date.now()) {
-  const postings = jobPostingNodes(html);
-  // A page that names more than one posting is a listing, or a page whose other
-  // postings we cannot tell apart from the requested one. Postings are
-  // told apart by title, description, url, @id, identifier, employer and location, and an identical
-  // duplicate representation of one posting does not count twice.
-  const distinctLd = new Set(postings.map((node) => JSON.stringify(canonicalJson([node.title ?? '', node.description ?? '', node.url ?? '', node['@id'] ?? '', node.identifier ?? '', node.hiringOrganization ?? '', node.jobLocation ?? ''])))).size;
-  if (distinctLd > 1) return { kind: 'ambiguous' };
-  // A single posting that names a different job than the requested URL is that other job's, not ours.
-  if (postings.length && postingNamesOtherJob(postings[0], requestedUrl)) return { kind: 'ambiguous' };
-
-  const expired = postings.find((node) => isPastValidThrough(node, now));
-  if (expired) return { kind: 'expired', evidence: `JobPosting validThrough ${String(expired.validThrough).slice(0, 40)}` };
-
-  let ld = null;
-  try { ld = fromLdJson(html); } catch { /* malformed JSON-LD fields: ignore, the ambiguity and expiry checks still ran */ }
-  if (ld && wordCount(ld.text) >= MIN_PAGE_JD_WORDS) {
-    const rawTitle = postings[0]?.title;
-    const title = typeof rawTitle === 'string' ? rawTitle.trim().slice(0, 300) : '';
-    return { kind: 'jd', jd: { ...ld, title } };
-  }
-
-  // The embedded-payload fallback picks the LONGEST description on the page. It
-  // is only trusted when the page holds one description-sized string (and, above,
-  // at most one posting), so what it returns can only be this posting's.
-  if (embeddedDescriptionCount(html) > 1) return { kind: 'ambiguous' };
-  const embedded = fromEmbeddedDescription(html);
-  return embedded && wordCount(embedded.text) >= MIN_PAGE_JD_WORDS ? { kind: 'jd', jd: { title: '', ...embedded } } : { kind: 'none' };
-}
+// What every fetch function keeps of a JD unless the caller asks otherwise.
+export const JD_TEXT_CAP = 12_000;
 
 export const TRUNCATION_NOTICE = (cap) =>
   `[Job description truncated here: the posting is longer than ${cap} characters. This text is NOT the complete job description.]`;
@@ -307,293 +84,6 @@ export function capJdText(text, cap) {
   return `${cut.trimEnd()}\n\n${TRUNCATION_NOTICE(cap)}`;
 }
 
-const VISIBLE_SCAN_CAP = 1_000_000;
-
-/**
- * Did the fetch land on the page that was asked for? A job URL that redirects to
- * a listing or another job would otherwise lend that page's one JobPosting (or
- * its closure) to the requested job. Host `www.` and a trailing slash are not a
- * different page; tracking parameters are ignored.
- */
-export function sameDocument(requested, final) {
-  try {
-    const norm = (u) => {
-      const x = new URL(u);
-      const q = [...x.searchParams].filter(([k]) => !/^(utm_|gclid$|fbclid$)/i.test(k)).map(([k, v]) => `${k}=${v}`).sort().join('&');
-      return `${x.hostname.toLowerCase().replace(/^www\./, '')}${x.pathname.replace(/\/+$/, '').toLowerCase()}?${q}`;
-    };
-    return norm(requested) === norm(final);
-  } catch { return false; }
-}
-
-/**
- * The one place a fetched page becomes a JD. Takes what a fetch returned
- * (fetchHtml's result, or a page the batch runner downloaded with curl) and
- * returns the JD, or null when the page holds no JD that can be attributed to
- * this URL. Whether the posting is still open is not decided here; that is
- * fetchedPageClosure's job, asked first by the caller.
- *
- * Attribution: a page that landed on another document, names several postings,
- * or is too large to inspect whole yields nothing. Then structured data (JSON-LD,
- * an embedded payload), then, only when the caller asks for it, the visible text.
- *
- * `visibleText` is opt-in because text with no structured data cannot prove it
- * belongs to one posting. The networked reader keeps its contract ("never the
- * longest description on a listing"); the batch runner, which has always handed
- * its worker that text, asks for it.
- *
- * @param {{html?: string, finalUrl?: string}} page what the fetch returned
- * @param {string} url the URL that was requested
- * @param {{textCap?: number, minWords?: number, visibleText?: boolean}} [opts]
- * @returns {{url: string, title: string, text: string, method: string}|null}
- */
-export function extractJd(page, url, { textCap = PAGE_TEXT_CAP, minWords = MIN_PAGE_JD_WORDS, visibleText: allowVisibleText = false } = {}) {
-  const html = String(page?.html ?? '');
-  if (!html || html.length > MAX_BODY_BYTES || !sameDocument(url, page?.finalUrl || url)) return null;
-  const data = readPostingData(html, url);
-  if (data.kind === 'ambiguous' || data.kind === 'expired') return null;
-  if (data.kind === 'jd') return { url, title: data.jd.title ?? '', text: capJdText(data.jd.text, textCap), method: data.jd.method };
-  if (!allowVisibleText) return null;
-  const text = htmlToText(withoutExpiryViews(withoutScripts(html))).replace(/\s+/g, ' ').trim();
-  return wordCount(text) >= minWords ? { url, title: '', text: capJdText(text, textCap), method: 'visible-text' } : null;
-}
-
-/**
- * @param {string} url
- * @param {number} [textCap]
- * @param {number} [timeoutMs]
- * @returns {Promise<{url: string, title: string, text: string, method: string, closed?: boolean, evidence?: string, unreachable?: boolean}|null>}
- */
-export async function fetchJdViaPage(url, textCap = PAGE_TEXT_CAP, timeoutMs = DEFAULT_TIMEOUT_MS, { visibleText = false } = {}) {
-  let host;
-  try { host = new URL(url).hostname; } catch { return null; }
-  if (isLinkedInHost(host)) return null;
-  const page = await fetchHtml(url, timeoutMs);
-  if (!page) return null;
-  if (page.unreachable) return { url, title: '', text: '', method: 'unreachable', unreachable: true };
-  const closure = fetchedPageClosure(page, url);
-  if (closure) return { url, title: '', text: '', method: page.gone ? 'http-gone' : 'page-closure', closed: true, evidence: closure };
-  return extractJd(page, url, { textCap, visibleText });
-}
-
-// ========================================================================
-// Closure — is the posting still open? Read from the page, never guessed
-// ========================================================================
-
-// Closure codes classifyLiveness can reach from page text alone. The softer
-// codes (listing page, missing apply control) lean on a rendered DOM's apply
-// buttons, which a plain download does not have, so they are not trusted here.
-const VISIBLE_CLOSURE_CODES = new Set(['expired_url', 'expired_body', 'deadline_passed']);
-
-/** Is a posting's `validThrough` in the past? An absent or unparseable date is not evidence. */
-function isPastValidThrough(node, now) {
-  const raw = node?.validThrough;
-  if (typeof raw !== 'string' || !raw.trim()) return false;
-  let when = Date.parse(raw);
-  // A date-only value parses as UTC midnight, but means "through that day".
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) when += 24 * 60 * 60 * 1000;
-  return Number.isFinite(when) && when < now;
-}
-
-// A script-toggled expiry view that is always present in the static markup (Phenom).
-const EXPIRE_TEMPLATE_RE = /\b(?:job-expire-view|expire-job-view|job-expire-block)\b/i;
-
-/** The markup with script/style elements and comments removed (linear, indexOf-based). */
-function withoutScripts(html) {
-  const src = String(html).slice(0, VISIBLE_SCAN_CAP);
-  const lower = asciiLower(src);
-  const out = [];
-  let i = 0;
-  while (i < src.length) {
-    const lt = src.indexOf('<', i);
-    if (lt === -1) { out.push(src.slice(i)); break; }
-    out.push(src.slice(i, lt));
-    if (src.startsWith('<!--', lt)) {
-      const end = src.indexOf('-->', lt + 4);
-      i = end === -1 ? src.length : end + 3;
-      continue;
-    }
-    const m = /^<(script|style)\b/.exec(lower.slice(lt, lt + 10));
-    if (m) {
-      const close = lower.indexOf(`</${m[1]}`, lt + 1);
-      const closeEnd = close === -1 ? -1 : src.indexOf('>', close);
-      i = closeEnd === -1 ? src.length : closeEnd + 1;
-      continue;
-    }
-    out.push('<');
-    i = lt + 1;
-  }
-  return out.join('');
-}
-
-const VOID_ELEMENTS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
-
-/**
- * Remove every element whose opening tag carries the expiry-view marker. One forward pass: the next
- * '>' is cached, tags are length-capped before the marker test, and nesting is a counter, so hostile
- * markup (a run of '<a', deep nesting) costs time linear in the page, never quadratic.
- */
-function withoutExpiryViews(html) {
-  const src = String(html);
-  const lower = asciiLower(src);
-  const out = [];
-  let i = 0; let nextGt = -2; let skipName = ''; let depth = 0;
-  while (i < src.length) {
-    const lt = src.indexOf('<', i);
-    if (lt === -1) { if (!skipName) out.push(src.slice(i)); break; }
-    if (!skipName) out.push(src.slice(i, lt));
-    if (nextGt !== -1 && nextGt <= lt) nextGt = src.indexOf('>', lt + 1);
-    const gt = nextGt;
-    const m = /^<(\/?)([a-z][a-z0-9]*)/.exec(lower.slice(lt, lt + 24));
-    if (!m || gt === -1) { if (!skipName) out.push('<'); i = lt + 1; continue; }
-    if (skipName) {
-      if (m[2] === skipName) {
-        if (m[1]) { if (--depth === 0) skipName = ''; } else depth++;
-      }
-      i = gt + 1;
-      continue;
-    }
-    if (!m[1] && EXPIRE_TEMPLATE_RE.test(src.slice(lt, Math.min(gt, lt + 4096)))) {
-      out.push(' ');
-      // A void element (img, br, ...) or a self-closed tag has no end tag: drop just the tag.
-      if (!VOID_ELEMENTS.has(m[2]) && lower[gt - 1] !== '/') { skipName = m[2]; depth = 1; }
-    } else out.push(src.slice(lt, gt + 1));
-    i = gt + 1;
-  }
-  return out.join('');
-}
-
-/**
- * Does the page's visible text say the posting is closed? JSON-LD often carries
- * no expiry, and a closure banner lives in the visible markup that the JD
- * extraction never reads, so check it with the repo's own classifier.
- *
- * @returns {string|null} evidence, or null when the page does not say so
- */
-function visibleClosureEvidence(html, url, finalUrl, now = new Date()) {
-  // Phenom career sites (observed on careers.roberthalf.com, every live posting) ship the
-  // "the job you are trying to apply for has been filled" view inside the page markup and
-  // show or hide it with script. Static HTML cannot say which, so the banner text proves
-  // nothing there; only structured data (validThrough, an ATS flag) can still close it.
-  // Only a marker in the page's own markup counts: one inside a script, style or comment
-  // (a bundle that merely names the class) must not suppress a separate closure banner.
-  // The expiry view itself is dropped; any other closure banner on the page still counts.
-  const markup = withoutExpiryViews(withoutScripts(html));
-  const verdict = classifyLiveness({ status: 200, requestedUrl: url, finalUrl, bodyText: htmlToText(markup), now });
-  return verdict.result === 'expired' && VISIBLE_CLOSURE_CODES.has(verdict.code)
-    ? `page text: ${verdict.reason}`.slice(0, 200)
-    : null;
-}
-
-/**
- * Closure evidence for a page already downloaded (the batch runner's static fetch): an
- * expired JobPosting validThrough, or closure text in the visible page. Null when the
- * page does not say it is closed.
- * @returns {string|null}
- */
-export function pageClosureEvidence(html, url, finalUrl = url) {
-  // Same gates as fetchJdViaPage: a redirect to another page is not this posting's closure,
-  // an ambiguous page proves nothing, and the HTML is capped so hostile input stays cheap.
-  if (finalUrl && !sameDocument(url, finalUrl)) {
-    // Off the requested page: its text is not this posting's. Only the URL itself can still
-    // say closed (a redirect to an error or "job not found" address).
-    const verdict = classifyLiveness({ status: 200, requestedUrl: url, finalUrl, bodyText: '', now: new Date() });
-    return verdict.result === 'expired' && verdict.code === 'expired_url' ? `redirect: ${verdict.reason}`.slice(0, 200) : null;
-  }
-  // A page past the cap cannot be checked whole: a second posting after the prefix could be hidden,
-  // so nothing page-derived counts as closure (the URL check above and the ATS API still do).
-  if (String(html).length > MAX_BODY_BYTES) return null;
-  const capped = String(html);
-  const data = readPostingData(capped, url);
-  if (data.kind === 'ambiguous') return null;
-  if (data.kind === 'expired') return data.evidence;
-  return visibleClosureEvidence(capped, url, finalUrl);
-}
-
-/**
- * Closure evidence for a fetched page: an HTTP 404/410 on the requested page, or
- * what pageClosureEvidence finds in the page and its final URL. Null when the
- * fetch does not say the posting is closed. A 404 reached through a redirect is
- * the other page's, not this posting's.
- *
- * @param {{html?: string, finalUrl?: string, gone?: number}} page
- * @param {string} url
- * @returns {string|null}
- */
-export function fetchedPageClosure(page, url) {
-  const finalUrl = page?.finalUrl || url;
-  if (page?.gone && sameDocument(url, finalUrl)) return `HTTP ${page.gone}`;
-  return pageClosureEvidence(String(page?.html ?? ''), url, finalUrl);
-}
-
-// Floor below which a jd-mode extraction is treated as failure, not content.
-// A posting page whose main text is a couple of sentences is a render we
-// missed (SPA shell, consent wall, bot interstitial), never a real JD; the
-// cost of being wrong is one silent fallback to the MCP path, whereas the
-// cost of NOT failing is an empty JD evaluated as if it were the posting.
-// Only jd mode gets this guard: an empty `listing` result is legitimate — a
-// company with no open roles.
-const MIN_JD_TEXT_CHARS = 200;
-
-/**
- * A Cloudflare challenge or block page served in place of the posting, as a
- * jd-mode failure, or null. Pure — exported for tests.
- *
- * jdFailure() never rejects a result above the length floor, and a
- * site-branded challenge body clears it (#6713: 838 characters, "Humans
- * only"), so the interstitial was emitted as the JD. Cloudflare titles the page
- * itself, and archive-posting.mjs refuses the same pages by that title on an
- * HTTP error (#6724). `bot_challenge` is the code liveness gives the same wall.
- *
- * @param {{ status?: number, pageTitle?: string, url?: string }} page
- */
-export function challengeFailure({ status = 0, pageTitle = '', url = '' } = {}) {
-  if (!(status >= 400)) return null;
-  const kind = cloudflareInterstitial(pageTitle);
-  if (!kind) return null;
-  return { error: `HTTP ${status} Cloudflare ${kind} ("${String(pageTitle).trim()}"), not the posting`, code: 'bot_challenge', url };
-}
-
-/**
- * Why a jd-mode result cannot be emitted, or null when it can. Pure — exported
- * for tests.
- *
- * A page whose cleaned text is below the floor is either unreadable (a client-
- * rendered shell: `empty_text`, worth another attempt) or gone (the posting
- * was taken down: `unavailable`, terminal). Both produce the same empty text,
- * because the "no longer available" banner usually sits in a header or footer
- * that readDom() strips — so the unstripped body is checked too. A result at or
- * above the floor is never reclassified: a full JD may quote such a phrase.
- */
-export function jdFailure(result, maxChars) {
-  const floor = Math.min(MIN_JD_TEXT_CHARS, maxChars);
-  if (result.text.length >= floor) return null;
-  // The shared liveness classifier, not a second phrase list. Only its
-  // posting-specific expiry verdicts count: `insufficient_content` is what a
-  // page that has not rendered yet looks like (liveness-browser treats it the
-  // same way), so it stays empty_text and remains worth retrying.
-  const verdict = classifyLiveness({
-    requestedUrl: result.url,
-    finalUrl: result.url,
-    bodyText: `${result.text}\n${result.bodyText || ''}`,
-  });
-  if (verdict.result === 'expired' && (verdict.code === 'expired_body' || verdict.code === 'expired_body_soft')) {
-    return { error: `posting is no longer available (${verdict.reason})`, code: 'unavailable', url: result.url };
-  }
-  return {
-    error: `extracted ${result.text.length} chars of JD text (minimum ${floor}) — the page most likely renders its content client-side`,
-    code: 'empty_text',
-    url: result.url,
-    body_text: String(result.bodyText || '').slice(0, 4000),
-  };
-}
-
-// ========================================================================
-// Tier 1 — the ATS's public API: one fetcher and one normalizer per ATS
-// ========================================================================
-
-export const JD_TEXT_CAP = 12_000;     // the API tiers' default cap; fetch-jd's own CLI asks for more
-export const WORKDAY_TIMEOUT_MS = 10_000;
 
 // Collapse runs of whitespace.
 export function tidyText(s) {
@@ -610,6 +100,12 @@ export function compactText(s, cap = JD_TEXT_CAP) {
 export function jdText(s, cap = JD_TEXT_CAP) {
   return capJdText(tidyText(s), cap);
 }
+
+// ========================================================================
+// Tier 1 — the ATS's public API: one fetcher and one normalizer per ATS
+// ========================================================================
+
+export const API_TIMEOUT_MS = 10_000;
 
 /**
  * Map a `*.myworkdayjobs.com` posting URL to its public per-job CXS endpoint,
@@ -742,7 +238,7 @@ async function fetchApiBody(apiUrl, { timeoutMs, as = 'json', headers = {} }) {
  * @param {number} timeoutMs
  */
 async function fetchWorkdayJd(apiUrl, postingUrl, textCap, timeoutMs) {
-  const json = await fetchApiBody(apiUrl, { timeoutMs: Math.max(timeoutMs, WORKDAY_TIMEOUT_MS) });
+  const json = await fetchApiBody(apiUrl, { timeoutMs: Math.max(timeoutMs, API_TIMEOUT_MS) });
   return json && normalizeWorkdayJob(json, postingUrl, textCap);
 }
 
@@ -1439,7 +935,7 @@ export const JD_FETCHERS = {
  *   null = not a JD_TEXT_API_ATS host, or the fetch/parse was inconclusive —
  *   caller should fall through to a browser-backed read.
  */
-export async function fetchJdViaKnownApi(url, textCap = JD_TEXT_CAP, timeoutMs = WORKDAY_TIMEOUT_MS) {
+export async function fetchJdViaKnownApi(url, textCap = JD_TEXT_CAP, timeoutMs = API_TIMEOUT_MS) {
   const resolved = resolveJdApi(url);
   if (!resolved || !JD_TEXT_API_ATS.has(resolved.ats)) return null;
   const fetcher = JD_FETCHERS[resolved.ats];
@@ -1457,8 +953,521 @@ export async function fetchJdViaKnownApi(url, textCap = JD_TEXT_CAP, timeoutMs =
 }
 
 // ========================================================================
+// Tier 2 — the page's own bytes: fetch it and read its structured data
+// ========================================================================
+
+/** LinkedIn hosts, which this module never requests. */
+export function isLinkedInHost(hostname) {
+  const host = String(hostname || '').toLowerCase().replace(/\.$/, '');
+  return host === 'linkedin.com' || host.endsWith('.linkedin.com');
+}
+
+async function readCapped(res, maxBytes) {
+  const reader = res.body?.getReader();
+  if (!reader) return '';
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) { await reader.cancel().catch(() => {}); return null; }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+/**
+ * GET one HTML document, following redirects by hand so each hop is guarded.
+ * Null on any failure: the caller falls through to its next source.
+ *
+ * @param {string} url
+ * @param {number} timeoutMs
+ * @returns {Promise<{html: string, finalUrl: string}|{gone: number, finalUrl: string}|null>}
+ */
+async function fetchHtml(url, timeoutMs) {
+  // The connect-time guard lives in the patched dns.lookup. With the patch opted
+  // out (CAREER_OPS_NO_DNS_CACHE=1) a name could pass the pre-check and resolve
+  // to a private address at connect time, so fail closed: a miss sends the
+  // worker back to WebFetch.
+  if (!dnsLookupPatched()) return null;
+  // NODE_USE_ENV_PROXY=1 makes Node's own fetch go through HTTP(S)_PROXY, where
+  // the address check above no longer sees the destination. Providers only use a
+  // proxy when CAREER_OPS_TRUST_PROXY_EGRESS=1 says it blocks private addresses;
+  // hold this fetch to the same rule and miss otherwise.
+  if (/^(1|true)$/i.test(process.env.NODE_USE_ENV_PROXY ?? '') && process.env.CAREER_OPS_TRUST_PROXY_EGRESS !== '1') return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let transportFailed = false;
+  try {
+    let current = url;
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      if (rejectPrivateOrInvalid(current)) return null;
+      if (isLinkedInHost(new URL(current).hostname)) return null;
+      await validateUrlSecurity(current);
+      const targetHost = new URL(current).hostname.replace(/^\[|\]$/g, '');
+      // The whole hop, body read included, runs inside the provider-fetch
+      // context: the socket's DNS lookup happens inside fetch(), after its
+      // synchronous part returns, and the context has to still be entered then.
+      const outcome = await providerFetchContext.run({ url: current, targetHost }, async () => {
+        let res;
+        try {
+          res = await fetch(current, {
+            headers: { accept: 'text/html,application/xhtml+xml', 'user-agent': DEFAULT_USER_AGENT },
+            redirect: 'manual',
+            signal: controller.signal,
+          });
+        } catch (err) {
+          // No HTTP response at all (DNS, refused, timeout, TLS): the caller can retry
+          // this. The address guard refusing a private address is a verdict on the
+          // destination, not a transport problem, so a retry would change nothing.
+          if ((err?.cause?.code ?? err?.code) !== 'ECAREEROPS_BLOCKED_ADDRESS') transportFailed = true;
+          throw err;
+        }
+        if (res.status >= 300 && res.status < 400) {
+          const location = res.headers.get('location');
+          await res.body?.cancel().catch(() => {});
+          return location ? { redirect: new URL(location, current).href } : null;
+        }
+        // 404/410 is the server saying the posting is gone, the same answer
+        // classifyLiveness reads as expired. Any other error status may be a
+        // block or an outage, so it stays a miss.
+        if (res.status === 404 || res.status === 410) { await res.body?.cancel().catch(() => {}); return { gone: res.status, finalUrl: current }; }
+        if (!res.ok) { await res.body?.cancel().catch(() => {}); return null; }
+        const type = res.headers.get('content-type') || '';
+        if (type && !/html|xml/i.test(type)) { await res.body?.cancel().catch(() => {}); return null; }
+        const html = await readCapped(res, MAX_BODY_BYTES);
+        return html == null ? null : { html, finalUrl: current };
+      });
+      if (!outcome) return null;
+      if (outcome.redirect) { current = outcome.redirect; continue; }
+      return outcome;
+    }
+    return null;
+  } catch {
+    return transportFailed ? { unreachable: true } : null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Every schema.org JobPosting node in the page's JSON-LD blocks. A malformed
+ * block is skipped, and a block may be an array or an @graph wrapper.
+ *
+ * @param {string} html
+ * @returns {object[]}
+ */
+function jobPostingNodes(html) {
+  const found = [];
+  for (const block of ldJsonBlocks(html)) {
+    let parsed;
+    try { parsed = JSON.parse(block.trim()); } catch { continue; }
+    const queue = [parsed];
+    for (let qi = 0; qi < queue.length; qi += 1) {
+      const node = queue[qi];
+      if (!node || typeof node !== 'object') continue;
+      if (Array.isArray(node)) { for (const child of node) queue.push(child); continue; }
+      if (Array.isArray(node['@graph'])) for (const child of node['@graph']) queue.push(child);
+      const type = node['@type'];
+      if (Array.isArray(type) ? type.includes('JobPosting') : type === 'JobPosting') found.push(node);
+    }
+  }
+  return found;
+}
+
+/** Distinct large description-like strings in a hydration payload (see fromEmbeddedDescription). */
+function embeddedDescriptionCount(html) {
+  const seen = new Set();
+  for (const raw of embeddedDescriptionStrings(html, { lenient: true })) {
+    if (wordCount(String(raw).replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag))) >= MIN_PAGE_JD_WORDS) seen.add(String(raw).replace(/\s+/g, ' ').trim());
+  }
+  return seen.size;
+}
+
+const collapseWs = (v) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : v);
+
+/** Stable form of a JSON value: object keys sorted at every depth, strings whitespace-collapsed. */
+function canonicalJson(v) {
+  if (Array.isArray(v)) return v.map(canonicalJson);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonicalJson(v[k])]));
+  return collapseWs(v);
+}
+
+// Tokens that identify a job in a posting URL: path segments containing a digit, and id-like query values.
+function jobIdTokens(u) {
+  try {
+    const x = new URL(u);
+    // SPA routes carry the job id in the fragment (/careers#/job/2), so read it like the path.
+    const toks = `${x.pathname}/${x.hash.replace(/^#/, '').split('?')[0]}`.split('/').filter((seg) => /\d/.test(seg)).map((seg) => seg.toLowerCase());
+    // id-like query values, from the real query and from a query inside the fragment (#/job?jobId=1).
+    const fragQuery = x.hash.includes('?') ? x.hash.slice(x.hash.indexOf('?') + 1) : '';
+    for (const params of [x.searchParams, new URLSearchParams(fragQuery)]) {
+      for (const [k, val] of params) if (/(^|_)(id|jid|jobid|job_id|reqid|req)$/i.test(k) && val) toks.push(val.toLowerCase());
+    }
+    return toks;
+  } catch { return []; }
+}
+
+// A bare year or version segment (/2024/, /v2/) is shared structure, not a job id.
+const STRUCTURAL_TOKEN_RE = /^(?:(?:19|20)\d\d|v\d+(?:\.\d+)*)$/;
+
+/**
+ * Does this JobPosting's own URL clearly name a different job than the one requested? Only when both are
+ * absolute URLs on the same host, both carry id-like tokens, and the tokens share nothing. Postings with no
+ * URL, a different host (CDN or alias), or no identifying tokens are not rejected.
+ */
+function postingNamesOtherJob(node, requestedUrl) {
+  if (!requestedUrl) return false;
+  const own = typeof node?.url === 'string' ? node.url : (typeof node?.['@id'] === 'string' ? node['@id'] : '');
+  if (!own) return false;
+  try {
+    const a = new URL(requestedUrl); const b = new URL(own);
+    if (a.hostname.replace(/^www\./, '').toLowerCase() !== b.hostname.replace(/^www\./, '').toLowerCase()) return false;
+  } catch { return false; }
+  let want = jobIdTokens(requestedUrl); let got = jobIdTokens(own);
+  // Compare without year/version segments when both sides still have a real id; otherwise the
+  // raw tokens are the only identity there is (/job/2031 vs /job/2044 must still differ).
+  const wantStrong = want.filter((t) => !STRUCTURAL_TOKEN_RE.test(t));
+  const gotStrong = got.filter((t) => !STRUCTURAL_TOKEN_RE.test(t));
+  if (wantStrong.length && gotStrong.length) { want = wantStrong; got = gotStrong; }
+  if (!want.length || !got.length) return false;
+  return !want.some((t) => got.includes(t));
+}
+
+/**
+ * What a page's own structured data (JSON-LD, then an embedded payload) says about
+ * the one posting it should hold. The single reader both extractJd (is there a JD?)
+ * and pageClosureEvidence (is the posting closed?) ask, so they cannot disagree
+ * about which posting the page is about. Pure — exported for tests.
+ *
+ *   `ambiguous` — the page names several postings, one for another job, or holds
+ *                 several description-sized payloads: nothing on it, closure
+ *                 included, belongs to one URL.
+ *   `expired`   — its JobPosting is past `validThrough`; `evidence` says so.
+ *   `jd`        — one posting of at least MIN_PAGE_JD_WORDS words: `{text, title, method}`.
+ *   `none`      — no usable structured data.
+ *
+ * @param {string} html
+ * @param {string} [requestedUrl] when given, a posting that names another job is `ambiguous`
+ * @param {number} [now] epoch ms, injectable for tests
+ * @returns {{kind: 'ambiguous'|'none'}|{kind: 'expired', evidence: string}|{kind: 'jd', jd: {text: string, title: string, method: string}}}
+ */
+export function readPostingData(html, requestedUrl = '', now = Date.now()) {
+  const postings = jobPostingNodes(html);
+  // A page that names more than one posting is a listing, or a page whose other
+  // postings we cannot tell apart from the requested one. Postings are
+  // told apart by title, description, url, @id, identifier, employer and location, and an identical
+  // duplicate representation of one posting does not count twice.
+  const distinctLd = new Set(postings.map((node) => JSON.stringify(canonicalJson([node.title ?? '', node.description ?? '', node.url ?? '', node['@id'] ?? '', node.identifier ?? '', node.hiringOrganization ?? '', node.jobLocation ?? ''])))).size;
+  if (distinctLd > 1) return { kind: 'ambiguous' };
+  // A single posting that names a different job than the requested URL is that other job's, not ours.
+  if (postings.length && postingNamesOtherJob(postings[0], requestedUrl)) return { kind: 'ambiguous' };
+
+  const expired = postings.find((node) => isPastValidThrough(node, now));
+  if (expired) return { kind: 'expired', evidence: `JobPosting validThrough ${String(expired.validThrough).slice(0, 40)}` };
+
+  let ld = null;
+  try { ld = fromLdJson(html); } catch { /* malformed JSON-LD fields: ignore, the ambiguity and expiry checks still ran */ }
+  if (ld && wordCount(ld.text) >= MIN_PAGE_JD_WORDS) {
+    const rawTitle = postings[0]?.title;
+    const title = typeof rawTitle === 'string' ? rawTitle.trim().slice(0, 300) : '';
+    return { kind: 'jd', jd: { ...ld, title } };
+  }
+
+  // The embedded-payload fallback picks the LONGEST description on the page. It
+  // is only trusted when the page holds one description-sized string (and, above,
+  // at most one posting), so what it returns can only be this posting's.
+  if (embeddedDescriptionCount(html) > 1) return { kind: 'ambiguous' };
+  const embedded = fromEmbeddedDescription(html);
+  return embedded && wordCount(embedded.text) >= MIN_PAGE_JD_WORDS ? { kind: 'jd', jd: { title: '', ...embedded } } : { kind: 'none' };
+}
+
+/**
+ * Did the fetch land on the page that was asked for? A job URL that redirects to
+ * a listing or another job would otherwise lend that page's one JobPosting (or
+ * its closure) to the requested job. Host `www.` and a trailing slash are not a
+ * different page; tracking parameters are ignored.
+ */
+export function sameDocument(requested, final) {
+  try {
+    const norm = (u) => {
+      const x = new URL(u);
+      const q = [...x.searchParams].filter(([k]) => !/^(utm_|gclid$|fbclid$)/i.test(k)).map(([k, v]) => `${k}=${v}`).sort().join('&');
+      return `${x.hostname.toLowerCase().replace(/^www\./, '')}${x.pathname.replace(/\/+$/, '').toLowerCase()}?${q}`;
+    };
+    return norm(requested) === norm(final);
+  } catch { return false; }
+}
+
+/**
+ * The one place a fetched page becomes a JD. Takes what a fetch returned
+ * (fetchHtml's result, or a page the batch runner downloaded with curl) and
+ * returns the JD, or null when the page holds no JD that can be attributed to
+ * this URL. Whether the posting is still open is not decided here; that is
+ * fetchedPageClosure's job, asked first by the caller.
+ *
+ * Attribution: a page that landed on another document, names several postings,
+ * or is too large to inspect whole yields nothing. Then structured data (JSON-LD,
+ * an embedded payload), then, only when the caller asks for it, the visible text.
+ *
+ * `visibleText` is opt-in because text with no structured data cannot prove it
+ * belongs to one posting. The networked reader keeps its contract ("never the
+ * longest description on a listing"); the batch runner, which has always handed
+ * its worker that text, asks for it.
+ *
+ * @param {{html?: string, finalUrl?: string}} page what the fetch returned
+ * @param {string} url the URL that was requested
+ * @param {{textCap?: number, minWords?: number, visibleText?: boolean}} [opts]
+ * @returns {{url: string, title: string, text: string, method: string}|null}
+ */
+export function extractJd(page, url, { textCap = JD_TEXT_CAP, minWords = MIN_PAGE_JD_WORDS, visibleText: allowVisibleText = false } = {}) {
+  const html = String(page?.html ?? '');
+  if (!html || html.length > MAX_BODY_BYTES || !sameDocument(url, page?.finalUrl || url)) return null;
+  const data = readPostingData(html, url);
+  if (data.kind === 'ambiguous' || data.kind === 'expired') return null;
+  if (data.kind === 'jd') return { url, title: data.jd.title ?? '', text: capJdText(data.jd.text, textCap), method: data.jd.method };
+  if (!allowVisibleText) return null;
+  const text = htmlToText(withoutExpiryViews(withoutScripts(html))).replace(/\s+/g, ' ').trim();
+  return wordCount(text) >= minWords ? { url, title: '', text: capJdText(text, textCap), method: 'visible-text' } : null;
+}
+
+/**
+ * @param {string} url
+ * @param {number} [textCap]
+ * @param {number} [timeoutMs]
+ * @returns {Promise<{url: string, title: string, text: string, method: string, closed?: boolean, evidence?: string, unreachable?: boolean}|null>}
+ */
+export async function fetchJdViaPage(url, textCap = JD_TEXT_CAP, timeoutMs = DEFAULT_TIMEOUT_MS, { visibleText = false } = {}) {
+  let host;
+  try { host = new URL(url).hostname; } catch { return null; }
+  if (isLinkedInHost(host)) return null;
+  const page = await fetchHtml(url, timeoutMs);
+  if (!page) return null;
+  if (page.unreachable) return { url, title: '', text: '', method: 'unreachable', unreachable: true };
+  const closure = fetchedPageClosure(page, url);
+  if (closure) return { url, title: '', text: '', method: page.gone ? 'http-gone' : 'page-closure', closed: true, evidence: closure };
+  return extractJd(page, url, { textCap, visibleText });
+}
+
+// ========================================================================
+// Closure — is the posting still open? Read from the page, never guessed
+// ========================================================================
+
+// Closure codes classifyLiveness can reach from page text alone. The softer
+// codes (listing page, missing apply control) lean on a rendered DOM's apply
+// buttons, which a plain download does not have, so they are not trusted here.
+const VISIBLE_CLOSURE_CODES = new Set(['expired_url', 'expired_body', 'deadline_passed']);
+
+/** Is a posting's `validThrough` in the past? An absent or unparseable date is not evidence. */
+function isPastValidThrough(node, now) {
+  const raw = node?.validThrough;
+  if (typeof raw !== 'string' || !raw.trim()) return false;
+  let when = Date.parse(raw);
+  // A date-only value parses as UTC midnight, but means "through that day".
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) when += 24 * 60 * 60 * 1000;
+  return Number.isFinite(when) && when < now;
+}
+
+// A script-toggled expiry view that is always present in the static markup (Phenom).
+const EXPIRE_TEMPLATE_RE = /\b(?:job-expire-view|expire-job-view|job-expire-block)\b/i;
+
+// The most of a page's markup scanned for closure text.
+const VISIBLE_SCAN_CAP = 1_000_000;
+
+/** The markup with script/style elements and comments removed (linear, indexOf-based). */
+function withoutScripts(html) {
+  const src = String(html).slice(0, VISIBLE_SCAN_CAP);
+  const lower = asciiLower(src);
+  const out = [];
+  let i = 0;
+  while (i < src.length) {
+    const lt = src.indexOf('<', i);
+    if (lt === -1) { out.push(src.slice(i)); break; }
+    out.push(src.slice(i, lt));
+    if (src.startsWith('<!--', lt)) {
+      const end = src.indexOf('-->', lt + 4);
+      i = end === -1 ? src.length : end + 3;
+      continue;
+    }
+    const m = /^<(script|style)\b/.exec(lower.slice(lt, lt + 10));
+    if (m) {
+      const close = lower.indexOf(`</${m[1]}`, lt + 1);
+      const closeEnd = close === -1 ? -1 : src.indexOf('>', close);
+      i = closeEnd === -1 ? src.length : closeEnd + 1;
+      continue;
+    }
+    out.push('<');
+    i = lt + 1;
+  }
+  return out.join('');
+}
+
+const VOID_ELEMENTS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
+
+/**
+ * Remove every element whose opening tag carries the expiry-view marker. One forward pass: the next
+ * '>' is cached, tags are length-capped before the marker test, and nesting is a counter, so hostile
+ * markup (a run of '<a', deep nesting) costs time linear in the page, never quadratic.
+ */
+function withoutExpiryViews(html) {
+  const src = String(html);
+  const lower = asciiLower(src);
+  const out = [];
+  let i = 0; let nextGt = -2; let skipName = ''; let depth = 0;
+  while (i < src.length) {
+    const lt = src.indexOf('<', i);
+    if (lt === -1) { if (!skipName) out.push(src.slice(i)); break; }
+    if (!skipName) out.push(src.slice(i, lt));
+    if (nextGt !== -1 && nextGt <= lt) nextGt = src.indexOf('>', lt + 1);
+    const gt = nextGt;
+    const m = /^<(\/?)([a-z][a-z0-9]*)/.exec(lower.slice(lt, lt + 24));
+    if (!m || gt === -1) { if (!skipName) out.push('<'); i = lt + 1; continue; }
+    if (skipName) {
+      if (m[2] === skipName) {
+        if (m[1]) { if (--depth === 0) skipName = ''; } else depth++;
+      }
+      i = gt + 1;
+      continue;
+    }
+    if (!m[1] && EXPIRE_TEMPLATE_RE.test(src.slice(lt, Math.min(gt, lt + 4096)))) {
+      out.push(' ');
+      // A void element (img, br, ...) or a self-closed tag has no end tag: drop just the tag.
+      if (!VOID_ELEMENTS.has(m[2]) && lower[gt - 1] !== '/') { skipName = m[2]; depth = 1; }
+    } else out.push(src.slice(lt, gt + 1));
+    i = gt + 1;
+  }
+  return out.join('');
+}
+
+/**
+ * Does the page's visible text say the posting is closed? JSON-LD often carries
+ * no expiry, and a closure banner lives in the visible markup that the JD
+ * extraction never reads, so check it with the repo's own classifier.
+ *
+ * @returns {string|null} evidence, or null when the page does not say so
+ */
+function visibleClosureEvidence(html, url, finalUrl, now = new Date()) {
+  // Phenom career sites (observed on careers.roberthalf.com, every live posting) ship the
+  // "the job you are trying to apply for has been filled" view inside the page markup and
+  // show or hide it with script. Static HTML cannot say which, so the banner text proves
+  // nothing there; only structured data (validThrough, an ATS flag) can still close it.
+  // Only a marker in the page's own markup counts: one inside a script, style or comment
+  // (a bundle that merely names the class) must not suppress a separate closure banner.
+  // The expiry view itself is dropped; any other closure banner on the page still counts.
+  const markup = withoutExpiryViews(withoutScripts(html));
+  const verdict = classifyLiveness({ status: 200, requestedUrl: url, finalUrl, bodyText: htmlToText(markup), now });
+  return verdict.result === 'expired' && VISIBLE_CLOSURE_CODES.has(verdict.code)
+    ? `page text: ${verdict.reason}`.slice(0, 200)
+    : null;
+}
+
+/**
+ * Closure evidence for a page already downloaded (the batch runner's static fetch): an
+ * expired JobPosting validThrough, or closure text in the visible page. Null when the
+ * page does not say it is closed.
+ * @returns {string|null}
+ */
+export function pageClosureEvidence(html, url, finalUrl = url) {
+  // Same gates as fetchJdViaPage: a redirect to another page is not this posting's closure,
+  // an ambiguous page proves nothing, and the HTML is capped so hostile input stays cheap.
+  if (finalUrl && !sameDocument(url, finalUrl)) {
+    // Off the requested page: its text is not this posting's. Only the URL itself can still
+    // say closed (a redirect to an error or "job not found" address).
+    const verdict = classifyLiveness({ status: 200, requestedUrl: url, finalUrl, bodyText: '', now: new Date() });
+    return verdict.result === 'expired' && verdict.code === 'expired_url' ? `redirect: ${verdict.reason}`.slice(0, 200) : null;
+  }
+  // A page past the cap cannot be checked whole: a second posting after the prefix could be hidden,
+  // so nothing page-derived counts as closure (the URL check above and the ATS API still do).
+  if (String(html).length > MAX_BODY_BYTES) return null;
+  const capped = String(html);
+  const data = readPostingData(capped, url);
+  if (data.kind === 'ambiguous') return null;
+  if (data.kind === 'expired') return data.evidence;
+  return visibleClosureEvidence(capped, url, finalUrl);
+}
+
+/**
+ * Closure evidence for a fetched page: an HTTP 404/410 on the requested page, or
+ * what pageClosureEvidence finds in the page and its final URL. Null when the
+ * fetch does not say the posting is closed. A 404 reached through a redirect is
+ * the other page's, not this posting's.
+ *
+ * @param {{html?: string, finalUrl?: string, gone?: number}} page
+ * @param {string} url
+ * @returns {string|null}
+ */
+export function fetchedPageClosure(page, url) {
+  const finalUrl = page?.finalUrl || url;
+  if (page?.gone && sameDocument(url, finalUrl)) return `HTTP ${page.gone}`;
+  return pageClosureEvidence(String(page?.html ?? ''), url, finalUrl);
+}
+
+// ========================================================================
 // Tier 3 — a rendered page in headless Chromium (only with browser: true)
 // ========================================================================
+
+// Floor below which a jd-mode extraction is treated as failure, not content.
+// A posting page whose main text is a couple of sentences is a render we
+// missed (SPA shell, consent wall, bot interstitial), never a real JD; the
+// cost of being wrong is one silent fallback to the MCP path, whereas the
+// cost of NOT failing is an empty JD evaluated as if it were the posting.
+// Only jd mode gets this guard: an empty `listing` result is legitimate — a
+// company with no open roles.
+const MIN_JD_TEXT_CHARS = 200;
+
+/**
+ * A Cloudflare challenge or block page served in place of the posting, as a
+ * jd-mode failure, or null. Pure — exported for tests.
+ *
+ * jdFailure() never rejects a result above the length floor, and a
+ * site-branded challenge body clears it (#6713: 838 characters, "Humans
+ * only"), so the interstitial was emitted as the JD. Cloudflare titles the page
+ * itself, and archive-posting.mjs refuses the same pages by that title on an
+ * HTTP error (#6724). `bot_challenge` is the code liveness gives the same wall.
+ *
+ * @param {{ status?: number, pageTitle?: string, url?: string }} page
+ */
+export function challengeFailure({ status = 0, pageTitle = '', url = '' } = {}) {
+  if (!(status >= 400)) return null;
+  const kind = cloudflareInterstitial(pageTitle);
+  if (!kind) return null;
+  return { error: `HTTP ${status} Cloudflare ${kind} ("${String(pageTitle).trim()}"), not the posting`, code: 'bot_challenge', url };
+}
+
+/**
+ * Why a jd-mode result cannot be emitted, or null when it can. Pure — exported
+ * for tests.
+ *
+ * A page whose cleaned text is below the floor is either unreadable (a client-
+ * rendered shell: `empty_text`, worth another attempt) or gone (the posting
+ * was taken down: `unavailable`, terminal). Both produce the same empty text,
+ * because the "no longer available" banner usually sits in a header or footer
+ * that readDom() strips — so the unstripped body is checked too. A result at or
+ * above the floor is never reclassified: a full JD may quote such a phrase.
+ */
+export function jdFailure(result, maxChars) {
+  const floor = Math.min(MIN_JD_TEXT_CHARS, maxChars);
+  if (result.text.length >= floor) return null;
+  // The shared liveness classifier, not a second phrase list. Only its
+  // posting-specific expiry verdicts count: `insufficient_content` is what a
+  // page that has not rendered yet looks like (liveness-browser treats it the
+  // same way), so it stays empty_text and remains worth retrying.
+  const verdict = classifyLiveness({
+    requestedUrl: result.url,
+    finalUrl: result.url,
+    bodyText: `${result.text}\n${result.bodyText || ''}`,
+  });
+  if (verdict.result === 'expired' && (verdict.code === 'expired_body' || verdict.code === 'expired_body_soft')) {
+    return { error: `posting is no longer available (${verdict.reason})`, code: 'unavailable', url: result.url };
+  }
+  return {
+    error: `extracted ${result.text.length} chars of JD text (minimum ${floor}) — the page most likely renders its content client-side`,
+    code: 'empty_text',
+    url: result.url,
+    body_text: String(result.bodyText || '').slice(0, 4000),
+  };
+}
 
 const HYDRATION_WAIT_MS = 2_000;
 
@@ -1682,7 +1691,7 @@ Options:
   // The waterfall: ATS API, then the page's own bytes, then (only with --browser)
   // a rendered page. A later tier runs only when the earlier one found nothing.
   const result = await fetchJd(url, {
-    textCap: PAGE_TEXT_CAP,
+    textCap: CLI_TEXT_CAP,
     timeoutMs: DEFAULT_TIMEOUT_MS,
     visibleText: hasFlag(args, '--visible-text'),
     browser: hasFlag(args, '--browser'),
