@@ -1475,6 +1475,7 @@ search_queries:
 #   factorial       <tenant>.factorialhr.com, <tenant>.factorial.com or another Factorial domain (.factorialhr.pt, .factorial.es, ...)  (Factorial ATS careers site; any path, the board is always read from the tenant's home page)
 #   homerun         <slug>.homerun.co or feed.homerun.co/<slug>  (branded careers domain → api: https://feed.homerun.co/<slug>)
 #   computrabajo    <country>.computrabajo.com/<search path>  (LatAm board; e.g. co.computrabajo.com/trabajo-de-sistemas)
+#   netempregos     www.net-empregos.com/<listing page>  (Portuguese board; a category, area or search page, e.g. /empregos-portugal-informatica-programacao.asp?categoria=5&zona=0)
 #   magneto         www.magneto365.com/co/<search path>       (Colombia board; e.g. /co/trabajos/buscar/tecnologia)
 #   bulldogjob      bulldogjob.pl/companies/jobs[/s/<filters>]  (Polish tech board; filters live in the path, e.g. /s/role,devops/city,Remote)
 #   paycom          www.paycomonline.net/v4/ats/web.php/portal/<client-key>/career-page  (or a posting link under the
@@ -2175,6 +2176,11 @@ search_queries:
 #   max_pages: 5                          # optional page cap (20 jobs/page, default 5, max 20)
 #   max_jobs: 100                         # optional (default 100, max 500)
 #   enabled: true                         # random 1-2s pause between pages
+#
+# - name: Example Net-Empregos            # Portuguese general board, many employers
+#   careers_url: https://www.net-empregos.com/empregos-portugal-informatica-programacao.asp?categoria=5&zona=0  # auto-detected; a category, area or search page
+#   max_pages: 50                         # optional page cap (18 jobs/page, default 50, max 200)
+#   enabled: true                         # 1.5s pacing between pages
 #
 # - name: Example Bulldogjob              # Polish tech board, many employers
 #   careers_url: https://bulldogjob.pl/companies/jobs/s/role,devops/experienceLevel,medium/city,Remote  # auto-detected; any search URL
