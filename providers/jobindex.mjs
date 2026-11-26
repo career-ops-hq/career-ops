@@ -151,12 +151,14 @@ function toEpochMs(value) {
 /**
  * Parse one page of the Jobindex RSS feed. Exported for unit tests.
  * Keeps ads placed on Jobindex (`PaidJob` cards); counts collected postings in
- * `collected`, and items it cannot read (another card kind, or a placed ad with
- * no Jobindex link, title or employer) in `unrecognised`.
+ * `collected`, placed ads that name no employer in `noEmployer`, and items it
+ * cannot read (another card kind, or a placed ad with no Jobindex link or
+ * title) in `unrecognised`.
  * Throws when the body is not a complete RSS channel, when its <item> tags do
- * not pair up (a page cut short), or when it has items and none is recognised.
+ * not pair up (a page cut short), or when it has items and none is recognised
+ * (neither a placed ad nor a collected posting).
  * @param {string} xml
- * @returns {{ jobs: {title: string, url: string, company: string, location: string, postedAt?: number}[], rawCount: number, collected: number, unrecognised: number }}
+ * @returns {{ jobs: {title: string, url: string, company: string, location: string, postedAt?: number}[], rawCount: number, collected: number, noEmployer: number, unrecognised: number }}
  */
 export function parseJobindexFeed(xml) {
   const body = String(xml ?? '');
@@ -171,6 +173,7 @@ export function parseJobindexFeed(xml) {
   }
   const jobs = [];
   let collected = 0;
+  let noEmployer = 0;
   let unrecognised = 0;
   for (const item of items) {
     // The card HTML is escaped once inside the XML: decode it once to get HTML,
@@ -204,9 +207,10 @@ export function parseJobindexFeed(xml) {
       if (alt) company = clean(alt[1]);
     }
     // Rule 1: a listing must name its employer. None was missing on the live
-    // feed (2026-11-24), so one without is counted rather than kept.
+    // feed (2026-11-24), so one without is counted rather than kept. It is
+    // still a recognised card, so it does not count as a format change.
     if (!company) {
-      unrecognised++;
+      noEmployer++;
       continue;
     }
     const area = card.match(/class="jix_robotjob--area"[^>]*>([\s\S]*?)<\/span>/i);
@@ -214,10 +218,10 @@ export function parseJobindexFeed(xml) {
     const postedAt = toEpochMs(clean(tagText(item, 'pubDate')));
     jobs.push({ title, url, company, location, ...(postedAt !== undefined ? { postedAt } : {}) });
   }
-  if (items.length && !jobs.length && !collected) {
+  if (items.length && !jobs.length && !collected && !noEmployer) {
     throw new Error(`jobindex: ${items.length} feed item(s) but none recognised — the feed format may have changed`);
   }
-  return { jobs, rawCount: items.length, collected, unrecognised };
+  return { jobs, rawCount: items.length, collected, noEmployer, unrecognised };
 }
 
 /** @param {{ max_pages?: unknown }} entry */
@@ -260,8 +264,9 @@ export default {
         stop = 'fetch-error'; // a failed or broken later page: keep the pages already read
         break;
       }
-      const { jobs, rawCount, collected, unrecognised } = parsed;
+      const { jobs, rawCount, collected, noEmployer, unrecognised } = parsed;
       if (collected) stats.dropped.collected = (stats.dropped.collected || 0) + collected;
+      if (noEmployer) stats.dropped.no_employer = (stats.dropped.no_employer || 0) + noEmployer;
       if (unrecognised) stats.dropped.unrecognised = (stats.dropped.unrecognised || 0) + unrecognised;
       for (const job of jobs) if (!byUrl.has(job.url)) byUrl.set(job.url, job);
       if (rawCount < PAGE_SIZE) {

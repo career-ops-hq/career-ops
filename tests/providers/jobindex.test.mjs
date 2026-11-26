@@ -139,11 +139,11 @@ try {
     item({ title: 'No link, Acme', link: '', description: card({ href: '', title: 'No link', area: 'x' }) }),
     item({ title: 'Off-host, Acme', link: 'https://evil.example.com/vis-job/h9', description: card({ href: '', title: 'Off-host', area: 'x' }) }),
   ]);
-  const { jobs, rawCount, collected, unrecognised } = parseJobindexFeed(sample);
-  if (rawCount === 8 && jobs.length === 4 && unrecognised === 3 && !jobs.some((j) => j.url.endsWith('/h105'))) {
-    pass('parseJobindexFeed drops and counts rows with no link, an off-host link or no employer');
+  const { jobs, rawCount, collected, noEmployer, unrecognised } = parseJobindexFeed(sample);
+  if (rawCount === 8 && jobs.length === 4 && unrecognised === 2 && noEmployer === 1 && !jobs.some((j) => j.url.endsWith('/h105'))) {
+    pass('parseJobindexFeed drops rows with no link or an off-host link as unrecognised, and a placed ad with no employer as noEmployer');
   } else {
-    fail(`parseJobindexFeed returned ${jobs.length} of ${rawCount}, unrecognised=${unrecognised}`);
+    fail(`parseJobindexFeed returned ${jobs.length} of ${rawCount}, unrecognised=${unrecognised}, noEmployer=${noEmployer}`);
   }
   if (collected === 1 && !jobs.some((j) => j.url.endsWith('/r104'))) pass('parseJobindexFeed leaves out postings Jobindex collected from elsewhere, and counts them');
   else fail(`parseJobindexFeed collected=${collected}, urls=${jobs.map((j) => j.url).join(' ')}`);
@@ -196,6 +196,24 @@ try {
   })]));
   if (onlyCollected.jobs.length === 0 && onlyCollected.collected === 1) pass('parseJobindexFeed returns no jobs, without throwing, for a page of collected postings only');
   else fail(`parseJobindexFeed only-collected: ${JSON.stringify(onlyCollected)}`);
+
+  {
+    let onlyNoEmployer;
+    try {
+      onlyNoEmployer = parseJobindexFeed(feed([item({
+        title: 'No Employer Named',
+        link: 'https://www.jobindex.dk/vis-job/h106',
+        description: card({ href: 'https://www.jobindex.dk/vis-job/h106', title: 'No Employer Named', area: 'Vejle' }),
+      })]));
+    } catch (err) {
+      onlyNoEmployer = { error: err.message };
+    }
+    if (onlyNoEmployer.jobs?.length === 0 && onlyNoEmployer.noEmployer === 1 && onlyNoEmployer.unrecognised === 0) {
+      pass('parseJobindexFeed returns no jobs, without throwing, for a page whose only item is a placed ad with no employer');
+    } else {
+      fail(`parseJobindexFeed only-no-employer: ${JSON.stringify(onlyNoEmployer)}`);
+    }
+  }
 
   {
     const mixed = feed([
