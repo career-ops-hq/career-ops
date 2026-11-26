@@ -978,20 +978,36 @@ function nonAnnualFigureLookup(text, matches) {
       let conjunction = false;
       let comma = false;
       let independentPayClause = false;
+      // null is outside an exclusion; a boolean records whether it names a pay item.
+      let excludedPayClause = null;
       for (let i = 0; i < markers.length; i++) {
         const marker = markers[i];
         const bridge = surface.slice(bridgeEnd, marker.offset);
         bridgeEnd = marker.offsetEnd;
         conjunction ||= /\b(?:and|or|plus|with|excluding)\b/i.test(bridge);
         comma ||= bridge.includes(',');
-        independentPayClause ||= bridge.split(/\b(?:and|or|plus|with|excluding)\b|,/i).slice(1)
-          .some((clause) => /\b(?:stipend|allowance|budget|bonus|sign[- ]on)\b/i.test(clause));
+        // Keep excluded items separate from paid additions. A comma or
+        // "and paid" returns the rate to salary; "or per month" does not.
+        const clauses = bridge.split(/(\b(?:and|or|plus|with|excluding|except|without)\b|,)/i);
+        for (let j = 0; j < clauses.length; j += 2) {
+          const separator = clauses[j - 1]?.toLowerCase();
+          const clause = clauses[j];
+          if (/^(?:excluding|except|without)$/.test(separator ?? '')) {
+            excludedPayClause = false;
+          } else if (separator === ',' || /^(?:plus|with)$/.test(separator ?? '')
+            || (/^(?:and|or)$/.test(separator ?? '') && /^\s*paid\b/i.test(clause))) {
+            excludedPayClause = null;
+          }
+          const payItem = /\b(?:stipend|allowance|budget|bonus|sign[- ]on)\b/i.test(clause);
+          if (excludedPayClause !== null) excludedPayClause ||= payItem;
+          else if (separator && payItem) independentPayClause = true;
+        }
         const owner = !previous || (marker === last && prefixesNext) ? next : previous;
         if (!owner) continue;
         // A separately named pay item owns its following rate even without
         // an amount: "plus a stipend paid weekly or per month". Retain that
         // owner through every cadence marker until the next physical figure.
-        if (owner === previous && independentPayClause) continue;
+        if (owner === previous && (independentPayClause || excludedPayClause)) continue;
         const continuation = surface.slice(marker.offsetEnd, markers[i + 1]?.offset ?? next?.offset ?? surface.length)
           .trim().replace(/[.!?]+$/, '').trim();
         // An adjectival cadence in a separate clause describes that clause,
