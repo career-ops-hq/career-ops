@@ -36,7 +36,9 @@
  *                               or work models. Omitted when empty.
  * @property {string} [country]  The source's country code when it exposes a
  *                               dedicated field (Lever's `country`), trimmed but
- *                               otherwise as given. Omitted when absent or null.
+ *                               otherwise as given. We Work Remotely gives the
+ *                               flag in `<country>`, read as its ISO code.
+ *                               Omitted when absent or null.
  * @property {string} [description] Job description text, populated ONLY when the
  *                               provider's list payload carries it for free (no
  *                               extra per-job request — the scanner is zero-token),
