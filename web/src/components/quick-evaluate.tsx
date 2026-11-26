@@ -85,10 +85,13 @@ export function QuickEvaluate() {
             if (hint) say("");
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter") run();
+            if (e.key === "Enter" && !capturing) run();
           }}
           placeholder="Paste a job URL to evaluate…"
           aria-label="Job posting URL"
+          // Read-only while a capture is in flight: its success clears both
+          // fields, which would otherwise erase a posting typed meanwhile.
+          readOnly={capturing}
           className="min-w-0 flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-faint"
         />
         <button
@@ -104,7 +107,8 @@ export function QuickEvaluate() {
         <button
           type="button"
           onClick={run}
-          className="shrink-0 rounded-full bg-brand px-4 py-1.5 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200"
+          disabled={capturing}
+          className="shrink-0 rounded-full bg-brand px-4 py-1.5 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200 disabled:opacity-60"
         >
           Evaluate
         </button>
@@ -133,6 +137,7 @@ export function QuickEvaluate() {
           rows={5}
           placeholder="Saved with the posting so a later evaluation can reuse it without opening a browser."
           aria-label="Job description text"
+          readOnly={capturing}
           className="mt-2 w-full rounded-lg border border-border bg-surface/70 p-2 text-xs outline-none focus:border-brand/50"
         />
       </details>

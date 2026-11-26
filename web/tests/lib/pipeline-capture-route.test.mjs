@@ -10,7 +10,7 @@
 
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -125,4 +125,49 @@ test("the home page's Add to pipeline never starts a worker", () => {
   assert.match(body, /fetch\("\/api\/pipeline\/capture"/);
   assert.doesNotMatch(body, /startJob/);
   assert.match(src, /No evaluation, no tokens/, "the button says what it does not do");
+});
+
+test("JD text within its decoded limit is not refused for its JSON escaping", async () => {
+  // Each \u0001 is one decoded byte but six on the wire (`\u0001`): 450 KB of
+  // text arrives as a ~2.6 MiB body, past a cap counted on raw text alone.
+  const text = `Role\n${"\u0001".repeat(450 * 1024)}\nend`;
+  assert.ok(Buffer.byteLength(JSON.stringify(text)) > MAX_CAPTURE_TEXT_BYTES + 64 * 1024);
+  const res = await post({ url: "https://jobs.ashbyhq.com/acme/3333", text });
+  const data = await res.json();
+  assert.equal(res.status, 200, JSON.stringify(data).slice(0, 300));
+  assert.equal(data.hasText, true);
+});
+
+test("JD text over its decoded limit gets the 'too long' answer, not a generic bad request", async () => {
+  const res = await post({ url: "https://jobs.ashbyhq.com/acme/4444", text: "x".repeat(MAX_CAPTURE_TEXT_BYTES + 1) });
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).error, /too long/);
+});
+
+test("a child that exits before reading a large JD fails the capture without crashing the server", async () => {
+  // EPIPE on child.stdin is a stream error, not a child error: with no
+  // listener on the pipe it is an uncaught exception in the web process.
+  const standIn = mkdtempSync(join(tmpdir(), "co-capture-dead-child-"));
+  writeFileSync(join(standIn, "capture-jd.mjs"), "process.exit(3);\nexport async function captureJd() {}\n");
+  const saved = process.env.CAREER_OPS_CODE_ROOT;
+  process.env.CAREER_OPS_CODE_ROOT = standIn;
+  try {
+    const { capturePosting } = await import("../../src/lib/core/capture.ts");
+    for (let i = 0; i < 3; i++) {
+      const result = await capturePosting({ url: "https://example.com/job", text: "x".repeat(MAX_CAPTURE_TEXT_BYTES) });
+      assert.equal(result.ok, false);
+      assert.match(result.error, /capture writer failed/);
+    }
+  } finally {
+    process.env.CAREER_OPS_CODE_ROOT = saved;
+    rmSync(standIn, { recursive: true, force: true });
+  }
+});
+
+test("the home form is read-only while a capture is in flight", () => {
+  const src = readFileSync(join(WEB, "src", "components", "quick-evaluate.tsx"), "utf8");
+  // Both inputs: a successful capture clears them, which would otherwise erase
+  // a posting typed while the request was pending.
+  assert.equal(src.split("readOnly={capturing}").length - 1, 2);
+  assert.match(src, /e\.key === "Enter" && !capturing/);
 });

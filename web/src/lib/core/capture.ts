@@ -61,6 +61,12 @@ process.stdin.on("end", async () => {
     child.stderr.on("data", (d: Buffer) => (err += d.toString()));
     child.on("error", (e) => resolve({ ok: false, error: e instanceof Error ? e.message : "spawn failed" }));
     child.on("close", (code, signal) => resolve(captureWriterResult(out, err, { code, signal }) as CaptureResult));
+    // A child that dies before reading stdin (a failed import, say) makes a
+    // large write fail with EPIPE on the pipe, not on `child`. Unhandled, that
+    // stream error would take the whole web server down. The failure itself is
+    // still reported: `close` follows with an empty stdout, which
+    // captureWriterResult() reads as a failed capture.
+    child.stdin.on("error", () => {});
     child.stdin.write(JSON.stringify({ url: input.url, text: input.text, company: input.company, role: input.role }));
     child.stdin.end();
   });

@@ -5,9 +5,13 @@ import { readJsonObject } from "@/lib/json-body";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// The JD text ceiling plus room for the URL, labels and JSON escaping. An
-// oversized request is dropped as it streams in, never buffered in full.
-const MAX_BODY_BYTES = MAX_CAPTURE_TEXT_BYTES + 64 * 1024;
+// The JD text ceiling is counted in DECODED bytes (capture-request.mjs). JSON
+// escaping can grow a character up to six times on the wire (a control char
+// becomes `\u00XX`), so the body cap covers that worst case plus room for the
+// URL and labels: text within its limit is never refused for its escaping,
+// and text over it gets the "too long" answer, not a generic bad request. A
+// body past this cap is still dropped as it streams in, never buffered in full.
+const MAX_BODY_BYTES =6 * MAX_CAPTURE_TEXT_BYTES + 64 * 1024;
 
 // Free + no evaluation: record a pasted posting URL (and optional JD text) in
 // data/pipeline.md via the core's captureJd(). Never commits, pushes or starts
