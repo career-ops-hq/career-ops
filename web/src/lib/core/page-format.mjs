@@ -29,9 +29,10 @@ import { DEFAULT_PAGE_FORMAT, PAGE_FORMATS } from "../page-formats.mjs";
  * web/ and refuses a static import from outside it. `coreRoot` is an argument for
  * the reasons cv-template.mjs gives.
  *
- * Never throws. A core that cannot be loaded, or that predates
+ * The readers never throw. A core that cannot be loaded, or that predates
  * readProfilePageSetting, reads as "nothing stated", which is how the web
  * behaved before: the agent picks, and the web's own default backs it up.
+ * normalizeChosenPageFormat is the one exception, because it guards a write.
  */
 
 const SETTINGS = new Set(["a4", "letter", "auto"]);
@@ -73,6 +74,27 @@ export async function readPageFormatSetting(coreRoot, profilePath) {
   // A prompt that asks for a country but cannot say which ones mean Letter would
   // leave the body width a guess. Fall back to the agent's own pick instead.
   return letterCountries.length > 0 ? { setting, letterCountries } : none;
+}
+
+/**
+ * Validate a size the user chose on /config with the core's own
+ * normalizePageFormat, so the dashboard accepts exactly the values the PDF
+ * scripts accept and keeps no copy of that rule.
+ *
+ * Unlike the readers it throws when the core cannot be loaded. A reader can
+ * fall back to "nothing stated", but a write guard that falls back to accepting
+ * everything, or to rejecting everything as a bad value, would mislead the user.
+ *
+ * @param {string} coreRoot Absolute path to the career-ops code checkout.
+ * @param {unknown} value
+ * @returns {Promise<"a4"|"letter"|null>} null when the core rejects the value.
+ */
+export async function normalizeChosenPageFormat(coreRoot, value) {
+  const mod = await loadCore(coreRoot);
+  if (typeof mod?.normalizePageFormat !== "function") {
+    throw new Error("The page format rules could not be loaded from the career-ops checkout.");
+  }
+  return mod.normalizePageFormat(value);
 }
 
 /**
