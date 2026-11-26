@@ -244,6 +244,8 @@ export const PORTAL_TOP_LEVEL_KEYS = [
   'company_aliases',
   'portal_health_threshold',
   'portal_health_stale_days',
+  'host_pacing',
+  'rate_limit_retry',
 ];
 
 export function portalTopLevelTypos(config) {
