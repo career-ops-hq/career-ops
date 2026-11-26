@@ -15,7 +15,9 @@
 //
 // PUBLIC PAGES, NO AUTH. The listing pages are server-rendered HTML: 18 cards
 // a page, `page=N` (1-based) walks them, and the page states the total
-// ("807 ofertas encontradas"). This provider keeps the URL's path and query,
+// ("807 ofertas encontradas"), which tells a full last page from a cut
+// listing. A page past the last says "Não encontrámos nenhuma oferta"
+// and has no results header. This provider keeps the URL's path and query,
 // drops any `page`, and walks the pages. For the programming category
 // (`categoria=5`) on 2026-11-26 the walk read 807 cards in 45 pages, the
 // total the page stated; 6 cards came twice, pushed one page on by ads posted
@@ -158,13 +160,14 @@ function toEpochMs(value) {
 /**
  * Parse one Net-Empregos listing page. Exported for unit tests.
  * Returns the postings of the results, `rawCount` (cards in the results,
- * before any is dropped), `noEmployer` (cards naming no employer) and
- * `unrecognised` (cards without a posting link or a title).
+ * before any is dropped), `noEmployer` (cards naming no employer),
+ * `unrecognised` (cards without a posting link or a title) and `total` (the
+ * count the page states, or undefined on a page with no results).
  * Throws when the page is the site's login page, when it is not a listing
- * page, or when its results hold cards and none could be read (the markup
- * changed).
+ * page, or when its results hold cards or posting links and no card could be
+ * read (the markup changed).
  * @param {string} html
- * @returns {{ jobs: {title: string, url: string, company: string, location: string, postedAt?: number}[], rawCount: number, noEmployer: number, unrecognised: number }}
+ * @returns {{ jobs: {title: string, url: string, company: string, location: string, postedAt?: number}[], rawCount: number, noEmployer: number, unrecognised: number, total?: number }}
  */
 export function parseNetEmpregosPage(html) {
   const body = String(html ?? '');
@@ -177,7 +180,7 @@ export function parseNetEmpregosPage(html) {
   if (/N[ãa]o encontr[áa]mos nenhuma oferta/i.test(body)) {
     return { jobs: [], rawCount: 0, noEmployer: 0, unrecognised: 0 };
   }
-  const header = body.match(/\d[\d.]*\s+ofertas?\s+encontradas?/i);
+  const header = body.match(/(\d[\d.]*)\s+ofertas?\s+encontradas?/i);
   if (!header || header.index === undefined) {
     throw new Error(`netempregos: unexpected response — no results header ("N ofertas encontradas"), got: ${JSON.stringify(body.slice(0, 80))}`);
   }
@@ -185,7 +188,14 @@ export function parseNetEmpregosPage(html) {
   const ends = [body.indexOf('Ofertas de Emprego Semelhantes', start), body.indexOf('class="pagination-box', start)].filter((i) => i >= 0);
   const results = body.slice(start, ends.length ? Math.min(...ends) : body.length);
 
+  // "1.234 ofertas encontradas": the dot groups thousands.
+  const total = Number(header[1].replace(/\./g, ''));
+
   const starts = [...results.matchAll(CARD_RE)].map((m) => /** @type {number} */ (m.index));
+  // Links to posting pages with no card around them: the card markup changed.
+  if (!starts.length && /\bhref=["']?\/\d+\/[a-z0-9-]+\//i.test(results)) {
+    throw new Error('netempregos: posting links but no cards in the results — the page markup may have changed');
+  }
   const jobs = [];
   let noEmployer = 0;
   let unrecognised = 0;
@@ -215,7 +225,7 @@ export function parseNetEmpregosPage(html) {
   if (starts.length && !jobs.length && !noEmployer) {
     throw new Error(`netempregos: ${starts.length} card(s) but none recognised — the page markup may have changed`);
   }
-  return { jobs, rawCount: starts.length, noEmployer, unrecognised };
+  return { jobs, rawCount: starts.length, noEmployer, unrecognised, total };
 }
 
 /** @param {{ max_pages?: unknown }} entry */
@@ -249,6 +259,8 @@ export default {
     const stats = { dropped: {} };
     let stop = 'cap';
     let stopError = '';
+    let cardsRead = 0; // every card, dropped ones too: the stated total counts them
+    let statedTotal;
     for (let page = 1; page <= maxPages; page++) {
       if (page > 1) await sleep(INTER_PAGE_DELAY_MS, ctx);
       let parsed;
@@ -261,7 +273,9 @@ export default {
         stopError = err instanceof Error ? err.message : String(err);
         break;
       }
-      const { jobs, rawCount, noEmployer, unrecognised } = parsed;
+      const { jobs, rawCount, noEmployer, unrecognised, total } = parsed;
+      cardsRead += rawCount;
+      statedTotal = total;
       if (noEmployer) stats.dropped.no_employer = (stats.dropped.no_employer || 0) + noEmployer;
       if (unrecognised) stats.dropped.unrecognised = (stats.dropped.unrecognised || 0) + unrecognised;
       for (const job of jobs) if (!byUrl.has(job.url)) byUrl.set(job.url, job);
@@ -270,6 +284,8 @@ export default {
         break;
       }
     }
+    // A full page at the cap can still be the last one: the stated total says.
+    if (stop === 'cap' && statedTotal !== undefined && cardsRead >= statedTotal) stop = 'complete';
 
     const jobs = [...byUrl.values()];
     // Read by scan.mjs for the per-source summary; not part of the job list.
@@ -281,6 +297,9 @@ export default {
       console.error(`⚠️  netempregos: ${entry?.name || 'entry'} truncated at max_pages=${entryMax} (${jobs.length} postings) — raise max_pages on this entry or narrow the listing`);
       markTruncated(jobs, 'page-cap', { fetched: jobs.length });
     }
+    // A search (`chaves=`) returns only the postings that match its keywords.
+    const keywords = parseListingUrl(entry?.careers_url).searchParams.get('chaves')?.trim();
+    if (keywords) jobs.queryScope = { config: 'careers_url', queries: [keywords] };
     return jobs;
   },
 };

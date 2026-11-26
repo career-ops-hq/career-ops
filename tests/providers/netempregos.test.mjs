@@ -191,6 +191,27 @@ try {
     else fail(`parseNetEmpregosPage none parsed: ${err.message}`);
   }
 
+  try {
+    // The card markup changed (a <div> became an <article>): the posting
+    // links are still there, but no card is.
+    const changed = listing([card({ id: 9, title: 'Role', employer: 'Acme' }).replace('<div class="job-item', '<article class="job-item')]);
+    parseNetEmpregosPage(changed);
+    fail('parseNetEmpregosPage should throw when posting links exist but no card matches');
+  } catch (err) {
+    if (/posting links but no cards/.test(err.message)) pass('parseNetEmpregosPage throws when posting links exist but no card matches');
+    else fail(`parseNetEmpregosPage links without cards: ${err.message}`);
+  }
+  {
+    const empty = parseNetEmpregosPage(listing([], { total: 0, pagination: false }));
+    if (empty.jobs.length === 0 && empty.rawCount === 0 && empty.total === 0) pass('parseNetEmpregosPage returns no postings for results with neither cards nor posting links');
+    else fail(`parseNetEmpregosPage empty results: ${JSON.stringify(empty)}`);
+  }
+  {
+    const big = parseNetEmpregosPage(listing([card({ id: 10, title: 'Role', employer: 'Acme' })], { total: '1.234' }));
+    if (big.total === 1234) pass('parseNetEmpregosPage reads the stated total, with a dot grouping thousands');
+    else fail(`parseNetEmpregosPage total: ${big.total}`);
+  }
+
   // ── fetch ──
   const entry = { name: 'Net-Empregos test', careers_url: category };
   const noSleep = async () => {};
@@ -252,6 +273,30 @@ try {
     const out = await netempregos.fetch({ ...entry, max_pages: 2 }, { sleep: noSleep, fetchText: async () => page(18, 18 * n++) });
     if (n === 2 && out.truncated?.reason === 'page-cap') pass('fetch() honours entry.max_pages');
     else fail(`fetch() max_pages: ${n} calls`);
+  }
+
+  {
+    // A full last page at max_pages: the stated total shows the listing is
+    // complete, so nothing is marked.
+    const cards = [];
+    for (let i = 0; i < 18; i++) cards.push(card({ id: 2000 + i, title: `Engineer ${i}`, employer: i ? 'Acme' : 'Confidencial' }));
+    let n = 0;
+    const out = await netempregos.fetch({ ...entry, max_pages: 1 }, { sleep: noSleep, fetchText: async () => { n++; return listing(cards, { total: 18 }); } });
+    if (n === 1 && out.length === 17 && out.truncated === undefined) pass('fetch() marks nothing when a full page at max_pages holds the stated total, dropped cards included');
+    else fail(`fetch() full last page at the cap: ${n} calls, ${out.length} jobs, truncated=${JSON.stringify(out.truncated)}`);
+  }
+
+  {
+    const search = 'https://www.net-empregos.com/pesquisa-empregos.asp?chaves=+data+engineer+&categoria=&cidade=';
+    const scoped = await netempregos.fetch({ ...entry, careers_url: search }, { sleep: noSleep, fetchText: async () => page(3) });
+    const plain = await netempregos.fetch(entry, { sleep: noSleep, fetchText: async () => page(3) });
+    const blank = await netempregos.fetch({ ...entry, careers_url: 'https://www.net-empregos.com/pesquisa-empregos.asp?chaves=&categoria=5' }, { sleep: noSleep, fetchText: async () => page(3) });
+    if (JSON.stringify(scoped.queryScope) === JSON.stringify({ config: 'careers_url', queries: ['data engineer'] })
+      && plain.queryScope === undefined && blank.queryScope === undefined) {
+      pass('fetch() attaches queryScope to a keyword search, and not to a category page or an empty search');
+    } else {
+      fail(`fetch() queryScope: ${JSON.stringify([scoped.queryScope, plain.queryScope, blank.queryScope])}`);
+    }
   }
 
   {
