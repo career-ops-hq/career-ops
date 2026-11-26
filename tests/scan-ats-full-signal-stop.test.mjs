@@ -118,7 +118,7 @@ setInterval(() => {}, 1000);
     });
     assert.equal(result.status, 143, result.out.slice(-600));
     assert.match(result.out, /SIGTERM: sweep stopped — 1 matches so far, saved to pipeline/);
-    assert.ok(readFileSync(join(dir, 'data', 'pipeline.md'), 'utf-8').includes(url));
+    assert.ok(readFileSync(join(dir, 'data', 'pipeline.md'), 'utf-8').split('\n').some((line) => line.trim() === `- [ ] ${url}` || line.includes(`${url} |`)));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
