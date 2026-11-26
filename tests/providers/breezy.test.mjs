@@ -136,6 +136,71 @@ try {
   if (noDup[0]?.location === 'Remote, EMEA') pass('parseBreezyResponse does not double-append Remote');
   else fail(`expected "Remote, EMEA", got ${JSON.stringify(noDup[0]?.location)}`);
 
+  // Work models as live boards list them (2026-11-26): `is_remote` is true for
+  // a hybrid position as well as a remote one, and `location.remote_details`
+  // says which: `value` is "hybrid", "remote" or "remote-location", and `label`
+  // is free text in the position's language. Reading `is_remote` alone called
+  // a hybrid position Remote.
+  {
+    const hybridDetails = { value: 'hybrid', label: 'Hybrid (Some remote, some in person)' };
+    const bordeaux = { name: 'Bordeaux, FR', city: 'Bordeaux', state: null, country: { name: 'France', id: 'FR' }, is_remote: true };
+    const [hybrid, remoteInPlace, remoteAnywhere, flagOnly, valueOnly, saysHybrid, placeless] = parseBreezyResponse([
+      { name: 'Data Engineer', url: 'https://acme.breezy.hr/p/a1-data-engineer', location: { ...bordeaux, remote_details: hybridDetails } },
+      { name: 'Games Producer', url: 'https://acme.breezy.hr/p/a2-games-producer',
+        location: { ...bordeaux, remote_details: { value: 'remote-location', label: 'Fully remote, within chosen location(s)' } } },
+      { name: 'Cloud Engineer', url: 'https://acme.breezy.hr/p/a3-cloud-engineer',
+        location: { name: 'San Jose, CA', city: 'San Jose', state: { id: 'CA', name: 'California' }, country: { name: 'United States', id: 'US' },
+          is_remote: true, remote_details: { value: 'remote', label: 'Fully remote, no location restrictions' } } },
+      { name: 'Support Agent', url: 'https://acme.breezy.hr/p/a4-support-agent',
+        location: { name: 'Lisbon, PT', city: 'Lisbon', country: { name: 'Portugal', id: 'PT' }, is_remote: true } },
+      { name: 'Account Manager', url: 'https://acme.breezy.hr/p/a5-account-manager',
+        location: { name: 'Calgary, AB', city: 'Calgary', country: { name: 'Canada', id: 'CA' }, is_remote: true, remote_details: { value: 'hybrid' } } },
+      { name: 'Field Engineer', url: 'https://acme.breezy.hr/p/a6-field-engineer',
+        location: { name: 'Austin, TX (Hybrid)', city: 'Austin', country: { name: 'United States', id: 'US' }, is_remote: true, remote_details: hybridDetails } },
+      { name: 'Analyst', url: 'https://acme.breezy.hr/p/a7-analyst', location: { is_remote: true, remote_details: hybridDetails } },
+    ], 'Acme');
+
+    if (hybrid?.location === 'Bordeaux, FR, France, Hybrid') pass('parseBreezyResponse says Hybrid, not Remote, for a hybrid position');
+    else fail(`hybrid position location was ${JSON.stringify(hybrid?.location)}, expected "Bordeaux, FR, France, Hybrid"`);
+
+    if (remoteInPlace?.location === 'Bordeaux, FR, France, Remote' && remoteAnywhere?.location === 'San Jose, CA, United States, Remote') {
+      pass('parseBreezyResponse keeps Remote for a remote position, within a place or not');
+    } else {
+      fail(`remote positions were ${JSON.stringify([remoteInPlace?.location, remoteAnywhere?.location])}, expected "Bordeaux, FR, France, Remote" and "San Jose, CA, United States, Remote"`);
+    }
+
+    if (flagOnly?.location === 'Lisbon, PT, Portugal, Remote') pass('parseBreezyResponse keeps Remote for is_remote without remote_details');
+    else fail(`is_remote without remote_details was ${JSON.stringify(flagOnly?.location)}, expected "Lisbon, PT, Portugal, Remote"`);
+
+    if (valueOnly?.location === 'Calgary, AB, Canada, Hybrid') pass('parseBreezyResponse reads the work model from remote_details.value, not its label');
+    else fail(`hybrid position without a label was ${JSON.stringify(valueOnly?.location)}, expected "Calgary, AB, Canada, Hybrid"`);
+
+    if (saysHybrid?.location === 'Austin, TX (Hybrid), United States') pass('parseBreezyResponse does not append Hybrid to a place that already says it');
+    else fail(`place that says Hybrid was ${JSON.stringify(saysHybrid?.location)}, expected "Austin, TX (Hybrid), United States"`);
+
+    if (placeless?.location === 'Hybrid') pass('parseBreezyResponse gives a hybrid position with no place the location "Hybrid"');
+    else fail(`placeless hybrid position was ${JSON.stringify(placeless?.location)}, expected "Hybrid"`);
+
+    const { buildLocationFilter } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+    const keeps = (config, job) => buildLocationFilter(config)(job?.location, job?.url, job?.title, job);
+    if (!keeps({ allow: ['Remote'] }, hybrid) && keeps({ allow: ['Remote'] }, remoteInPlace)) {
+      pass('location_filter allow: [Remote] drops a hybrid position and keeps a remote one');
+    } else {
+      fail(`location_filter allow: [Remote] gave hybrid ${keeps({ allow: ['Remote'] }, hybrid)}, remote ${keeps({ allow: ['Remote'] }, remoteInPlace)}`);
+    }
+    if (!keeps({ block: ['Hybrid'] }, hybrid) && keeps({ block: ['Hybrid'] }, remoteInPlace)) {
+      pass('location_filter block: [Hybrid] drops a hybrid position and keeps a remote one');
+    } else {
+      fail(`location_filter block: [Hybrid] gave hybrid ${keeps({ block: ['Hybrid'] }, hybrid)}, remote ${keeps({ block: ['Hybrid'] }, remoteInPlace)}`);
+    }
+    const policy = { workplace_policy: { onsite_locations: ['Paris'], remote_countries: ['France'] } };
+    if (!keeps(policy, hybrid) && keeps(policy, remoteInPlace)) {
+      pass('location_filter workplace_policy treats a hybrid position in Bordeaux as on-site, a remote one in France as remote');
+    } else {
+      fail(`workplace_policy (onsite Paris, remote France) gave hybrid ${keeps(policy, hybrid)}, remote ${keeps(policy, remoteInPlace)}`);
+    }
+  }
+
 } catch (e) {
   fail(`breezy provider tests crashed: ${e.message}`);
 }
