@@ -18,7 +18,7 @@
  * Synchronizes tracker status using set-status.mjs under shared tracker lock.
  */
 
-import { constants, statSync, openSync, fstatSync, closeSync, readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, linkSync, copyFileSync, rmSync } from 'fs';
+import { constants, statSync, openSync, fstatSync, closeSync, readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, linkSync, copyFileSync, rmSync, realpathSync } from 'fs';
 import { join, dirname, resolve, extname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
@@ -36,6 +36,7 @@ import {
   resolvePdfIndexPath,
   resolveTrackerPath,
   resolveWorkspaceRoot,
+  resolveWorkspaceRootFor,
   writeFileAtomic,
 } from './tracker-utils.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -263,6 +264,10 @@ if (existingOutcomeDirs.length > 1) {
 
 const noteToAppend = flags.note || (flags.stage ? `${outcomeConfig.defaultNote}: ${flags.stage}` : outcomeConfig.defaultNote);
 
+// Match generate-pdf.mjs: a symlinked data/ moves the journal and manifest
+// with the tracker without moving the workspace's generated output/.
+const pdfWorkspaceRoot = realpathSync(resolveWorkspaceRootFor(DATA_ROOT));
+
 // Resolve the submitted CV artifact up front (read-only lookups) so both the
 // --dry-run preview and the real run agree on exactly what would be archived
 // and, if --clean-output is set, what would be removed from output/ afterward.
@@ -300,7 +305,7 @@ if (flags.cv !== null) {
   // Case B: Read tracker's PDF column cell and resolve its path.
   if (matchedRow.pdf && matchedRow.pdf !== '—' && matchedRow.pdf !== '-') {
     const rawPdfPath = matchedRow.pdf.replace(/^local:/, '');
-    const fullPdfPath = join(repoRoot, rawPdfPath);
+    const fullPdfPath = join(pdfWorkspaceRoot, rawPdfPath);
     if (existsSync(fullPdfPath)) {
       cvResolvedPath = fullPdfPath;
       isPdf = true;
@@ -318,7 +323,7 @@ if (flags.cv !== null) {
         for (const num of reportNums) {
           const mappedPdf = pdfMap.get(String(num).padStart(3, '0')) || pdfMap.get(String(num));
           if (mappedPdf) {
-            const fullPdfPath = join(repoRoot, mappedPdf.replace(/^local:/, ''));
+            const fullPdfPath = join(pdfWorkspaceRoot, mappedPdf.replace(/^local:/, ''));
             if (existsSync(fullPdfPath)) {
               cvResolvedPath = fullPdfPath;
               isPdf = true;
@@ -349,7 +354,7 @@ if (flags.cv !== null) {
 // resolves symlinks before trusting it.
 let cvFromOutputDir = false;
 let htmlResolvedPath = null;
-const outputDir = resolve(repoRoot, 'output');
+const outputDir = resolve(pdfWorkspaceRoot, 'output');
 const resolvedCvAbs = cvResolvedPath ? resolve(cvResolvedPath) : null;
 if (isPdf && resolvedCvAbs && pathIsInsideCanonical(resolvedCvAbs, outputDir)) {
   cvFromOutputDir = true;
@@ -361,9 +366,9 @@ if (isPdf && resolvedCvAbs && pathIsInsideCanonical(resolvedCvAbs, outputDir)) {
         if (!line.trim() || line.startsWith('#')) continue;
         const fields = line.split('\t');
         if (!fields[1]) continue;
-        const rowPdfPath = resolve(join(repoRoot, fields[1].replace(/^local:/, '')));
+        const rowPdfPath = resolve(join(pdfWorkspaceRoot, fields[1].replace(/^local:/, '')));
         if (rowPdfPath === resolvedCvAbs && fields[2]) {
-          const htmlFull = join(repoRoot, fields[2].replace(/^local:/, ''));
+          const htmlFull = join(pdfWorkspaceRoot, fields[2].replace(/^local:/, ''));
           if (existsSync(htmlFull) && pathIsInsideCanonical(htmlFull, outputDir)) {
             htmlResolvedPath = htmlFull;
           }
