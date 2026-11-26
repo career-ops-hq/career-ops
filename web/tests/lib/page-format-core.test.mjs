@@ -18,7 +18,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { readPageFormatSetting, resolveRenderPageFormat } from "../../src/lib/core/page-format.mjs";
 
 const CORE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -28,7 +28,7 @@ const CORE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".
 // dependency, so probe importability rather than existence, as cv-template.test.mjs does.
 let coreUsable = true;
 try {
-  await import(path.join(CORE, "lib", "page-format.mjs"));
+  await import(pathToFileURL(path.join(CORE, "lib", "page-format.mjs")).href);
 } catch {
   coreUsable = false;
 }
@@ -147,4 +147,29 @@ test("resolveRenderPageFormat: nothing stated and nothing declared takes the def
   assert.equal(sheet.format, "letter");
   assert.equal(sheet.warnings.length, 1);
   assert.match(sheet.warnings[0], /declared no page format.*letter/);
+});
+
+test("resolveRenderPageFormat: explicit request format outranks profile setting", async () => {
+  // Explicit request format "a4" outranks profile's "letter"
+  const sheet1 = await resolveRenderPageFormat(CORE, { explicit: "a4", setting: "letter" });
+  assert.equal(sheet1.format, "a4");
+
+  // Explicit request format "letter" outranks profile's "a4"
+  const sheet2 = await resolveRenderPageFormat(CORE, { explicit: "letter", setting: "a4" });
+  assert.equal(sheet2.format, "letter");
+});
+
+test("resolveRenderPageFormat: explicit request format warns when agent declares a different format", async () => {
+  const sheet = await resolveRenderPageFormat(CORE, { explicit: "a4", setting: "letter", declared: "letter" });
+  assert.equal(sheet.format, "a4");
+  assert.equal(sheet.warnings.length, 1);
+  assert.match(sheet.warnings[0], /The agent declared letter, but format was requested as a4/);
+});
+
+test("resolveRenderPageFormat: explicit null falls back cleanly to profile setting or default", async () => {
+  const fromProfile = await resolveRenderPageFormat(CORE, { explicit: null, setting: "a4" });
+  assert.equal(fromProfile.format, "a4");
+
+  const fromDefault = await resolveRenderPageFormat(CORE, { explicit: null, setting: null });
+  assert.equal(fromDefault.format, "letter");
 });

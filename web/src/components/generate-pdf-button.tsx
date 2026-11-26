@@ -15,7 +15,7 @@ const quietPill =
 
 // Fires the real career-ops `pdf` mode (worker kind "pdf") to generate an
 // ATS-optimized CV tailored to THIS offer → output/cv-… + marks the tracker.
-export function GeneratePdfButton({ n, company, onDisk }: { n: string; company: string; onDisk: boolean }) {
+export function GeneratePdfButton({ n, company, onDisk, format }: { n: string; company: string; onDisk: boolean; format?: string | null }) {
   const { jobs, startJob } = useJobs();
   const router = useRouter();
   const listQuery = pipelineQuery(useSearchParams().toString());
@@ -35,7 +35,7 @@ export function GeneratePdfButton({ n, company, onDisk }: { n: string; company: 
     [jobs, n],
   );
   const generate = () =>
-    startJob({ title: `CV PDF · ${company}`, subtitle: "tailored for this role", kind: "pdf", input: n, page: `/pipeline/${n}` });
+    startJob({ title: `CV PDF · ${company}`, subtitle: "tailored for this role", kind: "pdf", input: n, page: `/pipeline/${n}`, format });
 
   const state = pdfButtonState(job, onDisk);
 

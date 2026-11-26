@@ -79,16 +79,23 @@ export async function readPageFormatSetting(coreRoot, profilePath) {
  * The sheet to render, from the stance read before the run and the agent's
  * envelope.
  *
+ * - `explicit` format in the request wins over everything else.
  * - `a4` / `letter` in the profile wins; a different declared format is reported.
  * - `auto` takes the declared country, ranked by the core's resolvePageFormat.
  * - Nothing stated: the declared format, else the project default.
  *
  * @param {string} coreRoot Absolute path to the career-ops code checkout.
- * @param {{setting?: "a4"|"letter"|"auto"|null, declared?: "a4"|"letter"|null, country?: string|null}} args
+ * @param {{explicit?: "a4"|"letter"|null, setting?: "a4"|"letter"|"auto"|null, declared?: "a4"|"letter"|null, country?: string|null}} args
  * @returns {Promise<{format: "a4"|"letter", warnings: string[]}>}
  */
-export async function resolveRenderPageFormat(coreRoot, { setting = null, declared = null, country = null } = {}) {
+export async function resolveRenderPageFormat(coreRoot, { explicit = null, setting = null, declared = null, country = null } = {}) {
   const warnings = [];
+  if (explicit && PAGE_FORMATS.has(explicit)) {
+    if (declared && declared !== explicit) {
+      warnings.push(`The agent declared ${declared}, but format was requested as ${explicit}; rendering ${explicit}.`);
+    }
+    return { format: explicit, warnings };
+  }
   if (setting === "a4" || setting === "letter") {
     if (declared && declared !== setting) {
       warnings.push(`The agent declared ${declared}, but page_format in your profile is ${setting}; rendering ${setting}.`);

@@ -20,6 +20,7 @@ export type Job = {
   page?: string; // route the job was launched from / refers to
   input?: string; // the URL/posting it processed (links inbox rows to their worker)
   kind?: string;
+  format?: string | null;
   evaluationSections?: string[];
   // A cover run's answers to modes/cover.md Step 6, kept so a failed run still
   // shows them on its run page and refills the form (#7441). Read through
@@ -37,7 +38,7 @@ export type Job = {
   endedAt?: number;
 };
 
-type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string; brief?: Record<string, string>; evaluationSections?: string[] };
+type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string; brief?: Record<string, string>; evaluationSections?: string[]; format?: string | null };
 
 type Ctx = {
   jobs: Job[];
@@ -151,6 +152,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         page: opts.page,
         input: opts.input,
         kind: opts.kind,
+        format: opts.format,
         evaluationSections: opts.evaluationSections ? [...opts.evaluationSections] : undefined,
         brief: opts.brief ? { ...opts.brief } : undefined,
         batchId: opts.batchId,
@@ -179,6 +181,10 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         try {
+          const res = await fetch("/api/run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ kind: opts.kind, input: opts.input, cliId, brief: opts.brief, evaluationSections: opts.evaluationSections, format: opts.format }),
           // resolveCliId() validates the saved id against what is installed; a
           // bare readSavedCliId() here would short-circuit that check and launch
           // a run against an uninstalled CLI (#4012).
