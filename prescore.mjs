@@ -856,6 +856,12 @@ function figureContext(text, index, length) {
 const ANNUAL_RE = /\b(?:annual(?:ly)?|yearly|per\s+(?:year|annum)|a\s+year|al\s+año|por\s+año|par\s+an|pro\s+Jahr|jährlich)\b|\/\s*(?:yr|year)\b/i;
 const CADENCE_RE = new RegExp('(?:' + NON_ANNUAL_RE.source + ')|(?:' + ANNUAL_RE.source + ')', 'gi');
 const EXPLICIT_RATE_RE = /^(?:\/|(?:per|al|por|par|pro|je)\b|an\s+hour\b|a\s+year\b)/i;
+// Payment complements describe the salary; paid benefit nouns do not.
+const PAYMENT_STATE = String.raw`in\s+(?:arrears|advance|full|${ISO_CODES.join('|')})`;
+const PAYMENT_METHOD = String.raw`(?:by|via)\s+(?:direct\s+deposit|(?:bank|wire)\s+transfer)`;
+const PAYMENT_ACCOUNT = String.raw`to\s+(?:your|the|a)\s+bank\s+account`;
+const PAYMENT_QUALIFIER = String.raw`(?:out|gross|net|pro\s+rata|${PAYMENT_STATE}|${PAYMENT_METHOD}|${PAYMENT_ACCOUNT})`;
+const SALARY_PAYMENT_RE = new RegExp(String.raw`^\s*(?:is\s+)?paid(?:\s+${PAYMENT_QUALIFIER})*\s*$`, 'i');
 // Prefix labels may include modifiers ("monthly home office stipend").
 // Stop at conjunctions so a postfix label cannot consume another pay clause.
 const CADENCE_PREFIX_TAIL_RE = /^[\s:=-]*(?:(?:(?!(?:and|or|plus|with)\b)[\p{L}\p{M}-]+\s+)*(?:salary|pay|wages?|stipend|allowance|budget|bonus|compensation|rate|ctc|ote)(?:\s+of)?[\s:=-]*)?$/iu;
@@ -993,7 +999,7 @@ function nonAnnualFigureLookup(text, matches) {
           const separator = clauses[j - 1]?.toLowerCase();
           const clause = clauses[j];
           // Accept payment qualifiers, not benefits such as paid leave or training.
-          const salaryPayment = /^\s*paid(?:\s+(?:in\s+(?:arrears|advance)|out|gross|net|pro\s+rata|via\s+bank\s+transfer))*\s*$/i.test(clause);
+          const salaryPayment = SALARY_PAYMENT_RE.test(clause);
           if (/^(?:excluding|except|without)$/.test(separator ?? '')) {
             excludedPayClause = false;
           } else if (separator === ',' || /^(?:plus|with)$/.test(separator ?? '')
