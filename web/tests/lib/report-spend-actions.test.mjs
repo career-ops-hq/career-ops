@@ -27,6 +27,9 @@ test("the report page shows the verdict before the action row, and delete stays 
   const generate = src.indexOf("<GeneratePdfButton");
   const checklist = src.indexOf("Apply checklist");
   const apply = src.indexOf("<ApplyButton");
+  assert.match(src,/app\?\.status !== "Applied" && \(\s*<ApplyButton/,
+    "Apply button must be hidden when the application is already Applied",
+  );
   const remove = src.indexOf("<DeleteFromTracker");
   assert.ok(verdict !== -1 && generate !== -1 && remove !== -1);
   assert.ok(verdict < generate, "verdict must come before Generate tailored CV");
