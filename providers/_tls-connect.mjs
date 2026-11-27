@@ -21,6 +21,7 @@ function stripHostBracketsAndPort(value) {
     const end = value.indexOf(']');
     return end === -1 ? value.slice(1) : value.slice(1, end);
   }
+  if (net.isIP(value)) return value;
   return value.replace(/:\d+$/, '');
 }
 
@@ -54,8 +55,11 @@ export function createDirectConnect(connectOpts = {}) {
     keepAlive,
     keepAliveInitialDelay,
     servername: configuredServername,
+    socketPath,
+    path: configuredPath,
     ...tlsBaseOpts
   } = connectOpts ?? {};
+  const ipcPath = configuredPath !== undefined ? configuredPath : socketPath;
 
   const timeoutMs = timeout === 0 || timeout === false
     ? 0
@@ -96,8 +100,7 @@ export function createDirectConnect(connectOpts = {}) {
         const tlsOpts = {
           highWaterMark: 16384,
           ...tlsBaseOpts,
-          host: hostname,
-          port: portNum,
+          ...(ipcPath !== undefined ? { path: ipcPath } : { host: hostname, port: portNum }),
           ...(resolvedServername ? { servername: resolvedServername } : {}),
           ...(localAddress ? { localAddress } : {}),
           ...(httpSocket ? { socket: httpSocket } : {}),
@@ -107,8 +110,7 @@ export function createDirectConnect(connectOpts = {}) {
       : net.connect({
         highWaterMark: 64 * 1024,
         ...tlsBaseOpts,
-        host: hostname,
-        port: portNum,
+        ...(ipcPath !== undefined ? { path: ipcPath } : { host: hostname, port: portNum }),
         ...(localAddress ? { localAddress } : {}),
       });
 

@@ -84,21 +84,30 @@ export async function withConnectionScope(fn, { agentOptions, signal } = {}) {
   if (!undici) return signal ? storage.run({ signal }, fn) : fn();
   const resolvedAgentOptions = typeof agentOptions?.connect === 'function'
     ? agentOptions
-    : {
-      ...agentOptions,
-      connect: createDirectConnect({
-        ...agentOptions?.tls,
-        ...(agentOptions?.socketPath !== undefined ? { path: agentOptions.socketPath } : undefined),
-        ...(agentOptions?.connectTimeout !== undefined ? { timeout: agentOptions.connectTimeout } : undefined),
-        ...(typeof agentOptions?.autoSelectFamily === 'boolean'
-          ? {
-            autoSelectFamily: agentOptions.autoSelectFamily,
-            autoSelectFamilyAttemptTimeout: agentOptions.autoSelectFamilyAttemptTimeout,
-          }
-          : undefined),
-        ...(agentOptions?.connect && typeof agentOptions.connect === 'object' ? agentOptions.connect : undefined),
-      }),
-    };
+    : (() => {
+      const connectObj = agentOptions?.connect && typeof agentOptions.connect === 'object'
+        ? agentOptions.connect
+        : undefined;
+      const { socketPath: connectSocketPath, ...restConnect } = connectObj ?? {};
+      const socketPath = connectSocketPath !== undefined
+        ? connectSocketPath
+        : agentOptions?.socketPath;
+      return {
+        ...agentOptions,
+        connect: createDirectConnect({
+          ...agentOptions?.tls,
+          ...(socketPath !== undefined ? { path: socketPath } : undefined),
+          ...(agentOptions?.connectTimeout !== undefined ? { timeout: agentOptions.connectTimeout } : undefined),
+          ...(typeof agentOptions?.autoSelectFamily === 'boolean'
+            ? {
+              autoSelectFamily: agentOptions.autoSelectFamily,
+              autoSelectFamilyAttemptTimeout: agentOptions.autoSelectFamilyAttemptTimeout,
+            }
+            : undefined),
+          ...restConnect,
+        }),
+      };
+    })();
   const agent = new undici.Agent(resolvedAgentOptions);
   try {
     return await storage.run({ agent, fetch: undici.fetch, signal }, fn);

@@ -132,6 +132,8 @@ test('stock undici.Agent sends ALPN http/1.1 while withConnectionScope omits ALP
 });
 
 test('withConnectionScope forwards top-level connectTimeout and fetchJson keeps IP guard inside scope', async () => {
+  const prevTrustProxy = process.env.CAREER_OPS_TRUST_PROXY_EGRESS;
+  process.env.CAREER_OPS_TRUST_PROXY_EGRESS = '0';
   const blackholeSockets = new Set();
   const blackhole = net.createServer((sock) => {
     blackholeSockets.add(sock);
@@ -153,6 +155,8 @@ test('withConnectionScope forwards top-level connectTimeout and fetchJson keeps 
       );
     }, { agentOptions: { connectTimeout: 80 } });
   } finally {
+    if (prevTrustProxy === undefined) delete process.env.CAREER_OPS_TRUST_PROXY_EGRESS;
+    else process.env.CAREER_OPS_TRUST_PROXY_EGRESS = prevTrustProxy;
     for (const sock of blackholeSockets) sock.destroy();
     await new Promise((r) => blackhole.close(r));
   }
@@ -199,6 +203,50 @@ test('createDirectConnect strips ALPNProtocols, omits IP SNI, handles http and t
     const httpRes = await undiciFetch(`http://127.0.0.1:${httpServer.address().port}/`, { dispatcher: agent });
     assert.equal(httpRes.status, 200);
     assert.deepEqual(await httpRes.json(), { plain: true });
+
+    // Unbracketed IPv6 literals (e.g. '::1') must NOT be stripped to ':' as TLS servername.
+    const { default: tlsMod } = await import('node:tls');
+    const origTlsConnect = tlsMod.connect;
+    let capturedTlsOpts = null;
+    tlsMod.connect = (opts) => {
+      capturedTlsOpts = opts;
+      const sock = new EventEmitter();
+      sock.setKeepAlive = () => sock;
+      sock.setNoDelay = () => sock;
+      sock.destroy = () => sock;
+      queueMicrotask(() => sock.emit('error', new Error('stop')));
+      return sock;
+    };
+    try {
+      await new Promise((resolve) => {
+        connect({ hostname: '::1', host: '::1', servername: '::1', protocol: 'https:', port: 443 }, () => resolve());
+      });
+      assert.equal('servername' in (capturedTlsOpts ?? {}), false, 'unbracketed ::1 must omit TLS servername');
+    } finally {
+      tlsMod.connect = origTlsConnect;
+    }
+
+    // agentOptions.connect.socketPath must map to Node's IPC `path` option (not TCP).
+    const sockDir = mkdtempSync(join(tmpdir(), 'co-alpn-sock-'));
+    const sockPath = process.platform === 'win32'
+      ? `\\\\.\\pipe\\co-alpn-sock-${process.pid}-${Date.now()}`
+      : join(sockDir, 'provider.sock');
+    const ipcServer = http.createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('{"ipc":true}');
+    });
+    await new Promise((r) => ipcServer.listen(sockPath, r));
+    try {
+      await withConnectionScope(async () => {
+        const { agent: ipcAgent, fetch: scopedFetch } = currentConnectionScope();
+        const ipcRes = await scopedFetch('http://localhost/', { dispatcher: ipcAgent });
+        assert.equal(ipcRes.status, 200);
+        assert.deepEqual(await ipcRes.json(), { ipc: true });
+      }, { agentOptions: { connect: { socketPath: sockPath } } });
+    } finally {
+      await new Promise((r) => ipcServer.close(r));
+      rmSync(sockDir, { recursive: true, force: true });
+    }
   } finally {
     await agent.destroy();
     await Promise.all([
@@ -229,13 +277,18 @@ test('createDirectConnect strips ALPNProtocols, omits IP SNI, handles http and t
 });
 
 test('unscoped native fetchJson uses no-ALPN tls.connect while preserving globalThis.fetch stubs', async () => {
-  // 1. In-process stub after _http.mjs import must still be honored.
+  // 1. In-process stub after _http.mjs import must still be honored even if
+  // the host environment has trusted proxy egress variables configured.
   const realFetch = globalThis.fetch;
+  const prevTrustProxy = process.env.CAREER_OPS_TRUST_PROXY_EGRESS;
+  process.env.CAREER_OPS_TRUST_PROXY_EGRESS = '0';
   globalThis.fetch = async () => new Response('{"stubbed":"after"}', { status: 200 });
   try {
     assert.deepEqual(await fetchJson('https://acme.wd3.myworkdayjobs.com/wday/cxs/acme/site/jobs'), { stubbed: 'after' });
   } finally {
     globalThis.fetch = realFetch;
+    if (prevTrustProxy === undefined) delete process.env.CAREER_OPS_TRUST_PROXY_EGRESS;
+    else process.env.CAREER_OPS_TRUST_PROXY_EGRESS = prevTrustProxy;
   }
 
   // 2. Preload --import stub before _http.mjs import must still be honored.
@@ -251,7 +304,11 @@ test('unscoped native fetchJson uses no-ALPN tls.connect while preserving global
         const { fetchJson } = await import(${JSON.stringify(httpUrl)});
         assert.deepEqual(await fetchJson('https://acme.wd3.myworkdayjobs.com/jobs'), { stubbed: 'preload' });
       `],
-      { encoding: 'utf8', timeout: 15_000 },
+      {
+        encoding: 'utf8',
+        timeout: 15_000,
+        env: { ...process.env, CAREER_OPS_TRUST_PROXY_EGRESS: '0' },
+      },
     );
     assert.equal(preResult.status, 0, describeSpawn(preResult));
   } finally {
