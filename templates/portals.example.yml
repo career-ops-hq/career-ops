@@ -1477,6 +1477,7 @@ search_queries:
 #   computrabajo    <country>.computrabajo.com/<search path>  (LatAm board; e.g. co.computrabajo.com/trabajo-de-sistemas)
 #   magneto         www.magneto365.com/co/<search path>       (Colombia board; e.g. /co/trabajos/buscar/tecnologia)
 #   bulldogjob      bulldogjob.pl/companies/jobs[/s/<filters>]  (Polish tech board; filters live in the path, e.g. /s/role,devops/city,Remote)
+#   jobindex        www.jobindex.dk/jobsoegning?<query>  (Danish board; filters as query parameters, e.g. ?q=python&geoareaid=15182)
 #   paycom          www.paycomonline.net/v4/ats/web.php/portal/<client-key>/career-page  (or a posting link under the
 #                   same /portal/<client-key>/ path; or provider: paycom with client_key:)
 #   paylocity       recruiting.paylocity.com/Recruiting/Jobs/All/<board-guid>  (or api: field; a posting's
@@ -2196,6 +2197,11 @@ search_queries:
 # - name: Example Bulldogjob              # Polish tech board, many employers
 #   careers_url: https://bulldogjob.pl/companies/jobs/s/role,devops/experienceLevel,medium/city,Remote  # auto-detected; any search URL
 #   max_pages: 5                          # optional page cap (50 jobs/page, default 25, max 100)
+#   enabled: true                         # 250ms pacing between pages
+#
+# - name: Example Jobindex                # Danish general board, many employers
+#   careers_url: https://www.jobindex.dk/jobsoegning?q=python  # auto-detected; filters as query parameters
+#   max_pages: 25                         # optional page cap (20 jobs/page, default 25, max 250)
 #   enabled: true                         # 250ms pacing between pages
 #
 # - name: The Hub                         # Nordic/EU startup board
