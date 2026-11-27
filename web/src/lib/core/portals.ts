@@ -40,20 +40,14 @@ export function writeTempPortals(f: FilterLists): string {
   const file = path.join(os.tmpdir(), `career-ops-explore-${randomUUID()}.yml`);
   // Conditional workplace policy is a profile constraint, not a search chip.
   // Keep it in ad-hoc scans too; malformed config must not disable the guard.
-  let text = serializePortals(f);
-  let policy: unknown;
+  let policy: Record<string, unknown> | undefined;
   try {
     const parsed = yaml.load(fs.readFileSync(path.join(careerOpsRoot(), "portals.yml"), "utf8"));
     policy = workplacePolicyConfig(parsed);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
-  if (policy !== undefined) {
-    const overlay = (yaml.load(text) || {}) as Record<string, unknown>;
-    overlay.location_filter = { ...(overlay.location_filter as Record<string, unknown> || {}), workplace_policy: policy };
-    text = yaml.dump(overlay, { noRefs: true, lineWidth: 120 });
-  }
-  fs.writeFileSync(file, text, "utf8");
+  fs.writeFileSync(file, serializePortals(f, policy), "utf8");
   return file;
 }
 
