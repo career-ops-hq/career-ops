@@ -158,6 +158,16 @@ test('styleHidden accepts two-keyword overflow values before applying the cascad
   assert.ok(!clean.includes('Hidden payload'));
 });
 
+test('styleHidden rejects mixed CSS-wide keyword overflow overrides', () => {
+  const html = '<p>Role</p><div style="height:0;overflow:hidden hidden;overflow:hidden initial">Hidden payload</div>';
+  const { clean, findings } = guard(html, 'html');
+  assert.ok(
+    findings.hidden_blocks.some((b) => b.reason === 'zero-box + overflow:hidden'),
+    `mixed CSS-wide keyword must not override: ${JSON.stringify(findings.hidden_blocks)}`,
+  );
+  assert.ok(!clean.includes('Hidden payload'));
+});
+
 test('styleHidden validates opacity overrides before applying the cascade', () => {
   const invalid = guard(
     '<p>Role</p><div style="opacity:0;opacity:bogus">Hidden payload</div>',

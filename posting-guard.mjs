@@ -142,7 +142,7 @@ const CSS_VALUE_VALIDATORS = {
   overflow: (v) => {
     const parts = v.split(/[\t\n\f\r ]+/);
     return parts.length <= 2 && parts.every((p) => OVERFLOW_KEYWORDS.has(p)
-      || ['inherit', 'initial', 'unset', 'revert'].includes(p));
+      || (parts.length === 1 && ['inherit', 'initial', 'unset', 'revert'].includes(p)));
   },
   opacity: new RegExp(`^(?:${CSS_NUM}%?|${CSS_KEYWORDS})$`),
   'font-size': new RegExp(`^(?:${CSS_NUM}(?:px|pt|em|rem|%|vw|vh|ch|ex)?|(?:xx-|x-)?small|medium|(?:xx-|x-)?large|larger|smaller|${CSS_KEYWORDS})$`),
