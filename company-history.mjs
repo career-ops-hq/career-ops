@@ -1737,6 +1737,17 @@ if (isMainModule(import.meta.url)) {
       process.exit(1);
     });
   } else {
+    // An explicit --scan-history or --followups names the data to report on, so
+    // a path that does not exist is an error, not "no history": the card would
+    // otherwise read no-history / no-scan-data for a file that was never read.
+    // Only the default paths may be absent. Same rule as rejection-latency
+    // (#7840) and process-quality (#7781).
+    for (const [flag, value] of [['--scan-history', scanHistoryOverride], ['--followups', followupsOverride]]) {
+      if (value && !existsSync(value)) {
+        console.error(`company-history: ${flag} not found: ${value}`);
+        process.exit(1);
+      }
+    }
     const run = async () => {
       // DATA_ROOT, not CAREER_OPS: these three read data/applications.md,
       // data/follow-ups.md and data/scan-history.tsv, which are USER layer and
