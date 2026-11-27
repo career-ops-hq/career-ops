@@ -107,6 +107,35 @@ test('styleHidden interprets percentage opacity numerically', () => {
   assert.ok(!clean.includes('Hidden payload'));
 });
 
+test('styleHidden validates multi-keyword display combinations', () => {
+  const visible = guard(
+    '<div style="display:none;display:block flow list-item"><p>Visible after override</p></div>',
+    'html',
+  );
+  assert.equal(visible.findings.hidden_blocks.length, 0);
+  assert.ok(visible.clean.includes('Visible after override'));
+
+  const invalid = guard(
+    '<p>Role</p><div style="display:none;display:grid inline-grid">Hidden payload</div>',
+    'html',
+  );
+  assert.ok(
+    invalid.findings.hidden_blocks.some((b) => b.reason === 'display:none'),
+    `invalid combination must not override: ${JSON.stringify(invalid.findings.hidden_blocks)}`,
+  );
+  assert.ok(!invalid.clean.includes('Hidden payload'));
+});
+
+test('styleHidden keeps escaped CRLF continuations inside quoted values', () => {
+  const html = `<p>Role</p><div style="content:'x\\&#13;&#10;;display:none;'">Visible after continuation</div>`;
+  const { clean, findings } = guard(html, 'html');
+  assert.equal(
+    findings.hidden_blocks.length, 0,
+    `escaped CRLF must stay in the string: ${JSON.stringify(findings.hidden_blocks)}`,
+  );
+  assert.ok(clean.includes('Visible after continuation'));
+});
+
 test('styleHidden accepts two-keyword overflow values before applying the cascade', () => {
   const html = '<p>Role</p><div style="height:0;overflow:hidden hidden">Hidden payload</div>';
   const { clean, findings } = guard(html, 'html');

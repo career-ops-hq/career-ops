@@ -119,10 +119,22 @@ const DISPLAY_KEYWORDS = new Set([
   'table-footer-group', 'table-column', 'table-column-group', 'table-caption',
   'list-item', 'contents', 'inherit', 'initial', 'unset', 'revert',
 ]);
+const DISPLAY_OUTSIDE = new Set(['block', 'inline', 'run-in']);
+const DISPLAY_INSIDE = new Set(['flow', 'flow-root', 'flex', 'grid', 'ruby', 'table']);
+const DISPLAY_LEGACY_OUTSIDE = new Set(['inline-block', 'inline-table', 'inline-flex', 'inline-grid']);
+const DISPLAY_SINGLE = new Set(['none', 'contents', 'inherit', 'initial', 'unset', 'revert']);
+const DISPLAY_CONFLICTS = [['flex', 'inline-flex'], ['grid', 'inline-grid'], ['table', 'inline-table']];
 const CSS_VALUE_VALIDATORS = {
   display: (v) => {
     const parts = v.split(/[\t\n\f\r ]+/);
-    return parts.length <= 2 && parts.every((p) => DISPLAY_KEYWORDS.has(p));
+    if (parts.length > 3 || parts.some((p) => !DISPLAY_KEYWORDS.has(p))) return false;
+    if (parts.some((p) => DISPLAY_SINGLE.has(p)) && parts.length !== 1) return false;
+    const groupOf = (p) => DISPLAY_OUTSIDE.has(p) || DISPLAY_LEGACY_OUTSIDE.has(p)
+      ? 'outside'
+      : DISPLAY_INSIDE.has(p) ? 'inside' : DISPLAY_SINGLE.has(p) ? 'single' : 'item';
+    const groups = parts.map(groupOf);
+    if (new Set(groups).size !== groups.length) return false;
+    return !DISPLAY_CONFLICTS.some(([a, b]) => parts.includes(a) && parts.includes(b));
   },
   visibility: new RegExp(`^(?:visible|hidden|collapse|${CSS_KEYWORDS})$`),
   overflow: (v) => {
@@ -159,7 +171,10 @@ function parseStyleDeclarations(style) {
     if (quote) {
       if (i === s.length) break;
       buf += ch;
-      if (ch === '\\' && i + 1 < s.length) buf += s[++i];
+      if (ch === '\\' && i + 1 < s.length) {
+        if (s[i + 1] === '\r' && s[i + 2] === '\n') buf += ch + s[++i] + s[++i];
+        else buf += ch + s[++i];
+      }
       else if (ch === quote || ch === '\n' || ch === '\r' || ch === '\f') quote = null;
       continue;
     }
