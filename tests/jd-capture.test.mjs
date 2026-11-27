@@ -102,7 +102,7 @@ try {
   // ── the slug must identify the company, not merely occur in the name ───────
   // Both grammars this repo writes put the company first, after the report
   // prefix and an optional capture date:
-  //   {NNN}-{YYYY-MM-DD}_{company}_{role}.pdf   (archive-posting.mjs)
+  //   {NNN}-{YYYY-MM-DD}_{company}_{role}_{sha256(url)[0:16]}[-2, -3, ...].pdf   (archive-posting.mjs)
   //   {NNN}-{company}-{role}.{ext}              (hand-named / plugin captures)
   // Substring matching let a role word stand in for a company, which is the
   // same mistake as matching on the number alone.

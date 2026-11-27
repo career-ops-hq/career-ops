@@ -1,4 +1,7 @@
 import { canonStatus } from "./status-alias.mjs";
+// One definition of "a rate with no denominator is absent", shared with the
+// Progress view rather than copied: web/src/lib/analytics/view-model.mjs.
+import { rateOrNull } from "./analytics/view-model.mjs";
 
 const STAGE_ORDER = ["TRACKED", "APPLIED", "RESPONDED", "INTERVIEW", "OFFER"];
 const SCORE_BUCKETS = [
@@ -110,10 +113,31 @@ export function computeProgressMetrics(applications = [], achievements) {
     totalOffers: achievements?.offers ?? totalOffers,
     funnel,
     scoreDistribution,
-    responseRate: percentage(responded, applied),
-    interviewRate: percentage(interview, applied),
-    offerRate: percentage(offer, applied),
+    // null, not 0, when nothing has been applied to. percentage() answers 0 for
+    // a zero denominator, and the view printed that as "0.0%" — telling a user
+    // who has evaluated roles but applied to none that no employer replied to
+    // them. A rate taken over nothing is absent, not measured. A REAL zero (0
+    // of 12 replied) still prints, because the gate reads the denominator and
+    // never the rate's own value.
+    ratesDenominator: applied,
+    responseRate: rateOrNull(percentage(responded, applied), applied),
+    interviewRate: rateOrNull(percentage(interview, applied), applied),
+    offerRate: rateOrNull(percentage(offer, applied), applied),
     weeklyActivity,
+  };
+}
+
+/**
+ * Width of one funnel bar. The count is cumulative. The width is that count
+ * out of everything tracked. The conversion rate stays on the rates card.
+ * Printing the rate here made 15 roles read as 38% of the pipeline.
+ */
+export function funnelBarModel(stage, tracked) {
+  const count = Number(stage?.count) || 0;
+  const whole = Number(tracked) || 0;
+  return {
+    count,
+    widthPct: whole > 0 ? (count / whole) * 100 : 0,
   };
 }
 
@@ -139,11 +163,15 @@ export function canonicalizeArchetype(raw) {
   if (!value || ["unknown", "none", "n/a", "—", "-"].includes(value) || value.startsWith("none ")) return "Unclassified";
   if (value.includes("agentic") || value.includes("automation")) return "Agentic & Automation";
   if (value.includes("solutions architect") || value.includes("forward deployed") || value.includes("deployment architect")) return "AI Solutions & FDE";
-  if (value.includes("technical ai pm") || (value.includes("ai") && value.includes("pm")) || (value.includes("ai") && value.includes("product manager"))) return "Technical AI PM";
+  // "ai" and "pm" are whole words here: as substrings they match "supply chain"
+  // and "development", which sent unrelated roles into the PM buckets.
+  const hasAi = /\b(gen)?ai\b/.test(value);
+  const hasPm = /\bpm\b/.test(value);
+  if (value.includes("technical ai pm") || (hasAi && hasPm) || (hasAi && value.includes("product manager"))) return "Technical AI PM";
   if (value.includes("llmops") || value.includes("mlops") || value.includes("platform") || value.includes("infrastructure")) return "AI Platform & LLMOps";
   if (value.includes("ai/ml") || value.includes("ml engineer") || value.includes("ai engineer") || value.includes("ki- entwickler") || value.includes("genai") || value.includes("applied ai")) return "AI & ML Engineering";
   if (value.includes("transformation") || value.includes("strategy") || value.includes("consultant") || value.includes("governance") || value.includes("policy")) return "AI Transformation & Governance";
-  if (value.includes("product") || value.includes("project") || value.includes("program") || value.includes("pm") || value.includes("projektkoordin")) return "Product & Program Mgmt";
+  if (value.includes("product") || value.includes("project") || value.includes("program") || hasPm || value.includes("projektkoordin")) return "Product & Program Mgmt";
   if (value.includes("data") || value.includes("analytics") || value.includes("business intelligence")) return "Data & Analytics";
   if (value.includes("support") || value.includes("helpdesk") || value.includes("service desk") || value.includes("customer service") || value.includes("onboarding") || value.includes("administrator") || value.includes("operations") || /\badmin\b/.test(value)) return "IT & Technical Operations";
   if (value.includes("research") || value.includes("wissenschaft") || value.includes("universit") || value.includes("bildung")) return "Research & Academia";

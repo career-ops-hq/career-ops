@@ -6,11 +6,14 @@
 // untracks a path git already has, so the update looks like it silently did
 // nothing (career-ops#2881) with no signal pointing at .bak. This pins the
 // doctor check that surfaces it instead of letting it stay silent.
-import { pass, fail, NODE, ROOT, rmSync } from './helpers.mjs';
+import { pass, fail, NODE, ROOT, rmSync, sealProcessGitEnv } from './helpers.mjs';
 import { execFileSync } from 'child_process';
 import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+
+// Fixture git inherits process.env, so keep the contributor's git config out of it.
+sealProcessGitEnv();
 
 console.log('\ndoctor.mjs — tracked .bak files');
 
@@ -37,6 +40,7 @@ function initRepo(dir) {
   git(dir, 'init', '-q');
   git(dir, 'config', 'user.email', 'test@example.com');
   git(dir, 'config', 'user.name', 'Test');
+  git(dir, 'config', 'core.hooksPath', join(dir, 'no-such-hooks'));
 }
 
 // 1. A tracked .bak file is reported as a warning naming the remedy.

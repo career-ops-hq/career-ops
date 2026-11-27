@@ -1,5 +1,6 @@
 import { parseReport } from "@/lib/format";
-import { readReport, type Application } from "@/lib/career-ops";
+import { requestReportReader, type Application } from "@/lib/career-ops";
+import { machineSummarySection } from "@/lib/machine-summary-section.mjs";
 
 export type AnalyticsApplication = Application & {
   archetype: string;
@@ -58,7 +59,13 @@ function normalizeWorkMode(raw: string, text: string): string {
     if (explicit.includes("remote")) return "Remote";
     if (explicit.includes("onsite") || explicit.includes("on-site") || explicit.includes("in-office")) return "Full";
   }
-  const value = text.toLowerCase();
+  // A negated remote is an on-site statement: "On-site only, no remote" was
+  // charted as Remote. Same negation rule as scan.mjs REMOTE_NEGATED_RE, which
+  // web/ cannot import; it never crosses a letter, so "nonprofit … remote"
+  // keeps its remote.
+  const value = text.toLowerCase()
+    .replace(/\b(?:non|not|no)[^a-z.!;?\n]*remote\b/g, " on-site ")
+    .replace(/\bremote(?:[^\S\n]+work)?[^a-z.!;?\n]*(?:is[^\S\n]+)?(?:not|n't)[^\S\n]+(?:available|possible|allowed|offered|an option)\b/g, " on-site ");
   if (value.includes("hybrid")) return "Hybrid";
   if (value.includes("remote") && (value.includes("flex") || value.includes("remote-first") || value.includes("remote first"))) return "RemoteFlex";
   if (value.includes("remote")) return "Remote";
@@ -78,7 +85,9 @@ function fallbackLocation(text: string): string {
 
 function reportArchetype(content: string, fallbackArchetype: string): string {
   const meta = parseReport(content);
-  const machine = content.match(/##\s+Machine Summary[\s\S]*?```(?:yaml)?\s*([\s\S]*?)```/i)?.[1] ?? content;
+  // No summary, no YAML to read: the rest of the report includes the archived
+  // JD, whose own "archetype:" line is not the report's.
+  const machine = machineSummarySection(content).match(/^##\s+Machine Summary[\s\S]*?```(?:yaml)?\s*([\s\S]*?)```/i)?.[1] ?? "";
   const archetypeTable = content.match(/\*\*(?:Archetype detected|Archetype)\*\*\s*\|\s*([^|\n]+)/i)?.[1]?.replace(/\*+/g, "").trim() ?? "";
   return scalar(machine, "archetype_primary") || scalar(machine, "archetype") || archetypeTable || meta.fields.find((field) => field.label === "Archetype")?.value || fallbackArchetype;
 }
@@ -104,11 +113,8 @@ export function enrichAnalyticsApplication(app: Application, reportContent = "")
   };
 }
 
-function fromApplication(app: Application): AnalyticsApplication {
-  return enrichAnalyticsApplication(app, readReport(app.n)?.content ?? "");
-}
-
 /** Read-only enrichment of tracker rows for Analytics. */
 export function analyticsApplications(applications: Application[]): AnalyticsApplication[] {
-  return applications.map(fromApplication);
+  const readReport = requestReportReader();
+  return applications.map((app) => enrichAnalyticsApplication(app, readReport(app)?.content ?? ""));
 }

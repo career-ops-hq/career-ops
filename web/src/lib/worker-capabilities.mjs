@@ -14,7 +14,7 @@
  * only copy it — and the next kind added would then be classified twice, in two
  * files, with nothing comparing the answers. This repo already carries that
  * failure three times over: clis.ts KNOWN, rank-pipeline.mjs CLI_CANDIDATES and
- * doctor.mjs VALID_CLIS are hand-maintained lists of the same CLIs that have
+ * lib/agent-cli.mjs AGENT_CLIS are hand-maintained lists of the same CLIs that have
  * drifted apart (differing entries, differing names for the same binary). One
  * source, many translations — never many sources.
  */

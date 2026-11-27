@@ -122,7 +122,9 @@ Applied drops can also be removed; their tracker receipts preserve deduplication
 ## Data paths
 
 The drop directory follows `getCareerOpsRoot()`: `CAREER_OPS_ROOT`, then
-`CAREER_OPS_DATA_DIR`, then the `.career-ops-data` marker, then the code root.
+`CAREER_OPS_DATA_DIR`, then the `.career-ops-data` marker, then
+`~/career-ops-data` when the code runs from a Claude Code plugin install, then
+the code root.
 It is user-layer data under the existing `data/*` ignore/protection rules.
 An explicit `CAREER_OPS_TRACKER` still requires a matching `tracker_path` in
 every proposal; it does not change the drop directory. Paths in proposals

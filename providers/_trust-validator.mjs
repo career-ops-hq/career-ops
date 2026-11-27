@@ -38,6 +38,7 @@ const DEFAULT_ATS_ALLOWLIST = [
   'smartrecruiters.com',
   'jobvite.com',
   'myworkdayjobs.com',
+  'myworkdaysite.com',
   'recruitee.com',
   'workable.com',
   'icims.com',
@@ -47,6 +48,15 @@ const DEFAULT_ATS_ALLOWLIST = [
   'jazz.co',
   'bamboohr.com',
   'teamtailor.com',
+  'paycomonline.net',
+  'paylocity.com',
+  'careers.hibob.com',
+  'join.com',
+  'hirehive.com',
+  'recruitmentplatform.com',
+  'taleez.com',
+  'kula.ai',
+  'wellfound.com',
 ];
 
 /** @type {Record<string, number>} */

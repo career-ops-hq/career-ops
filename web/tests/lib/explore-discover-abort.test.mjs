@@ -15,6 +15,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src");
 const provider = readFileSync(join(ROOT, "components/explore/explore-provider.tsx"), "utf8");
 const scan = readFileSync(join(ROOT, "lib/core/scan.ts"), "utf8");
 const route = readFileSync(join(ROOT, "app/api/explore/route.ts"), "utf8");
+const scanArgs = readFileSync(join(ROOT, "lib/core/scan-args.mjs"), "utf8");
 
 // The body of one `const <name> = useCallback(async () => { ... }, [...])`.
 // Self-checking: a rename fails here instead of matching nothing below.
@@ -90,7 +91,8 @@ test("Discover writes nothing to pipeline.md: only the offers the user picks are
   assert.doesNotMatch(route, /addOffersToPipeline|core\/pipeline|appendToPipeline|appendToScanHistory/);
   assert.doesNotMatch(route, /\bafter\s*\(/, "no work after the response: a dropped client must not turn into a silent save");
   assert.doesNotMatch(scan, /addOffersToPipeline|core\/pipeline|appendToPipeline|appendToScanHistory/);
-  assert.match(scan, /"--dry-run"/, "the scanner child stays a dry run");
+  assert.match(scan, /scannerArgs\(/, "the scanner child takes its flags from scan-args.mjs");
+  assert.match(scanArgs, /"--dry-run"/, "the scanner child stays a dry run");
 
   // The writer is the explicit "Add to pipeline" route, fed by the user's pick.
   const addRoute = readFileSync(join(ROOT, "app/api/explore/add/route.ts"), "utf8");

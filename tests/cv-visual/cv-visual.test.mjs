@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { listTemplates } from '../../cv-templates.mjs';
+import { listTemplates, DEFAULT_TEMPLATES_DIR } from '../../cv-templates.mjs';
 import { injectPrintPageCss } from '../../generate-pdf.mjs';
 import { fixtures } from './fixtures.mjs';
 import { collectDomLayout, parsePdfLayout, inspectPdfLayout, missingAtsWords } from './layout.mjs';
@@ -13,7 +13,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const ARTIFACTS = join(ROOT, 'test-results', 'cv-visual-artifacts');
 const BASELINES = JSON.parse(readFileSync(join(ROOT, 'tests/cv-visual/baselines.json'), 'utf8'));
 // Use the same registry as the product, including one-level template packs.
-const templates = listTemplates('cv', { format: 'html' });
+const templates = listTemplates('cv', { dir: DEFAULT_TEMPLATES_DIR, format: 'html' });
 const normalize = (text) => text.normalize('NFC').replace(/\s+/gu, '').toLowerCase();
 
 function atsValues(payload) {

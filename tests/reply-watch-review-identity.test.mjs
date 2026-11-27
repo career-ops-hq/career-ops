@@ -3,11 +3,75 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pass, fail, ROOT, NODE, rmSync } from './helpers.mjs';
+import { pass, fail, ROOT, NODE, rmSync, DEFAULT_SCRIPT_TIMEOUT_MS } from './helpers.mjs';
 import { openTrackerTransaction } from '../tracker-utils.mjs';
 
 const header = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n|---|---|---|---|---|---|---|---|---|\n';
 const original = '| 1 | 2026-06-01 | Acme | Backend Engineer | 4/5 | Applied | - | - | |\n';
+
+// One review is a chain of cold Node starts: reply-watch up to its prompt,
+// then, after the answer, set-status and `tracker.mjs sync`, each run by
+// reply-watch with execFileSync. A case normally takes about a second on the
+// Windows runner, but a flat 15s for the whole chain has run out there, in a
+// different case each time: an occasional stall, not the usual pace. Each
+// phase gets the per-script budget run() uses, which rides out a short stall,
+// and a timeout names the phase it was in, with the child's output, so the
+// next stall shows where it happens.
+const PHASE_BUDGET_MS = DEFAULT_SCRIPT_TIMEOUT_MS;
+
+// Pure: names the in-flight phase at a timeout from the captured stdout alone.
+// Extracted from `arm()` so it can be unit-tested without spawning reply-watch.
+// A stall after "Tracker review complete" but before "Synced database index"
+// is the tracker.mjs sync step itself; every other case keeps the original
+// phase message unchanged.
+function phaseNameAtTimeout(phase, stdout) {
+  if (
+    phase === 'applying the answer (set-status, then tracker sync)'
+    && stdout.includes('Tracker review complete')
+    && !stdout.includes('Synced database index')
+  ) {
+    return 'tracker sync';
+  }
+  return phase;
+}
+
+function check(label, actual, expected) {
+  try {
+    assert.equal(actual, expected);
+    pass(label);
+  } catch (error) {
+    fail(`${label}: ${error.message}`);
+  }
+}
+
+// Unit tests for the phase-naming logic — run in milliseconds, never spawn a
+// child, and fail if the logic is removed (each asserts a concrete output).
+const complete = '✅ Tracker review complete\n';
+const synced = 'Synced database index (applications.db).\n';
+
+check(
+  'phaseNameAtTimeout: complete but not synced -> tracker sync',
+  phaseNameAtTimeout('applying the answer (set-status, then tracker sync)', complete),
+  'tracker sync'
+);
+
+check(
+  'phaseNameAtTimeout: neither marker -> original message',
+  phaseNameAtTimeout('applying the answer (set-status, then tracker sync)', 'still waiting for the prompt'),
+  'applying the answer (set-status, then tracker sync)'
+);
+
+check(
+  'phaseNameAtTimeout: both markers -> original message',
+  phaseNameAtTimeout('applying the answer (set-status, then tracker sync)', complete + synced),
+  'applying the answer (set-status, then tracker sync)'
+);
+
+check(
+  'phaseNameAtTimeout: unrelated phase unaffected',
+  phaseNameAtTimeout('waiting for the review prompt', complete),
+  'waiting for the review prompt'
+);
 
 async function review(change, expectsConflict = true) {
   const root = mkdtempSync(join(tmpdir(), 'career-ops-reply-identity-'));
@@ -26,21 +90,46 @@ async function review(change, expectsConflict = true) {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '', stderr = '', changed = false;
+    const startedAt = Date.now();
+    let answeredAt = null;
+    let timedOut = false;
     const result = await new Promise((resolve, reject) => {
-      timer = setTimeout(() => { child.kill(); reject(new Error('review did not finish')); }, 15_000);
+      const arm = phase => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          timedOut = true;
+          child.kill();
+          reject(new Error(`review did not finish: still ${phaseNameAtTimeout(phase, stdout)} after ${PHASE_BUDGET_MS}ms `
+            + `(${Date.now() - startedAt}ms in all)\nstdout: ${stdout}\nstderr: ${stderr}`));
+        }, PHASE_BUDGET_MS);
+      };
+      arm('waiting for the review prompt');
       child.on('error', reject);
       child.stderr.on('data', data => { stderr += data; });
       child.stdout.on('data', async data => {
         stdout += data;
         if (changed || !stdout.includes('Apply recommended status updates')) return;
         changed = true;
+        arm('changing the tracker as the second writer');
+        // A second authorized writer changes the row while the human prompt is open.
         try {
-          // A second authorized writer changes the row while the human prompt is open.
           const transaction = await openTrackerTransaction(tracker);
+          if (timedOut) {
+            // The phase timer already fired: close without mutating the row
+            // and don't arm the next phase.
+            transaction.close();
+            return;
+          }
           try { transaction.replace(header + change(original)); }
           finally { transaction.close(); }
-          child.stdin.end('y\n');
-        } catch (error) { child.kill(); reject(error); }
+          answeredAt = Date.now();
+        } catch (error) {
+          child.kill();
+          reject(error);
+          return;
+        }
+        arm('applying the answer (set-status, then tracker sync)');
+        child.stdin.end('y\n');
       });
       child.on('close', code => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
     });
@@ -54,6 +143,7 @@ async function review(change, expectsConflict = true) {
       assert.doesNotMatch(result.stderr, /tracker row changed or became ambiguous during review/);
       assert.match(result.stdout, /No change for #1: already Interview/);
     }
+    return `answered after ${answeredAt - startedAt}ms, exit ${Date.now() - answeredAt}ms later`;
   } finally {
     clearTimeout(timer);
     child?.kill();
@@ -72,16 +162,16 @@ for (const [field, change] of [
 ]) {
   const label = `legacy reply review refuses a concurrent ${field} change`;
   try {
-    await review(change);
-    pass(label);
+    const timing = await review(change);
+    pass(`${label} (${timing})`);
   } catch (error) {
     fail(`${label}: ${error.message}`);
   }
 }
 
 try {
-  await review(row => row.replace('| Applied |', '| Interview |'), false);
-  pass('an unchanged application already updated by another writer remains a no-op');
+  const timing = await review(row => row.replace('| Applied |', '| Interview |'), false);
+  pass(`an unchanged application already updated by another writer remains a no-op (${timing})`);
 } catch (error) {
   fail(`an unchanged application already updated by another writer remains a no-op: ${error.message}`);
 }

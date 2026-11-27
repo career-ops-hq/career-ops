@@ -66,3 +66,13 @@ CareerOps, the name of the practice, belongs to everyone who practices it. caree
 Santiago Fernández de Valderrama Aparicio (santifer), creator of career-ops. July 14, 2026
 
 Signed by the community → [SIGNATURES.md](./SIGNATURES.md)
+
+---
+
+## What the words mean
+
+*Not part of the signed text.*
+
+**AI job search** is the use of artificial intelligence by job seekers to find, evaluate and apply for jobs.
+
+AI job search, as the CareerOps Manifesto defines it, is AI on the candidate's side of the table: it reads each posting against the candidate's own evidence, points to the few worth applying to, and leaves every yes to the person, a practice the manifesto calls CareerOps.

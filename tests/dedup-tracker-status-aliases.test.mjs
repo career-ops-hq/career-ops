@@ -28,6 +28,7 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEDUP = join(HERE, '..', 'dedup-tracker.mjs');
@@ -46,7 +47,7 @@ function withTracker(rows, fn) {
       encoding: 'utf-8',
       env: { ...process.env, CAREER_OPS_TRACKER: tracker },
     });
-    assert.equal(r.status, 0, `dedup-tracker exited ${r.status}: ${r.stderr}`);
+    assert.equal(r.status, 0, describeSpawn(r, `dedup-tracker exited ${r.status}`));
     fn(readFileSync(tracker, 'utf-8').split('\n').filter((l) => /^\|\s*\d+\s*\|/.test(l)));
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -110,15 +111,18 @@ ok('a bold alias with a trailing date ("**Entrevista** 2026-06-01") is still rea
 // ── Every spelling states.yml declares ──────────────────────────────────────
 // One company per spelling, each holding a higher-scored Evaluated row and a
 // lower-scored row under that spelling, with the same role title and no report
-// identity in common. If the spelling is read as Applied or later, both rows
-// survive; if not, the pair merges into the Evaluated row. One run of the CLI
-// covers all of them.
+// identity in common. Applied or later, and Rejected, keep both rows. Any
+// other spelling merges into the Evaluated row. One run of the CLI covers
+// all of them.
 //
 // Which states count as "in motion" is the script's policy, restated here on
 // purpose: a new state in states.yml fails the first check below until someone
 // decides which side of the line it is on.
+// Rejected is not in motion, and a title match still keeps it. Evaluated must
+// not delete that row or replace the rejection.
 const IN_MOTION = ['applied', 'responded', 'assessment', 'interview', 'offer', 'hired'];
-const NOT_IN_MOTION = ['evaluated', 'rejected', 'discarded', 'skip'];
+const KEPT_ON_TITLE = ['rejected'];
+const NOT_IN_MOTION = ['evaluated', 'speculative', 'rejected', 'discarded', 'skip'];
 
 const { loadCanonicalStates } = await import(pathToFileURL(join(ROOT, 'tracker-utils.mjs')).href);
 const states = loadCanonicalStates(join(ROOT, 'templates', 'states.yml'));
@@ -145,9 +149,9 @@ ok(`all ${spellings.length} labels and aliases in states.yml are ranked as the s
     for (const p of pairs) {
       if (!left.has(p.keeperNum)) wrong.push(`"${p.text}": the Evaluated keeper was removed`);
       const survived = left.has(p.otherNum);
-      const inMotion = IN_MOTION.includes(p.id);
-      if (inMotion && !survived) wrong.push(`"${p.text}" (${p.id}): the in-flight row was deleted`);
-      if (!inMotion && survived) wrong.push(`"${p.text}" (${p.id}): the duplicate was not merged`);
+      const kept = IN_MOTION.includes(p.id) || KEPT_ON_TITLE.includes(p.id);
+      if (kept && !survived) wrong.push(`"${p.text}" (${p.id}): the row that must stay was deleted`);
+      if (!kept && survived) wrong.push(`"${p.text}" (${p.id}): the duplicate was not merged`);
     }
     assert.deepEqual(wrong, [], wrong.join('; '));
   });
@@ -162,7 +166,11 @@ ok(`all ${spellings.length} labels and aliases in states.yml are ranked as the s
 const SANDBOX_FILES = [
   'dedup-tracker.mjs', 'path-resolver.mjs', 'role-matcher.mjs', 'url-key.mjs',
   'tracker-utils.mjs', 'tracker-parse.mjs', 'tracker-aliases.json', 'pipeline-lock.mjs',
-  'lib/cli-flags.mjs',
+  'lib/cli-flags.mjs', 'lib/linkedin-url.mjs', 'lib/dir-lock.mjs', 'lib/rename-retry.mjs', 'lib/lock-path.mjs', 'lib/yaml-document.mjs',
+  // url-key.mjs reads Himalayas posting ids through the liveness resolver.
+  'himalayas-posting.mjs', 'lib/is-main-module.mjs',
+  // himalayas-posting.mjs strips markup with lib/jd-parse.mjs.
+  'lib/jd-parse.mjs',
 ];
 const DUPLICATE_ROWS = [
   '| 1 | 2026-09-01 | Acme | Backend Engineer | 4.5/5 | Evaluated | ❌ | — | first |',
@@ -196,7 +204,7 @@ function inSandbox(statesYml, fn) {
 
 ok('control: the sandbox copy dedups normally when states.yml is beside it', () => {
   inSandbox(readFileSync(join(ROOT, 'templates', 'states.yml'), 'utf-8'), ({ r, tracker }) => {
-    assert.equal(r.status, 0, `exited ${r.status}: ${r.stderr}`);
+    assert.equal(r.status, 0, describeSpawn(r, `exited ${r.status}`));
     assert.ok(!readFileSync(tracker, 'utf-8').includes('| 2 | 2026-09-02 |'), 'the duplicate row is still there');
   });
 });
@@ -216,7 +224,7 @@ for (const [what, statesYml, names] of [
 ]) {
   ok(`when states.yml ${what}, dedup-tracker stops with an error and leaves the tracker alone`, () => {
     inSandbox(statesYml, ({ r, tracker }) => {
-      assert.equal(r.status, 1, `expected exit 1, got ${r.status}: ${r.stdout}${r.stderr}`);
+      assert.equal(r.status, 1, describeSpawn(r, `expected exit 1, got ${r.status}`));
       assert.match(r.stderr, names, `the error does not say what is wrong: ${r.stderr}`);
       assert.equal(readFileSync(tracker, 'utf-8'), trackerText(DUPLICATE_ROWS), 'the tracker was modified');
       assert.ok(!existsSync(`${tracker}.bak`), 'a .bak was written although nothing ran');

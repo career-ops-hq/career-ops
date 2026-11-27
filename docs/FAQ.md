@@ -14,7 +14,7 @@ Windows does not create symlinks by default, so Git checks out the CLI skill ent
 
 ## 3. How do I avoid hitting token or rate limits during a batch run?
 
-Pass `--limit <N>` to `batch-runner.sh` to cap the number of offers processed in a single run (e.g. `./batch/batch-runner.sh --limit 5`) — this lets you inspect output quality before committing to a larger run. If a run is interrupted mid-way by a rate limit or network error, do not restart from scratch; use `./batch/batch-runner.sh --resume-paused` to skip already-completed jobs and pick up where you left off, avoiding wasted tokens on work that finished successfully.
+Pass `--limit <N>` to `batch-runner.sh` to cap the number of offers processed in a single run (e.g. `./batch/batch-runner.sh --limit 5`) — this lets you inspect output quality before committing to a larger run. If a run stops part-way, do not start over. Run the same command again: the runner keeps each offer's state in `batch/batch-state.tsv`, skips offers that already completed, and picks up the rest, retrying a failed offer up to `--max-retries` (default 2). A run that hit a Claude session or usage limit is different: it marks the offer that hit the limit `paused_rate_limit` and stops scheduling new ones. After the limit resets, `./batch/batch-runner.sh --resume-paused` re-runs only those paused offers, so follow it with a plain run for the offers that had not started yet.
 
 ## 4. Can I run career-ops on a cheaper or local model?
 
@@ -48,6 +48,10 @@ it means the job description text of two listings from **different companies** i
 
 Yes. Set `cv.template` (and/or `cover_letter.template`) in `config/profile.yml` to the kebab-case name of a template file in `templates/` — a value of `modern` resolves to `templates/cv-template.modern.html` (cover letters use `templates/cover-letter-template.<name>.html`). Leave the field unset and career-ops falls back to the built-in default template (`templates/cv-template.html`). You can also pick a template per generation just by asking (e.g. "use the modern template"). See the commented `cv.template` / `cover_letter.template` fields in `config/profile.example.yml` for the full reference.
 
+## Can every CV be one page?
+
+Yes. Set `cv.max_pages: 1` in `config/profile.yml`, and add `cv.strict_pages: true` if a CV that runs over should fail instead of only warning. Every CV render then uses that budget: the `pdf` mode, auto-pipeline, batch workers and the web UI. Cover letters ignore the `cv.*` keys and keep their flag-or-default budget. Students, new graduates and early-career candidates usually want this. Without the setting a CV may run to 2 pages. A CV that runs over its budget is saved as a sibling `{name}.overflow.pdf` draft instead of the real PDF path, with a warning by default or as a failed render with `cv.strict_pages: true`. A `--max-pages` or `--strict-pages` flag on `generate-pdf.mjs` still wins for a single render. A typo in either value stops the CV render with a message naming the key, instead of quietly falling back to 2 pages, unless a flag passed for that render overrides the key. Onboarding offers this setting when your answers or your CV show under 2 years of experience, or when you target entry-level roles.
+
 ## Why does career-ops refuse to use a number from my story bank?
 
 Because a plausible number is not necessarily a verified one. Interview-prep documents are often drafted to match a particular job description, and their phrasing can later be absorbed into `interview-prep/story-bank.md`. Without a provenance check, a figure invented in one prep session can be repeated in the next, gradually turning into an apparent fact.
@@ -67,7 +71,15 @@ The checker classifies each numeric claim as `existing`, `supportedByResume`, `d
 
 ## How do I stop a company from showing up in scans?
 
-Copy `templates/blacklist.example.md` to `data/blacklist.md`, then list one company per line.
+Copy `templates/blacklist.example.md` to `data/blacklist.md`, delete its example rows, and add one table row per company:
+
+```markdown
+| Company | Since | Scope | Reason |
+|---------|-------|-------|--------|
+| Acme Corp | 2026-01-15 | company | what happened |
+```
+
+The scanner reads only table rows, so a plain list of names, one per line, filters nothing. `Scope` is `company` (match the company name, ignoring case and punctuation) or `domain` (put a hostname such as `ibm.com` in the Company column to match postings on `jobs.ibm.com`).
 
 If a listed company is encountered, the scan reports that it was skipped (never silently). You can bypass the filter with `--include-blacklisted` if you want to audit matching postings.
 
@@ -84,6 +96,10 @@ No. `templates/` has `cv-template.html`, `cv-template.tex` (LaTeX/Overleaf), `cv
 ## Why does Chrome open during some scans but not others?
 
 Chromium only launches with `--verify`. A normal scan reads public ATS APIs and needs no browser; `--verify` checks a posting is genuinely still live, which needs a real page load. If it fails, the error asks you to run `npx playwright install chromium`.
+
+## Why does every company in a scan fail with `fetch failed`, or every posting come back `uncertain`?
+
+Usually a DNS filter. Sandboxed agent environments, and some corporate or home DNS filters, answer `0.0.0.0` or `::` for any host outside their allowlist. career-ops refuses to connect to a non-public address, so a scan lists each filtered company under `Network errors` as `fetch failed`, and with `--verify` a posting whose own host is filtered reads `uncertain` (`dns_sinkhole`) and is kept (see [liveness](SCRIPTS.md#liveness)). To check, resolve a board host: if `node -e "require('dns').lookup('boards-api.greenhouse.io', console.log)"` prints `0.0.0.0` or `::`, the lookup is being filtered. Run the scan from a normal shell, or allow the board hosts in your sandbox or filter.
 
 ## Can I run career-ops in Docker / self-hosted?
 

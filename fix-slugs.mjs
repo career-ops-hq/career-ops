@@ -34,12 +34,14 @@
  *   node fix-slugs.mjs --help        # show this message (-h is an alias)
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join, resolve } from 'path';
 
 import { verifyPortalsFile } from './verify-portals.mjs';
+import { replaceUserFile } from './tracker-utils.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 
 // The data root's portals.yml, the same default verify-portals.mjs sweeps
@@ -308,7 +310,7 @@ function applyFix(lines, block, suggested, oldAts, dateStr) {
  * @param {{dryRun?: boolean, dateStr?: string}} [opts]
  * @returns {{text: string, fixes: Array<{name: string, oldAts: string, newAts: string, careersUrlOld: string, careersUrlNew: string}>}}
  */
-export function computeFixes(rawText, results, { dateStr = new Date().toISOString().slice(0, 10) } = {}) {
+export function computeFixes(rawText, results, { dateStr = localToday() } = {}) {
   const { lines, blocks } = splitCompanyBlocks(rawText);
   const blocksByName = new Map(blocks.map((b) => [b.name, b]));
 
@@ -400,7 +402,7 @@ async function main() {
   printDiff(fixes, { dryRun });
 
   if (!dryRun && fixes.length > 0) {
-    writeFileSync(filePath, text, 'utf-8');
+    replaceUserFile(filePath, text);
     console.log(`\nportals.yml updated (${fixes.length} fixed).`);
   } else if (dryRun && fixes.length > 0) {
     console.log('\nRun with --fix to write these changes to portals.yml.');

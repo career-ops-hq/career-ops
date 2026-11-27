@@ -19,27 +19,31 @@
  * Exit code: 0 if all active, 1 if any expired or uncertain
  */
 
-import { chromium } from 'playwright';
 import { readFile } from 'fs/promises';
 import {
   checkUrlLivenessWithFallback,
   createHeadedPageProvider,
   newLivenessPage,
-  jitteredDelayMs,
+  createHostSpacer,
+  takeSuppressedBlockCount,
   sleep,
 } from './liveness-browser.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
-import { planExpiredHistoryRows, trackerLivenessTargets, DEFAULT_TRACKER_STATUSES, planExpiredDiscards, postingClosedNote, DEFAULT_DISCARD_STATUSES } from './liveness-core.mjs';
-import { appendToScanHistory, normalizeUrlForDedup, SCAN_HISTORY_PATH } from './scan.mjs';
+import { robotsAllows } from './robots-check.mjs';
+import { planExpiredHistoryRows, trackerLivenessTargets, DEFAULT_TRACKER_STATUSES, planExpiredDiscards, postingClosedNote, DEFAULT_DISCARD_STATUSES, discardableExpiredUrls } from './liveness-core.mjs';
+import { appendToScanHistory, seenJobKey, atomicWriteFile, DATA_ROOT, SCAN_HISTORY_PATH } from './scan.mjs';
+import { mergeLivenessLog, parseLivenessLog } from './lib/posting-facts.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { localToday } from './lib/local-today.mjs';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 const USAGE = `Usage:
   node check-liveness.mjs [--no-fallback] [--throttle[=ms]] [--no-record] <url1> [url2] ...
@@ -49,6 +53,64 @@ const USAGE = `Usage:
   node check-liveness.mjs --no-record             # check only; write nothing to scan-history
   node check-liveness.mjs --help                  # print this usage block and exit
   node check-liveness.mjs -h                      # alias for --help`;
+
+const KNOWN_FLAGS = [
+  '--no-fallback', '--throttle', '--no-record', '--file', '--tracker', '--status',
+  '--discard-expired', '--apply', '--help', '-h',
+];
+
+/**
+ * `--throttle` alone means the 5000ms default. `--throttle 1000` and
+ * `--throttle=1000` both mean 1000. A non-numeric equals value stays on the
+ * default rather than becoming a URL to check.
+ *
+ * @param {string[]} args
+ * @returns {number}
+ */
+function throttleBaseMsFrom(args) {
+  if (!hasFlag(args, '--throttle')) return 0;
+  const eq = args.find((a) => typeof a === 'string' && a.startsWith('--throttle='));
+  const raw = eq !== undefined ? eq.slice('--throttle='.length) : (() => {
+    const idx = args.indexOf('--throttle');
+    const next = idx === -1 ? undefined : args[idx + 1];
+    return typeof next === 'string' && /^\d+$/.test(next) ? next : undefined;
+  })();
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 5000;
+}
+
+/**
+ * Tokens that are not flags and not a flag's operand. Those are the URLs.
+ * `--dry-run` is not a flag this script accepts, so it never reaches here:
+ * validateFlags rejects it first. A numeric `--throttle` operand is not a URL.
+ *
+ * @param {string[]} args
+ * @returns {string[]}
+ */
+function urlPositionals(args) {
+  const skip = new Set();
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (typeof a !== 'string') continue;
+    if (a.startsWith('--file=') || a.startsWith('--status=') || a.startsWith('--throttle=')) {
+      skip.add(i);
+      continue;
+    }
+    if (a === '--file' || a === '--status') {
+      skip.add(i);
+      if (args[i + 1] !== undefined) skip.add(i + 1);
+      continue;
+    }
+    if (a === '--throttle') {
+      skip.add(i);
+      const next = args[i + 1];
+      if (typeof next === 'string' && /^\d+$/.test(next)) skip.add(i + 1);
+      continue;
+    }
+    if (a === '-h' || a.startsWith('--')) skip.add(i);
+  }
+  return args.filter((_, i) => !skip.has(i));
+}
 
 /**
  * Is this run allowed to record its verdicts?
@@ -102,11 +164,58 @@ export async function recordExpiredVerdicts(verdicts) {
     const rows = planExpiredHistoryRows(
       readFileSync(SCAN_HISTORY_PATH, 'utf-8'),
       verdicts,
-      normalizeUrlForDedup,
+      seenJobKey,
     );
-    if (rows.length > 0) await appendToScanHistory(rows, localToday(), 'skipped_expired', { alreadyLocked: true });
-    return rows.length;
+    // The writer drops an alias when another spelling of that posting already
+    // has a pinning skipped_expired row. The number below is rows that landed.
+    if (rows.length > 0) return await appendToScanHistory(rows, localToday(), 'skipped_expired', { alreadyLocked: true });
+    return 0;
   });
+}
+
+/**
+ * Local wall time with its UTC offset, YYYY-MM-DDTHH:MM:SS+HH:MM: when one
+ * verdict was observed. The offset keeps the order right across a DST change
+ * or a move to another time zone; the first ten characters stay the local day.
+ */
+export function localStamp(now = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  const off = -now.getTimezoneOffset();
+  const zone = `${off < 0 ? '-' : '+'}${p(Math.floor(Math.abs(off) / 60))}:${p(Math.abs(off) % 60)}`;
+  return `${localToday(now)}T${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}${zone}`;
+}
+
+export const LIVENESS_LOG_PATH = process.env.CAREER_OPS_LIVENESS_LOG || join(DATA_ROOT, 'data', 'liveness-checks.tsv');
+
+/**
+ * Record each conclusive verdict (open or closed) with the time it was
+ * observed, so the Today page can show when a posting was last checked. Uncertain and unreadable
+ * verdicts are skipped: they say nothing about the posting.
+ *
+ * @param {{url: string, result: string, code?: string, checkedAt?: string}[]} verdicts
+ * @returns {Promise<number>} conclusive verdicts applied
+ */
+export async function recordLivenessChecks(verdicts) {
+  mkdirSync(dirname(LIVENESS_LOG_PATH), { recursive: true });
+  return withPipelineLock(LIVENESS_LOG_PATH, async () => {
+    const before = existsSync(LIVENESS_LOG_PATH) ? readFileSync(LIVENESS_LOG_PATH, 'utf-8') : '';
+    const day = localToday();
+    const after = mergeLivenessLog(before, verdicts, day);
+    const touched = [...parseLivenessLog(after).values()].filter((v) => v.day === day).length;
+    if (after !== before) atomicWriteFile(LIVENESS_LOG_PATH, after);
+    return touched;
+  });
+}
+
+// A --tracker sweep walks every Evaluated and Pending posting, so it spaces
+// repeat browser visits to one host. --file and URL arguments keep the old
+// default; the pipeline sweep adds --throttle for large batches.
+const SWEEP_THROTTLE_MS = 5000;
+
+export function sweepThrottleBaseMs(args) {
+  const given = throttleBaseMsFrom(args);
+  if (given) return given;
+  return args.includes('--tracker') ? SWEEP_THROTTLE_MS : 0;
 }
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
@@ -158,27 +267,54 @@ export function discardExpiredRows(rows, { apply, note, trackerPath, reportsRoot
 async function main() {
   const args = process.argv.slice(2);
 
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    return;
+  // Unknown flags used to survive into the URL list: `--dry-run --file urls.txt`
+  // checked three strings and never opened the file, and `--help` ran before
+  // that filter so `--help --bogus` exited 0. validateFlags rejects the unknown
+  // flag first, then prints help. --throttle's operand is optional (bare
+  // `--throttle` is the 5000ms default), and --status keeps the message the
+  // status-flag test locks, so the missing-operand check stays here rather
+  // than in requireOperand. See tests/validate-flags-value-operand.test.mjs.
+  validateFlags(args, KNOWN_FLAGS, USAGE, {
+    valueFlags: ['--file', '--status', '--throttle'],
+  });
+
+  if (hasFlag(args, '--file')) {
+    const filePath = flagValue(args, '--file');
+    if (typeof filePath !== 'string' || !filePath.trim() || filePath.startsWith('--')) {
+      console.error('Error: --file requires a value');
+      process.exit(1);
+    }
   }
 
   // Portals like pracuj.pl serve a Cloudflare anti-bot wall to headless Chromium.
   // On a challenge we retry once in a headed browser (which clears it); pass
   // --no-fallback to stay fully headless (e.g. on a machine with no display).
   const noFallback = args.includes('--no-fallback');
-  // --throttle or --throttle=<ms>: wait base..2*base ms (jittered) between checks
-  // to stay under rate-based WAF limits. pracuj.pl's Cloudflare flags the session
-  // after ~2 rapid hits, so a bulk run needs spacing. Default base 5000ms.
-  const throttleArg = args.find((a) => a === '--throttle' || a.startsWith('--throttle='));
-  const throttleBaseMs = throttleArg ? (Number(throttleArg.split('=')[1]) || 5000) : 0;
+  // --throttle, --throttle <ms>, or --throttle=<ms>: wait base..2*base ms
+  // (jittered) between browser checks of the same host (createHostSpacer in
+  // liveness-browser.mjs) to stay under rate-based WAF limits. pracuj.pl's
+  // Cloudflare flags the session after ~2 rapid hits, so a bulk run needs
+  // spacing. Bare --throttle uses a 5000ms base. The space form used to be
+  // ignored (the number was checked as a URL) and the base stayed 5000.
+  const throttleBaseMs = sweepThrottleBaseMs(args);
   const record = recordingEnabled(args);
-  const statusArg = args.find((a) => a.startsWith('--status='));
+  // `--status Rejected` as well as `--status=Rejected`. Only the `=` form was
+  // read, so the space form, and any `--status` with no value, fell back to
+  // the default statuses without a word, and `--discard-expired --apply`
+  // then rewrote Evaluated and Applied rows the user never asked about.
+  // A --status with no value is a usage error (the hasFlag + flagValue
+  // pairing lib/cli-flags.mjs documents for this).
+  const statusGiven = hasFlag(args, '--status');
+  const statusValue = statusGiven ? flagValue(args, '--status') : undefined;
+  if (statusGiven && (typeof statusValue !== 'string' || !statusValue.trim() || statusValue.startsWith('--'))) {
+    console.error('--status needs a value, e.g. --status=Evaluated,Applied');
+    process.exitCode = 1;
+    return;
+  }
   const fromTracker = args.includes('--tracker');
   const discardExpired = args.includes('--discard-expired');
   const applyDiscards = args.includes('--apply');
-  const positional = args.filter((a) => a !== '--no-fallback' && a !== '--no-record' && a !== throttleArg
-    && a !== '--tracker' && a !== '--discard-expired' && a !== '--apply' && a !== statusArg);
+  const positional = urlPositionals(args);
 
   if (discardExpired && !fromTracker) {
     console.error('--discard-expired requires --tracker.');
@@ -186,7 +322,7 @@ async function main() {
     return;
   }
 
-  if (positional.length === 0 && !fromTracker) {
+  if (positional.length === 0 && !fromTracker && !hasFlag(args, '--file')) {
     console.error(USAGE);
     process.exitCode = 1;
     return;
@@ -207,13 +343,13 @@ async function main() {
       return;
     }
     trackerText = readFileSync(trackerPath, 'utf-8');
-    const statuses = statusArg ? statusArg.slice('--status='.length).split(',') : DEFAULT_TRACKER_STATUSES;
+    const statuses = statusGiven ? statusValue.split(',').map((s) => s.trim()).filter(Boolean) : DEFAULT_TRACKER_STATUSES;
     const { targets, noUrl } = trackerLivenessTargets(trackerText, { statuses, reportsRoot });
     console.log(`Tracker rows with status ${statuses.join(' or ')}: ${targets.length} with a posting URL${noUrl.length ? `, ${noUrl.length} without (${noUrl.map((n) => `#${n}`).join(' ')})` : ''}`);
     for (const t of targets) labels.set(t.url, `#${t.num} ${t.company} · ${t.role} (${t.status})`);
     urls = targets.map((t) => t.url);
-  } else if (positional[0] === '--file') {
-    const text = await readFile(positional[1], 'utf-8');
+  } else if (hasFlag(args, '--file')) {
+    const text = await readFile(flagValue(args, '--file'), 'utf-8');
     urls = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
   } else {
     urls = positional;
@@ -231,7 +367,8 @@ async function main() {
   let browser = null, page = null, headed = null;
   async function ensureBrowser() {
     if (browser) return;
-    const launched = await chromium.launch({ headless: true });
+    const { chromium } = await import('./lib/hardened-chromium.mjs');
+    const launched = await chromium.launch(browserLaunchOptions({ headless: true }));
     try {
       page = await newLivenessPage(launched);
       headed = noFallback ? null : createHeadedPageProvider(chromium);
@@ -245,14 +382,20 @@ async function main() {
 
   let active = 0, expired = 0, uncertain = 0, viaApi = 0;
   const verdicts = [];
+  // --throttle spaces repeat browser visits to the same host; the API rung is
+  // cheap and not WAF-rate-limited, so it never waits.
+  const spacer = createHostSpacer(throttleBaseMs);
+  // An Ashby board answers for every posting under its org: fetch each board
+  // once per run, not once per posting.
+  const boardCache = new Map();
 
   // Sequential — project rule: never Playwright in parallel
   for (let i = 0; i < urls.length; i++) {
     const url = urls[i];
-    let result, reason, code, usedBrowser = false;
+    let result, reason, code;
 
     // Rung 1: zero-token ATS API check. A conclusive active/expired wins; otherwise fall through.
-    const api = await checkLivenessViaApi(url);
+    const api = await checkLivenessViaApi(url, { boardCache });
     if (api) {
       ({ result, reason, code } = api);
       viaApi++;
@@ -266,13 +409,20 @@ async function main() {
       // were not confirmed.
       try {
         await ensureBrowser();
+        const wait = spacer.waitBefore(url);
+        if (wait) await sleep(wait);
         const getHeadedPage = headed ? () => headed.get() : undefined;
-        ({ result, reason, code } = await checkUrlLivenessWithFallback(page, url, { getHeadedPage }));
-        usedBrowser = true;
+        try {
+          ({ result, reason, code } = await checkUrlLivenessWithFallback(page, url, { getHeadedPage, robotsGate: robotsAllows }));
+        } finally {
+          // A failed visit counts too: that is when a WAF is most likely involved.
+          spacer.visited(url);
+        }
       } catch (err) {
         result = 'uncertain';
         code = 'browser_unavailable';
-        reason = `browser unavailable (${String(err?.message ?? err).split('\n')[0]}); run \`npx playwright install\` and re-run`;
+        const fix = err?.code === 'ERR_MODULE_NOT_FOUND' ? 'npm install' : 'npx playwright install chromium';
+        reason = `browser unavailable (${String(err?.message ?? err).split('\n')[0]}); run \`${fix}\` and re-run`;
       }
     }
 
@@ -282,17 +432,15 @@ async function main() {
     if (result === 'active') active++;
     else if (result === 'expired') expired++;
     else uncertain++;
-    verdicts.push({ url, result, code });
-
-    // Throttle only matters between browser checks (the API is cheap, not WAF-rate-limited).
-    const wait = usedBrowser && i < urls.length - 1 ? jitteredDelayMs(throttleBaseMs) : 0;
-    if (wait) await sleep(wait);
+    verdicts.push({ url, result, code, checkedAt: localStamp() });
   }
 
   if (headed) await headed.close();
   if (browser) await browser.close();
 
   console.log(`\nResults: ${active} active  ${expired} expired  ${uncertain} uncertain  (${viaApi} via API, no browser)`);
+  const quietBlocks = takeSuppressedBlockCount();
+  if (quietBlocks) console.log(`(${quietBlocks} tracker/analytics requests skipped: their host had no usable address, e.g. a DNS ad-blocker; not counted against any posting)`);
 
   // Close the loop: the verdict is the expensive part of this run and it used
   // to die with the process. `--no-record` leaves no trace, so the write is
@@ -300,10 +448,24 @@ async function main() {
   if (record) {
     const recorded = await recordExpiredVerdicts(verdicts);
     if (recorded > 0) console.log(`Recorded ${recorded} expired posting(s) in ${SCAN_HISTORY_PATH}`);
+    try {
+      await recordLivenessChecks(verdicts);
+    } catch (err) {
+      console.error(`Could not write ${LIVENESS_LOG_PATH}: ${err?.message ?? err}`);
+    }
   }
 
   if (discardExpired) {
-    const expiredUrls = verdicts.filter((v) => v.result === 'expired').map((v) => v.url);
+    // Only closure EVIDENCE closes a row. An `insufficient_content` verdict
+    // means the page could not be read, whether it arrives as `uncertain` or,
+    // from an older verdict, as `expired`, and this path writes Discarded to
+    // the tracker — see isClosureEvidence().
+    const { closed: expiredUrls, unreadable } = discardableExpiredUrls(verdicts);
+    if (unreadable.length > 0) {
+      console.log(`\nDiscard expired: ${unreadable.length} page(s) could not be read and were left as they are `
+        + '(an unreadable page is unconfirmed, not closed):');
+      for (const url of unreadable) console.log(`  · ${url}`);
+    }
     const planned = planExpiredDiscards(trackerText, expiredUrls, {
       statuses: DEFAULT_DISCARD_STATUSES,
       reportsRoot,

@@ -1,6 +1,6 @@
 /**
  * @typedef {{ type: "text", text: string } | { type: "tool", name: string } | { type: "status", label: string }} JobProgress
- * @typedef {{ status: "done", tokens?: number, costUsd?: number, reportN?: number } | { status: "error", message: string }} JobCompletion
+ * @typedef {{ status: "done", tokens?: number, costUsd?: number, reportN?: number } | { status: "gated", reason: (typeof EVALUATION_GATE_REASONS)[number], message: string, confirmationRequired: boolean, tokens?: number, costUsd?: number } | { status: "error", message: string }} JobCompletion
  */
 
 /**
@@ -28,6 +28,21 @@ export async function readJobStream(stream, onProgress) {
     }
     if (event?.type === "error") {
       return { status: "error", message: typeof event.msg === "string" && event.msg ? event.msg : "Error" };
+    }
+    if (event?.type === "gated") {
+      if (!EVALUATION_GATE_REASONS.includes(event.reason)
+          || typeof event.message !== "string" || !event.message.trim()
+          || typeof event.confirmationRequired !== "boolean") {
+        return { status: "error", message: "Invalid evaluation stop from the server. Review the worker output before retrying." };
+      }
+      return {
+        status: "gated",
+        reason: event.reason,
+        message: event.message,
+        confirmationRequired: event.confirmationRequired,
+        ...(Number.isFinite(event.tokens) && event.tokens >= 0 ? { tokens: event.tokens } : {}),
+        ...(Number.isFinite(event.costUsd) && event.costUsd >= 0 ? { costUsd: event.costUsd } : {}),
+      };
     }
     if (event?.type === "done") {
       return {
@@ -76,3 +91,4 @@ export async function readJobStream(stream, onProgress) {
     reader.releaseLock();
   }
 }
+import { EVALUATION_GATE_REASONS } from "./evaluation-gate.mjs";

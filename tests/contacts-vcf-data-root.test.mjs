@@ -25,6 +25,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFi
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT, rmSync } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const SCRIPT = join(ROOT, 'contacts.mjs');
 
@@ -58,7 +59,7 @@ test('--vcf writes its default output into the data root when the data root is n
   const f = fixture();
   try {
     const r = run(f, ['--vcf']);
-    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.status, 0, describeSpawn(r));
     assert.match(r.stdout, /Wrote 1 contact/);
     const out = join(f.dataRoot, 'output', 'contacts.vcf');
     assert.ok(existsSync(out), 'vCard lands in <data root>/output/contacts.vcf');
@@ -74,7 +75,7 @@ test('--vcf accepts an explicit path inside the data root (CAREER_OPS_DATA_DIR s
   try {
     const target = join(f.dataRoot, 'output', 'custom.vcf');
     const r = run(f, ['--vcf', target], 'CAREER_OPS_DATA_DIR');
-    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.status, 0, describeSpawn(r));
     assert.ok(existsSync(target), 'vCard lands at the explicit path');
   } finally {
     rmSync(f.base, { recursive: true, force: true });
@@ -86,7 +87,7 @@ test('--vcf still refuses a target outside the data root', () => {
   try {
     const outside = join(f.workDir, 'escape.vcf');
     const r = run(f, ['--vcf', outside]);
-    assert.equal(r.status, 1);
+    assert.equal(r.status, 1, describeSpawn(r));
     assert.match(r.stderr, /Refusing to write the vCard outside the project directory/);
     assert.ok(!existsSync(outside), 'the guard leaves no file outside the data root');
   } finally {
@@ -101,7 +102,7 @@ test('--vcf refuses a path into the checkout when the data root is elsewhere', (
   const inCheckout = join(ROOT, 'output', `contacts-vcf-guard-${process.pid}-${Date.now()}.vcf`);
   try {
     const r = run(f, ['--vcf', inCheckout]);
-    assert.equal(r.status, 1);
+    assert.equal(r.status, 1, describeSpawn(r));
     assert.match(r.stderr, /Refusing to write the vCard outside the project directory/);
     assert.ok(!existsSync(inCheckout), 'nothing written into the checkout');
   } finally {

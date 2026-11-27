@@ -1,7 +1,9 @@
+import { coreProfileEnv } from "@/lib/core/profile-path.mjs";
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { careerOpsRoot, portalsConfigPath, rootScript } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,7 +26,7 @@ export async function GET() {
   if (!fs.existsSync(verifyPortals)) {
     return Response.json({ available: false, configured: false, companies: [] });
   }
-  if (!fs.existsSync(path.join(root, "portals.yml"))) {
+  if (!fs.existsSync(portalsConfigPath(root))) {
     return Response.json({ available: true, configured: false, companies: [] });
   }
 
@@ -38,7 +40,7 @@ export async function GET() {
     execFile(
       process.execPath,
       [verifyPortals],
-      { cwd: root, timeout: 110_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
+      { cwd: resolveCodeRoot(process.cwd(), process.env), env: coreProfileEnv(careerOpsRoot()), timeout: 110_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
       (e, out, err) => {
         const stdout = out || "";
         if (!e && stdout.trim()) return resolve({ stdout, error: null });

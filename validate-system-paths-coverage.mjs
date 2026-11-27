@@ -22,20 +22,23 @@ import { fileURLToPath } from 'url';
 import { extractArrayFromSource, localUserPaths, LOCAL_PATHS_FILE } from './update-system.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
+// SYSTEM_PATHS lives in lib/update-manifest.mjs (#5554); USER_PATHS is still in
+// the updater. Both are read with the updater's own parser, as it reads them.
 const sourcePath = join(ROOT, 'update-system.mjs');
+const manifestPath = join(ROOT, 'lib', 'update-manifest.mjs');
 
-if (!existsSync(sourcePath)) {
-  console.error('FAIL: update-system.mjs not found');
-  process.exit(1);
+for (const path of [sourcePath, manifestPath]) {
+  if (!existsSync(path)) {
+    console.error(`FAIL: ${path} not found`);
+    process.exit(1);
+  }
 }
 
-const source = readFileSync(sourcePath, 'utf-8');
-
-const SYSTEM_PATHS = extractArrayFromSource(source, 'SYSTEM_PATHS');
-const USER_PATHS = extractArrayFromSource(source, 'USER_PATHS');
+const SYSTEM_PATHS = extractArrayFromSource(readFileSync(manifestPath, 'utf-8'), 'SYSTEM_PATHS');
+const USER_PATHS = extractArrayFromSource(readFileSync(sourcePath, 'utf-8'), 'USER_PATHS');
 
 if (SYSTEM_PATHS.length === 0 || USER_PATHS.length === 0) {
-  console.error('FAIL: SYSTEM_PATHS or USER_PATHS not found in update-system.mjs');
+  console.error('FAIL: SYSTEM_PATHS not found in lib/update-manifest.mjs, or USER_PATHS not found in update-system.mjs');
   process.exit(1);
 }
 // Paths a fork declared as its own in the gitignored local file (#2421).
@@ -58,10 +61,8 @@ const EXCLUDES = [
   '.coderabbit.yaml',
   '.editorconfig',
   '.envrc',
-  '.npmignore',
   '.release-please-manifest.json',
   'release-please-config.json',
-  'renovate.json',
   'flake.lock',
   'flake.nix',
   'batch/logs/.gitkeep',
@@ -108,7 +109,12 @@ const REPO_ONLY = ['SIGNATURES.md'];
 // web/ is the experimental web UI — its own release-please component, never
 // shipped by update-system.mjs, never in the npm package. Excluding it here is
 // part of that isolation contract, not a coverage gap.
-const EXCLUDE_PREFIXES = ['web/'];
+//
+// employers/inbox/ is where a contribution waits for its PR to be folded into
+// employers/boards/. The registry itself ships with each release (SYSTEM_PATHS),
+// with its manifests and licence; the inbox is a PR's staging area and stays in
+// the repo.
+const EXCLUDE_PREFIXES = ['web/', 'employers/inbox/'];
 
 function covered(file) {
   // If explicitly excluded, it is covered
@@ -178,7 +184,13 @@ if (process.argv.includes('--self-test')) {
   assert(covered('providers-sibling/justjoin.mjs') === false, 'providers-sibling/justjoin.mjs must NOT be covered');
   assert(covered('web/package.json') === true, 'web/ tree must be covered (isolation-contract prefix exclude)');
   assert(covered('web-dashboard/index.html') === false, 'web-dashboard/ must NOT ride the web/ prefix exclude');
-  assert(covered('.npmignore') === true, '.npmignore must be covered (excluded)');
+  // The registry ships with each release, with the manifests that carry its
+  // attribution; the inbox stays repo-only.
+  assert(SYSTEM_PATHS.includes('employers/boards/'), 'employers/boards/ must be in SYSTEM_PATHS: the registry ships with each release');
+  assert(SYSTEM_PATHS.includes('employers/contributions/') && SYSTEM_PATHS.includes('employers/LICENSE') && SYSTEM_PATHS.includes('employers/THIRD_PARTY_NOTICES.md'), 'the registry ships with its manifests, LICENSE and THIRD_PARTY_NOTICES.md (attribution travels with the data)');
+  assert(!SYSTEM_PATHS.some((p) => p.startsWith('employers/inbox')), 'employers/inbox/ must NOT enter SYSTEM_PATHS: it is a PR staging area');
+  assert(covered('employers/inbox/2026-11-20-octocat.ndjson') === true, 'employers/inbox/ must be covered (repo-only prefix exclude)');
+  assert(covered('employers-sibling/a.ndjson') === false, 'employers-sibling/ must NOT ride an employers/ path');
   // Asserted through the MECHANISM as well as covered(): if SIGNATURES.md ever
   // went back into SYSTEM_PATHS, covered() would still answer true while the
   // #4062 false-positive drift came back on every install.
@@ -249,7 +261,7 @@ if (orphans.length > 0) {
   console.error('Coverage gap — tracked files not in SYSTEM_PATHS or USER_PATHS:');
   for (const orphan of orphans) console.error(`  ${orphan}`);
   console.error('');
-  console.error('Add each path to update-system.mjs SYSTEM_PATHS (if system layer)');
+  console.error('Add each path to SYSTEM_PATHS in lib/update-manifest.mjs (if system layer)');
   console.error('or USER_PATHS (if user-owned), then re-run this check.');
   process.exit(1);
 }

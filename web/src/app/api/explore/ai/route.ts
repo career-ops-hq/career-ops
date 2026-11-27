@@ -4,11 +4,14 @@ import os from "node:os";
 import path from "node:path";
 import { cliSubstitutionNotice, cliUnavailableError, resolveCliOrFallback } from "@/lib/clis";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { assembleDedupContext } from "@/lib/core/discover";
+import { makeKnownOfferFilter } from "@/lib/explore-ai";
 import { CAPS } from "@/lib/worker-capabilities.mjs";
 import { scopeFrom } from "@/lib/claude-invocation.mjs";
 import { fencingReport } from "@/lib/cli-fencing.mjs";
 import { codexFencingSupported } from "@/lib/cli-fencing-probe.mjs";
+import { spillOversizedPrompt } from "@/lib/oversized-prompt.mjs";
 import { readJsonObject } from "@/lib/json-body";
 
 // Deny list DERIVED, never hand-written: every one of the six advisor argvs
@@ -63,12 +66,12 @@ export async function POST(req: Request) {
   // homegrown prompt. Missing (older core) → graceful 400 so the Scan tab stays usable.
   let mode: string;
   try {
-    mode = fs.readFileSync(path.join(careerOpsRoot(), "modes", "discover.md"), "utf8");
+    mode = fs.readFileSync(path.join(resolveCodeRoot(process.cwd(), process.env), "modes", "discover.md"), "utf8");
   } catch {
     return Response.json({ code: "MODE_MISSING", error: "AI search needs a newer career-ops — update to enable it." }, { status: 400 });
   }
 
-  const { lines } = assembleDedupContext();
+  const { lines, urls: knownUrls } = assembleDedupContext();
   const memory = readMemory();
   const memoryLine = memory.trim() ? `\n\nWHAT YOU KNOW ABOUT THE USER (persistent memory):\n${memory.trim()}` : "";
   const knownBlock = lines.length ? `\n\n--- ALREADY KNOWN (dedup — do NOT propose these) ---\n${lines.join("\n")}` : "";
@@ -116,10 +119,10 @@ export async function POST(req: Request) {
     ? path.join(childCwd, "final-response.txt")
     : undefined;
 
-  const args = isClaude
+  const buildArgs = (p: string) => isClaude
     ? [
         "-p",
-        prompt,
+        p,
         "--output-format",
         "stream-json",
         "--verbose",
@@ -146,9 +149,9 @@ export async function POST(req: Request) {
           ...CODEX_ISOLATION_FLAGS,
           CODEX_OUTPUT_FLAG,
           codexResultFile!,
-          prompt,
+          p,
         ]
-      : spec.args(prompt);
+      : spec.args(p);
 
   // POSIX detached children become process-group leaders. Keeping stdio
   // piped means Node still tracks the Codex process normally.
@@ -175,10 +178,25 @@ export async function POST(req: Request) {
   // for a writable workspace. Claude is unaffected; its tools are not sandboxed
   // and it still gets WebFetch (see ADVISOR_SCOPE).
   let child;
+  let spill: ReturnType<typeof spillOversizedPrompt> | undefined;
   try {
+    // The prompt carries the whole modes/_profile.md (readMemory) after the
+    // discover mode, the same profile /api/run spills for (#6743). A long one
+    // takes the launch past the Windows command line (32,767 UTF-16 units, an
+    // opaque `spawn ENAMETOOLONG`). A launch that would not fit gets the prompt
+    // in a file in the worker's own cwd, with a pointer in argv; the scope here
+    // includes Read, and Codex reads its own temporary workspace. A prompt that
+    // fits is passed as before.
+    spill = spillOversizedPrompt({
+      prompt,
+      buildArgs,
+      binPath,
+      fencing: { cliId, capabilities: CAPS.webSearchOnly },
+      root: childCwd,
+    });
     child = spawnHeadlessCli(
       binPath,
-      args,
+      spill.args,
       { cwd: childCwd, env: process.env, detached: useCodexProcessGroup },
       { cliId, capabilities: CAPS.webSearchOnly },
     );
@@ -186,6 +204,7 @@ export async function POST(req: Request) {
     // Fencing refuses an argv that contradicts the capability record. Report it
     // in this route's own error shape rather than letting the throw escape POST
     // as an unhandled rejection and an unstructured 500.
+    spill?.cleanup?.();
     cleanupChildCwd();
     return Response.json({ error: e instanceof Error ? e.message : "failed to start the CLI" }, { status: 500 });
   }
@@ -282,8 +301,15 @@ export async function POST(req: Request) {
           return false;
         }
       };
-      const emit = (s: string) => {
-        if (safeEnqueue(s)) emitted = true;
+      // The AI's own text goes through the known-URL filter: an offer the user
+      // already has is dropped here, so the browser never needs the whole set.
+      // `emitted` still records that the CLI produced output, even when every
+      // offer in it was a known one.
+      const knownFilter = makeKnownOfferFilter(knownUrls);
+      const emitAi = (s: string) => {
+        if (!s) return;
+        emitted = true;
+        safeEnqueue(knownFilter.feed(s));
       };
       // Same honesty as /api/run: a runtime with no verified fencing mechanism
       // runs with its default access, and that must be visible rather than
@@ -303,7 +329,7 @@ export async function POST(req: Request) {
         if (isCodex) return;
 
         if (!isClaude) {
-          emit(d.toString());
+          emitAi(d.toString());
           return;
         }
         buf += d.toString();
@@ -316,7 +342,7 @@ export async function POST(req: Request) {
             const obj = JSON.parse(line);
             if (obj.type === "stream_event" && obj.event?.type === "content_block_delta") {
               const text = obj.event.delta?.text;
-              if (typeof text === "string") emit(text);
+              if (typeof text === "string") emitAi(text);
             }
           } catch {
             /* partial / non-json line — skip */
@@ -341,12 +367,15 @@ export async function POST(req: Request) {
       child.on("error", (e) => {
         safeEnqueue(`
 [error launching ${spec.name}: ${e.message}]`);
+        spill?.cleanup?.();
         cleanupChildCwd();
         safeClose();
       });
 
       child.on("close", (code) => {
         clearTerminationTimers();
+        // The worker is gone, so its spilled prompt is no longer needed.
+        spill?.cleanup?.();
 
         if (closed) {
           cleanupChildCwd();
@@ -365,7 +394,8 @@ export async function POST(req: Request) {
           }
 
           if (finalText) {
-            emit(finalText);
+            emitAi(finalText);
+            safeEnqueue(knownFilter.flush());
           } else if (code !== 0) {
             const diagnosticText = codexStderr.trim();
             const diagnosticsCaptured = diagnosticText.length > 0;
@@ -408,6 +438,7 @@ export async function POST(req: Request) {
           return;
         }
 
+        safeEnqueue(knownFilter.flush());
         if (!emitted) safeEnqueue("_(no output — is the CLI authenticated?)_");
         safeClose();
       });

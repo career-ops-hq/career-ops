@@ -19,6 +19,7 @@ import { pass, fail } from './helpers.mjs';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runInThisContext } from 'node:vm';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = readFileSync(join(ROOT, 'test-all.mjs'), 'utf-8').replace(/\r\n/g, '\n');
@@ -34,7 +35,7 @@ const strip = (() => {
   const m = SRC.match(/\nfunction stripCommentLines\(src\) \{\n[\s\S]*?\n\}\n/);
   if (!m) return null;
   try {
-    return new Function(`${m[0]}\nreturn stripCommentLines;`)();
+    return runInThisContext(`(() => {\n${m[0]}\nreturn stripCommentLines;\n})()`);
   } catch {
     return null;
   }

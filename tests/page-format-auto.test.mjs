@@ -6,23 +6,34 @@
  * assertion that reads its answer from the module it pins compares the module to
  * itself and stays green whatever the module becomes (see page-format.test.mjs).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ROOT, NODE } from './helpers.mjs';
+import { toolRequired } from './required-tools.mjs';
 import {
   LETTER_COUNTRIES,
   PAGE_FORMATS,
   pageFormatForCountry,
+  readProfilePageSetting,
   resolvePageFormat,
 } from '../lib/page-format.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
+
+// Every workspace this file makes, removed once its tests have run, failed
+// ones included.
+const workspaces = [];
+after(() => {
+  for (const dir of workspaces) rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
+});
 
 function workspace(pageFormat) {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-page-format-auto-'));
+  workspaces.push(dir);
   for (const sub of ['config', 'data', 'output']) mkdirSync(join(dir, sub), { recursive: true });
   writeFileSync(
     join(dir, 'config', 'profile.yml'),
@@ -62,6 +73,20 @@ test('the Letter table is the CLDR paperSize list, pinned', () => {
     [...LETTER_COUNTRIES].sort(),
     ['BZ', 'CA', 'CL', 'CO', 'CR', 'GT', 'MX', 'NI', 'PA', 'PH', 'PR', 'SV', 'US', 'VE'],
   );
+});
+
+test('readProfilePageSetting keeps auto apart from an unset or unknown value', () => {
+  // The web dashboard reads this before its agent runs, to know whether to ask
+  // the agent for a country. readProfilePageFormat folds auto into null, which
+  // would make auto and "unset" look the same there.
+  assert.equal(readProfilePageSetting(profileOf(workspace('auto'))), 'auto');
+  assert.equal(readProfilePageSetting(profileOf(workspace(' AUTO '))), 'auto');
+  assert.equal(readProfilePageSetting(profileOf(workspace('A4'))), 'a4');
+  assert.equal(readProfilePageSetting(profileOf(workspace('letter'))), 'letter');
+  assert.equal(readProfilePageSetting(profileOf(workspace('legal'))), null);
+  assert.equal(readProfilePageSetting(profileOf(workspace(null))), null);
+  assert.equal(readProfilePageSetting(join(tmpdir(), 'no-such-dir', 'profile.yml')), null);
+  assert.equal(readProfilePageSetting(undefined), null);
 });
 
 test('auto is not a sheet: PAGE_FORMATS still holds only a4 and letter', () => {
@@ -126,7 +151,7 @@ test('injectPrintPageCss: auto picks the sheet from the country', () => {
       '',
     ].join('\n'));
     const res = spawnSync(NODE, [probe], { env: workspaceEnv(dir), encoding: 'utf-8' });
-    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.status, 0, describeSpawn(res));
     assert.match(res.stdout, new RegExp(`@page \\{ size: ${sheet};`), `${country}: ${res.stdout}${res.stderr}`);
   }
 });
@@ -138,7 +163,7 @@ test('build-cv-html: country is a known payload key, not a typo to warn about', 
   const res = spawnSync(NODE, [join(ROOT, 'build-cv-html.mjs'), payloadPath, join(dir, 'output', 'cv.html')], {
     env: workspaceEnv(dir), encoding: 'utf-8',
   });
-  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.status, 0, describeSpawn(res));
   assert.doesNotMatch(res.stderr + res.stdout, /country/i);
 });
 
@@ -149,7 +174,7 @@ function buildHtml(dir, payload) {
   const res = spawnSync(NODE, [join(ROOT, 'build-cv-html.mjs'), payloadPath, out], {
     env: workspaceEnv(dir), encoding: 'utf-8',
   });
-  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.status, 0, describeSpawn(res));
   return readFileSync(out, 'utf-8');
 }
 
@@ -188,13 +213,13 @@ test('generate-pdf: --format still outranks auto and --country', () => {
 
 test('generate-pdf: a bare --country with no value fails instead of being dropped', () => {
   const res = runPdf(workspace('auto'), '--country');
-  assert.equal(res.status, 1);
+  assert.equal(res.status, 1, describeSpawn(res));
   assert.match(res.stderr, /Invalid country ""/);
 });
 
 test('generate-pdf: a malformed --country fails loudly, like a bad --format', () => {
   const res = runPdf(workspace('auto'), '--country=Germany');
-  assert.equal(res.status, 1);
+  assert.equal(res.status, 1, describeSpawn(res));
   assert.match(res.stderr, /Invalid country "Germany"/);
 });
 
@@ -235,14 +260,16 @@ test('renderHtmlToPdf: auto records the sheet the country calls for', () => {
 });
 
 // The batch CLI cannot take a stub browser, so these need a real Chromium and
-// skip where none is installed. The sheet is the PDF's MediaBox: 595x842pt is
-// A4, 612x792pt is Letter.
+// skip where none is installed, except where the browser is required
+// (`test-all.mjs --needs browser`). The sheet is the PDF's MediaBox: 595x842pt
+// is A4, 612x792pt is Letter.
 const chromiumReady = (() => {
   const res = spawnSync(NODE, ['-e',
     "import('playwright').then(async ({chromium})=>{const b=await chromium.launch();await b.close();console.log('READY')}).catch(()=>{})",
   ], { cwd: ROOT, encoding: 'utf-8' });
   return res.stdout.includes('READY');
 })();
+const browserSkip = !toolRequired('browser') && !chromiumReady && 'no Chromium';
 
 function mediaBox(pdfPath) {
   const m = readFileSync(pdfPath, 'latin1').match(/\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/);
@@ -269,7 +296,7 @@ function entry(dir, name, extra = {}) {
   return { input: join(dir, `${name}.html`), output: join(dir, 'output', `${name}.pdf`), kind: 'cover', ...extra };
 }
 
-test('generate-pdf --batch: each entry takes its own country under auto', { skip: !chromiumReady && 'no Chromium' }, () => {
+test('generate-pdf --batch: each entry takes its own country under auto', { skip: browserSkip }, () => {
   const dir = workspace('auto');
   const res = runBatch(dir, [entry(dir, 'de', { country: 'DE' }), entry(dir, 'us', { country: 'US' }), entry(dir, 'none')]);
   assert.equal(res.status, 0, res.stderr + res.stdout);
@@ -278,15 +305,15 @@ test('generate-pdf --batch: each entry takes its own country under auto', { skip
   assert.equal(mediaBox(join(dir, 'output', 'none.pdf')), '612x792');
 });
 
-test('generate-pdf --batch: a malformed entry country fails that entry only', { skip: !chromiumReady && 'no Chromium' }, () => {
+test('generate-pdf --batch: a malformed entry country fails that entry only', { skip: browserSkip }, () => {
   const dir = workspace('auto');
   const res = runBatch(dir, [entry(dir, 'a', { country: 'Germany' }), entry(dir, 'b', { country: 'DE' })]);
-  assert.notEqual(res.status, 0);
+  assert.ok(exitedNonZero(res), describeSpawn(res, 'expected a non-zero exit'));
   assert.match(res.stderr + res.stdout, /invalid country "Germany"/);
   assert.equal(mediaBox(join(dir, 'output', 'b.pdf')), '595x842');
 });
 
-test('generate-cover-letter: the payload country steers auto, and --country outranks it', { skip: !chromiumReady && 'no Chromium' }, () => {
+test('generate-cover-letter: the payload country steers auto, and --country outranks it', { skip: browserSkip }, () => {
   const letter = {
     role_title: 'Head of Marketing', opening: 'Opening line.', profile_intro: 'Profile intro.',
     company: 'Example Corp', city: 'Berlin', date: 'September 8, 2026',
@@ -312,7 +339,7 @@ test('generate-cover-letter: the payload country steers auto, and --country outr
 
 test('generate-pdf: --country keeps everything after the prefix, so DE=US is rejected', () => {
   const res = runPdf(workspace('auto'), '--country=DE=US');
-  assert.equal(res.status, 1);
+  assert.equal(res.status, 1, describeSpawn(res));
   assert.match(res.stderr, /Invalid country "DE=US"/);
 });
 
@@ -345,7 +372,7 @@ test('generate-cover-letter: --format takes only a4 or letter, never auto', () =
   }
 });
 
-test('generate-pdf --batch: a global --country covers an entry with none, and an entry format still wins', { skip: !chromiumReady && 'no Chromium' }, () => {
+test('generate-pdf --batch: a global --country covers an entry with none, and an entry format still wins', { skip: browserSkip }, () => {
   const dir = workspace('auto');
   const res = runBatchWithFlags(dir, [
     entry(dir, 'bare'),

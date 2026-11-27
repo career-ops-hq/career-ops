@@ -4,6 +4,7 @@
 // behaviour that prevents that: each unit gets its own pool, and every socket
 // in it is closed when the unit ends, whether it resolved or threw.
 import http from 'node:http';
+import { listenOnSafePort } from './helpers/listen-safe-port.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { pass, fail, ROOT } from './helpers.mjs';
@@ -87,7 +88,7 @@ delete process.env.CAREER_OPS_CONNECTION_SCOPE;
       open++; peak = Math.max(peak, open);
       socket.on('close', () => { open--; });
     });
-    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    await listenOnSafePort(server);
     servers.push(server);
   }
   try {
@@ -109,7 +110,7 @@ delete process.env.CAREER_OPS_CONNECTION_SCOPE;
 // Only per-tenant-host sources are scoped; single-host directories share one pool.
 {
   const { SOURCES } = await import(pathToFileURL(join(ROOT, 'scan-ats-full.mjs')).href);
-  const single = ['greenhouse', 'lever', 'ashby'].every((s) => SOURCES[s].singleHost === true);
+  const single = ['greenhouse', 'lever', 'ashby', 'paylocity', 'join', 'workable'].every((s) => SOURCES[s].singleHost === true);
   const multi = ['workday', 'icims', 'bamboohr'].every((s) => !SOURCES[s].singleHost);
   if (single && multi) pass('single-host sources unscoped; workday, icims and bamboohr scoped');
   else fail(`singleHost flags: ${JSON.stringify(Object.fromEntries(Object.entries(SOURCES).map(([k, v]) => [k, v.singleHost])))}`);

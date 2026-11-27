@@ -28,7 +28,7 @@ export function splitLines(text) {
   return text.split(/\r?\n/);
 }
 
-const LABELED_SEGMENT = /^(posted|trust|note|rank):\s(.*)$/i;
+const LABELED_SEGMENT = /^(posted|trust|yrs|note|rank):\s(.*)$/i;
 
 /** What a row points at: a posting URL, or a job description saved on disk
  *  (`local:jds/…`, the row modes/scan.md writes for a pasted posting). */
@@ -37,12 +37,12 @@ const ROW_TARGET = /^(?:https?:\/\/|local:\S)/i;
 /** Parse data/pipeline.md — `- [ ] URL | Company | Role [| Location [| Compensation]] [| label: …]*`.
  *  The http(s) or `local:` cell is the URL, so `#NNN | URL | …` and a bare
  *  checkbox URL both survive. Company and role are the first two cells after that URL and
- *  are never labels: a `word:` there is text. Labels (`posted:`/`trust:`/`note:`/`rank:`)
+ *  are never labels: a `word:` there is text. Labels (`posted:`/`trust:`/`yrs:`/`note:`/`rank:`)
  *  start at the third cell after the URL, so they do not occupy location or
  *  compensation. Missing company and role stay empty. A row with neither an
  *  http(s) nor a `local:` cell is skipped. Further trailing columns are ignored.
  *  @param {string} md - content of data/pipeline.md.
- *  @returns {{url: string, company: string, role: string, location?: string, compensation?: string, done: boolean, postedAt?: string}[]}
+ *  @returns {{url: string, company: string, role: string, location?: string, compensation?: string, done: boolean, postedAt?: string, rankStamp?: string}[]}
  */
 export function parseInbox(md) {
   const jobs = [];
@@ -63,6 +63,7 @@ export function parseInbox(md) {
       else positional.push(seg);
     }
     const posted = labels.get("posted");
+    const rankStamp = labels.get("rank");
     jobs.push({
       done: m[1].toLowerCase() === "x",
       url: all[urlIndex],
@@ -73,6 +74,9 @@ export function parseInbox(md) {
       // the row's own posting date (scan.mjs `posted:` label) — a more direct
       // freshness signal than the scan-history join, which stays as fallback
       postedAt: posted && /^\d{4}-\d{2}-\d{2}$/.test(posted) ? posted : undefined,
+      // Absent unless the row carries a rank label. A present-but-undefined
+      // key fails deep equality on rows that were never ranked.
+      ...(rankStamp ? { rankStamp } : {}),
     });
   }
   return jobs;

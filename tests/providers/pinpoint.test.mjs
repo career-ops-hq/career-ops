@@ -137,13 +137,26 @@ try {
     fail(`parsePinpointResponse row 2 location = ${JSON.stringify(jobs[2]?.location)}`);
   }
 
-  if (parsePinpointResponse({}, 'X').length === 0) pass('parsePinpointResponse: empty {} → empty result');
-  else fail('parsePinpointResponse: empty {} should yield empty result');
-
-  if (parsePinpointResponse({ data: null }, 'X').length === 0) {
-    pass('parsePinpointResponse: null data → empty result (no crash)');
-  } else {
-    fail('parsePinpointResponse: null data should yield empty result');
+  // Empty vs broken (#6906, ADDING_A_PROVIDER.md "Defensive parsing"): only the
+  // documented container, present and empty, is an empty board. Any other body
+  // throws, naming the keys (or the type) it got.
+  {
+    const emptyBoard = parsePinpointResponse({ data: [] }, 'X');
+    if (Array.isArray(emptyBoard) && emptyBoard.length === 0) pass('parsePinpointResponse returns [] for { data: [] }');
+    else fail(`parsePinpointResponse { data: [] } → ${JSON.stringify(emptyBoard)}`);
+    let brokenOk = true;
+    for (const [body, got] of [[{}, '[]'], [{ error: 'rate limited' }, '[error]'], [{ data: null }, '[data]'], [{ data: {} }, '[data]'], ['oops', '[string]'], [null, '[null]']]) {
+      let out;
+      let err = null;
+      try { out = parsePinpointResponse(body, 'X'); } catch (e) { err = e; }
+      const msg = String(err?.message || '');
+      if (!err || !msg.startsWith('pinpoint: unexpected response for X') || !msg.includes(`got: ${got}`)) {
+        brokenOk = false;
+        fail(`parsePinpointResponse body=${JSON.stringify(body)} should throw naming ${got}; got ${err ? JSON.stringify(msg) : `a return of ${JSON.stringify(out)}`}`);
+        break;
+      }
+    }
+    if (brokenOk) pass('parsePinpointResponse throws, naming what it got, for a body that is not a board');
   }
 
   // fetch(): requests the derived postings.json URL and passes the SSRF guard.
@@ -234,6 +247,52 @@ try {
     pass('parsePinpointResponse keeps a posting with no description field at all');
   } else {
     fail('parsePinpointResponse should not drop a posting merely for lacking a description');
+  }
+
+  // listingIdentity (#6908): the tenant label of the board's host and the
+  // posting's id from the payload, which Pinpoint writes as a string of digits.
+  {
+    const { pinpointListingIdentity } = pinpointModule;
+    const identityRows = await pinpoint.fetch(
+      { name: 'Acme', careers_url: 'https://acme.pinpointhq.com' },
+      { fetchJson: async () => ({ data: [
+        { id: '583795', title: 'Engineer', url: 'https://acme.pinpointhq.com/postings/abc' },
+        { id: 583796, title: 'Number Id', url: 'https://acme.pinpointhq.com/postings/def' },
+        { title: 'No Id', url: 'https://acme.pinpointhq.com/postings/ghi' },
+      ] }) },
+    );
+    const identity = identityRows[0]?.listingIdentity;
+    if (identity && identity.ats_provider === 'pinpoint' && identity.board_slug === 'acme' && identity.posting_id === '583795') {
+      pass('pinpoint.fetch() returns the pinpoint/<host label>/<posting id> listingIdentity');
+    } else {
+      fail(`pinpoint listingIdentity = ${JSON.stringify(identity)}`);
+    }
+    if (identityRows.length === 3 && !('listingIdentity' in identityRows[1]) && !('listingIdentity' in identityRows[2])) {
+      pass('a pinpoint posting whose id is a number, or that has none, leaves listingIdentity off and keeps the row');
+    } else {
+      fail(`rows without identity = ${JSON.stringify(identityRows.slice(1))}`);
+    }
+
+    if (pinpointListingIdentity('acme', '583795')?.posting_id === '583795'
+        && pinpointListingIdentity('acme', 583795) === undefined
+        && pinpointListingIdentity('acme', '0') === undefined
+        && pinpointListingIdentity('acme', '0583795') === undefined
+        && pinpointListingIdentity('acme', ' 583795') === undefined
+        && pinpointListingIdentity('acme', '58a') === undefined
+        && pinpointListingIdentity('acme', '') === undefined
+        && pinpointListingIdentity('acme', null) === undefined
+        && pinpointListingIdentity('', '583795') === undefined
+        && pinpointListingIdentity(' acme', '583795') === undefined
+        && pinpointListingIdentity('ac\nme', '583795') === undefined
+        && pinpointListingIdentity(null, '583795') === undefined) {
+      pass('pinpointListingIdentity takes only a string of digits with no leading zero and a clean slug');
+    } else {
+      fail('pinpointListingIdentity accepted an id or a slug it must refuse');
+    }
+
+    const noSlug = parsePinpointResponse({ data: [{ id: '583795', title: 'Engineer', url: 'https://acme.pinpointhq.com/postings/abc' }] }, 'Acme');
+    if (noSlug.length === 1 && !('listingIdentity' in noSlug[0])) pass('parsePinpointResponse without a board slug gives no listingIdentity');
+    else fail(`no-slug rows = ${JSON.stringify(noSlug)}`);
   }
 
 } catch (e) {

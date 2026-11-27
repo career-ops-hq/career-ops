@@ -143,7 +143,8 @@ export function parseBlocks(html) {
  * @typedef {{hidden: Set<string>, order: Record<string, string[]>, text: Record<string, string>}} BlockView
  */
 
-function arrange(children, order) {
+/** @template {{id: string}} T @param {T[]} children @param {string[] | undefined} order @returns {T[]} */
+export function arrange(children, order) {
   if (!order) return children;
   const byId = new Map(children.map((c) => [c.id, c]));
   const picked = order.map((id) => byId.get(id)).filter(Boolean);
@@ -158,15 +159,24 @@ function renderRange(html, start, end, children, ordered, hidden, renderChild) {
   let out = html.slice(start, slots[0].start);
   visible.forEach((c, k) => {
     out += renderChild(c);
-    if (k < visible.length - 1) out += gaps[Math.min(k, gaps.length - 1)] ?? "";
+    // A lone source slot has no gap to copy; only added bullets can follow it.
+    if (k < visible.length - 1) out += gaps[Math.min(k, gaps.length - 1)] ?? "\n    ";
   });
   return out + html.slice(slots[slots.length - 1].end, end);
 }
 
 /**
+ * A bullet that is not in the tailored HTML (one the tailor dropped and the
+ * user added back). Its id takes part in `view.order` like a source bullet's.
+ *
+ * @typedef {{id: string, text: string}} AddedBullet
+ */
+
+/**
  * @param {BlockTree} tree
  * @param {BlockView} view
- * @param {{added?: Record<string, string[]>}} [extra] new bullets appended to an entry, by item id
+ * @param {{added?: Record<string, AddedBullet[]>}} [extra] new bullets for an entry, by item id;
+ *   placed by `view.order`, after the source bullets when the order does not name them
  * @returns {string}
  */
 export function renderBlocks(tree, view, extra = {}) {
@@ -177,15 +187,14 @@ export function renderBlocks(tree, view, extra = {}) {
     return html.slice(b.start, b.inner[0]) + escapeHtml(text) + html.slice(b.inner[1], b.end);
   };
   const renderItem = (item) => {
-    const added = (extra.added?.[item.id] ?? []).filter((t) => t.trim());
     if (!item.bullets.length) return html.slice(item.start, item.end);
-    let out = renderRange(html, item.start, item.end, item.bullets, arrange(item.bullets, view.order[item.id]), view.hidden, renderBullet);
-    if (added.length && item.kind === "entry") {
-      const li = html.slice(item.bullets[0].start, item.bullets[0].inner[0]);
-      const extraLis = added.map((t) => `${li}${escapeHtml(t)}</li>`).join("\n    ");
-      out = out.replace(/(\s*)<\/ul>/, (m, ws) => `\n    ${extraLis}${ws}</ul>`);
-    }
-    return out;
+    const added = item.kind === "entry" ? (extra.added?.[item.id] ?? []).filter((a) => a.text.trim()) : [];
+    if (!added.length) return renderRange(html, item.start, item.end, item.bullets, arrange(item.bullets, view.order[item.id]), view.hidden, renderBullet);
+    const li = html.slice(item.bullets[0].start, item.bullets[0].inner[0]);
+    const fresh = added.map((a) => ({ id: a.id, markup: `${li}${escapeHtml(a.text)}</li>` }));
+    /** @type {(Bullet | {id: string, markup: string})[]} */
+    const all = [...item.bullets, ...fresh];
+    return renderRange(html, item.start, item.end, item.bullets, arrange(all, view.order[item.id]), view.hidden, (c) => ("markup" in c ? c.markup : renderBullet(c)));
   };
   const renderSection = (s) => {
     if (s.items.length && s.items.every((i) => view.hidden.has(i.id))) return "";

@@ -13,8 +13,9 @@ import { normalizeTextKey } from "./normalize-text-key.mjs";
 //  2. It must not collide. Two different companies sharing a key means one of
 //     them wears the other's logo permanently, with no expiry to correct it.
 
-/** Bump whenever `companyDomains()` in app/api/logo/route.ts changes which
- *  domains it tries, or in what order — OR whenever the key derivation itself
+/** Bump whenever the route's candidate list (`companyDomains()` in
+ *  lib/core/company-domains.mjs, fed by the curated lookup in lib/company.ts)
+ *  changes which domains it tries, or in what order — OR whenever the key derivation itself
  *  changes, per requirement 1 above: an unchanged version leaves any entry
  *  poisoned under the old derivation permanently reachable, with nothing to
  *  correct it. The version is part of every key, so bumping it makes entries
@@ -30,8 +31,18 @@ import { normalizeTextKey } from "./normalize-text-key.mjs";
  *  — v2 stripped every non-ASCII letter, so "Škoda" and "Koda" hashed to the
  *  IDENTICAL key and one silently wore the other's logo forever (requirement 2,
  *  violated). Bumping discards any v2 entry poisoned this way rather than
- *  leaving it reachable under an unchanged "koda" key. */
-export const COMPANY_KEY_VERSION = "v4";
+ *  leaving it reachable under an unchanged "koda" key.
+ *  v5: a failed lookup (timeout, offline, 429, 5xx) is no longer cached as a
+ *  miss (logo-fetch.mjs). Every sentinel written by one of those under v4 is
+ *  indistinguishable on disk from a real miss, so the same reasoning as v4
+ *  applies: without a bump the fix never reaches the companies it is for.
+ *  v6: the route passed lib/company.ts's companyDomain() as the curated
+ *  lookup, but it fell back to an un-folded slug+".com" for every name not in
+ *  the map, and that guess went first: "Telefónica" tried telefónica.com,
+ *  "Co-op Group" tried -op.com, "日本電産" tried 日本電産.com. The lookup is
+ *  now curated-only (curatedCompanyDomain), so the first candidate changes for
+ *  every company outside the map. */
+export const COMPANY_KEY_VERSION = "v6";
 
 /** Cache key for a company name, or null if the name carries nothing to key on.
  *

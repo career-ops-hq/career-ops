@@ -6,11 +6,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { liveServerSkip } from "../helpers/live-server.mjs";
 
 const url = process.env.PIPELINE_RETURN_TEST_URL;
 const root = process.env.PIPELINE_RETURN_TEST_ROOT;
 
-test("Pipeline detail links preserve the list context", { skip: !url || !root, timeout: 120_000 }, async (t) => {
+test("Pipeline detail links preserve the list context", { skip: liveServerSkip("PIPELINE_RETURN_TEST_URL", "PIPELINE_RETURN_TEST_ROOT"), timeout: 120_000 }, async (t) => {
   const origin = new URL(url);
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
   const relative = path.relative(os.tmpdir(), fs.realpathSync(root));
@@ -27,8 +28,9 @@ test("Pipeline detail links preserve the list context", { skip: !url || !root, t
 
   await page.goto(`${origin.origin}/pipeline?tab=EVALUATED&min=3.5&sort=company&dir=1`);
   const search = page.getByPlaceholder("Search company or role…");
-  await search.fill("Fixture"); // local typing does not update the URL
+  await search.fill("Fixture"); // detail links include this immediately; the list URL catches up after a short pause
   const row = page.locator("tbody tr").filter({ has: page.getByRole("link", { name: "#11", exact: true }) });
+  await row.locator('a[href*="q=Fixture"]').first().waitFor();
   for (const name of ["#11", "Fixture Alpha", "Engineer"]) {
     const href = await row.getByRole("link", { name, exact: true }).getAttribute("href");
     assert.equal(href, `/pipeline/11?${query}`);

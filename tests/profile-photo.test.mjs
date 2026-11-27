@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const TEMPLATE = join(ROOT, 'templates', 'cv-template.html');
@@ -92,6 +93,40 @@ test('project-relative image is validated and inlined', () => {
   assert.match(html, /src="data:image\/png;base64,/);
 });
 
+// The profile is a user-layer file, so a relative photo path in it is read
+// from the data root. It resolved against the checkout, so with the user layer
+// moved out (CAREER_OPS_ROOT) the photo kept next to the profile was never
+// found and the build failed.
+function dataRootPhotoBuild(relPhoto, bytes) {
+  const dir = mkdtempSync(join(tmpdir(), 'photo-data-root-'));
+  const root = join(dir, 'data-root');
+  mkdirSync(join(root, dirname(relPhoto)), { recursive: true });
+  writeFileSync(join(root, relPhoto), bytes);
+  writeProfile(root, relPhoto);
+  const input = join(dir, 'input.json');
+  const output = join(dir, 'output.html');
+  writeFileSync(input, JSON.stringify(payload(relPhoto)));
+  const result = spawnSync(process.execPath, ['build-cv-html.mjs', input, output, TEMPLATE], {
+    cwd: ROOT, encoding: 'utf8', env: { ...process.env, CAREER_OPS_ROOT: root },
+  });
+  return { result, html: existsSync(output) ? readFileSync(output, 'utf8') : '' };
+}
+
+test('a relative photo is read from the data root, where the profile is', () => {
+  const { result, html } = dataRootPhotoBuild('assets/headshot.png', ONE_PIXEL_PNG);
+  assert.equal(result.status, 0, describeSpawn(result, 'expected the build to find the photo in the data root'));
+  assert.ok(html.includes(`src="data:image/png;base64,${ONE_PIXEL_PNG.toString('base64')}"`), 'the data-root photo is inlined');
+});
+
+test('the data root wins over the checkout when both have the relative path', () => {
+  // docs/logo.png exists in the checkout; a different image at the same path
+  // in the data root is the one the user meant.
+  assert.ok(existsSync(join(ROOT, 'docs', 'logo.png')), 'premise: the checkout has docs/logo.png');
+  const { result, html } = dataRootPhotoBuild('docs/logo.png', ONE_PIXEL_PNG);
+  assert.equal(result.status, 0, describeSpawn(result, 'expected a clean build'));
+  assert.ok(html.includes(`src="data:image/png;base64,${ONE_PIXEL_PNG.toString('base64')}"`), 'the data-root image is inlined, not the checkout logo');
+});
+
 test('single-letter Windows drive paths reach local file handling', () => {
   const dir = mkdtempSync(join(tmpdir(), 'photo-windows-path-'));
   const input = join(dir, 'input.json');
@@ -101,7 +136,7 @@ test('single-letter Windows drive paths reach local file handling', () => {
   const root = mkdtempSync(join(tmpdir(), 'photo-windows-root-'));
   writeProfile(root, winPath);
   const result = spawnSync(process.execPath, ['build-cv-html.mjs', input, output, TEMPLATE], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, CAREER_OPS_ROOT: root } });
-  assert.notEqual(result.status, 0);
+  assert.ok(exitedNonZero(result), describeSpawn(result, 'expected a non-zero exit'));
   assert.doesNotMatch(result.stderr, /Unsupported profile photo URL scheme/);
   assert.match(result.stderr, /not found or unreadable/);
 });
@@ -116,7 +151,7 @@ test('a payload photo path that config/profile.yml does not name is refused (#50
   ];
   for (const [label, profilePhoto] of cases) {
     const { result, output } = buildWith(payload(secret), profilePhoto);
-    assert.notEqual(result.status, 0, label);
+    assert.ok(exitedNonZero(result), describeSpawn(result, label));
     assert.match(result.stderr, /does not match candidate\.photo in config\/profile\.yml/, label);
     assert.equal(existsSync(output), false, label);
   }
@@ -124,14 +159,14 @@ test('a payload photo path that config/profile.yml does not name is refused (#50
 
 test('a relative path that climbs out of the project is refused unless the profile names it (#5094)', () => {
   const { result, output } = buildWith(payload('../../../../etc/hosts.png'), 'docs/logo.png');
-  assert.notEqual(result.status, 0);
+  assert.ok(exitedNonZero(result), describeSpawn(result, 'expected a non-zero exit'));
   assert.match(result.stderr, /does not match candidate\.photo in config\/profile\.yml/);
   assert.equal(existsSync(output), false);
 });
 
 test('http(s) photo URLs do not need the profile (#5094)', () => {
   const { result, output } = buildWith(payload('https://example.com/me.png'), undefined);
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, describeSpawn(result));
   assert.equal(existsSync(output), true);
 });
 
@@ -163,7 +198,7 @@ test('missing, unsupported, and invalid-style photos fail clearly', () => {
     const root = mkdtempSync(join(tmpdir(), 'photo-fail-root-'));
     writeProfile(root, value.candidate.photo);
     const result = spawnSync(process.execPath, ['build-cv-html.mjs', input, output, TEMPLATE], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, CAREER_OPS_ROOT: root } });
-    assert.notEqual(result.status, 0);
+    assert.ok(exitedNonZero(result), describeSpawn(result, 'an invalid profile photo must fail the build'));
     assert.match(result.stderr, expected);
     assert.equal(existsSync(output), false);
   }

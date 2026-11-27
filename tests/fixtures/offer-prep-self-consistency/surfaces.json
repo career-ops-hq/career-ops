@@ -1,0 +1,44 @@
+[
+  {
+    "id": "S1",
+    "title": "Referenced-documents inventory (item 3, narrowed)",
+    "parent": "## Step 0 — Intake and gates",
+    "start": "**Referenced-documents inventory:** list every document the contract",
+    "end": "becomes a lawyer question; no statutory figure is stated.",
+    "bans": [],
+    "expected_blocks": "P",
+    "expected_norm": "referenced-documents inventory: list every document the contract incorporates by reference (equity plan, option agreement, piia, handbook, arbitration rules) and ask for them. unprovided ones are named in the output header, and each generates a lawyer question — a clause that defers to an unseen controlling document cannot be fully described. a clause that states no figure and refers to another instrument for it (\"as set out in the applicable collective agreement\", \"per the bonus policy as amended from time to time\") counts as such a reference and also gets one item to raise: \"the clause gives no figure and refers to {quoted reference}. which document sets it, in which version, and can you share it?\" the item says nothing about what that document contains. nothing is looked up: the candidate asks the employer. a clause that refers to a statute instead becomes a lawyer question; no statutory figure is stated."
+  },
+  {
+    "id": "S2",
+    "title": "Package inventory (item 2)",
+    "parent": "## Step 0 — Intake and gates",
+    "start": "**Package inventory:**",
+    "end": "referenced-documents inventory above.",
+    "bans": [],
+    "expected_blocks": "P",
+    "expected_norm": "package inventory: ask which documents came with the offer, and list every one the contract does not reference (for example a separately signed acknowledgement, a policy pdf or a declaration form). each is named in the output header and gets one item to raise: \"what is this document, and does it form part of the agreement?\" nothing is inferred about what it means for the contract, and the list stays separate from the referenced-documents inventory above."
+  },
+  {
+    "id": "S3",
+    "title": "Step 3, within the document (item 1)",
+    "parent": "## Step 3 — Consistency check",
+    "start": "**Within the document:**",
+    "end": "no new tag is added.",
+    "bans": [
+      "K17"
+    ],
+    "expected_blocks": "P",
+    "expected_norm": "within the document: the contract is also read against itself. quote both places wherever two parts of the same document state a different value for the same figure in the same unit (body and annex, a clause and a schedule). a clause that takes its figure from one of those places is quoted too, together with the clause it cites. a clause that only refers to a figure whose value is the same everywhere is not a finding. say only that the two readings differ; neither is called the one that applies. each is listed in the consistency deltas and also becomes one item to raise: \"can you confirm which figure applies?\" where two places state the same quantity in different units (days and weeks, a monthly and a yearly amount, 12 or 13 salaries), nothing is converted: both places are quoted in one item to raise that asks only \"which figure applies?\", and no difference is claimed. a lawyer question follows only where a quoted clause already carries [ask your lawyer]; no new tag is added."
+  },
+  {
+    "id": "S4",
+    "title": "Output header, package line (item 2)",
+    "parent": "# Offer Prep — {Company} — {Role}",
+    "start": "**Referenced documents not provided:** {list or \"none\"}",
+    "end": "**Contents:** clause walk · notable absences · consistency deltas · lawyer questions · items to raise",
+    "bans": [],
+    "expected_blocks": "P",
+    "expected_norm": "referenced documents not provided: {list or \"none\"} received, not referenced by the contract: {list or \"none\"} contents: clause walk · notable absences · consistency deltas · lawyer questions · items to raise"
+  }
+]

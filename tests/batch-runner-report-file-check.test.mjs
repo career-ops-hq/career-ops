@@ -20,6 +20,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ROOT, getBash, rmSync } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const SRC = readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/\r\n/g, '\n');
 const FN = SRC.match(/^has_report_file\(\) \{\n[\s\S]*?\n\}\n/m);
@@ -39,7 +40,7 @@ function check(files, num) {
     ].join('\n');
     const r = spawnSync(getBash(), ['-c', script], { encoding: 'utf8', timeout: 10000 });
     assert.ifError(r.error);
-    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.status, 0, describeSpawn(r));
     return r.stdout.trim();
   } finally { rmSync(root, { recursive: true, force: true }); }
 }

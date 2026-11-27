@@ -3,10 +3,11 @@
 // Every apply API is intercepted: no employer page, AI worker, or submission.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { liveServerSkip } from "../helpers/live-server.mjs";
 
 const url = process.env.APPLY_FIELDS_TEST_URL;
 
-test("application review labels, requirements and confirmation descriptions", { skip: !url, timeout: 120_000 }, async (t) => {
+test("application review labels, requirements and confirmation descriptions", { skip: liveServerSkip("APPLY_FIELDS_TEST_URL"), timeout: 120_000 }, async (t) => {
   const origin = new URL(url);
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
   const { chromium } = await import("playwright-core");

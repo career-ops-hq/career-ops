@@ -11,7 +11,7 @@ For reviewers on the [contributor ladder](../GOVERNANCE.md#contributor-ladder). 
 ## What to check, in order
 
 1. **Data contract** — does the diff touch user files (`cv.md`, `config/profile.yml`, `data/`, `reports/`)? User files are never written without explicit opt-in. This is the one non-negotiable.
-2. **Tests** — does `node test-all.mjs` pass? Does new behavior come with a check? Files added at top level must be registered in `SYSTEM_PATHS` (update-system.mjs).
+2. **Tests** — does `node test-all.mjs` pass? Does new behavior come with a check? Files added at top level must be registered in `SYSTEM_PATHS` (`lib/update-manifest.mjs`).
 3. **Scope** — does the diff match what the linked issue asked for? Features nobody asked for, or >200 lines with no issue, get a conversation before a review.
 4. **Behavior changes** — anything under `modes/` changes what the agent does. Descriptive signals with guards written into the text are the house style; anything that changes scoring or tiers goes to the maintainer.
 5. **Security** — new fetches get hostname validation (parse the URL, never substring-match), no new dependencies without discussion, nothing auto-submits on a candidate's behalf.

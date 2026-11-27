@@ -122,9 +122,32 @@ export function buildStudioDoc({ tree, base, keywords, sourceHash, keywordsIn, i
   return { sourceHash, keywords, fixedKeywords: keywordsIn(fixedText), sections };
 }
 
+/**
+ * The id an added-back bullet answers to in `order`, so it moves among the
+ * tailored bullets like any other. Tailored bullets are `{item}b{n}`; the `r`
+ * keeps the two from ever colliding.
+ *
+ * @param {string} itemId
+ * @param {number} index into the item's `restorable`
+ */
+export function restoredId(itemId, index) {
+  return `${itemId}r${index}`;
+}
+
 /** @param {string} sourceHash @returns {StudioEdits} */
 export function emptyEdits(sourceHash) {
   return { v: 1, sourceHash, preset: { ...DEFAULT_PRESET }, use: {}, hidden: [], shown: [], order: {}, restored: {} };
+}
+
+/** True when Reset would change nothing. A fresh object here would still count as a new undo step. */
+function isUntouched(edits) {
+  return edits.preset.length === DEFAULT_PRESET.length
+    && edits.preset.tone === DEFAULT_PRESET.tone
+    && edits.hidden.length === 0
+    && edits.shown.length === 0
+    && Object.keys(edits.use).length === 0
+    && Object.keys(edits.order).length === 0
+    && Object.keys(edits.restored).length === 0;
 }
 
 /**
@@ -172,8 +195,19 @@ export function parseEdits(raw, sourceHash) {
  *   | {type: "restore", item: string, index: number}
  *   | {type: "unrestore", item: string, index: number}
  *   | {type: "preset", preset: Partial<Preset>}
- *   | {type: "reset"}} StudioAction
+ *   | {type: "reset"}
+ *   | {type: "replace", edits: StudioEdits}} StudioAction
  */
+
+/** @param {BulletUse} a @param {BulletUse} b */
+function sameBulletUse(a, b) {
+  if (a.kind !== b.kind) return false;
+  if (a.kind !== "custom") return true;
+  if (a.text !== b.text) return false;
+  const left = a.keywords;
+  const right = b.keywords;
+  return left.length === right.length && left.every((word, i) => word === right[i]);
+}
 
 /**
  * @param {StudioEdits} edits
@@ -183,8 +217,11 @@ export function parseEdits(raw, sourceHash) {
  */
 export function studioReducer(edits, action, doc) {
   switch (action.type) {
-    case "use":
+    case "use": {
+      const chosen = edits.use[action.id];
+      if (chosen && sameBulletUse(chosen, action.use)) return edits;
       return { ...edits, use: { ...edits.use, [action.id]: action.use } };
+    }
     case "toggle": {
       const isHidden = hiddenSet(doc, edits).has(action.id);
       const presetHides = presetHidden(doc, edits.preset).has(action.id);
@@ -193,7 +230,9 @@ export function studioReducer(edits, action, doc) {
       return { ...edits, hidden: presetHides ? edits.hidden : [...without(edits.hidden), action.id], shown: without(edits.shown) };
     }
     case "move": {
-      const order = [...(edits.order[action.parent] ?? action.siblings)];
+      // Drop ids that are no longer siblings (an added-back bullet that was
+      // removed again), or a click would swap with something not on screen.
+      const order = (edits.order[action.parent] ?? action.siblings).filter((id) => action.siblings.includes(id));
       for (const id of action.siblings) if (!order.includes(id)) order.push(id);
       const from = order.indexOf(action.id);
       const to = from + action.by;
@@ -205,12 +244,24 @@ export function studioReducer(edits, action, doc) {
       const list = edits.restored[action.item] ?? [];
       return list.includes(action.index) ? edits : { ...edits, restored: { ...edits.restored, [action.item]: [...list, action.index] } };
     }
-    case "unrestore":
-      return { ...edits, restored: { ...edits.restored, [action.item]: (edits.restored[action.item] ?? []).filter((i) => i !== action.index) } };
-    case "preset":
-      return { ...edits, preset: { ...edits.preset, ...action.preset } };
+    case "unrestore": {
+      const id = restoredId(action.item, action.index);
+      const order = edits.order[action.item];
+      return {
+        ...edits,
+        restored: { ...edits.restored, [action.item]: (edits.restored[action.item] ?? []).filter((i) => i !== action.index) },
+        order: order?.includes(id) ? { ...edits.order, [action.item]: order.filter((x) => x !== id) } : edits.order,
+      };
+    }
+    case "preset": {
+      const preset = { ...edits.preset, ...action.preset };
+      if (preset.length === edits.preset.length && preset.tone === edits.preset.tone) return edits;
+      return { ...edits, preset };
+    }
     case "reset":
-      return emptyEdits(edits.sourceHash);
+      return isUntouched(edits) ? edits : emptyEdits(edits.sourceHash);
+    case "replace":
+      return action.edits;
   }
 }
 
@@ -266,7 +317,7 @@ export function bulletShown(b, edits) {
  *
  * @param {StudioDoc} doc
  * @param {StudioEdits} edits
- * @returns {{view: import("./html-blocks.mjs").BlockView, added: Record<string, string[]>,
+ * @returns {{view: import("./html-blocks.mjs").BlockView, added: Record<string, import("./html-blocks.mjs").AddedBullet[]>,
  *            coverage: {present: string[], missing: string[], pct: number|null}}}
  */
 export function resolveStudio(doc, edits) {
@@ -284,10 +335,10 @@ export function resolveStudio(doc, edits) {
           if (shown.source !== "tailored") text[b.id] = shown.text;
           if (!hidden.has(b.id)) shown.keywords.forEach((k) => found.add(k));
         }
-        const restored = (edits.restored[item.id] ?? []).map((i) => item.restorable[i]).filter(Boolean);
+        const restored = (edits.restored[item.id] ?? []).filter((i) => item.restorable[i]);
         if (restored.length) {
-          added[item.id] = restored.map((r) => r.text);
-          restored.forEach((r) => r.keywords.forEach((k) => found.add(k)));
+          added[item.id] = restored.map((i) => ({ id: restoredId(item.id, i), text: item.restorable[i].text }));
+          restored.forEach((i) => item.restorable[i].keywords.forEach((k) => found.add(k)));
         }
       }
     }
@@ -309,8 +360,9 @@ export function resolveStudio(doc, edits) {
  * @returns {{op: "same"|"del"|"ins", text: string}[]}
  */
 export function wordDiff(before, after) {
-  const a = before.split(/(\s+)/).filter(Boolean);
-  const b = after.split(/(\s+)/).filter(Boolean);
+  const tokens = (t) => t.match(/\s+|[,;:](?=\s|$)|[^\s,;:]+|[,;:]/g) ?? [];
+  const a = tokens(before);
+  const b = tokens(after);
   const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
   for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
   const out = [];
@@ -331,5 +383,96 @@ export function wordDiff(before, after) {
   }
   while (i < a.length) push("del", a[i++]);
   while (j < b.length) push("ins", b[j++]);
+  return readableRuns(out);
+}
+
+const SHORT_SAME = 2;
+
+/**
+ * A raw word diff of a rewrite interleaves small matches ("the", ",") between
+ * changes and reads as noise. Short unchanged stretches between two changes
+ * are folded into the change, and each change prints as all removed words,
+ * then all inserted words.
+ *
+ * @param {{op: "same"|"del"|"ins", text: string}[]} parts
+ */
+function readableRuns(parts) {
+  const isShort = (t) => t.trim().split(/\s+/).filter(Boolean).length <= SHORT_SAME;
+  const out = [];
+  let del = "";
+  let ins = "";
+  const flush = () => {
+    if (del) out.push({ op: "del", text: del });
+    // A removed word and the words that replace it are printed as two runs.
+    // Without a space at that boundary the runs glue: "thewrites", "read.messy".
+    if (del && ins && /\S$/.test(del) && /^\S/.test(ins)) out.push({ op: "same", text: " " });
+    if (ins) out.push({ op: "ins", text: ins });
+    del = "";
+    ins = "";
+  };
+  parts.forEach((p, k) => {
+    if (p.op === "del") del += p.text;
+    else if (p.op === "ins") ins += p.text;
+    else if (
+      (del || ins) &&
+      k < parts.length - 1 &&
+      isShort(p.text) &&
+      ((parts[k - 1]?.op === "del" && parts[k + 1]?.op === "ins") ||
+        (parts[k - 1]?.op === "ins" && parts[k + 1]?.op === "del"))
+    ) {
+      del += p.text;
+      ins += p.text;
+    } else {
+      flush();
+      out.push(p);
+    }
+  });
+  flush();
   return out;
+}
+
+/** How many earlier edit states Undo can step back through. */
+export const UNDO_LIMIT = 30;
+
+/**
+ * The undo history after recording `state`: oldest first, so Undo pops the
+ * most recent. Past the limit the oldest state is dropped.
+ *
+ * @param {StudioEdits[]} history
+ * @param {StudioEdits} state - The edits from before the change being recorded.
+ * @param {number} [limit]
+ * @returns {StudioEdits[]}
+ */
+export function pushUndo(history, state, limit = UNDO_LIMIT) {
+  return [...history, state].slice(-limit);
+}
+
+/**
+ * Cmd+Z or Ctrl+Z steps back. Shift stays out so Cmd+Shift+Z and Ctrl+Shift+Z
+ * remain redo. Caps Lock reports Z with shift off, so the letter is folded.
+ *
+ * @param {{ key?: string, shiftKey?: boolean, metaKey?: boolean, ctrlKey?: boolean }} event
+ * @returns {boolean}
+ */
+export function isStudioUndoKey(event) {
+  const key = typeof event?.key === "string" ? event.key.toLowerCase() : "";
+  return key === "z" && event.shiftKey !== true && Boolean(event.metaKey || event.ctrlKey);
+}
+
+/**
+ * Record one edit against the edits on screen now.
+ *
+ * A wording save can call this after an await. The edits argument has to be
+ * the current ones, not the snapshot from when that request started, or Undo
+ * drops a hide that happened in between.
+ *
+ * @param {StudioEdits} current
+ * @param {StudioAction} action
+ * @param {StudioDoc} doc
+ * @param {StudioEdits[]} history
+ */
+export function applyRecordedEdit(current, action, doc, history) {
+  const next = studioReducer(current, action, doc);
+  if (next === current) return { edits: current, history, recorded: false };
+  return { edits: next, history: pushUndo(history, current), recorded: true };
 }

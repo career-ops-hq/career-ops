@@ -250,7 +250,7 @@ I am happy to discuss further at your convenience.
 
 **集約のみで、新たな judgment は行いません。** 各行は、元のシグナルがすでに出した判定を引用またはリンクします。サマリーが再採点・再重み付け・上書きを行うことは決してありません。ある行が誤って見える場合、修正すべきは元のシグナル側であり、ここではありません。
 
-各行の状態は3種類：`✅ {明確な判定}` / `⚠️ {検出事項}` / `— not evaluated`。**`— not evaluated` は一級の状態です。** シグナルを実行できなかった場合は、行を省略せず明示してください。そうして初めて、すべて ✅ のサマリーを信頼できます。**個別の例外：** 面接レッドフラグ行の未評価は `— no interview sessions yet` と表記します。これは同じ「未評価」概念をこの行に限ってより具体的に言い換えたもので（相互参照チェック自体は実行され、redflags ファイルが無かっただけ）、4つ目の状態ではありません。
+各行の状態は3種類：`✅ {明確な判定}` / `⚠️ {検出事項}` / `— not evaluated`。**`— not evaluated` は一級の状態です。** シグナルを実行できなかった場合は、行を省略せず明示してください。そうして初めて、すべて ✅ のサマリーを信頼できます。**個別の例外：** 面接レッドフラグ行の未評価は `— no interview sessions yet` と表記します。これは同じ「未評価」概念をこの行に限ってより具体的に言い換えたもので（相互参照チェック自体は実行され、redflags ファイルが無かっただけ）、4つ目の状態ではありません。未検証マーカー付きの redflags ファイルはこの例外ではなく、通常の `— not evaluated` 状態です。ファイルは存在するので、セッションが無いとは書きません。
 
 行ラベル、`| Signal | Status |` のヘッダー、状態の語彙はいずれも固定リテラルであり、翻訳しません。Machine Summary の `risk_summary` がこれらに依存します。
 
@@ -259,7 +259,7 @@ I am happy to discuss further at your convenience.
 | Posting legitimacy | ブロック G の評価ティア | `✅ High Confidence`。Proceed with Caution / Suspicious は `⚠️ {tier} — {一文の理由}` |
 | Employment classification | ブロック G 内の雇用形態シグナル | チェックが実行され問題がなければ `✅ clear`。フラグが立った場合は `⚠️ contractor-style language: "{引用した表現}"`。実行できなかった場合は `— not evaluated` |
 | Culture screen | ブロック A のカルチャースクリーン項目 | `✅ pass`、または `⚠️ caution — {根拠}` / `⚠️ fail — {根拠}`。スクリーンを実施していない場合は `— not evaluated` |
-| Interview red flags | `interview-prep/{company-slug}-redflags.md`（`interview-redflag` モード） | **コピーではなく相互参照：** ファイルが存在する場合は現在の警告レベルと相対リンクを記載 — `[{level}](../interview-prep/{company-slug}-redflags.md)`（`reports/` からの相対）。無ければ `— no interview sessions yet` |
+| Interview red flags | `interview-prep/{company-slug}-redflags.md`（`interview-redflag` モード） | **コピーではなく相互参照：** ファイルが存在する場合は現在の警告レベルと相対リンクを記載 — `[{level}](../interview-prep/{company-slug}-redflags.md)`（`reports/` からの相対）。無ければ `— no interview sessions yet`。**未検証ファイル：** ファイルにマーカー `<!-- career-ops:redflags-unverified -->` が含まれる場合（実際の面接セッションの裏付けがないまま `interview-redflag` が残したファイル）、その警告レベルは決して記載しません。`— not evaluated: [unverified analysis](../interview-prep/{company-slug}-redflags.md)` と表記し、`risk_summary.interview_redflags` は `not_evaluated` とします。注記の文言ではなくマーカーで判定してください。注記はユーザーの出力言語で書かれています。 |
 | AI claims vs. infrastructure | ブロック G の AI／インフラ整合性チェック（存在する場合） | 本レポートにそのチェックが含まれる場合は判定をミラーする（`✅ consistent` / `⚠️ {検出事項}`）。無ければ `— not evaluated`。チェックが存在すれば自動的に有効化され、順序依存はありません |
 
 ブロック形式：
@@ -297,8 +297,11 @@ Full evaluation を `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` に保存す�
 **URL:**
 **Archetype:** {detected}
 **Score:** {X/5}
+**決定:** {応募する | 検討する | 先に調べる | 見送る}
 **Legitimacy:** {High Confidence | Proceed with Caution | Suspicious}
 **PDF:** {path or pending}
+
+{`## 判定 (lead)` の一文をそのまま写す}
 
 ---
 
@@ -329,13 +332,63 @@ Full evaluation を `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` に保存す�
 ## Risk Summary
 (リスクシグナルごとに1行、順序は固定 — 上記の Risk Summary セクションを参照)
 
-## H) Draft Application Answers
+## H) Draft Application Answers (draft)
 (only if score >= 4.5 -- draft answers for the application form)
 
 ---
 
 ## Keywords extracted
 (list of 15-20 keywords from the JD for ATS optimization)
+
+## Keyword Coverage
+(`keyword-match.mjs` (1b) が生成 — coverage %、present、missing)
+
+## Job Description (archived verbatim)
+(posting の全文を verbatim で貼る — 下の要件を参照)
+
+## Machine Summary
+(downstream script 用の YAML block — 下の要件を参照)
+```
+
+**Machine Summary（必須）：** report の末尾、`## Job Description (archived verbatim)` の後に置く YAML block。Script は位置ではなく見出しで探すので、読者とブロック A の間に挟まらないよう最後に置く。Schema、正確な field 名、ルールは `batch/batch-prompt.md` が source（ここに複製しない）。見出し `## Machine Summary` と field 名は英語のまま。`advertised_comp`（JD に書かれた給与額をそのまま、なければ `null`）、`risk_summary`（Risk Summary ブロックを map にしたもの）、`requirement_importance`（ブロック B を 1 行ずつ。JD に使える要件リストがなければ `[]`）を含む。
+
+**JD archival（必須、#2789）：** すべての report に `## Job Description (archived verbatim)` section を入れ、posting の全文をそのまま貼る。要約・言い換えはしない。見出しは英語のまま：`check-jd-archive.mjs` が名前で探す。`**URL:**` は archive ではない：posting が閉じると link は切れ、元の要件はもう取り戻せない。Section の 1 行目は source に表示されている掲載日（`Posted: {日付または表示どおりの相対表記}`、本当に無いときは `Posted: not visible in source`）で、report file 自体の日時で代用しない。JD が長すぎる、または全文を引用できないときは `archive-posting.mjs` (下の command) で capture し、section には `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` の一文**だけ**を書く。言い換えで代用しない。Rule 全体は `modes/oferta.md` の **JD archival** を参照。
+
+**Command arguments（#5853）：** posting の URL、company slug、report path を command line に直接書かない（引用符で囲んでも不可）。file tool で値を JSON file に書き（`{"url": "…", "company": "{company-slug}", "report": "{num}"}`）、下の command を実行する。この command は各値を検査し（slug は `^[a-z0-9-]+$` に一致すること）、shell を通さずに各値を独立した引数として script に渡す。検査に通らない値は実行を止める：直すのは値であり、検査ではない。Rule 全体は `modes/oferta.md` の **Command arguments** を参照。
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("archive-posting: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.url !== "string" || !/^https?:\/\//i.test(p.url)) fail("url must be an http(s) URL");
+const args = ["archive-posting.mjs", p.url];
+if (p.company != null) { if (typeof p.company !== "string" || !/^[a-z0-9-]+$/.test(p.company)) fail("company must match ^[a-z0-9-]+$"); args.push("--company=" + p.company); }
+if (p.report != null) { if (!/^[0-9]+$/.test(String(p.report))) fail("report must be a report number"); args.push("--report=" + p.report); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
+
+### 1b. ATS keyword coverage を埋め込む
+
+Report を保存したら `keyword-match.mjs` (下の command) を実行し、`## Keyword Coverage` block を `## Keywords extracted` の下に貼る（見出しは英語のまま）。診断用のみ：keyword は実際の経験を反映する場合だけ追加する。
+
+そのために `{"report": "reports/{###}-{company-slug}-{YYYY-MM-DD}.md"}` を JSON file に書き（上の **Command arguments** を参照）、次を実行する：
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("keyword-match: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.report !== "string" || !/^reports\/[0-9]{3,}-[a-z0-9-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$/.test(p.report)) fail("report must be reports/{###}-{company-slug}-{YYYY-MM-DD}.md");
+const args = ["keyword-match.mjs", p.report];
+if (p.cv != null) { if (typeof p.cv !== "string" || p.cv === "" || p.cv.startsWith("-")) fail("cv must be a file path"); args.push("--cv", p.cv); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
 ```
 
 ### 2. Record in tracker

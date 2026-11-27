@@ -5,6 +5,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFi
 import { join, delimiter } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ROOT, getBash, rmSync } from './helpers.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 // A failed report-number reservation (lock timeout, unwritable reports/, ...)
 // makes reserve-report-num.mjs exit 1 with nothing on stdout. The runner used
@@ -46,7 +47,7 @@ test('a failed report-number reservation stops the offer before any worker is la
   try {
     const result = f.run(['--model', 'test-model']);
     assert.ifError(result.error);
-    assert.notEqual(result.status, 0, `the run reported success:\n${result.stdout}\n${result.stderr}`);
+    assert.ok(exitedNonZero(result), describeSpawn(result, `the run reported success:\n\n`));
     assert.equal(existsSync(f.marker), false, 'a worker was launched without a report number');
     assert.match(result.stdout + result.stderr, /Report-number reservation failed after 3 attempts/);
 

@@ -5,8 +5,9 @@ import { CalendarPlus, Loader2, Sparkles, X } from "lucide-react";
 import type { ScanEngine } from "@/lib/scheduled-jobs";
 import { DEFAULT_FILTERS, type ExploreFilters } from "@/lib/explore";
 import { FilterBuilder } from "@/components/explore/filter-builder";
-import { ScheduledOverlay } from "./scheduled-overlay";
+import { Modal } from "@/components/ui/modal";
 import { cadenceMinimum, cadenceValueForUnit, createScheduledJobRequest } from "@/lib/scheduled-job-client.mjs";
+import { scanEngineDetail, scanEngineLabel } from "@/lib/schedule-label.mjs";
 
 export function CreateJobModal({
   isOpen,
@@ -51,15 +52,15 @@ export function CreateJobModal({
   };
 
   return (
-    <ScheduledOverlay isOpen={isOpen} onClose={onClose} titleId="create-scheduled-scan-title" initialFocusRef={nameRef} panelClassName="max-w-2xl">
+    <Modal isOpen={isOpen} onClose={onClose} labelledBy="create-scheduled-scan-title" initialFocusRef={nameRef} panelClassName="max-w-2xl">
         <div className="flex items-center justify-between border-b border-border pb-4">
           <div className="flex items-center gap-2.5">
-            <div className="grid size-9 place-items-center rounded-xl bg-brand-soft text-brand">
+            <div className="grid size-9 place-items-center rounded-xl bg-brand-soft text-brand-text">
               <CalendarPlus className="size-5" />
             </div>
             <div>
               <h2 id="create-scheduled-scan-title" className="text-lg font-semibold text-foreground">Create Scheduled Scan</h2>
-              <p className="text-xs text-muted">Configure a persistent background job for automatic role discovery.</p>
+              <p className="text-xs text-muted">Choose which boards to check, and how often.</p>
             </div>
           </div>
           <button
@@ -90,20 +91,16 @@ export function CreateJobModal({
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1 block text-[13px] font-medium text-foreground">Scan Engine</label>
+              <label className="mb-1 block text-[13px] font-medium text-foreground">Where to check</label>
               <select
                 value={engine}
                 onChange={(e) => setEngine(e.target.value as ScanEngine)}
                 className="w-full rounded-xl border border-border bg-surface-hover/60 px-3.5 py-2 text-sm text-foreground outline-none focus:border-brand/60"
               >
-                <option value="full">Full ATS Dataset Sweep</option>
-                <option value="portals">Zero-Token Portals.yml</option>
+                <option value="full">{scanEngineLabel("full")}</option>
+                <option value="portals">{scanEngineLabel("portals")}</option>
               </select>
-              <p className="mt-1 text-[11px] text-faint">
-                {engine === "full"
-                  ? "Sweeps public Greenhouse/Lever/Ashby datasets."
-                  : "Scans pre-configured portals.yml companies (0 AI cost)."}
-              </p>
+              <p className="mt-1 text-[11px] text-faint">{scanEngineDetail(engine)}</p>
             </div>
 
             <div>
@@ -157,6 +154,6 @@ export function CreateJobModal({
             </button>
           </div>
         </form>
-    </ScheduledOverlay>
+    </Modal>
   );
 }

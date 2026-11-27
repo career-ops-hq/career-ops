@@ -2,10 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { cliSubstitutionNotice, cliUnavailableError, resolveCliOrFallback } from "@/lib/clis";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
+import { profileRef } from "@/lib/core/profile-path.mjs";
 import { getSession } from "@/lib/apply/session";
 import { resolveSessionCv } from "@/lib/apply/cv";
 import { applyCvSource } from "@/lib/apply/cv-source.mjs";
 import { buildAnswerPrompt } from "@/lib/apply/answer-prompt.mjs";
+import { blankUnknownDraft, readApplyProfile } from "@/lib/apply/blank-unknown.mjs";
+import { guardAiDirectedAnswers } from "@/lib/apply/ai-directed-field.mjs";
 import { runPlanner } from "@/lib/apply/planner";
 import { extractJsonObject } from "@/lib/extract-json-object.mjs";
 import { readJsonObject } from "@/lib/json-body";
@@ -95,7 +98,7 @@ export async function POST(req: Request) {
       // stapled to them cannot describe different documents.
       const cvPath = await resolveSessionCv({ company, application, title: s.title });
       const cvSource = cvPath ? applyCvSource(careerOpsRoot(), cvPath) : null;
-      const prompt = buildAnswerPrompt({ title: s.title, fields: s.fields, memory: mem, cvSource });
+      const prompt = buildAnswerPrompt({ title: s.title, fields: s.fields, memory: mem, cvSource, profile: profileRef(careerOpsRoot()) });
 
       log(`Form: "${s.title}" · ${s.fields.length} fields · prompt ${prompt.length} chars · memory ${mem.length} chars`);
       log(`CV source: ${cvSource ?? "none found — answers will come from cv.md"}`);
@@ -131,9 +134,20 @@ export async function POST(req: Request) {
           result.buf.slice(-300),
         );
       }
-      const count = Object.keys(obj).length;
+      let profile;
+      try {
+        profile = readApplyProfile(careerOpsRoot());
+      } catch (error) {
+        return fail(error instanceof Error ? error.message.slice(0, 200) : "could not read the profile");
+      }
+      // A question addressed to an AI filling the form stays empty for the
+      // candidate, whatever the planner wrote (#7193). It runs after
+      // blankUnknownDraft, which rebuilds every answer and would drop the reason.
+      const { answers, flagged } = guardAiDirectedAnswers(s.fields, blankUnknownDraft(s.fields, obj, profile));
+      const count = Object.keys(answers).length;
       log(`Parsed ${count} answers${truncated ? " (RECOVERED from truncated output — some fields may be missing)" : ""}`);
-      emit({ t: "done", answers: obj, truncated, count });
+      if (flagged.length) log(`Left ${flagged.length} AI-directed field(s) for you: ${flagged.join(", ")}`);
+      emit({ t: "done", answers, truncated, count });
       controller.close();
     },
   });

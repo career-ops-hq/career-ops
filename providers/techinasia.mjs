@@ -63,6 +63,7 @@
 import { htmlToText } from './_html-to-text.mjs';
 import { fetchJsonWithRetry, fetchTextWithRetry, sleep } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const SITE_ORIGIN = 'https://www.techinasia.com';
 const SEARCH_PAGE_URL = `${SITE_ORIGIN}/jobs/search`;
@@ -358,6 +359,8 @@ export default {
     // reported more pages. Never set by a ctx.maxPages cap nor by a fetch error,
     // so the advice to raise `max_pages` cannot misfire.
     let truncated = false;
+    // Set when a later page failed and the walk kept what it had.
+    let fetchFailed = false;
 
     for (let page = 0; page < maxPages; page++) {
       if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
@@ -392,6 +395,7 @@ export default {
         // was already collected.
         if (page === 0) throw err;
         console.warn(`techinasia: page ${page} failed after retries — ${err.message}`);
+        fetchFailed = true;
         break;
       }
 
@@ -441,6 +445,11 @@ export default {
       out.push(normalized);
     }
 
+    // Both cuts mark the result too, so scan.mjs logs the board partial instead
+    // of reachable (lib/board-truncation.mjs). Never while probing, like the
+    // warning.
+    if (truncated && !probing) markTruncated(out, 'page-cap', { fetched: out.length });
+    if (fetchFailed) markTruncated(out, 'fetch-error', { fetched: out.length });
     return out;
   },
 };

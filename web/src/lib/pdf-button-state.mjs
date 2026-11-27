@@ -1,18 +1,49 @@
+import { cvDiskState } from "./cv-disk-state.mjs";
+
 /**
- * @typedef {{ id: string, status: "running" | "done" | "error", steps: { kind: string, label: string }[] }} PdfJob
+ * @typedef {{ id: string, status: "running" | "done" | "error" | "gated", steps: { kind: string, label: string }[] }} PdfJob
  * @typedef {{ jobId: string, reason: string } | null} PdfFailure
  * @typedef {{ kind: "running", jobId: string } | { kind: "ready" | "idle", failure: PdfFailure }} PdfButtonState
  */
 
 /**
- * @param {PdfJob | undefined} job the latest pdf job for this application
- * @param {boolean} pdfReady the tracker already lists a tailored CV
+ * @param {{ kind?: string, input?: string } | null | undefined} detail
+ * @param {string} n
+ * @returns {boolean}
+ */
+export function pdfJobRefreshesReport(detail, n) {
+  return Boolean(n && detail && detail.kind === "pdf" && detail.input === n);
+}
+
+/**
+ * @param {PdfJob | undefined} job
+ * @param {boolean} onDisk
  * @returns {PdfButtonState}
  */
-export function pdfButtonState(job, pdfReady) {
+export function pdfButtonState(job, onDisk) {
   if (job?.status === "running") return { kind: "running", jobId: job.id };
   const failure = job?.status === "error" ? { jobId: job.id, reason: failureReason(job) } : null;
-  return { kind: pdfReady || job?.status === "done" ? "ready" : "idle", failure };
+  const disk = cvDiskState({ onDisk, jobFinished: job?.status === "done" });
+  return { kind: disk.exists ? "ready" : "idle", failure };
+}
+
+/**
+ * @param {(PdfJob & { result?: { score?: number | null, summary?: string } }) | undefined} job
+ * @returns {PdfButtonState}
+ */
+export function coverDraftButtonState(job) {
+  if (job?.status !== "done") return pdfButtonState(job, false);
+  const score = job.result?.score;
+  if (typeof score !== "number" || !Number.isFinite(score) || score < 2) {
+    return {
+      kind: "idle",
+      failure: {
+        jobId: job.id,
+        reason: job.result?.summary || "The cover run finished without a usable draft.",
+      },
+    };
+  }
+  return { kind: "ready", failure: null };
 }
 
 /** @param {PdfJob} job */

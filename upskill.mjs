@@ -23,21 +23,29 @@
  */
 
 import { readFileSync, existsSync, statSync, realpathSync, writeFileSync, symlinkSync, rmSync } from 'fs';
-import { join, dirname, relative, sep } from 'path';
+import { join, dirname, relative, resolve, sep } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { load as yamlLoad } from 'js-yaml';
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { validateFlags } from './lib/cli-flags.mjs';
+import { loadYaml } from './lib/yaml-document.mjs';
+import { machineSummarySection } from './lib/machine-summary-section.mjs';
+import { resolveColumns, parseTrackerRow, firstLinkTarget } from './tracker-parse.mjs';
+import { validateFlags, flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { loadCanonicalStates, resolveCanonicalStateId } from './tracker-utils.mjs';
 import { rankSkipBlockers, parseRequirementImportance } from './skip-blockers.mjs';
 
-import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath, rawTrackerPath, resolveTrackerPath } from './path-resolver.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+// Report links resolve against the tracker's directory as spelled first:
+// withinReports() compares candidates lexically against CAREER_OPS, so the
+// realpath above alone (macOS /var -> /private/var, or any symlinked data
+// root) would push every valid link outside reports/. The realpath's own
+// directory stays a candidate for a tracker file that is itself a symlink,
+// whose links are written relative to its target.
+const TRACKER_DIR = dirname(resolve(rawTrackerPath(CAREER_OPS)));
 const CV_FILE = join(CAREER_OPS, 'cv.md');
-const PROFILE_FILE = join(CAREER_OPS, 'config/profile.yml');
+const PROFILE_FILE = getProfilePath();
 const STATES_FILE = join(ROOT, 'templates/states.yml');
 
 // Canonical reports-root containment. A tracker link resolves to a candidate
@@ -105,6 +113,8 @@ const LOW_FIT_SCORE = 4.0;
 // exported here so existing importers of extractSkills keep working unchanged.
 import { extractSkills } from './skill-extract.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
+import { rejectPrivateOrInvalid, validateUrlSecurity as validateResolvedAddresses } from './liveness-browser.mjs';
 export { extractSkills };
 
 // --- Known-skills text assembly ---
@@ -154,7 +164,7 @@ export function yamlValueText(raw, onParseFailure) {
   if (!raw) return '';
   let doc;
   try {
-    doc = yamlLoad(raw);
+    doc = loadYaml(raw);
   } catch (err) {
     if (onParseFailure) onParseFailure(err);
     return raw;
@@ -166,7 +176,7 @@ export function yamlValueText(raw, onParseFailure) {
   // which js-yaml resolves into a real JS cycle (doc.root.self === doc.root).
   // An unguarded walk chases that forever and dies with a RangeError, killing
   // the whole run — the parse try/catch above cannot help, because the throw
-  // happens here, not in yamlLoad(). The WeakSet also collapses a non-cyclic
+  // happens here, not in loadYaml(). The WeakSet also collapses a non-cyclic
   // alias reused in several places, which is harmless: the caller turns this
   // into a Set of skills, so emitting a value once is sufficient.
   const seen = new WeakSet();
@@ -258,12 +268,12 @@ export function readOptionalText(filePath) {
 // --- Machine Summary + Gap table parsing ---
 // Mirrors analyze-patterns.mjs (duplicated by design, see header comment).
 function parseMachineSummary(content) {
-  const fenceMatch = content.match(/##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
+  const fenceMatch = machineSummarySection(content).match(/^##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
   if (!fenceMatch) return null;
   const raw = fenceMatch[1].trim();
   if (!raw) return null;
   try {
-    const parsed = yamlLoad(raw);
+    const parsed = loadYaml(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     return parsed;
   } catch {
@@ -460,14 +470,19 @@ function analyze(minReports) {
   );
 
   for (const row of rows) {
-    const linkMatch = (row.report || '').match(/\]\(([^)]+)\)/);
-    if (!linkMatch) continue;
+    const linkTarget = firstLinkTarget(row.report);
+    if (linkTarget == null) continue;
     reportsLinked += 1;
     // Tracker links are normalized relative to the tracker file's directory
-    // (see merge-tracker.mjs); resolve against it, with a root-relative fallback.
+    // (see merge-tracker.mjs); resolve against it as spelled and as realpathed
+    // (see TRACKER_DIR), with a root-relative fallback.
     // The read is attempted directly instead of probing with existsSync first,
     // which costs a full stat per report and races with the read (#2385).
-    const candidates = new Set([join(dirname(APPS_FILE), linkMatch[1]), join(CAREER_OPS, linkMatch[1])]);
+    const candidates = new Set([
+      join(TRACKER_DIR, linkTarget),
+      join(dirname(APPS_FILE), linkTarget),
+      join(CAREER_OPS, linkTarget),
+    ]);
     let content = null;
     for (const p of candidates) {
       if (!withinReports(p)) continue;
@@ -761,36 +776,17 @@ soft_gaps:
   process.exit(0);
 }
 
-// Helper function to enforce egress guard against SSRF (Private/Loopback IPs)
-const dnsCache = new Map();
-
-async function validateUrlSecurity(urlString) {
-  const dns = await import('dns/promises');
+// The egress guard for --url-text (SSRF). It used to keep its own list, checked
+// on DNS answers only: `http://[::1]/` passed (the bracketed name resolves to
+// nothing, so no address was checked), and so did 0.0.0.0, IPv4-mapped IPv6 and
+// 100.64.0.0/10. It now asks the liveness guard, the literal host first and then
+// every address the name resolves to, both judged by providers/_ip-guard.mjs
+// isBlockedAddress. Exported for tests.
+export async function validateUrlSecurity(urlString) {
   const url = new URL(urlString.endsWith('.') ? urlString.slice(0, -1) : urlString);
-  const hostname = url.hostname;
-
-  if (hostname === 'localhost' || hostname.endsWith('.local')) {
-    throw new Error('Access denied: Localhost or internal domain target detected.');
-  }
-
-  let addresses;
-  if (dnsCache.has(hostname)) {
-    addresses = dnsCache.get(hostname);
-  } else {
-    addresses = await dns.resolve(hostname).catch(() => []);
-    const lookupRes = await dns.lookup(hostname).catch(() => null);
-    if (lookupRes) addresses.push(lookupRes.address);
-    dnsCache.set(hostname, addresses);
-  }
-
-  for (const ip of addresses) {
-    if (/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|169\.254\.)/.test(ip)) {
-      throw new Error(`Access denied: Egress guard blocked private target IP ${ip}`);
-    }
-    if (ip === '::1' || ip.startsWith('fe80:') || ip.startsWith('fc00:') || ip.startsWith('fd00:')) {
-      throw new Error(`Access denied: Egress guard blocked private target IPv6 ${ip}`);
-    }
-  }
+  const verdict = rejectPrivateOrInvalid(url.href);
+  if (verdict) throw new Error(`Access denied: Egress guard refused ${verdict.reason}`);
+  await validateResolvedAddresses(url.href);
   return url.toString();
 }
 
@@ -831,7 +827,10 @@ const isMain = isMainModule(import.meta.url);
 // are read, and before --help, so `--help --bogus` still errors.
 const KNOWN_FLAGS = ['--min-reports', '--summary', '--url-text', '--self-test', '--help', '-h'];
 
-// Only --min-reports and --url-text take their value as the next argv token.
+// Only --min-reports and --url-text take a value, as the next argv token or as
+// `--flag=value`. validateFlags accepts either form, so both are read with
+// flagValue(): an indexOf() lookup cannot see `--url-text=<url>` (the aggregate
+// map ran instead) or `--min-reports=3` (the default of 5 applied instead).
 const VALUE_FLAGS = ['--min-reports', '--url-text'];
 
 const USAGE = `Usage:
@@ -857,13 +856,13 @@ if (isMain) {
   if (args.includes('--self-test')) runSelfTest();
 
   // ====== SECURE TARGETED MODE PHASE 2a IMPLEMENTATION ======
-  const urlTextIdx = args.indexOf('--url-text');
+  const urlTextGiven = hasFlag(args, '--url-text');
   const directUrl = args.find(arg => arg.startsWith('http://') || arg.startsWith('https://'));
 
-  if (urlTextIdx !== -1 || directUrl) {
+  if (urlTextGiven || directUrl) {
     (async () => {
       let targetText = '';
-      const inputSource = urlTextIdx !== -1 ? args[urlTextIdx + 1] : directUrl;
+      const inputSource = urlTextGiven ? flagValue(args, '--url-text') : directUrl;
 
       if (!inputSource) {
         console.error('Error: Please provide a valid URL or file path after --url-text');
@@ -874,16 +873,25 @@ if (isMain) {
         let browser;
         try {
           const secureUrl = await validateUrlSecurity(inputSource);
-          const { chromium } = await import('playwright');
-          browser = await chromium.launch({ headless: true });
+          const { chromium } = await import('./lib/hardened-chromium.mjs');
+          browser = await chromium.launch(browserLaunchOptions({ headless: true }));
           const page = await browser.newPage();
 
           await page.route('**/*', async (route) => {
             const requestUrl = route.request().url();
+            // data: and blob: never leave the browser.
+            if (/^(?:data|blob):/i.test(requestUrl)) return route.continue();
             try {
               await validateUrlSecurity(requestUrl);
               await route.continue();
             } catch (err) {
+              // A subresource host that does not exist, or that the user's DNS
+              // filter sinkholes, is a dead tracker, not an attack: drop that
+              // request and keep reading the page.
+              if (route.request().resourceType() !== 'document'
+                && (err?.livenessCode === 'dns_no_addresses' || err?.livenessCode === 'dns_sinkhole')) {
+                return route.abort('blockedbyclient');
+              }
               console.error(`Security Violation on Redirect: ${err.message}`);
               await route.abort('blockedbyclient');
               process.exit(1);
@@ -900,8 +908,10 @@ if (isMain) {
             // steer the fetch at an internal host (SSRF). The Playwright path
             // re-validates per hop, but this plain fetch must refuse redirects
             // outright — fail closed rather than follow an unvetted Location (#1851).
-            const res = await fetch(secureUrl, { signal: AbortSignal.timeout(30000), redirect: 'error' });
-            if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+            // Through providers/_http.mjs: its lookup-time guard checks the
+            // address it actually dials, which a check made before fetch() cannot.
+            const { fetchResponse } = await import('./providers/_http.mjs');
+            const res = await fetchResponse(secureUrl, { redirect: 'error', timeoutMs: 30_000 });
             targetText = await res.text();
           } catch (fetchErr) {
             console.error(`Fatal: Failed to fetch JD from URL: ${fetchErr.message}`);
@@ -985,10 +995,10 @@ if (isMain) {
     });
   } else {
     // ====== ORIGINAL AGGREGATE MODE PIPELINE ======
-    const minReportsIdx = args.indexOf('--min-reports');
+    const minReportsRaw = flagValue(args, '--min-reports');
     const MIN_REPORTS = (() => {
-      if (minReportsIdx === -1 || args[minReportsIdx + 1] === undefined) return 5;
-      const n = parseInt(args[minReportsIdx + 1], 10);
+      if (minReportsRaw === undefined) return 5;
+      const n = parseInt(minReportsRaw, 10);
       return Number.isNaN(n) || n < 1 ? 5 : n;
     })();
 

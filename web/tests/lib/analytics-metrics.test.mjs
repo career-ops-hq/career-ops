@@ -27,6 +27,20 @@ test("SKIP belongs to Tracked inventory, not active or advanced funnel stages", 
   assert.equal(after.offerRate, before.offerRate);
 });
 
+test("a measured zero still prints — the gate reads the denominator, not the rate", () => {
+  // The failure mode of an over-eager fix: gating on the rate's own value
+  // would hide a genuine 0%, which is a finding the user needs rather than an
+  // absence. Six applied, none responded, is a real measurement.
+  const metrics = computeProgressMetrics([
+    app("Applied"), app("Applied"), app("Applied"),
+    app("Applied"), app("Applied"), app("Applied"),
+  ]);
+  assert.equal(metrics.ratesDenominator, 6);
+  assert.equal(metrics.responseRate, 0, "0 of 6 replied IS a measurement and must still print");
+  assert.equal(metrics.interviewRate, 0);
+  assert.equal(metrics.offerRate, 0);
+});
+
 test("core ledger achievements survive the Analytics view refactor", () => {
   const metrics = computeProgressMetrics([app("Rejected")], { interviews: 1, offers: 1 });
   assert.deepEqual(metrics.funnel.map(stage => stage.count), [1, 1, 1, 1, 1]);
@@ -98,7 +112,13 @@ test("progress boundaries and zero denominators are stable", () => {
     app("Evaluated", "N/A", "bad-date"),
     app("Evaluated", "N/A", "2026-02-30"),
   ]);
-  assert.equal(metrics.responseRate, 0);
+  // Nothing here was applied to, so there is no denominator and the three rates
+  // are ABSENT. This asserted 0 before, which is what the view printed as
+  // "0.0%" — the dashboard reporting the search as failing before it began.
+  assert.equal(metrics.ratesDenominator, 0);
+  assert.equal(metrics.responseRate, null);
+  assert.equal(metrics.interviewRate, null);
+  assert.equal(metrics.offerRate, null);
   assert.equal(metrics.funnel[0].label, "Tracked");
   assert.equal(metrics.funnel[0].count, 7);
   assert.deepEqual(metrics.scoreDistribution.map((row) => row.count), [1, 1, 1, 1, 1]);
@@ -185,6 +205,16 @@ test("archetype IT operations bucket matches admin as a word", () => {
   assert.equal(canonicalizeArchetype("Sys Admin"), "IT & Technical Operations");
   assert.equal(canonicalizeArchetype("Database Administrator"), "Data & Analytics");
   assert.equal(canonicalizeArchetype("Systems Administrator"), "IT & Technical Operations");
+});
+
+test("archetype buckets match ai and pm as words, not inside other words", () => {
+  assert.equal(canonicalizeArchetype("Supply Chain Product Manager"), "Product & Program Mgmt");
+  assert.equal(canonicalizeArchetype("GenAI Product Manager"), "Technical AI PM");
+  assert.equal(canonicalizeArchetype("Software Development"), "Other / Cross-Functional");
+  assert.equal(canonicalizeArchetype("Domain Expert"), "Other / Cross-Functional");
+  assert.equal(canonicalizeArchetype("AI PM"), "Technical AI PM");
+  assert.equal(canonicalizeArchetype("AI Product Manager"), "Technical AI PM");
+  assert.equal(canonicalizeArchetype("Senior PM, Payments"), "Product & Program Mgmt");
 });
 
 test("executive in a title is not an executive level on its own", () => {

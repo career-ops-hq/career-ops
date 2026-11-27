@@ -37,7 +37,7 @@ const CLOSER_ALL = new RegExp(CLOSER_SRC, "gm");
  * about its own capabilities invites it to test the claim.
  */
 export const REPORT_ENVELOPE_INSTRUCTION =
-  `Do NOT save or edit any file, and do not run reserve-report-num.mjs or merge-tracker.mjs — the platform persists your output for you. Instead OUTPUT the finished report markdown inline, between two marker lines. The first line contains only \`${OPEN_MARK}\`, then the complete report (header, Machine Summary YAML fence, blocks A–G), then a final line containing only \`${CLOSE_MARK}\`. Each marker appears exactly once. Emit the WHOLE report — never abbreviate, summarize, or write "unchanged"; the platform writes exactly these bytes to reports/.`;
+  `Do NOT save or edit any file, and do not run reserve-report-num.mjs or merge-tracker.mjs — the platform persists your output for you. Instead OUTPUT the finished report markdown inline, between two marker lines. The first line contains only \`${OPEN_MARK}\`, then the complete report (header, blocks A–G and the sections after them, Machine Summary YAML fence last), then a final line containing only \`${CLOSE_MARK}\`. Each marker appears exactly once. Emit the WHOLE report — never abbreviate, summarize, or write "unchanged"; the platform writes exactly these bytes to reports/.`;
 
 /**
  * @typedef {Object} ReportEnvelope

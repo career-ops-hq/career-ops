@@ -49,18 +49,19 @@ function linkDestination(raw) {
 }
 
 /**
- * First http(s) markdown-link target in a tracker cell.
- * The walk matches tracker-parse.mjs `parseMarkdownLinks`: the label ends at
- * an unescaped `]`, the destination ends at the matching `)`, and a `\` skips
- * the next character.
+ * Every markdown link in a tracker cell, in order, with its span in `value`
+ * (`end` exclusive). The walk matches tracker-parse.mjs `scanMarkdownLinks`:
+ * the label ends at an unescaped `]`, the destination ends at the matching
+ * `)`, and a `\` skips the next character.
  * @param {string} value
- * @returns {string|null}
+ * @returns {{target: string, start: number, end: number}[]}
  */
-function firstHttpMarkdownTarget(value) {
+function markdownLinks(value) {
+  const links = [];
   let cursor = 0;
   while (cursor < value.length) {
     const labelStart = value.indexOf("[", cursor);
-    if (labelStart === -1) return null;
+    if (labelStart === -1) break;
 
     let labelEnd = -1;
     for (let i = labelStart + 1; i < value.length; i++) {
@@ -91,11 +92,57 @@ function firstHttpMarkdownTarget(value) {
     }
 
     const target = linkDestination(value.slice(labelEnd + 2, linkEnd));
-    const href = target == null ? "" : String(target).trim().replace(/^<|>$/g, "");
-    if (/^https?:\/\//i.test(href)) return href;
+    if (target != null) links.push({ target, start: labelStart, end: linkEnd + 1 });
     cursor = linkEnd + 1;
   }
-  return null;
+  return links;
+}
+
+/**
+ * Every markdown-link target in a tracker cell, in order.
+ * @param {string} value
+ * @returns {string[]}
+ */
+function markdownLinkTargets(value) {
+  return markdownLinks(value).map((link) => link.target);
+}
+
+/**
+ * First http(s) markdown-link target in a tracker cell.
+ * @param {string} value
+ * @returns {string|null}
+ */
+function firstHttpMarkdownTarget(value) {
+  // The `<…>` strip mirrors tracker-parse.mjs `extractCellUrl`, so both read
+  // the same href from a URL cell.
+  const hrefs = markdownLinkTargets(value).map((target) => String(target).trim().replace(/^<|>$/g, ""));
+  return hrefs.find((href) => /^https?:\/\//i.test(href)) ?? null;
+}
+
+/**
+ * First markdown-link target in a tracker cell, such as the report path in
+ * `[1](../reports/001-acme-(berlin)-2026-10-01.md)`, or null when the cell
+ * holds no link. Balanced parentheses stay in the target (#5482). Same result
+ * as tracker-parse.mjs `firstLinkTarget`.
+ * @param {string | null | undefined} cell
+ * @returns {string|null}
+ */
+export function firstMarkdownLinkTarget(cell) {
+  return markdownLinkTargets(String(cell ?? ""))[0] ?? null;
+}
+
+/**
+ * The target of a tracker cell that is exactly one markdown link, trimmed, with
+ * nothing around it; null for no link, two links, or text beside the link.
+ * Same result as tracker-parse.mjs `soleMarkdownLink`.
+ * @param {string | null | undefined} cell
+ * @returns {string|null}
+ */
+export function soleMarkdownLinkTarget(cell) {
+  const value = String(cell ?? "").trim();
+  const links = markdownLinks(value);
+  if (links.length !== 1 || links[0].start !== 0 || links[0].end !== value.length) return null;
+  return links[0].target;
 }
 
 /**
@@ -147,6 +194,20 @@ export function postingLabel(href) {
 /** Tracker cell first, then the report's URL field. */
 export function resolvePostingUrl(trackerCell, reportField) {
   return postingHref(trackerCell) || postingHref(reportField) || "";
+}
+
+/**
+ * @param {string | null | undefined} reportField
+ * @param {string | null | undefined} trackerCell
+ * @param {string | null | undefined} [applyLink]
+ * @returns {string}
+ */
+export function applyPostingUrl(reportField, trackerCell, applyLink = "") {
+  const fromTracker = postingUrl(resolvePostingUrl(trackerCell, ""));
+  if (fromTracker) return fromTracker;
+  const fromReport = postingUrl(typeof reportField === "string" ? reportField : "");
+  if (fromReport) return fromReport;
+  return postingUrl(resolvePostingUrl(applyLink, "")) || "";
 }
 
 const MAX_URL_LEN = 2048;

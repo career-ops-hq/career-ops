@@ -52,9 +52,18 @@ export async function POST(req: Request) {
   // Default to the LOCAL day (local-first app — server clock is the user's
   // clock); validate as a REAL calendar date, not just the shape: one
   // impossible date (2026-13-45) in the log would crash the cadence engine.
+  // FIX #7782: type-check before .trim(): a non-string (number, boolean, object,
+  // array) would otherwise throw a TypeError and surface as a 500.
+  if (body.date != null && typeof body.date !== "string") {
+    return Response.json({ error: "date must be a string" }, { status: 400 });
+  }
   const date = (body.date ?? localISODate()).trim();
   if (!isRealISODate(date)) {
     return Response.json({ error: "date must be a real calendar date (YYYY-MM-DD)" }, { status: 400 });
+  }
+  // FIX #7782: same guard for channel.
+  if (body.channel != null && typeof body.channel !== "string") {
+    return Response.json({ error: "channel must be a string" }, { status: 400 });
   }
   const rawChannel = (body.channel ?? "Other").trim();
   const channel = CHANNELS.find((c) => c.toLowerCase() === rawChannel.toLowerCase());

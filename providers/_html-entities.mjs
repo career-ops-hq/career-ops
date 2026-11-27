@@ -1,4 +1,6 @@
 // @ts-check
+import { ENTITIES, LEGACY_NAMES } from './_html-entity-table.mjs';
+
 // Minimal HTML entity decoder shared by the scraping providers whose sources
 // return raw HTML (as opposed to a JSON API). Handles named entities (&amp;,
 // &lt;, …) and numeric entities (&#252; / &#xfc;).
@@ -67,9 +69,15 @@ const NAMED_ENTITIES = {
   Yacute: 'Ý',
   // Punctuation these same pages emit around titles.
   deg: '°', hellip: '…', laquo: '«', raquo: '»', ndash: '–', mdash: '—',
+  // URL punctuation and whitespace for the default (title) decoder. Attribute mode
+  // reads the full table in _html-entity-table.mjs, not this one.
+  colon: ':', sol: '/',
+  Tab: '\t', NewLine: '\n',
   lsquo: '\u2018', rsquo: '\u2019', ldquo: '\u201C', rdquo: '\u201D', middot: '·', euro: '€',
 };
 
+// HTML maps the numeric references 0x80-0x9F to windows-1252; five of them have no mapping and stay C1 controls.
+const WINDOWS_1252_C1 = '\u20ac\u0081\u201a\u0192\u201e\u2026\u2020\u2021\u02c6\u2030\u0160\u2039\u0152\u008d\u017d\u008f\u0090\u2018\u2019\u201c\u201d\u2022\u2013\u2014\u02dc\u2122\u0161\u203a\u0153\u009d\u017e\u0178';
 const CASE_INSENSITIVE_NAMES = new Set(['amp', 'lt', 'gt', 'quot', 'apos', 'nbsp']);
 
 /**
@@ -111,12 +119,49 @@ function isEmittableCodePoint(code) {
     || (code >= 0x10000 && code <= 0x10ffff);
 }
 
-/** @param {string} s */
-export function decodeEntities(s) {
-  return s.replace(/&(#[xX][0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);/g, (m, body) => {
-    if (body[0] === '#') {
-      const isHex = body[1] === 'x' || body[1] === 'X';
-      const code = parseInt(body.slice(isHex ? 2 : 1), isHex ? 16 : 10);
+// The default mode: a reference with its semicolon, the decimal and hex forms as separate
+// alternatives. An HTML parser also decodes a numeric reference in an attribute value with no
+// semicolon (`&#58//x` is `://x`), so a caller that inspects an attribute needs `bareNumeric`.
+const STRICT_REF = /&(#[xX][0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);/g;
+// Attribute mode reads the whole WHATWG table (_html-entity-table.mjs). A name decodes when it
+// ends in a semicolon and is in the table. Otherwise the longest legacy name that prefixes it
+// decodes with no semicolon, unless an alphanumeric or `=` follows it (`&amp=1`, `&ampx` and
+// `&notit;` stay as written). Each run of name characters starts at its own `&`, so one pass is linear.
+const ATTRIBUTE_REF = /&(?:(#[xX][0-9a-fA-F]+|#[0-9]+);?|([a-zA-Z][a-zA-Z0-9]*)(;?))/g;
+const LEGACY_MAX = 6;
+
+/**
+ * @param {string} s
+ * @param {{bareNumeric?: boolean, text?: boolean}} [opts] `text` reads the
+ *   references the way the tokenizer's data state does: with `bareNumeric`, a
+ *   legacy name with no semicolon decodes whatever follows it (`&quothttps` is
+ *   `"https`), where an attribute value keeps it as written.
+ */
+export function decodeEntities(s, { bareNumeric = false, text = false } = {}) {
+  if (bareNumeric) return s.replace(ATTRIBUTE_REF, (m, numeric, name, semi, at) => {
+    if (numeric === undefined) {
+      if (semi && Object.hasOwn(ENTITIES, name)) return ENTITIES[name];
+      for (let n = Math.min(name.length, LEGACY_MAX); n >= 2; n--) {
+        const head = name.slice(0, n);
+        if (!LEGACY_NAMES.has(head)) continue;
+        const next = n < name.length ? name[n] : s[at + m.length];
+        if (text) return ENTITIES[head] + name.slice(n) + semi;
+        return next !== undefined && /[A-Za-z0-9=]/.test(next) ? m : ENTITIES[head];
+      }
+      return m;
+    }
+    const isHex = numeric[1] === 'x' || numeric[1] === 'X';
+    const code = parseInt(numeric.slice(isHex ? 2 : 1), isHex ? 16 : 10);
+    // An attribute caller sees what the browser sees: NUL, a surrogate and a
+    // code point past U+10FFFF become U+FFFD, and every other reference
+    // decodes, a leading C0 control included (the URL parser strips it).
+    if (code >= 0x80 && code <= 0x9f) return WINDOWS_1252_C1[code - 0x80];
+    return code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff) ? '\ufffd' : String.fromCodePoint(code);
+  });
+  return s.replace(STRICT_REF, (m, ref) => {
+    if (ref[0] === '#') {
+      const isHex = ref[1] === 'x' || ref[1] === 'X';
+      const code = parseInt(ref.slice(isHex ? 2 : 1), isHex ? 16 : 10);
       // Anything outside the emittable set is left exactly as written. Raw
       // `&#0;` in a title is visible and inert; a decoded NUL is neither.
       return isEmittableCodePoint(code) ? String.fromCodePoint(code) : m;
@@ -126,8 +171,8 @@ export function decodeEntities(s) {
     // silently decode `&Eacute;` to the lowercase letter. Only the XML five and
     // nbsp are matched case-insensitively, which is where legacy pages really do
     // write `&AMP;`.
-    if (Object.hasOwn(NAMED_ENTITIES, body)) return NAMED_ENTITIES[body];
-    const lower = body.toLowerCase();
+    if (Object.hasOwn(NAMED_ENTITIES, ref)) return NAMED_ENTITIES[ref];
+    const lower = ref.toLowerCase();
     return CASE_INSENSITIVE_NAMES.has(lower) ? NAMED_ENTITIES[lower] : m;
   });
 }

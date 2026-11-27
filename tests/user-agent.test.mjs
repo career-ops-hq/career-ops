@@ -4,6 +4,7 @@
 // deciding it should be there — see PR #2536 review) and must actually be
 // the header value sent on the wire.
 import { createServer } from 'node:http';
+import { listenOnSafePort } from './helpers/listen-safe-port.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { pass, fail, ROOT, withLocalServerAs } from './helpers.mjs';
@@ -45,7 +46,7 @@ else fail(`MACOS_BROWSER_LIKE_USER_AGENT drifted from the pinned literal: got ${
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end('{"ok":true}');
   });
-  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  await listenOnSafePort(server);
   // The provider guard refuses a loopback destination, so the request goes to
   // a public-looking origin and the transport is pointed at the local server.
   const base = 'http://ua.example.test';

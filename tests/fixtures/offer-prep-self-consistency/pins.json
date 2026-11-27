@@ -1,0 +1,206 @@
+[
+  {
+    "id": "P1",
+    "surface": "S1",
+    "phrase": "a clause that states no figure and refers to another instrument for it",
+    "sentence": "a clause that states no figure and refers to another instrument for it (\"as set out in the applicable collective agreement\", \"per the bonus policy as amended from time to time\") counts as such a reference and also gets one item to raise: \"the clause gives no figure and refers to {quoted reference}.",
+    "twins": []
+  },
+  {
+    "id": "P2",
+    "surface": "S1",
+    "phrase": "counts as such a reference",
+    "sentence": "a clause that states no figure and refers to another instrument for it (\"as set out in the applicable collective agreement\", \"per the bonus policy as amended from time to time\") counts as such a reference and also gets one item to raise: \"the clause gives no figure and refers to {quoted reference}.",
+    "twins": []
+  },
+  {
+    "id": "P3",
+    "surface": "S1",
+    "phrase": "also gets one item to raise",
+    "sentence": "a clause that states no figure and refers to another instrument for it (\"as set out in the applicable collective agreement\", \"per the bonus policy as amended from time to time\") counts as such a reference and also gets one item to raise: \"the clause gives no figure and refers to {quoted reference}.",
+    "twins": []
+  },
+  {
+    "id": "P4",
+    "surface": "S1",
+    "phrase": "the clause gives no figure and refers to {quoted reference}",
+    "sentence": "a clause that states no figure and refers to another instrument for it (\"as set out in the applicable collective agreement\", \"per the bonus policy as amended from time to time\") counts as such a reference and also gets one item to raise: \"the clause gives no figure and refers to {quoted reference}.",
+    "twins": []
+  },
+  {
+    "id": "P5",
+    "surface": "S1",
+    "phrase": "which document sets it, in which version, and can you share it?",
+    "sentence": "which document sets it, in which version, and can you share it?\"",
+    "twins": []
+  },
+  {
+    "id": "P6",
+    "surface": "S1",
+    "phrase": "the item says nothing about what that document contains",
+    "sentence": "the item says nothing about what that document contains.",
+    "twins": [
+      "K4"
+    ]
+  },
+  {
+    "id": "P7",
+    "surface": "S1",
+    "phrase": "nothing is looked up",
+    "sentence": "nothing is looked up: the candidate asks the employer.",
+    "twins": [
+      "K5"
+    ]
+  },
+  {
+    "id": "P8",
+    "surface": "S1",
+    "phrase": "a clause that refers to a statute instead",
+    "sentence": "a clause that refers to a statute instead becomes a lawyer question; no statutory figure is stated.",
+    "twins": [
+      "K4"
+    ]
+  },
+  {
+    "id": "P9",
+    "surface": "S2",
+    "phrase": "ask which documents came with the offer, and list every one the contract does not reference",
+    "sentence": "package inventory: ask which documents came with the offer, and list every one the contract does not reference (for example a separately signed acknowledgement, a policy pdf or a declaration form).",
+    "twins": []
+  },
+  {
+    "id": "P10",
+    "surface": "S2",
+    "phrase": "each is named in the output header",
+    "sentence": "each is named in the output header and gets one item to raise: \"what is this document, and does it form part of the agreement?\"",
+    "twins": []
+  },
+  {
+    "id": "P11",
+    "surface": "S2",
+    "phrase": "gets one item to raise: \"what is this document, and does it form part of the agreement?\"",
+    "sentence": "each is named in the output header and gets one item to raise: \"what is this document, and does it form part of the agreement?\"",
+    "twins": []
+  },
+  {
+    "id": "P12",
+    "surface": "S2",
+    "phrase": "nothing is inferred about what it means for the contract",
+    "sentence": "nothing is inferred about what it means for the contract, and the list stays separate from the referenced-documents inventory above.",
+    "twins": []
+  },
+  {
+    "id": "P13",
+    "surface": "S3",
+    "phrase": "the contract is also read against itself",
+    "sentence": "within the document: the contract is also read against itself.",
+    "twins": []
+  },
+  {
+    "id": "P14",
+    "surface": "S3",
+    "phrase": "quote both places wherever two parts of the same document state a different value for the same figure in the same unit",
+    "sentence": "quote both places wherever two parts of the same document state a different value for the same figure in the same unit (body and annex, a clause and a schedule).",
+    "twins": [
+      "K17"
+    ]
+  },
+  {
+    "id": "P15",
+    "surface": "S3",
+    "phrase": "a clause that takes its figure from one of those places is quoted too",
+    "sentence": "a clause that takes its figure from one of those places is quoted too, together with the clause it cites.",
+    "twins": [
+      "K17"
+    ]
+  },
+  {
+    "id": "P16",
+    "surface": "S3",
+    "phrase": "a clause that only refers to a figure whose value is the same everywhere is not a finding",
+    "sentence": "a clause that only refers to a figure whose value is the same everywhere is not a finding.",
+    "twins": [
+      "K17"
+    ]
+  },
+  {
+    "id": "P17",
+    "surface": "S3",
+    "phrase": "say only that the two readings differ",
+    "sentence": "say only that the two readings differ; neither is called the one that applies.",
+    "twins": [
+      "K3"
+    ]
+  },
+  {
+    "id": "P18",
+    "surface": "S3",
+    "phrase": "neither is called the one that applies",
+    "sentence": "say only that the two readings differ; neither is called the one that applies.",
+    "twins": [
+      "K3"
+    ]
+  },
+  {
+    "id": "P19",
+    "surface": "S3",
+    "phrase": "each is listed in the consistency deltas and also becomes one item to raise",
+    "sentence": "each is listed in the consistency deltas and also becomes one item to raise: \"can you confirm which figure applies?\"",
+    "twins": []
+  },
+  {
+    "id": "P20",
+    "surface": "S3",
+    "phrase": "can you confirm which figure applies?",
+    "sentence": "each is listed in the consistency deltas and also becomes one item to raise: \"can you confirm which figure applies?\"",
+    "twins": []
+  },
+  {
+    "id": "P21",
+    "surface": "S3",
+    "phrase": "where two places state the same quantity in different units",
+    "sentence": "where two places state the same quantity in different units (days and weeks, a monthly and a yearly amount, 12 or 13 salaries), nothing is converted: both places are quoted in one item to raise that asks only \"which figure applies?\", and no difference is claimed.",
+    "twins": []
+  },
+  {
+    "id": "P22",
+    "surface": "S3",
+    "phrase": "nothing is converted",
+    "sentence": "where two places state the same quantity in different units (days and weeks, a monthly and a yearly amount, 12 or 13 salaries), nothing is converted: both places are quoted in one item to raise that asks only \"which figure applies?\", and no difference is claimed.",
+    "twins": [
+      "K17"
+    ]
+  },
+  {
+    "id": "P23",
+    "surface": "S3",
+    "phrase": "both places are quoted in one item to raise that asks only \"which figure applies?\"",
+    "sentence": "where two places state the same quantity in different units (days and weeks, a monthly and a yearly amount, 12 or 13 salaries), nothing is converted: both places are quoted in one item to raise that asks only \"which figure applies?\", and no difference is claimed.",
+    "twins": []
+  },
+  {
+    "id": "P24",
+    "surface": "S3",
+    "phrase": "no difference is claimed",
+    "sentence": "where two places state the same quantity in different units (days and weeks, a monthly and a yearly amount, 12 or 13 salaries), nothing is converted: both places are quoted in one item to raise that asks only \"which figure applies?\", and no difference is claimed.",
+    "twins": [
+      "K17"
+    ]
+  },
+  {
+    "id": "P25",
+    "surface": "S3",
+    "phrase": "a lawyer question follows only where a quoted clause already carries [ask your lawyer]",
+    "sentence": "a lawyer question follows only where a quoted clause already carries [ask your lawyer]; no new tag is added.",
+    "twins": [
+      "K6"
+    ]
+  },
+  {
+    "id": "P26",
+    "surface": "S4",
+    "phrase": "received, not referenced by the contract:",
+    "sentence": "referenced documents not provided: {list or \"none\"} received, not referenced by the contract: {list or \"none\"} contents: clause walk · notable absences · consistency deltas · lawyer questions · items to raise",
+    "twins": []
+  }
+]

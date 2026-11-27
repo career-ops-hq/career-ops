@@ -34,8 +34,7 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { join } from 'path';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { flagValue, validateFlags, safeIntFlag } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -375,6 +374,13 @@ if (isMainModule(import.meta.url)) {
 
   if (selfTestMode) {
     runSelfTest();
+  }
+
+  // An explicit --file names the data to report on, so a path that does not
+  // exist is an error. Only the default path may be absent (no interviews yet).
+  if (fileFlagValue !== undefined && !existsSync(fileFlagValue)) {
+    console.error(`process-quality: file not found: ${fileFlagValue}`);
+    process.exit(1);
   }
 
   const rows = loadActiveInterviews();

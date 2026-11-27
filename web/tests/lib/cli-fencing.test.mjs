@@ -7,6 +7,11 @@
 // under `read-only` the Codex sandbox blocks DNS outright, and the network escape
 // hatch only exists for `workspace-write`.
 //
+// The Pi tests below encode Pi's CLI as read from earendil-works/pi v1.5.2
+// (packages/coding-agent/src/cli/args.ts and core/agent-session.ts): `-p` takes
+// the next element as the prompt, `--tools` with plain names replaces the default
+// read/bash/edit/write selection, and it keeps MCP tools unless they are excluded.
+//
 // Run:  node --test tests/lib/cli-fencing.test.mjs
 
 import { test } from "node:test";
@@ -361,7 +366,7 @@ test("every runtime and capability pair grades to a defined level", () => {
   // so a worker that must fetch but is not asked to write receives a writable
   // workspace — fenced on one axis, not the other.
   const grades = [];
-  for (const cliId of ["claude", "codex", "gemini", "made-up-cli"]) {
+  for (const cliId of ["claude", "codex", "pi", "gemini", "made-up-cli"]) {
     for (const [name, caps] of Object.entries(CAPS)) {
       const { level, notice } = fencingReport({ cliId, cliName: cliId, capabilities: caps });
 
@@ -526,7 +531,7 @@ test("fencingReport answers for the runtimes the routes actually ask about", () 
     // reassuring answer.
     assert.equal(fencingReport({ cliId, cliName: cliId, capabilities: CAPS.localReadOnly }).level, "none");
   }
-  for (const cliId of ["claude", "codex"]) {
+  for (const cliId of ["claude", "codex", "pi"]) {
     assert.equal(fencingReport({ cliId, cliName: cliId, capabilities: CAPS.localReadOnly }).level, "full");
   }
 });
@@ -586,5 +591,121 @@ test("a prototype-inherited cliId is not mistaken for a fencer", () => {
     // so both entry points agree on what membership in FENCERS means.
     assert.deepEqual(out, args, `${cliId} must not resolve to a fencer`);
     assert.equal(fencingReport({ cliId, cliName: cliId, capabilities: CAPS.localReadOnly }).level, "none");
+  }
+});
+
+/** The argv clis.ts KNOWN ships for pi, prompt last. */
+const piArgv = (prompt = "PROMPT") => ["--no-session", "-p", prompt];
+
+/** Read the value of a Pi list option (`--tools`, `--exclude-tools`) back out of a built argv. */
+function piList(args, option) {
+  const i = args.indexOf(option);
+  return i === -1 ? null : args[i + 1].split(",");
+}
+
+test("pi's pdf worker gets read-only tools and no MCP tools (#2172)", () => {
+  // Given the pdf worker, which must never get Bash, on Pi, whose default tools
+  // are read, bash, edit and write, all run without asking
+  const { args } = fenceArgs({ cliId: "pi", args: piArgv(), capabilities: capabilitiesFor("pdf") });
+
+  // Then it is handed only tools that read...
+  assert.deepEqual(piList(args, "--tools"), ["read", "grep", "find", "ls"]);
+  // ...with every MCP tool removed, since `--tools` alone keeps them on Pi 1.0.4+
+  // and an MCP server can supply a write tool...
+  assert.deepEqual(piList(args, "--exclude-tools"), ["mcp__*"]);
+  // ...the folder stays untrusted, so no project-local extension loads, even
+  // after a saved /trust...
+  assert.ok(args.includes("--no-approve"), "the run must not trust the project folder");
+  // ...and the run is graded fully fenced, with no notice.
+  assert.deepEqual(fencingReport({ cliId: "pi", cliName: "Pi", capabilities: capabilitiesFor("pdf") }), { level: "full", notice: null });
+});
+
+test("no non-writing worker on pi is handed edit or write", () => {
+  // Given every kind /api/run dispatches, plus the inline records other routes use
+  const records = [...KNOWN_KINDS.map((kind) => [kind, capabilitiesFor(kind)]), ...Object.entries(CAPS)];
+  for (const [name, caps] of records) {
+    if (caps.writes) continue;
+    const { args } = fenceArgs({ cliId: "pi", args: piArgv(), capabilities: caps });
+    const tools = piList(args, "--tools");
+
+    // Then each one gets an explicit allowlist without a write tool, and no MCP tools
+    assert.ok(tools, `${name}: a non-writing worker must get a --tools allowlist`);
+    for (const forbidden of ["edit", "write"]) {
+      assert.ok(!tools.includes(forbidden), `${name}: ${forbidden} must not be allowed`);
+    }
+    assert.deepEqual(piList(args, "--exclude-tools"), ["mcp__*"], `${name}: MCP tools must be excluded`);
+    assert.ok(args.includes("--no-approve"), `${name}: the project folder must stay untrusted`);
+    // And bash only when the worker has to reach the web, which Pi does through it
+    assert.equal(tools.includes("bash"), Boolean(caps.network), `${name}: bash iff the record needs the web`);
+  }
+});
+
+test("a pi worker that needs the web is graded partial, not full", () => {
+  // Given Pi has no web tool, so a worker that must open urls keeps bash
+  for (const caps of [CAPS.networkReadOnly, CAPS.webSearchOnly]) {
+    const report = fencingReport({ cliId: "pi", cliName: "Pi", capabilities: caps });
+
+    // Then the run says it is only partly restricted, names the runtime, and the
+    // worker card can spot the notice
+    assert.equal(report.level, "partial");
+    assert.ok(isFencingNotice(report.notice), "the notice must be detectable by the UI");
+    assert.ok(report.notice.includes("Pi"), "the notice must name the runtime");
+  }
+});
+
+test("a writing pi worker keeps pi's default tools", () => {
+  // Given a record that grants writes and fetches, which Pi's default tools give
+  const original = piArgv();
+  const { args } = fenceArgs({ cliId: "pi", args: original, capabilities: CAPS.workspaceWrite });
+
+  // Then the argv is untouched and the run is fully fenced
+  assert.deepEqual(args, original);
+  assert.equal(fencingReport({ cliId: "pi", cliName: "Pi", capabilities: CAPS.workspaceWrite }).level, "full");
+});
+
+test("pi fencing keeps the prompt right after -p", () => {
+  // Given Pi's `-p` reads the element after it as the prompt, a flag spliced in
+  // between would become the prompt and the real prompt a stray message
+  const prompt = "Tailor the CV --tools edit,write";
+  for (const caps of Object.values(CAPS)) {
+    const { args } = fenceArgs({ cliId: "pi", args: piArgv(prompt), capabilities: caps });
+
+    // Then the prompt stays last and immediately follows -p, and every argv
+    // element the caller wrote is still there in order
+    assert.equal(args.at(-1), prompt);
+    assert.equal(args.at(-2), "-p");
+    assert.deepEqual(args.slice(-3), piArgv(prompt));
+  }
+});
+
+test("a pi argv that already chooses its own tools is refused", () => {
+  // Given call sites that spell a tool selection or a project trust choice themselves,
+  // in every spelling Pi's parser takes
+  const spellings = [
+    ["--tools", "read,bash"],
+    ["-t", "read"],
+    ["--exclude-tools", "write"],
+    ["-xt", "write"],
+    ["--no-tools"],
+    ["-nt"],
+    ["--no-builtin-tools"],
+    ["-nbt"],
+    ["--no-mcp"],
+    ["--approve"],
+    ["-a"],
+    ["--no-approve"],
+    ["-na"],
+    ["--tools=read,bash"],
+  ];
+  for (const spelled of spellings) {
+    // Then fencing throws rather than adding a second, contradicting selection,
+    // whatever the record
+    for (const caps of Object.values(CAPS)) {
+      assert.throws(
+        () => fenceArgs({ cliId: "pi", args: [...spelled, ...piArgv()], capabilities: caps }),
+        /pi argv already spells/,
+        `${spelled.join(" ")} must be refused`,
+      );
+    }
   }
 });

@@ -14,6 +14,7 @@ import {
   cleanHeading,
   firstProseParagraph,
   isLeadSection,
+  legitimacyTone,
   isVerdictHeading,
   splitSections,
   sectionPreview,
@@ -37,9 +38,21 @@ test("a block added past H needs no code change", () => {
   assert.equal(authorLetter("Z. Last One"), "Z");
 });
 
-test("the (lead) / (verdict) marker is dropped with the letter", () => {
+test("the (lead) / (verdict) / (draft) marker is dropped with the letter", () => {
   assert.equal(cleanHeading("F) Verdict (lead)"), "Verdict");
   assert.equal(cleanHeading("F) Verdict (verdict)"), "Verdict");
+  // The evaluation modes write "(draft)" on the draft-answers block so the core
+  // reader can find it in any language (#3884); the viewer must not see it either.
+  assert.equal(cleanHeading("H) Draft Application Answers (draft)"), "Draft Application Answers");
+  assert.equal(cleanHeading("G) Чернетки відповідей на форму (draft)"), "Чернетки відповідей на форму");
+});
+
+test("(draft) marks the draft-answers block, never the verdict callout", () => {
+  // Both markers are stripped for display, but only (lead)/(verdict) leads the
+  // report. A draft-answers block rendered as the Verdict callout would put
+  // unsent application answers where the hiring decision belongs.
+  assert.equal(isVerdictHeading("H) Draft Application Answers (draft)"), false);
+  assert.equal(isVerdictHeading("G) Szkice odpowiedzi do aplikacji (draft)"), false);
 });
 
 test("all three delimiters and the spelled-out Block form", () => {
@@ -218,6 +231,17 @@ test("verdictReason reads the header lede above ---", () => {
   );
 });
 
+test("a report with no section break does not reuse its body as the verdict reason", () => {
+  const report = [
+    "# Fixture States Co — Engineer",
+    "",
+    "**URL:** https://jobs.fixture-states.example/engineer",
+    "",
+    "Fictional browser test report.",
+  ].join("\n");
+  assert.equal(verdictReason({ report, intro: "" }), "");
+});
+
 test("verdictReason drops inline Markdown markers", () => {
   assert.equal(
     verdictReason({
@@ -244,6 +268,42 @@ test("applyLineLabel: a flagged posting above the line is not Recommended", () =
   assert.equal(applyLineLabel("3.1/5", "Proceed with Caution"), "Below the apply line");
 });
 
+test("applyLineLabel: Turkish legitimacy tiers flag the posting too", () => {
+  assert.equal(applyLineLabel("4.9/5", "Dikkatli İlerle"), "Check the posting first");
+  assert.equal(applyLineLabel("4.9/5", "Şüpheli"), "Check the posting first");
+  assert.equal(applyLineLabel("4.9/5", "Güvenilir"), "Recommended");
+  assert.equal(applyCtaQuiet({ score: 4.5, legitimacy: "Şüpheli" }), true);
+});
+
+test("applyLineLabel: Chinese legitimacy tiers flag the posting too", () => {
+  // modes/zh/oferta.md (Simplified) and modes/zh-TW/oferta.md (Traditional).
+  assert.equal(applyLineLabel("4.9/5", "谨慎推进"), "Check the posting first");
+  assert.equal(applyLineLabel("4.9/5", "疑似虚假"), "Check the posting first");
+  assert.equal(applyLineLabel("4.9/5", "高置信度"), "Recommended");
+  assert.equal(applyLineLabel("4.9/5", "審慎推進"), "Check the posting first");
+  assert.equal(applyLineLabel("4.9/5", "疑似虛假"), "Check the posting first");
+  assert.equal(applyLineLabel("4.9/5", "高信心"), "Recommended");
+  assert.equal(applyCtaQuiet({ score: 4.5, legitimacy: "疑似虚假" }), true);
+  assert.equal(applyCtaQuiet({ score: 4.5, legitimacy: "審慎推進" }), true);
+  assert.equal(applyCtaQuiet({ score: 4.5, legitimacy: "高信心" }), false);
+});
+
+test("legitimacyTone: English, Turkish and Chinese tiers map to good / warn / bad", () => {
+  assert.equal(legitimacyTone("High Confidence"), "good");
+  assert.equal(legitimacyTone("Proceed with Caution"), "warn");
+  assert.equal(legitimacyTone("Suspicious"), "bad");
+  assert.equal(legitimacyTone("Güvenilir"), "good");
+  assert.equal(legitimacyTone("Dikkatli İlerle"), "warn");
+  assert.equal(legitimacyTone("Şüpheli"), "bad");
+  assert.equal(legitimacyTone("高置信度"), "good");
+  assert.equal(legitimacyTone("谨慎推进"), "warn");
+  assert.equal(legitimacyTone("疑似虚假"), "bad");
+  assert.equal(legitimacyTone("高信心"), "good");
+  assert.equal(legitimacyTone("審慎推進"), "warn");
+  assert.equal(legitimacyTone("疑似虛假"), "bad");
+  assert.equal(legitimacyTone("unknown"), "muted");
+});
+
 test("applyCtaQuiet: below the apply line or caution legitimacy", () => {
   assert.equal(applyCtaQuiet({ score: 4.2 }), false);
   assert.equal(applyCtaQuiet({ score: 3.3 }), true);
@@ -260,4 +320,9 @@ test("sectionPreview prefers prose next to a table and counts a wide table", () 
   assert.equal(sectionPreview("| A | B |\n|---|---|\n| x | y |\n\nStrong fit overall. More detail."), "Strong fit overall.");
   assert.equal(sectionPreview("| Gap | Severity | Mitigation |\n|---|---|---|\n| SQL | Low | Course |\n| K8s | Mid | Lab |"), "2 rows");
   assert.equal(sectionPreview("| # | Situation | S | T | A | R | STAR story |\n|---|---|---|---|---|---|---|\n| 1 | a | b | c | d | e | f |"), "1 interview story");
+});
+
+test("a decimal-comma score is placed against the apply line as a decimal", () => {
+  assert.equal(applyLineLabel("3,8/5"), "Below the apply line");
+  assert.equal(applyLineLabel("4,2/5"), "Recommended");
 });

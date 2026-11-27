@@ -34,7 +34,9 @@ import {
   buildWorkdayCandidates,
   resolveCompany,
   resolveWorkday,
+  partitionBlacklisted,
 } from '../discover-ats.mjs';
+import { parseBlacklist } from '../scan.mjs';
 import * as yaml from 'js-yaml';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
@@ -725,3 +727,53 @@ try {
   workdayVendorOk = false;
 }
 ok('--vendors workday accepted', workdayVendorOk);
+
+// ── Blacklist ─────────────────────────────────────────────────────────
+console.log('\n--- data/blacklist.md is never resolved or written ---');
+{
+  const bl = parseBlacklist('| Company | Since | Scope | Reason |\n|---|---|---|---|\n'
+    + '| BannedCo | 2026-01-01 | company | culture |\n'
+    + '| banned.wd1.myworkdayjobs.com | 2026-01-01 | domain | same |\n');
+  const pre = partitionBlacklisted([
+    { name: 'BannedCo' },
+    { name: 'Hinted', workday: 'https://banned.wd1.myworkdayjobs.com/Site' },
+    { name: 'KeptCo' },
+  ], bl);
+  eq('pre-probe: name and Workday-hint domain matches are split out', pre.blacklisted.map((b) => b.name), ['BannedCo', 'Hinted']);
+  eq('pre-probe: the rest is kept', pre.allowed.map((c) => c.name), ['KeptCo']);
+  eq('pre-probe: matched entry + reason are reported', pre.blacklisted[0], { name: 'BannedCo', entry: 'BannedCo', reason: 'culture' });
+  const post = partitionBlacklisted([{ name: 'Other', careers_url: 'https://banned.wd1.myworkdayjobs.com/X' }], bl, (r) => [r.careers_url]);
+  eq('post-probe: a resolved board on a blacklisted host is dropped', post.allowed.length, 0);
+
+  // Review on #5333: the website must be checked even when a Workday hint is
+  // present, and a bare documented `website: example.com` must still match.
+  const bl2 = parseBlacklist('| Company | Since | Scope | Reason |\n|---|---|---|---|\n'
+    + '| banned-site.example | 2026-01-01 | domain | same |\n');
+  const both = partitionBlacklisted([
+    { name: 'BothFields', workday: 'https://ok.wd1.myworkdayjobs.com/Site', website: 'https://www.banned-site.example' },
+    { name: 'BareSite', website: 'banned-site.example' },
+    { name: 'BareSubdomain', website: 'careers.banned-site.example/jobs' },
+    { name: 'CleanSite', website: 'fine.example' },
+  ], bl2);
+  eq('pre-probe: website is checked even when a Workday hint is present', both.blacklisted.map((b) => b.name), ['BothFields', 'BareSite', 'BareSubdomain']);
+  eq('pre-probe: a bare website not on the list is kept', both.allowed.map((c) => c.name), ['CleanSite']);
+
+  // End to end: every company blacklisted → nothing probed (no network) and
+  // --write leaves portals.yml byte-for-byte unchanged.
+  const dir = mkdtempSync(join(tmpdir(), 'discover-ats-bl-'));
+  try {
+    const portals = join(dir, 'portals.yml');
+    const blPath = join(dir, 'blacklist.md');
+    const content = 'tracked_companies:\n  - name: Existing\n    careers_url: https://jobs.lever.co/existing\n';
+    writeFileSync(portals, content);
+    writeFileSync(blPath, '| Company | Since | Scope | Reason |\n|---|---|---|---|\n| BannedCo | 2026-01-01 | company | culture |\n');
+    const out = JSON.parse(execFileSync('node', [scriptPath, 'BannedCo', '--write'], {
+      encoding: 'utf-8', timeout: 15000, cwd: dirname(scriptPath),
+      env: { ...process.env, CAREER_OPS_PORTALS: portals, CAREER_OPS_BLACKLIST: blPath },
+    }));
+    eq('CLI: blacklisted company reported, not resolved', [out.metadata.blacklistedSkipped, out.metadata.resolved], [1, 0]);
+    eq('CLI: --write leaves portals.yml unchanged', readFileSync(portals, 'utf-8'), content);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}

@@ -3,7 +3,7 @@
 // read: a header row of column labels, a `url` column, and one data row (#3702).
 //
 // Why a test and not a review note. Headerless additions stay valid forever
-// (AGENTS.md keeps the legacy path), so a stale localized template never goes
+// (modes/_tracker-tsv.md keeps the legacy path), so a stale localized template never goes
 // red on its own — it just keeps that market on the content-sniffing path,
 // where `—` is both a score sentinel (#1799) and a status meaning Discarded, so
 // a discarded, never-scored row is undecidable and skipped. The missing `url`
@@ -33,22 +33,22 @@ const ALIASES = JSON.parse(readFileSync(join(ROOT, 'tracker-aliases.json'), 'utf
 // input: discovery below runs over all of modes/, and this set only asserts it
 // never silently narrows again.
 //
-// `modes/ru/oferta.md` was the fifth and is deliberately NOT here any more.
-// Removing an entry from a narrowing tripwire is the exact move it exists to
-// prevent, so the reason is recorded rather than assumed: #3830 re-synced that
-// file to the canonical A–H structure, and the canonical structure — English
-// `modes/oferta.md` — dictates no TSV row at all. It lists the fields in prose
-// and defers the row shape to AGENTS.md and rule 9 of `_shared.md`. The
-// re-synced file no longer contains the string `batch/tracker-additions/`, so
-// it is not merely unrecognized, it is genuinely out of this suite's scope.
-// That is a better end state than #3702 asked for: one canonical spec instead
-// of a sixth copy that can drift. If a row template ever returns to that file,
-// discovery picks it up again and the full contract below applies to it.
+// `modes/ru/oferta.md` was the fifth and `modes/ua/oferta.md` the sixth, and
+// both are deliberately NOT here any more. Removing an entry from a narrowing
+// tripwire is the exact move it exists to prevent, so the reason is recorded
+// rather than assumed: #3830 and #5433 re-synced those files to the canonical
+// A–H structure, and the canonical structure — English `modes/oferta.md` —
+// dictates no TSV row at all. It lists the fields in prose and defers the row
+// shape to modes/_tracker-tsv.md and rule 9 of `_shared.md`. The re-synced files no longer
+// contain the string `batch/tracker-additions/`, so they are not merely
+// unrecognized, they are genuinely out of this suite's scope. That is a better
+// end state than #3702 asked for: one canonical spec instead of a sixth copy
+// that can drift. If a row template ever returns to either file, discovery
+// picks it up again and the full contract below applies to it.
 const KNOWN_TEMPLATE_FILES = [
   'modes/ko/gonggo.md',
   'modes/nl/vacature.md',
   'modes/tr/is-ilani.md',
-  'modes/ua/oferta.md',
 ];
 
 // Column labels a header must carry before merge-tracker can resolve a row by
@@ -162,6 +162,9 @@ if (missed.length) {
 // Prose that only made sense before the header: a fixed column count, or the
 // score/status order restated as a fact about the format. Under a header the
 // order carries no meaning, so restating it is what goes stale next (#3702).
+// The format spec AGENTS.md points to (#6693); see check 7 below.
+const TSV_SPEC = 'modes/_tracker-tsv.md';
+
 const STALE_PROSE = [
   { re: /\b8\s*(?:or|veya|или|або|of|oder|ou|o|nebo|veya)\s*9\b/i, why: 'a fixed column count' },
   { re: /status\s*(?:before|önce|перед|voor|vóór|前)\s*score/i, why: 'the "status before score" framing' },
@@ -264,8 +267,10 @@ for (const rel of [...seen].sort()) {
     fail(`${rel}: the data row's literal status cell is "${statusCell}", which is not a canonical state (templates/states.yml)`);
   }
 
-  // 7. No prose that the header made wrong.
-  for (const { re, why } of STALE_PROSE) {
+  // 7. No prose that the header made wrong. The spec itself is exempt: it
+  // moved here from AGENTS.md (#6693) and describes the legacy headerless
+  // order on purpose, as the form `--allow-headerless` still accepts.
+  for (const { re, why } of rel === TSV_SPEC ? [] : STALE_PROSE) {
     const hit = entry.text.split('\n').findIndex((l) => re.test(l));
     if (hit >= 0) fail(`${rel}:${hit + 1} still states ${why} — under a header the column order is not a fact about the format`);
   }

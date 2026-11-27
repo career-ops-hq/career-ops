@@ -1,7 +1,9 @@
 version: 2
 updates:
+  # Dependabot does not recurse into nested manifests, so every tracked
+  # package.json is listed (#4899).
   - package-ecosystem: "npm"
-    directory: "/"
+    directories: ["/", "/web", "/scaffolder"]
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5

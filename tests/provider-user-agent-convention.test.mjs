@@ -20,6 +20,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { codeMask } from './helpers.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PROVIDERS_DIR = join(ROOT, 'providers');
@@ -28,18 +29,50 @@ const PROVIDERS_DIR = join(ROOT, 'providers');
 // them. Nothing under providers/ needs its own.
 const EXEMPT = new Set([]);
 
-const UA_LITERAL_RE = /Mozilla\/5\.0/;
+const UA_LITERAL_RE = /Mozilla\/5\.0/g;
+
+/**
+ * Line numbers of every Mozilla/5.0 that is not in a comment.
+ *
+ * A comment explaining the rule is not a violation; a string is. This used to
+ * drop everything after the first `//` on a line, which is also the `//` of a
+ * URL, so `getJson('https://api.example.com/jobs', { headers: { 'User-Agent':
+ * 'Mozilla/5.0 …' } })` was cut to `getJson('https:` and never seen. codeMask
+ * blanks comments, strings and regexes alike, so what decides is what opens
+ * the blanked region a match sits in: a `/` (a comment, or a regex that tests
+ * for the token) is allowed, anything else (a quote, a template) is a literal.
+ */
+function uaLiteralLines(src) {
+  const isCode = codeMask(src);
+  const lines = [];
+  for (const m of src.matchAll(UA_LITERAL_RE)) {
+    let start = m.index;
+    while (start > 0 && !isCode[start - 1]) start--;
+    if (!isCode[m.index] && src[start] === '/') continue;
+    lines.push(src.slice(0, m.index).split('\n').length);
+  }
+  return lines;
+}
+
+test('the detector sees a literal past a URL and ignores comments and regexes', () => {
+  const lines = [
+    "const r = await getJson('https://api.example.com/jobs', { headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux)' } });",
+    "headers['User-Agent'] = `Mozilla/5.0 ${suffix}`;",
+    '// a Mozilla/5.0 literal here is what this file bans',
+    '/* Mozilla/5.0 in a block comment */',
+    'const isBrowser = /Mozilla\\/5\\.0/.test(ua);',
+    "fetch('https://example.com/a'); // Mozilla/5.0 noted after a URL",
+  ].join('\n');
+  assert.deepEqual(uaLiteralLines(lines), [1, 2]);
+});
 
 test('no provider hardcodes a User-Agent literal', () => {
   const offenders = [];
   for (const name of readdirSync(PROVIDERS_DIR)) {
     if (!name.endsWith('.mjs') || EXEMPT.has(name)) continue;
     const src = readFileSync(join(PROVIDERS_DIR, name), 'utf-8');
-    src.split('\n').forEach((line, i) => {
-      // A comment explaining the rule is not a violation; a string is.
-      const code = line.replace(/\/\/.*$/, '');
-      if (UA_LITERAL_RE.test(code)) offenders.push(`${name}:${i + 1}: ${line.trim()}`);
-    });
+    const lines = src.split('\n');
+    for (const n of uaLiteralLines(src)) offenders.push(`${name}:${n}: ${lines[n - 1].trim()}`);
   }
   assert.deepEqual(
     offenders,

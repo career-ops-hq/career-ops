@@ -14,10 +14,13 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 import { decodeEntities } from './providers/_html-entities.mjs';
+import { isBlockedAddress } from './providers/_ip-guard.mjs';
 import { safeEncodeURIComponent } from './providers/_safe-url.mjs';
 import { BROWSER_LIKE_USER_AGENT } from './user-agent.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -89,8 +92,7 @@ const GENERIC_NAMES = new Set([
   'round',
 ]);
 
-function usage() {
-  console.log(`Usage:
+const USAGE = `Usage:
   node company-funded.mjs --dry-run
   node company-funded.mjs --limit 25 --months 6 --sort date
   node company-funded.mjs --sources techcrunch,prnewswire,guardian,hn --dry-run
@@ -104,42 +106,43 @@ Options:
   --dry-run               Print only; do not write report/JSON files.
   --json                  Print machine-readable JSON.
   --self-test             Run offline self-test.
-`);
-}
+`;
+
+function usage() { console.log(USAGE); }
 
 function parseArgs(argv) {
-  const opts = {
-    limit: DEFAULT_LIMIT,
-    months: DEFAULT_MONTHS,
-    sort: DEFAULT_SORT,
-    sources: [...DEFAULT_SOURCES],
-    dryRun: false,
-    json: false,
-    selfTest: false,
-    help: false,
+  const args = argv.slice(2);
+  const KNOWN_FLAGS = ['--dry-run','--json','--self-test','--help','-h','--limit','--months','--sort','--sources'];
+  const VALUE_FLAGS = ['--limit','--months','--sort','--sources'];
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+  return {
+    limit: parseLimit(flagValue(args, '--limit') ?? String(DEFAULT_LIMIT)),
+    months: parseMonths(flagValue(args, '--months') ?? String(DEFAULT_MONTHS)),
+    sort: parseSort(flagValue(args, '--sort') ?? DEFAULT_SORT),
+    sources: parseSources(flagValue(args, '--sources') ?? DEFAULT_SOURCES.join(',')),
+    dryRun: hasFlag(args, '--dry-run'),
+    json: hasFlag(args, '--json'),
+    selfTest: hasFlag(args, '--self-test'),
+    help: hasFlag(args, '--help') || hasFlag(args, '-h'),
   };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === '--dry-run') opts.dryRun = true;
-    else if (arg === '--json') opts.json = true;
-    else if (arg === '--self-test') opts.selfTest = true;
-    else if (arg === '--help' || arg === '-h') opts.help = true;
-    else if (arg === '--limit') opts.limit = Number(argv[++i] || '');
-    else if (arg === '--months') opts.months = Number(argv[++i] || '');
-    else if (arg === '--sort') opts.sort = String(argv[++i] || '').trim().toLowerCase();
-    else if (arg === '--sources') opts.sources = parseSources(argv[++i] || '');
-    else throw new Error(`unknown option: ${arg}`);
-  }
-  if (!Number.isInteger(opts.limit) || opts.limit <= 0 || opts.limit > 100) {
-    throw new Error('--limit must be an integer from 1 to 100');
-  }
-  if (!Number.isInteger(opts.months) || opts.months <= 0 || opts.months > 120) {
-    throw new Error('--months must be an integer from 1 to 120');
-  }
-  if (!['date', 'score'].includes(opts.sort)) {
-    throw new Error('--sort must be date or score');
-  }
-  return opts;
+}
+
+function parseLimit(value) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0 || n > 100) throw new Error('--limit must be an integer from 1 to 100');
+  return n;
+}
+
+function parseMonths(value) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0 || n > 120) throw new Error('--months must be an integer from 1 to 120');
+  return n;
+}
+
+function parseSort(value) {
+  const s = String(value || '').trim().toLowerCase();
+  if (!['date', 'score'].includes(s)) throw new Error('--sort must be date or score');
+  return s;
 }
 
 function parseSources(value) {
@@ -200,21 +203,6 @@ function trustedForSource(raw, source) {
   return domains.some((domain) => matchesDomain(url.hostname, domain));
 }
 
-function isPrivateIpv4(parts) {
-  const [a, b] = parts;
-  return (
-    a === 0 ||
-    a === 10 ||
-    a === 127 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    (a === 198 && (b === 18 || b === 19)) ||
-    a >= 224
-  );
-}
-
 function parseIpv4Part(part) {
   if (/^0x[0-9a-f]+$/i.test(part)) return Number.parseInt(part.slice(2), 16);
   if (/^0[0-7]+$/.test(part)) return Number.parseInt(part, 8);
@@ -239,37 +227,19 @@ function parseIpv4Hostname(host) {
   return nums;
 }
 
-function parseIpv4MappedIpv6(host) {
-  const normalized = String(host || '').toLowerCase();
-  const dotted = normalized.match(/^(?:0:0:0:0:0:ffff:|::ffff:)(\d{1,3}(?:\.\d{1,3}){3})$/);
-  if (dotted) return parseIpv4Hostname(dotted[1]);
-  const hex = normalized.match(/^(?:0:0:0:0:0:ffff:|::ffff:)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-  if (!hex) return null;
-  const high = Number.parseInt(hex[1], 16);
-  const low = Number.parseInt(hex[2], 16);
-  if (high > 0xffff || low > 0xffff) return null;
-  return [(high >>> 8) & 255, high & 255, (low >>> 8) & 255, low & 255];
-}
-
-function isPrivateOrInternalHostname(hostname) {
+// An IP literal is judged by the providers' address list
+// (providers/_ip-guard.mjs isBlockedAddress), so this fetcher refuses what every
+// other one refuses. It kept its own list until it fell behind: [::] and the
+// IPv4-compatible spellings (::7f00:1) passed. Exported for tests.
+export function isPrivateOrInternalHostname(hostname) {
   const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
   if (!host) return true;
   if (host === 'localhost' || host.endsWith('.localhost')) return true;
 
   const ipv4 = parseIpv4Hostname(host);
-  if (ipv4) return isPrivateIpv4(ipv4);
-
-  const version = isIP(host);
-  if (version !== 6) return false;
-  if (host === '::1' || host === '0:0:0:0:0:0:0:1') return true;
-
-  const mappedIpv4 = parseIpv4MappedIpv6(host);
-  if (mappedIpv4) return isPrivateIpv4(mappedIpv4);
-
-  const firstHextet = host.split(':')[0];
-  if (/^f[cd][0-9a-f]{0,2}$/i.test(firstHextet)) return true;
-  const first = Number.parseInt(firstHextet, 16);
-  return Number.isFinite(first) && first >= 0xfe80 && first <= 0xfebf;
+  if (ipv4) return isBlockedAddress(ipv4.join('.'));
+  if (isIP(host) === 6) return isBlockedAddress(new URL(`http://[${host}]/`).hostname.slice(1, -1));
+  return false;
 }
 
 function untrustedSourceMeta(url, finalUrl, message, status = 0, contentType = '') {
@@ -627,11 +597,13 @@ function inferredDateFromText(text, now = new Date()) {
   const raw = String(text || '');
   const year = raw.match(/\b(20\d{2})\b/)?.[1];
   if (year) {
-    const currentYear = now.getUTCFullYear();
+    // The year where the user is: the UTC year turns over hours apart from it,
+    // and a year read as the next one dates the item in the future.
+    const currentYear = now.getFullYear();
     const date = Number(year) === currentYear ? new Date(now.getTime()) : new Date(`${year}-01-01T00:00:00Z`);
     return { value: String(year), precision: 'year', date };
   }
-  return { value: now.toISOString().slice(0, 10), precision: 'observed', date: now };
+  return { value: localToday(now), precision: 'observed', date: now };
 }
 
 function bestObservedDate(item, now) {
@@ -958,7 +930,7 @@ export async function discoverFundedCompanies(opts = {}) {
   });
 
   return {
-    generated_at: isoDate(now),
+    generated_at: localToday(now),
     window_months: months,
     sort: opts.sort || DEFAULT_SORT,
     dry_run: Boolean(opts.dryRun),
@@ -966,10 +938,6 @@ export async function discoverFundedCompanies(opts = {}) {
     diagnostics,
     companies,
   };
-}
-
-function isoDate(now = new Date()) {
-  return now.toISOString().slice(0, 10);
 }
 
 async function selfTest() {
@@ -1019,7 +987,7 @@ async function selfTest() {
 }
 
 async function main() {
-  const opts = parseArgs(process.argv.slice(2));
+  const opts = parseArgs(process.argv);
   if (opts.help) {
     usage();
     return;

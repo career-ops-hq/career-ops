@@ -18,8 +18,8 @@
  *   node calibrate.mjs --self-test
  *
  * Honesty rules, in order of importance:
- *   - An application still in flight (Applied/Responded with no recorded
- *     outcome) is NOT a data point. Counting it as a failure would punish
+ *   - An application still in flight (Applied/Responded/Assessment with no
+ *     recorded outcome) is NOT a data point. Counting it as a failure would punish
  *     recent applications; counting it as a success would flatter everything.
  *     It is excluded from every rate and reported separately as in-flight.
  *   - No percentage is printed on a band below the sample floor. "2 of 3
@@ -37,10 +37,16 @@ import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { parseTrackerRow, resolveColumns, isSeparatorRow, isHeaderRow } from './tracker-parse.mjs';
-import { resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
+import { resolveTrackerPath, resolveWorkspaceRoot, loadCanonicalStates } from './tracker-utils.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { canonicalOutcome } from './lib/outcome-types.mjs';
 import { outcomeDirsFor } from './lib/outcome-dir.mjs';
+import { statusLogPath } from './lib/status-hooks.mjs';
+import { parseStatusLog, replayObservations } from './funnel-velocity.mjs';
+import { LEDGER_SOURCE as CLOSE_STALE_SOURCE } from './close-stale.mjs';
+
+const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
+const STATES_FILE = join(CODE_ROOT, 'templates/states.yml');
 
 // The USER's data root, not this file's directory. It was __dirname under the
 // name CAREER_OPS, so resolveTrackerPath() looked inside the checkout and a user
@@ -72,8 +78,8 @@ export const JOURNAL_OUTCOMES = {
 
 // Tracker statuses that resolve an application even without a journal.
 // `interview`/`offer`/`hired` prove tier reach; `rejected` is terminal
-// negative. Everything else (applied, responded, evaluated…) is in-flight
-// or pre-application and carries no outcome evidence.
+// negative. Everything else (applied, responded, assessment, evaluated…) is
+// in-flight or pre-application and carries no outcome evidence.
 const TRACKER_TERMINAL = {
   hired: { reachedInterview: true, reachedOffer: true },
   offer: { reachedInterview: true, reachedOffer: true },
@@ -130,11 +136,12 @@ export function parseOutcomeJournal(text) {
  *
  * @param {Array<{num:number, company:string, score:number|null, status:string}>} rows
  * @param {Map<number, {latestType:string|null, feedback:string[]}>} journals
- * @param {{minBandN?: number, reached?: Map<number, {reachedInterview:boolean, reachedOffer:boolean}>}} [opts]
+ * @param {{minBandN?: number, reached?: Map<number, {reachedInterview:boolean, reachedOffer:boolean}>, closedNoResponse?: Map<number, string>}} [opts]
  */
 export function computeCalibration(rows, journals, opts = {}) {
   const minBandN = opts.minBandN ?? 5;
   const reached = opts.reached ?? new Map();
+  const closedNoResponse = opts.closedNoResponse ?? new Map();
 
   const resolved = [];
   const inFlight = [];
@@ -159,8 +166,11 @@ export function computeCalibration(rows, journals, opts = {}) {
       verdict = { source: 'ledger', type: led.reachedOffer ? 'offer' : 'interview', reachedInterview: true, reachedOffer: !!led.reachedOffer };
     } else {
       const s = String(row.status || '').replace(/\*\*/g, '').trim().toLowerCase().replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '');
-      if (TRACKER_TERMINAL[s]) verdict = { source: 'tracker', type: s, ...TRACKER_TERMINAL[s] };
-      else if (['applied', 'responded'].includes(s)) { inFlight.push(row.num); continue; }
+      if (closedNoResponse.get(row.num) === s) verdict = { source: 'ledger', type: 'no_response', ...JOURNAL_OUTCOMES.no_response };
+      else if (TRACKER_TERMINAL[s]) verdict = { source: 'tracker', type: s, ...TRACKER_TERMINAL[s] };
+      // Assessment (#4317) sits between Applied and Interview, so a row there is
+      // in flight like the two before it, not outside the population.
+      else if (['applied', 'responded', 'assessment'].includes(s)) { inFlight.push(row.num); continue; }
       else continue; // evaluated / discarded / skip with no stage history — outside calibration's population
     }
     if (!Number.isFinite(row.score) || row.score <= 0) { unscored.push(row.num); continue; }
@@ -277,16 +287,21 @@ function loadJournals(workspaceRoot) {
 }
 
 /**
- * Per-row stage-reached evidence from the transition ledger data/status-log.tsv
+ * Per-row stage-reached evidence from the transition ledger, the status-log.tsv
+ * beside the tracker that set-status writes through statusLogPath()
  * ({num}\t{date}\t{from}\t{to}\t{source}\t{note}). A row reached interview if any
  * transition entered OR left Interview/Offer/Hired; reached offer if it entered
  * OR left Offer/Hired. Offer implies interview. Missing file → empty Map (the
  * calibration falls back to journals + current status, exactly as before).
  * @returns {Map<number, {reachedInterview:boolean, reachedOffer:boolean}>}
  */
-export function loadLedgerReached(workspaceRoot) {
+export function loadLedgerReached(appsFile) {
   const reached = new Map();
-  const logPath = join(workspaceRoot, 'data', 'status-log.tsv');
+  // Beside the tracker, where every writer puts it and loadClosedNoResponse()
+  // below reads it. <workspace>/data/ is that place only for the default
+  // tracker, so a CAREER_OPS_TRACKER elsewhere or a root-level applications.md
+  // lost every interview the ledger recorded.
+  const logPath = statusLogPath(appsFile);
   if (!existsSync(logPath)) return reached;
   const INTERVIEW_PLUS = new Set(['interview', 'offer', 'hired']);
   const OFFER_PLUS = new Set(['offer', 'hired']);
@@ -307,6 +322,30 @@ export function loadLedgerReached(workspaceRoot) {
     reached.set(num, cur);
   }
   return reached;
+}
+
+/**
+ * Maps each tracker number to the status set by close-stale, when close-stale
+ * made the latest transition for that number. Duplicate tracker numbers are
+ * skipped (#1704), missing file will return an empty Map.
+ *
+ * @param {string} appsFile
+ * @param {Array<{num:number}>} rows
+ * @param {object[]} states - loadCanonicalStates() output
+ * @returns {Map<number, string>}
+ */
+export function loadClosedNoResponse(appsFile, rows, states) {
+  const closed = new Map();
+  const logPath = statusLogPath(appsFile);
+  if (!existsSync(logPath)) return closed;
+  const timelines = replayObservations(parseStatusLog(readFileSync(logPath, 'utf-8'), states).observations);
+  const rowCount = new Map();
+  for (const row of rows) rowCount.set(row.num, (rowCount.get(row.num) ?? 0) + 1);
+  for (const [num, timeline] of timelines) {
+    const last = timeline[timeline.length - 1];
+    if (last?.source === CLOSE_STALE_SOURCE && rowCount.get(num) === 1) closed.set(num, last.to.toLowerCase());
+  }
+  return closed;
 }
 
 function renderHuman(result) {
@@ -420,6 +459,20 @@ function selfTest() {
     { minBandN: 1, reached: new Map([[1, { reachedInterview: true, reachedOffer: true }]]) },
   );
   t('journal outranks ledger', ledVsJournal.bands.find((b) => b.band === '>=4.5').offers === 0);
+  // A row in closedNoResponse resolves as no_response while its status is
+  // unchanged. Ledger interview evidence outranks closedNoResponse.
+  const closed = computeCalibration(
+    [mk(1, 4.2, 'Discarded'), mk(2, 4.2, 'SKIP'), mk(3, 4.2, 'Applied'), mk(4, 4.6, 'Discarded'), mk(5, 4.2, 'Responded'), mk(6, 4.2, 'Responded')],
+    new Map(),
+    {
+      minBandN: 1,
+      reached: new Map([[4, { reachedInterview: true, reachedOffer: false }]]),
+      closedNoResponse: new Map([[1, 'discarded'], [2, 'skip'], [3, 'discarded'], [4, 'discarded'], [5, 'responded']]),
+    },
+  );
+  t('closedNoResponse row resolves as no_response', closed.resolved === 4 && closed.inFlight === 2);
+  t('closedNoResponse row is a negative outcome', closed.bands.find((b) => b.band === '4.0-4.4')?.interviews === 0);
+  t('ledger interview evidence outranks closedNoResponse', closed.bands.find((b) => b.band === '>=4.5')?.interviews === 1);
 
   if (failures.length) {
     console.error(`❌ calibrate self-test: ${failures.length} failure(s):\n  - ${failures.join('\n  - ')}`);
@@ -471,8 +524,9 @@ if (isMainModule(import.meta.url)) {
   const workspaceRoot = resolveWorkspaceRoot(appsFile);
   const rows = loadTrackerRows(appsFile);
   const journals = loadJournals(workspaceRoot);
-  const reached = loadLedgerReached(workspaceRoot);
-  const result = computeCalibration(rows, journals, { minBandN, reached });
+  const reached = loadLedgerReached(appsFile);
+  const closedNoResponse = loadClosedNoResponse(appsFile, rows, loadCanonicalStates(STATES_FILE));
+  const result = computeCalibration(rows, journals, { minBandN, reached, closedNoResponse });
   if (argv.includes('--json')) console.log(JSON.stringify(result, null, 2));
   else console.log(renderHuman(result));
 }

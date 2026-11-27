@@ -244,6 +244,10 @@ try {
     if (s._error) fail(`${label}: doctor crashed: ${s._error}`);
     else if (hit && hit.reason === 'is empty' && !flagged(s, `modes/${other}`)) {
       pass(`${label}: empty ${file} is flagged as empty, the filled one is not`);
+      // An empty file holds no template text, so its impact cannot describe one.
+      if (!hit.impact || /template author|\{placeholders\}/.test(hit.impact)) {
+        fail(`${label}: the empty-file impact describes template content: ${JSON.stringify(hit.impact)}`);
+      } else pass(`${label}: the empty-file impact describes an empty file`);
     } else {
       fail(`${label}: not flagged as empty: ${JSON.stringify(s.unpersonalized)}`);
     }

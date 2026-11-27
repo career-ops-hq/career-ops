@@ -15,7 +15,7 @@
  * Report header labels, mapped to the canonical field the UI renders.
  *
  * The lookup is exact on the lowercased label, so an unlisted form is dropped
- * SILENTLY (see the `continue` in parseReport). That is why this map has to
+ * SILENTLY (see the `continue` in readReport). That is why this map has to
  * carry every form actually in circulation rather than the ones we remember:
  * a Russian user's report was losing Archetype, Score and Date, and a
  * Portuguese one Archetype and Date, with no error anywhere. `arquetipo` was
@@ -63,23 +63,62 @@ const FIELD_KEYS = {
   legitimidad: "Legitimacy", // es, legacy reports
   "легітимність": "Legitimacy", // ua
   "meşruiyet": "Legitimacy", // tr
-  // Decision
-  decision: "Decision",
   // PDF — identical in every mode
   pdf: "PDF",
+  "evaluation scope": "Evaluation scope",
 };
 
-/**
- * Tolerant report parser (per maintainer: adapt the render, don't migrate the
- * old data). Extracts the bold key/value header fields (Date/URL/Archetype/
- * Score/Legitimacy/PDF) when present and returns the body without the header
- * block. Degrades gracefully on legacy reports that lack some fields.
- */
-export function parseReport(md) {
-  const lines = md.split("\n");
-  // Header runs until the first `---` or the first `## ` section.
+const DECISION_LABELS = {
+  decision: "Decision",
+  القرار: "Decision",
+  beslutning: "Decision",
+  entscheidung: "Decision",
+  decisión: "Decision",
+  décision: "Decision",
+  निर्णय: "Decision",
+  keputusan: "Decision",
+  decisione: "Decision",
+  決定: "Decision",
+  결정: "Decision",
+  beslissing: "Decision",
+  decyzja: "Decision",
+  decisão: "Decision",
+  решение: "Decision",
+  karar: "Decision",
+  рішення: "Decision",
+  "quyết định": "Decision",
+  决定: "Decision",
+};
+
+function fieldName(raw) {
+  const key = raw.trim().toLowerCase();
+  if (Object.hasOwn(DECISION_LABELS, key)) return DECISION_LABELS[key];
+  if (Object.hasOwn(FIELD_KEYS, key)) return FIELD_KEYS[key];
+  return undefined;
+}
+
+function normalizeNewlines(text) {
+  return String(text ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+export function readReport(md) {
+  const normalized = normalizeNewlines(md);
+  const lines = normalized.split("\n");
   let cut = lines.findIndex((l, i) => i > 0 && (/^\s*-{3,}\s*$/.test(l) || /^##\s/.test(l)));
-  if (cut === -1) cut = Math.min(lines.length, 10);
+  if (cut === -1) {
+    // No section break. Keep a leading title and **Field:** lines as the
+    // header, and leave the rest of the file in the body. A hard stop at
+    // line 10 dropped the opening of a report that has neither rule.
+    cut = 0;
+    while (cut < lines.length) {
+      const line = lines[cut];
+      if (line.trim() === "" || /^#\s+/.test(line) || /^\s*\*\*.+?:\*\*/.test(line)) {
+        cut += 1;
+        continue;
+      }
+      break;
+    }
+  }
 
   const headerLines = lines.slice(0, cut);
   let bodyStart = cut;
@@ -98,12 +137,15 @@ export function parseReport(md) {
     }
     const m = l.match(/^\s*\*\*(.+?):\*\*\s*(.*)$/);
     if (!m) continue;
-    const label = FIELD_KEYS[m[1].trim().toLowerCase()];
+    const label = fieldName(m[1]);
     const value = m[2].trim();
     if (!label || !value) continue;
     if (label === "Legitimacy") legitimacy = value;
     fields.push({ label, value });
   }
 
-  return { title, fields, legitimacy, body: body || md };
+  return { title, fields, legitimacy, body: body || normalized };
 }
+
+/** Same parser under the name the label tests import. */
+export const parseReport = readReport;

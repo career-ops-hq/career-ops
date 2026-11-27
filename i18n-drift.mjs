@@ -3,8 +3,12 @@
  * Structural coverage of translated modes (#3168). Offline, read-only, Node only.
  * Adapted from alinaqvi1129's initial checker in PR #3228.
  *
- * node i18n-drift.mjs [--lang tr ...] [--json | --summary]
- * Drift is advisory (exit 0); invalid arguments or unreadable inputs exit 1.
+ * node i18n-drift.mjs [--lang tr ...] [--fail-under N] [--json | --summary]
+ * Drift is advisory by default (exit 0): coverage is a structural signal, not
+ * a verdict on translation quality. --fail-under N turns a language whose
+ * heading coverage is below N% into exit 1, so a regression can gate CI without
+ * changing the default for everyone else. Invalid arguments or unreadable
+ * inputs exit 1 either way.
  *
  * Compare heading levels IN ORDER, never translated words. Coverage measures
  * structural slots, not translation completeness: equal-shaped replacements,
@@ -18,10 +22,10 @@ import { basename, join, posix, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { isNestedCheckout } from './lib/mjs-files.mjs';
+import { isLanguageModeSet, isMarketModeSet } from './lib/mode-sets.mjs';
 import { walkTree } from './lib/walk-tree.mjs';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
-const LANGUAGE = /^[a-z]{2}(?:-[A-Za-z0-9]{2,8})*$/;
 
 /** Top-level Markdown ATX/setext headings, with one-based source lines. */
 export function extractHeadings(text) {
@@ -176,11 +180,14 @@ export function parseReadmeMapping(readmePath) {
   return map;
 }
 
+// Market sets (modes/at/, modes/in/, modes/sg/) are left out: they are English
+// overlays that defer to the base modes, so a heading-coverage score for them
+// measures how little they override, not how much is translated.
 export function discoverLangs(root = ROOT) {
   const dir = sourcePath(root, '');
   if (!dir || !lstatSync(dir).isDirectory()) throw new Error('modes/ directory not found');
   return readdirSync(dir, { withFileTypes: true })
-    .filter(entry => LANGUAGE.test(entry.name) && entry.isDirectory() && !isNestedCheckout(join(dir, entry.name)))
+    .filter(entry => isLanguageModeSet(entry.name) && entry.isDirectory() && !isNestedCheckout(join(dir, entry.name)))
     .map(entry => entry.name).sort();
 }
 
@@ -199,6 +206,7 @@ function markdownFiles(dir) {
 
 /** Compare the shipped subset, plus README-promised files that were deleted. */
 export function checkLang(lang, root = ROOT) {
+  if (isMarketModeSet(lang)) throw new Error(`modes/${lang}/ is a market set (English modes plus market rules), not a translation`);
   if (!discoverLangs(root).includes(lang)) throw new Error(`language directory not found: modes/${lang}/`);
   const maps = new Map();
   const mapping = (language) => {
@@ -213,7 +221,7 @@ export function checkLang(lang, root = ROOT) {
     const [first, ...tail] = source.split('/');
     // Some languages translate another locale (NL -> FR); follow its declared
     // source to the canonical root rather than measuring two stale mirrors.
-    if (tail.length && LANGUAGE.test(first)) return canonicalFor(first, tail.join('/'), seen);
+    if (tail.length && isLanguageModeSet(first)) return canonicalFor(first, tail.join('/'), seen);
     return modePath(source) ? source : null;
   };
   const names = new Set([...markdownFiles(sourcePath(root, lang)), ...mapping(lang).keys()]);
@@ -250,6 +258,27 @@ export function toJSON(results) {
 
 const percent = result => result.total ? `${Math.round(result.coverage * 100)}%` : 'n/a';
 
+/**
+ * A language's aggregate coverage as a whole percentage, rounded DOWN.
+ *
+ * Floor rather than round, because this number is printed next to the threshold
+ * that failed: 199 of 250 sections is 79.6%, and a line reading "below
+ * --fail-under 80: zh 80%" contradicts itself, while rounding also flattens
+ * 1999 of 2500 to the same 80%. Rounding down can only understate coverage,
+ * which is the safe direction for a gate.
+ *
+ * The per-file column in the report table keeps its own rounding: it measures a
+ * single file, not the language total this threshold is compared against.
+ *
+ * @param {{sectionsCovered: number, sectionsTotal: number}} stats - A language summary.
+ * @returns {number|null} Whole percent, or null when there is nothing measured.
+ */
+export function coveragePercent(stats) {
+  const total = stats?.sectionsTotal ?? 0;
+  if (!total) return null;
+  return Math.floor((stats.sectionsCovered / total) * 100);
+}
+
 export function formatReport(results, { summary = false } = {}) {
   const lines = ['i18n structural coverage (heading levels/order; not translation quality)'];
   for (const { lang, files, summary: stats } of toJSON(results)) {
@@ -285,25 +314,49 @@ function main(args) {
   let json = false;
   let summary = false;
   let help = false;
+  let failUnder = null;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--lang' || args[i].startsWith('--lang=')) {
       const lang = args[i] === '--lang' ? args[++i] : args[i].slice('--lang='.length);
-      if (!lang || !LANGUAGE.test(lang)) throw new Error('--lang requires a language code, e.g. tr or zh-TW');
+      if (!lang || !(isLanguageModeSet(lang) || isMarketModeSet(lang))) throw new Error('--lang requires a language code, e.g. tr or zh-TW');
       langs.push(lang);
     } else if (args[i] === '--json') json = true;
     else if (args[i] === '--summary') summary = true;
-    else if (args[i] === '--help' || args[i] === '-h') help = true;
+    else if (args[i] === '--fail-under' || args[i].startsWith('--fail-under=')) {
+      const raw = args[i] === '--fail-under' ? args[++i] : args[i].slice('--fail-under='.length);
+      const value = Number(raw);
+      // Whole percentages only: "80.5" reads like a threshold but invites a
+      // boundary argument no one needs, and Number('') is 0 — which would
+      // silently pass everything. Both are rejected by name instead.
+      if (raw === undefined || raw === '' || !Number.isInteger(value) || value < 0 || value > 100) {
+        throw new Error('--fail-under requires a whole percentage between 0 and 100, e.g. --fail-under 80');
+      }
+      failUnder = value;
+    } else if (args[i] === '--help' || args[i] === '-h') help = true;
     else throw new Error(`unknown argument: ${args[i]}`);
   }
   if (json && summary) throw new Error('choose --json or --summary');
   if (help) {
-    console.log('Usage: node i18n-drift.mjs [--lang tr ...] [--json | --summary]\nRead-only, offline. Drift exits 0; invalid arguments or unreadable inputs exit 1.');
+    console.log('Usage: node i18n-drift.mjs [--lang tr ...] [--fail-under N] [--json | --summary]\nRead-only, offline. Drift exits 0 by default; --fail-under exits 1 for any selected language below N% coverage. Invalid arguments or unreadable inputs exit 1.');
     return;
   }
   const selected = [...new Set(langs.length ? langs : discoverLangs())];
   if (!selected.length) throw new Error('no language directories found in modes/');
   const results = selected.map(lang => checkLang(lang));
   console.log(json ? JSON.stringify(toJSON(results), null, 2) : formatReport(results, { summary }));
+
+  // Checked after the report, so the run still prints what fell short. A
+  // language with nothing measurable (every file skipped) has no percentage to
+  // judge and is left alone rather than counted as 100% or 0%.
+  if (failUnder !== null) {
+    const below = toJSON(results)
+      .map(({ lang, summary: stats }) => ({ lang, coverage: coveragePercent(stats) }))
+      .filter(entry => entry.coverage !== null && entry.coverage < failUnder);
+    if (below.length) {
+      console.error(`i18n-drift: ${below.length} language(s) below --fail-under ${failUnder}: ${below.map(entry => `${entry.lang} ${entry.coverage}%`).join(', ')}`);
+      process.exitCode = 1;
+    }
+  }
 }
 
 if (isMainModule(import.meta.url)) {

@@ -59,9 +59,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
-import { resolveTrackerPath, writeFileAtomic } from './tracker-utils.mjs';
+import { resolveTrackerPath, writeFileAtomic, normalizeCompany, companiesMatchIgnoringCorporateForm } from './tracker-utils.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { validateFlags, hasFlag, flagValue } from './lib/cli-flags.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { parseFileInput, collectInteractive } from './paste-reply.mjs';
@@ -78,7 +79,7 @@ const FOLLOWUPS_FILE = path.join(DATA_ROOT, 'data', 'follow-ups.md');
 // Kept in sync by hand with contacts.mjs's own VALID_TYPES — both are small,
 // stable enums describing the same TSV column, and contacts.mjs does not
 // export its copy. internal-referral (#4691) added to both at the same time.
-const VALID_TYPES = new Set(['recruiter', 'hiring-manager', 'peer', 'interviewer', 'internal-referral', 'other']);
+export const VALID_TYPES = new Set(['recruiter', 'hiring-manager', 'peer', 'interviewer', 'internal-referral', 'other']);
 
 const KNOWN_FLAGS = ['--file', '--yes', '--company', '--tracker', '--type', '--help', '-h'];
 const USAGE = `Usage:
@@ -167,7 +168,7 @@ export async function appendContact(contact, contactsPath = CONTACTS_PATH) {
     const key = (name, company) => `${identityPart(name)}\0${identityPart(company)}`;
     const storedKey = (name, company) => `${identityPart(name, true)}\0${identityPart(company, true)}`;
     const incomingKey = key(contact.name, contact.company);
-    const existingIndex = lines.findIndex((line) => {
+    const existingIndex = lines.findLastIndex((line) => {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) return false;
       const cells = line.split('\t');
@@ -299,7 +300,8 @@ async function main() {
       process.exitCode = 1;
       return;
     }
-    if (companyOverride && companyOverride.trim().toLowerCase() !== trackerRow.company.trim().toLowerCase()) {
+    if (companyOverride && normalizeCompany(companyOverride) !== normalizeCompany(trackerRow.company)
+      && !companiesMatchIgnoringCorporateForm(companyOverride, trackerRow.company)) {
       console.error(`Error: --company "${companyOverride}" does not match tracker #${trackerNumber}'s company "${trackerRow.company}"`);
       process.exitCode = 1;
       return;
@@ -307,8 +309,11 @@ async function main() {
     trackerNum = String(trackerNumber);
     company = trackerRow.company;
   } else if (companyOverride) {
-    const normalizedCompany = companyOverride.trim().toLowerCase();
-    const companyApps = apps.filter((app) => app.company.trim().toLowerCase() === normalizedCompany);
+    // Exact key first, then the corporate-form variant, the order set-status
+    // and outcome resolve a company in: "Acme" finds the row stored as "Acme Inc.".
+    const key = normalizeCompany(companyOverride);
+    let companyApps = key ? apps.filter((app) => normalizeCompany(app.company) === key) : [];
+    if (!companyApps.length) companyApps = apps.filter((app) => companiesMatchIgnoringCorporateForm(companyOverride, app.company));
     if (!companyApps.length) {
       console.error(`Error: --company must name a company in the tracker; got "${companyOverride}"`);
       process.exitCode = 1;
@@ -349,7 +354,9 @@ async function main() {
   const contactType = typeOverride || inferContactType(`${candidate.subject} ${candidate.body_snippet}`);
 
   const replyType = classifyReply(candidate).type;
-  const today = new Date().toISOString().slice(0, 10);
+  // The local day: this lands in the user's contacts.tsv, and the UTC day is
+  // tomorrow all evening west of Greenwich (#3070).
+  const today = localToday();
   const contact = {
     name,
     company,

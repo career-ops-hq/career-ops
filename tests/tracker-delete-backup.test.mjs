@@ -9,14 +9,18 @@
 //
 // Each case runs the real CLI against its own temp tracker and asserts on the
 // files afterwards, because the bytes left on disk are what the user can restore.
-import { pass, fail, rmSync, ROOT, NODE } from './helpers.mjs';
+import { pass, fail, warn, rmSync, ROOT, NODE } from './helpers.mjs';
 import assert from 'node:assert';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
-const ok = (name, fn) => { try { fn(); pass(name); } catch (e) { fail(`${name} — ${e.message}`); } };
+// A case that could not run here warns and returns SKIP, so it is not also
+// counted as a pass.
+const SKIP = Symbol('skip');
+const ok = (name, fn) => { try { if (fn() !== SKIP) pass(name); } catch (e) { fail(`${name} — ${e.message}`); } };
 
 const TRACKER = [
   '# Applications Tracker',
@@ -38,14 +42,18 @@ function sandbox(fn) {
       timeout: 30_000,
       env: { ...process.env, CAREER_OPS_TRACKER: trackerPath, CAREER_OPS_TRACKER_DB: join(dir, 'applications.db') },
     });
-    return { status: r.status, all: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+    // Spread the real result so describeSpawn() can reach stdout, stderr, signal
+  // and error. Returning only { status, all } printed "(empty)" for both
+  // streams where r.all used to show the output (#5386), and it would also
+  // hide a kill from exitedNonZero(), which reads signal and error.
+  return { ...r, all: `${r.stdout ?? ''}${r.stderr ?? ''}` };
   };
   try { return fn({ dir, tracker, cli }); } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
 ok('delete --num 42 removes the row and leaves a .bak of the pre-delete tracker', () => sandbox(({ tracker, cli }) => {
   const r = cli(tracker, '--num', '42');
-  assert.equal(r.status, 0, r.all);
+  assert.equal(r.status, 0, describeSpawn(r));
   const after = readFileSync(tracker, 'utf-8');
   assert.ok(!after.includes('| 42 |'), 'row 42 is still in the tracker');
   assert.ok(after.includes('| 41 | 2026-09-01 | Acme |'), 'row 41 was lost');
@@ -62,7 +70,7 @@ ok('restoring the .bak brings the deleted row back byte for byte', () => sandbox
 
 ok('a delete that finds no such row writes no .bak', () => sandbox(({ tracker, cli }) => {
   const r = cli(tracker, '--num', '99');
-  assert.equal(r.status, 1, r.all);
+  assert.equal(r.status, 1, describeSpawn(r));
   assert.match(r.all, /No application numbered 99/);
   assert.equal(readFileSync(tracker, 'utf-8'), TRACKER, 'the tracker was modified');
   assert.ok(!existsSync(`${tracker}.bak`), 'a .bak was written although nothing was deleted');
@@ -70,7 +78,7 @@ ok('a delete that finds no such row writes no .bak', () => sandbox(({ tracker, c
 
 ok('delete --dry-run writes no .bak', () => sandbox(({ tracker, cli }) => {
   const r = cli(tracker, '--num', '42', '--dry-run');
-  assert.equal(r.status, 0, r.all);
+  assert.equal(r.status, 0, describeSpawn(r));
   assert.match(r.all, /Would remove application 42/);
   assert.equal(readFileSync(tracker, 'utf-8'), TRACKER, 'the tracker was modified');
   assert.ok(!existsSync(`${tracker}.bak`), 'a preview wrote a .bak');
@@ -80,7 +88,7 @@ ok('a second delete replaces the .bak with the tracker as it was before THAT del
   cli(tracker, '--num', '42');
   const afterFirst = readFileSync(tracker, 'utf-8');
   const r = cli(tracker, '--num', '41');
-  assert.equal(r.status, 0, r.all);
+  assert.equal(r.status, 0, describeSpawn(r));
   assert.equal(readFileSync(`${tracker}.bak`, 'utf-8'), afterFirst);
 }));
 
@@ -90,9 +98,13 @@ ok('a second delete replaces the .bak with the tracker as it was before THAT del
 // read inside the lock, next to the path the transaction actually replaces.
 ok('a symlinked tracker gets its .bak beside the real file', () => sandbox(({ dir, tracker, cli }) => {
   const link = join(dir, 'linked.md');
-  try { symlinkSync(tracker, link); } catch { return; } // Windows without the symlink privilege
+  try { symlinkSync(tracker, link); } catch (e) {
+    if (e.code !== 'EPERM' && e.code !== 'EACCES') throw e;
+    warn(`a symlinked tracker gets its .bak beside the real file: not run, this account cannot create a symlink (${e.code})`);
+    return SKIP;
+  }
   const r = cli(link, '--num', '42');
-  assert.equal(r.status, 0, r.all);
+  assert.equal(r.status, 0, describeSpawn(r));
   assert.ok(existsSync(`${tracker}.bak`), 'no .bak beside the real tracker');
   assert.equal(readFileSync(`${tracker}.bak`, 'utf-8'), TRACKER);
   assert.ok(!existsSync(`${link}.bak`), 'a .bak was written beside the symlink');

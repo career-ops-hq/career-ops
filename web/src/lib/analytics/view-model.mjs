@@ -25,7 +25,9 @@
  *   the view explains itself or stays quiet.
  * @typedef {{available: boolean, reason: "no-core"|"no-data"|null, totals: ProgressTotals, funnel: {stages: FunnelStage[], rates: FunnelRate[]}, provisional: boolean}} ProgressModel
  *
- * @typedef {Record<string, string|number|undefined>} BreakdownRow
+ * @typedef {Record<string, string|number|boolean|null|undefined>} BreakdownRow
+ *   A `null` numeric means the core had a value but it is not claimable yet
+ *   (too small a sample); `provisional: true` marks such a row.
  * @typedef {{key: "threshold", label: string, value: number|null, note: string|null, sampleSize: number|null, provisional: boolean}} ThresholdSection
  * @typedef {{key: string, label: string, rows: BreakdownRow[], dimension: string, partial: boolean}} BreakdownSection
  * @typedef {{key: "vendor", label: string, rows: BreakdownRow[], claimable: boolean, coveragePct: number, minSampleForClaim: number, identified: number, citation: string|null}} VendorSection
@@ -141,12 +143,19 @@ export function statsModel(patterns) {
   // Quality threshold. Shown as a recommendation only when the core says the
   // sample supports one; otherwise the reasoning is shown WITHOUT the number,
   // because a "recommended 4.7" off three outcomes reads as a rule.
+  //
+  // Gated on the core having REASONED about one, not on it recommending one.
+  // scoreThresholdFrom() sets `recommended` only when the sample is sufficient
+  // and a rejection scored below the cutoff, so gating on a finite
+  // `recommended` dropped the panel in exactly the cases the number-less
+  // branch is for: "only 2 positive outcome(s) carry a score (3 needed…)"
+  // never reached the page, and `provisional` could never be true.
   const t = patterns.scoreThreshold;
-  if (t && Number.isFinite(t.recommended)) {
+  if (t && (Number.isFinite(t.recommended) || typeof t.reasoning === "string")) {
     sections.push({
       key: "threshold",
       label: "Quality threshold",
-      value: t.sufficientSample ? t.recommended : null,
+      value: t.sufficientSample === true && Number.isFinite(t.recommended) ? t.recommended : null,
       note: typeof t.reasoning === "string" ? t.reasoning : null,
       sampleSize: Number.isFinite(t.sampleSize) ? t.sampleSize : null,
       provisional: t.sufficientSample !== true,
@@ -165,7 +174,16 @@ export function statsModel(patterns) {
     const list = Array.isArray(rows) ? rows.filter((r) => Number.isFinite(r?.total) && r.total > 0) : [];
     const named = list.filter((r) => !isUnlabelled(r?.[dim]));
     if (named.length === 0) continue;
-    sections.push({ key, label, rows: list, dimension: dim, partial: named.length < list.length });
+    // A bucket nothing was submitted from has no conversion rate. The core
+    // (withOutcomeRates in analyze-patterns.mjs) reports `conversionRate: 0`
+    // over `submitted: 0`, so a bucket of only Evaluated and SKIP rows read as
+    // a confident "0%" beside buckets with real outcomes. The row stays, with
+    // its count, and the rate is absent, as the vendor rows below do it.
+    const withRates = list.map((r) => ({
+      ...r,
+      conversionRate: Number(r?.submitted) > 0 ? r.conversionRate : NO_RATE,
+    }));
+    sections.push({ key, label, rows: withRates, dimension: dim, partial: named.length < list.length });
   }
 
   // Per-ATS advance rate. The core states the sample it needs and how much of
@@ -179,7 +197,25 @@ export function statsModel(patterns) {
     sections.push({
       key: "vendor",
       label: "By ATS vendor",
-      rows: enough ? v.breakdown : [],
+      // Per ROW, not just per panel. `enough` above is an aggregate — enough of
+      // the pipeline was identified for the panel to make any claim — and it
+      // says nothing about an individual vendor. The core marks each row
+      // `sufficientSample: total >= minSampleForClaim`, so a user with 19
+      // Greenhouse applications and 1 Lever one gets a claimable panel in which
+      // Lever reads 100%. Rendering that beside Greenhouse's 20% invites
+      // exactly the wrong conclusion, and it is the hedged-figure-made-confident
+      // failure this module exists to prevent.
+      //
+      // Same treatment ThresholdSection already gives it: null the value and
+      // flag the row. The count still shows, so the row does not vanish — the
+      // user sees "lever 1 —" and knows a rate is not yet available.
+      // An absent `sufficientSample` counts as insufficient: the signal missing
+      // is not the core saying the sample is fine.
+      rows: enough ? v.breakdown.map((r) => ({
+        ...r,
+        advanceRate: r?.sufficientSample === true ? r.advanceRate : null,
+        provisional: r?.sufficientSample !== true,
+      })) : [],
       claimable: enough,
       coveragePct: Number.isFinite(v.coveragePct) ? v.coveragePct : 0,
       minSampleForClaim: need,

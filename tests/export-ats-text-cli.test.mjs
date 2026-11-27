@@ -5,6 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../scripts/export-ats-text.mjs', import.meta.url));
 
@@ -34,7 +35,7 @@ function run(root, args) {
 for (const flag of ['--help', '-h']) {
   test(`${flag} prints usage without requiring a profile or CV`, (t) => {
     const result = run(fixture(t), [flag]);
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 0, describeSpawn(result));
     assert.match(result.stdout, /^Usage:.*export-ats-text\.mjs/m);
     for (const option of ['--section', '--out', '--profile', '--cv', '--help', '-h']) {
       assert.ok(result.stdout.includes(option), `usage is missing ${option}`);
@@ -57,7 +58,7 @@ for (const flag of ['--help', '-h']) {
     const entries = readdirSync(root).sort();
     for (const output of [existing, missing]) {
       const result = run(root, [flag, '--profile', profile, '--cv', cv, '--out', output]);
-      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.status, 0, describeSpawn(result));
       assert.equal(result.stdout, empty.stdout);
       assert.equal(result.stderr, '');
     }
@@ -77,7 +78,7 @@ test('unknown flags and missing values still fail without creating an export', (
     ['--help', '--profile'],
   ]) {
     const result = run(root, args);
-    assert.notEqual(result.status, 0, `accepted ${args.join(' ')}`);
+    assert.ok(exitedNonZero(result), describeSpawn(result, `accepted ${args.join(' ')}`));
     assert.equal(existsSync(output), false);
   }
 });
@@ -89,7 +90,7 @@ test('help flags cannot supply a required value or overwrite an export', (t) => 
   for (const option of ['--section', '--out', '--profile', '--cv']) {
     for (const help of ['--help', '-h']) {
       const result = run(root, ['--out', output, option, help]);
-      assert.equal(result.status, 1, `accepted ${option} ${help}`);
+      assert.equal(result.status, 1, describeSpawn(result, `accepted ${option} ${help}`));
       assert.match(result.stderr, new RegExp(`${option} requires a value`));
       assert.equal(result.stdout, '');
       assert.equal(readFileSync(output, 'utf8'), 'Keep this previous export.\n');
@@ -107,9 +108,9 @@ test('normal exports still support explicit profile, CV, section and output opti
   writeFileSync(cv, '# Fictional Candidate\n\n## Skills\n- Node.js, SQL\n');
   const args = ['--profile', profile, '--cv', cv, '--section', 'skills'];
   const stdout = run(root, args);
-  assert.equal(stdout.status, 0, stdout.stderr);
+  assert.equal(stdout.status, 0, describeSpawn(stdout));
   assert.equal(stdout.stdout.trim(), '--- KEY SKILLS ---\nNode.js, SQL');
   const file = run(root, [...args, '--out', output]);
-  assert.equal(file.status, 0, file.stderr);
+  assert.equal(file.status, 0, describeSpawn(file));
   assert.equal(readFileSync(output, 'utf8'), '--- KEY SKILLS ---\nNode.js, SQL');
 });

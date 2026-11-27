@@ -114,3 +114,85 @@ test('reads a URL column and returns the href from a markdown link cell', () => 
   const rows = parseApplications(md, root);
   assert.deepEqual(rows.map((row) => row.url), [href, href, '—', workday]);
 });
+
+test('reads a header-mapped tracker narrower than the legacy eight columns', () => {
+  // No PDF or Report column. parseTrackerRow reads this row; the web reader
+  // used to drop it before the header map was consulted.
+  const md = `| # | Date | Company | Role | Score | Status | Notes |
+|---|---|---|---|---|---|---|
+| 3 | 2026-01-02 | Example | Engineer | 4.0/5 | Applied | fixture |`;
+  assert.deepEqual(parseApplications(md, root), [{
+    n: '3', date: '2026-01-02', company: 'Example', via: '', role: 'Engineer', location: '', score: '4.0/5',
+    status: 'Applied', pdf: '', report: '', notes: 'fixture', applyLink: '', followUp: '', url: '',
+  }]);
+});
+
+test('still drops a headerless row shorter than the legacy eight columns', () => {
+  assert.deepEqual(parseApplications('| 3 | 2026-01-02 | Example | Engineer | 4.0/5 | Applied | fixture |', root), []);
+});
+
+test('a header with unrecognized trailing columns still drops a seven-cell row', () => {
+  // Eight header cells, the last one unknown to the alias table, so the mapped
+  // width is seven. A row that lost its Date cell must not be read shifted.
+  const md = `| # | Date | Company | Role | Score | Status | Notes | Custom |
+|---|---|---|---|---|---|---|---|
+| 4 | Example | Engineer | 4.0/5 | Applied | fixture | x |
+| 5 | 2026-01-02 | Example | Engineer | 4.0/5 | Applied | fixture | x |`;
+  assert.deepEqual(parseApplications(md, root).map((row) => row.n), ['5']);
+});
+
+for (const field of ['mtimeNs', 'ctimeNs']) {
+  test(`reloads same-size header aliases when only ${field} advances`, (t) => {
+    const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'career-ops-alias-stamp-'));
+    t.after(() => fs.rmSync(dataRoot, { recursive: true, force: true }));
+    const file = path.join(dataRoot, 'tracker-aliases.json');
+    fs.writeFileSync(file, JSON.stringify(ALIASES));
+    const originalStat = fs.statSync;
+    let changed = false;
+    t.mock.method(fs, 'statSync', (target, options) => {
+      const st = originalStat(target, options);
+      if (String(target) !== file) return st;
+      // A one-nanosecond edit is lost in the numeric millisecond timestamp.
+      return options?.bigint
+        ? { ...st, mtimeNs: 1_700_000_000_000_000_000n, ctimeNs: 1_700_000_000_000_000_000n,
+          [field]: 1_700_000_000_000_000_000n + (changed ? 1n : 0n) }
+        : { ...st, mtimeMs: 1_700_000_000_000, ctimeMs: 1_700_000_000_000 };
+    });
+
+    assert.equal(parseApplications(TRACKER, dataRoot)[0].company, 'Example');
+    const swapped = JSON.stringify({ ...ALIASES, company: 'role', role: 'company' });
+    assert.equal(Buffer.byteLength(swapped), Buffer.byteLength(JSON.stringify(ALIASES)));
+    fs.writeFileSync(file, swapped);
+    changed = true;
+    const [row] = parseApplications(TRACKER, dataRoot);
+    assert.equal(row.company, 'Frontend Engineer');
+    assert.equal(row.role, 'Example');
+  });
+}
+
+test('reloads same-size aliases whose mtime was restored', (t) => {
+  const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'career-ops-alias-utimes-'));
+  t.after(() => fs.rmSync(dataRoot, { recursive: true, force: true }));
+  const file = path.join(dataRoot, 'tracker-aliases.json');
+  fs.writeFileSync(file, JSON.stringify(ALIASES));
+  fs.utimesSync(file, 1_700_000_000, 1_700_000_000);
+  assert.equal(parseApplications(TRACKER, dataRoot)[0].company, 'Example');
+  const before = fs.statSync(file, { bigint: true });
+  const swapped = JSON.stringify({ ...ALIASES, company: 'role', role: 'company' });
+  const deadline = Date.now() + 2000;
+  let after;
+  do {
+    fs.writeFileSync(file, swapped);
+    fs.utimesSync(file, 1_700_000_000, 1_700_000_000);
+    after = fs.statSync(file, { bigint: true });
+  } while (after.ctimeNs === before.ctimeNs && Date.now() < deadline);
+  if (after.ctimeNs === before.ctimeNs) {
+    t.skip('this filesystem does not advance ctime after utimes');
+    return;
+  }
+  assert.equal(after.mtimeNs, before.mtimeNs);
+  assert.equal(after.size, before.size);
+  const [row] = parseApplications(TRACKER, dataRoot);
+  assert.equal(row.company, 'Frontend Engineer');
+  assert.equal(row.role, 'Example');
+});

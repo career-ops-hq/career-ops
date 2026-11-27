@@ -169,6 +169,47 @@ try {
   );
   if (singleJobs.length === 1) pass('glints.fetch() stops when hasMore is false');
   else fail(`glints.fetch() single page: ${JSON.stringify(singleJobs)}`);
+  if (singleJobs.truncated === undefined) pass('glints.fetch() leaves a board that ended on its own unmarked');
+  else fail(`glints.fetch() complete board was marked: ${JSON.stringify(singleJobs.truncated)}`);
+
+  // fetch() — a later page that fails, or answers in an unknown shape, keeps
+  // the pages already read and marks the board partial, so scan.mjs logs it
+  // partial instead of reachable.
+  const laterPage = async (second) => {
+    const origError = console.error;
+    console.error = () => {};
+    try {
+      return await glints.fetch(
+        { name: 'Glints ID', provider: 'glints', searchKeywords: 'dev', pageSize: 2 },
+        {
+          transport: 'http',
+          sleep: async () => {},
+          fetchJson: async (_url, opts) => {
+            const { variables } = JSON.parse(opts.body);
+            if (variables.data.page === 1) {
+              return { data: { searchJobsV3: { jobsInPage: [{ id: 'a', title: 'Dev A' }, { id: 'b', title: 'Dev B' }], hasMore: true } } };
+            }
+            return second();
+          },
+          fetchText: async () => { throw new Error('should not be called'); },
+        },
+      );
+    } finally {
+      console.error = origError;
+    }
+  };
+  const failedLater = await laterPage(() => { throw new Error('HTTP 503'); });
+  if (failedLater.length === 2 && failedLater.truncated?.reason === 'fetch-error' && failedLater.truncated.fetched === 2) {
+    pass('glints.fetch() keeps page 1 and marks the board partial when page 2 fails');
+  } else {
+    fail(`glints.fetch() later-page failure: ${failedLater.length} jobs, truncated = ${JSON.stringify(failedLater.truncated)}`);
+  }
+  const oddLater = await laterPage(() => ({ data: { somethingElse: [] } }));
+  if (oddLater.length === 2 && oddLater.truncated?.reason === 'unrecognised-page' && oddLater.truncated.fetched === 2) {
+    pass('glints.fetch() keeps page 1 and marks the board partial when page 2 has an unknown shape');
+  } else {
+    fail(`glints.fetch() later-page unknown shape: ${oddLater.length} jobs, truncated = ${JSON.stringify(oddLater.truncated)}`);
+  }
 
   // fetch() — rejects invalid hostname
   let hostRejected = false;

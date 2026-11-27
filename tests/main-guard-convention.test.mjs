@@ -30,6 +30,7 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isMainModule } from '../lib/is-main-module.mjs';
 import { trackedFiles } from '../lib/mjs-files.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -92,7 +93,7 @@ test('a CLI reached through a symlinked directory still runs', (t) => {
         `${viaLink.status} — the main-guard silently suppressed it (#3170)`,
     );
     assert.equal(output(viaLink), output(direct), 'the symlinked invocation behaved differently');
-    assert.equal(viaLink.status, direct.status);
+    assert.equal(viaLink.status, direct.status, describeSpawn(viaLink));
   } finally {
     cleanup();
   }
@@ -266,6 +267,7 @@ const EXEMPT = new Map([
   // Assigns argv[1] inside a spawned child's preamble so the copied script's
   // main-guard fires under `node -e` — the child's entry path, not a guard.
   ['tests/scan-ats-full-outage-checkpoint.test.mjs', 'sets a child process\u2019s argv[1] in a spawn preamble'],
+  ['tests/scan-ats-full-workable-resume.test.mjs', 'sets a child process\u2019s argv[1] in a spawn preamble'],
   // Asserts that a bash-embedded node snippet reads its input file via ITS OWN
   // argv[1] (injection safety, not a main-guard); the literal lives in strings.
   ['tests/batch-runner-jd-prefetch.test.mjs', 'asserts another script\u2019s argv[1] usage in strings'],
@@ -399,7 +401,7 @@ test("update-system.mjs's inlined guard realpaths both sides", (t) => {
       `the updater printed no usage through a symlink (exit ${viaLink.status}) — its inlined ` +
         'guard stopped realpathing both sides, and every update silently no-ops (#3170)',
     );
-    assert.equal(viaLink.status, 1, 'the usage branch must still exit non-zero');
+    assert.equal(viaLink.status, 1, describeSpawn(viaLink, 'the usage branch must still exit non-zero'));
   } finally {
     cleanup();
   }

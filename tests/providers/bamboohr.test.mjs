@@ -80,11 +80,79 @@ try {
   if (jobs[1]?.url === 'https://acme.bamboohr.com/careers/22') pass('parseBambooHRResponse coerces numeric id to URL');
   else fail(`parseBambooHRResponse numeric-id url was ${jobs[1]?.url}`);
 
-  // empty / malformed payloads → []
-  if (parseBambooHRResponse({}, 'X', 'https://x.bamboohr.com').length === 0) pass('parseBambooHRResponse empty {} → []');
-  else fail('parseBambooHRResponse should return [] for {}');
-  if (parseBambooHRResponse({ result: null }, 'X', 'https://x.bamboohr.com').length === 0) pass('parseBambooHRResponse result:null → []');
-  else fail('parseBambooHRResponse should return [] for result:null');
+  // Remote openings as live boards list them (2026-11-23): `locationType` is
+  // "1" and `isRemote` is null. A remote opening has no office, so `location`
+  // is empty and the place the hire must be in, if any, is in `atsLocation`.
+  // Reading only `location` and `isRemote` left these with an empty location.
+  {
+    const noPlace = { country: null, state: null, province: null, city: null };
+    const [remote, placeless, hybrid, province, remoteOffice, bothPlaces] = parseBambooHRResponse({
+      meta: { totalCount: 6 },
+      result: [
+        { id: '90', jobOpeningName: 'Lead Business Development Manager', location: { city: null, state: null },
+          atsLocation: { country: 'Canada', state: 'Ontario', province: null, city: 'London' }, isRemote: null, locationType: '1' },
+        { id: '340', jobOpeningName: 'Researcher', location: { city: null, state: null }, atsLocation: noPlace, isRemote: null, locationType: '1' },
+        { id: '83', jobOpeningName: 'Director - Commercial Sales', location: { city: 'London', state: 'Ontario' }, atsLocation: noPlace, isRemote: null, locationType: '2' },
+        { id: '91', jobOpeningName: 'Account Manager', location: { city: null, state: null },
+          atsLocation: { country: 'Germany', state: null, province: 'Bavaria', city: 'Munich' }, isRemote: null, locationType: '1' },
+        { id: '92', jobOpeningName: 'Support Engineer', location: { city: 'Remote', state: null }, atsLocation: noPlace, isRemote: null, locationType: '1' },
+        { id: '93', jobOpeningName: 'Field Engineer', location: { city: 'Toronto', state: 'Ontario' },
+          atsLocation: { country: 'Canada', state: 'Ontario', province: null, city: 'London' }, isRemote: null, locationType: '2' },
+      ],
+    }, 'Acme', 'https://acme.bamboohr.com');
+
+    if (remote?.location === 'London, Ontario, Canada, Remote') pass('parseBambooHRResponse reads a remote opening (locationType "1") with its place from atsLocation');
+    else fail(`remote opening location was ${JSON.stringify(remote?.location)}, expected "London, Ontario, Canada, Remote"`);
+
+    if (placeless?.location === 'Remote') pass('parseBambooHRResponse gives a remote opening with no place the location "Remote"');
+    else fail(`placeless remote opening location was ${JSON.stringify(placeless?.location)}, expected "Remote"`);
+
+    if (hybrid?.location === 'London, Ontario') pass('parseBambooHRResponse keeps the office of an opening that is not remote');
+    else fail(`hybrid opening location was ${JSON.stringify(hybrid?.location)}, expected "London, Ontario"`);
+
+    if (province?.location === 'Munich, Bavaria, Germany, Remote') pass('parseBambooHRResponse reads atsLocation.province when atsLocation.state is empty');
+    else fail(`atsLocation.province location was ${JSON.stringify(province?.location)}, expected "Munich, Bavaria, Germany, Remote"`);
+
+    if (remoteOffice?.location === 'Remote') pass('parseBambooHRResponse does not append Remote to a place that already says it');
+    else fail(`remote office location was ${JSON.stringify(remoteOffice?.location)}, expected "Remote"`);
+
+    if (bothPlaces?.location === 'Toronto, Ontario') pass('parseBambooHRResponse keeps the office when atsLocation names another place');
+    else fail(`office + atsLocation location was ${JSON.stringify(bothPlaces?.location)}, expected "Toronto, Ontario"`);
+
+    const { buildLocationFilter } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+    if (!buildLocationFilter({ block: ['Canada'] })(remote?.location, remote?.url, remote?.title, remote)) {
+      pass('location_filter block: [Canada] drops a remote opening whose place is in Canada');
+    } else {
+      fail(`location_filter block: [Canada] kept ${JSON.stringify(remote?.location)}`);
+    }
+    if (buildLocationFilter({ allow: ['Remote'], strict: true })(placeless?.location, placeless?.url, placeless?.title, placeless)) {
+      pass('location_filter strict allow: [Remote] keeps a remote opening with no place');
+    } else {
+      fail(`location_filter strict allow: [Remote] dropped ${JSON.stringify(placeless?.location)}`);
+    }
+  }
+
+  // Empty vs broken (#6906, ADDING_A_PROVIDER.md "Defensive parsing"): only the
+  // documented container, present and empty, is an empty board. Any other body
+  // throws, naming the keys (or the type) it got.
+  {
+    const emptyBoard = parseBambooHRResponse({ meta: { totalCount: 0 }, result: [] }, 'X', 'https://x.bamboohr.com');
+    if (Array.isArray(emptyBoard) && emptyBoard.length === 0) pass('parseBambooHRResponse returns [] for { meta: { totalCount: 0 }, result: [] }');
+    else fail(`parseBambooHRResponse { meta: { totalCount: 0 }, result: [] } → ${JSON.stringify(emptyBoard)}`);
+    let brokenOk = true;
+    for (const [body, got] of [[{}, '[]'], [{ error: 'rate limited' }, '[error]'], [{ meta: {}, result: null }, '[meta, result]'], ['oops', '[string]'], [null, '[null]']]) {
+      let out;
+      let err = null;
+      try { out = parseBambooHRResponse(body, 'X', 'https://x.bamboohr.com'); } catch (e) { err = e; }
+      const msg = String(err?.message || '');
+      if (!err || !msg.startsWith('bamboohr: unexpected response for X') || !msg.includes(`got: ${got}`)) {
+        brokenOk = false;
+        fail(`parseBambooHRResponse body=${JSON.stringify(body)} should throw naming ${got}; got ${err ? JSON.stringify(msg) : `a return of ${JSON.stringify(out)}`}`);
+        break;
+      }
+    }
+    if (brokenOk) pass('parseBambooHRResponse throws, naming what it got, for a body that is not a board');
+  }
 
   // fetch() — via mock ctx, asserts the resolved URL + SSRF redirect pinning + parsing
   let fetchedUrl = '';
@@ -235,6 +303,63 @@ try {
       pass('bamboohr.enrichDate() fetches /careers/<id>/detail with redirect:error and sets postedAt');
     } else {
       fail(`bamboohr.enrichDate() redirect=${JSON.stringify(detailOpts)} postedAt=${job.postedAt}`);
+    }
+  }
+
+  // listingIdentity (#6908): the id the payload already carries becomes the
+  // strong ATS-native identity, next to the tenant subdomain.
+  {
+    const { bamboohrListingIdentity } = bamboohrModule;
+    const { isOfferSeen, markOfferSeen, listingIdentityToken } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+
+    const [stringId, numberId] = parseBambooHRResponse(sample, 'Acme', 'https://acme.bamboohr.com');
+    const identity = stringId?.listingIdentity;
+    if (identity?.ats_provider === 'bamboohr' && identity?.board_slug === 'acme' && identity?.posting_id === '15'
+        && Object.keys(identity).length === 3) {
+      pass('parseBambooHRResponse returns the bamboohr/<tenant>/<id> listingIdentity');
+    } else {
+      fail(`bamboohr identity = ${JSON.stringify(identity)}`);
+    }
+    if (numberId?.listingIdentity?.posting_id === '22') pass('a numeric BambooHR id gives the same decimal posting_id as its string form');
+    else fail(`numeric-id identity = ${JSON.stringify(numberId?.listingIdentity)}`);
+
+    // The same posting reached at another URL (the legacy /jobs/view.php?id=
+    // share link, or a branded page embedding the tenant's widget) is the
+    // same listing; URL dedup alone cannot join the two.
+    const sharePage = { ...stringId, url: 'https://acme.bamboohr.com/jobs/view.php?id=15' };
+    const seen = new Set();
+    markOfferSeen(stringId, seen);
+    if (isOfferSeen(sharePage, seen)) {
+      pass('the same BambooHR posting under another URL is already seen (one row, not two)');
+    } else {
+      fail('BambooHR posting under another URL was not recognised as the same posting');
+    }
+
+    const [otherTenant] = parseBambooHRResponse({ result: [{ id: '15', jobOpeningName: 'IT Security Engineer' }] }, 'Other', 'https://other.bamboohr.com');
+    if (listingIdentityToken(otherTenant) && listingIdentityToken(otherTenant) !== listingIdentityToken(stringId) && !isOfferSeen(otherTenant, seen)) {
+      pass('the same BambooHR id on another tenant is a different listing');
+    } else {
+      fail(`other-tenant token = ${listingIdentityToken(otherTenant)}`);
+    }
+
+    // A row the provider keeps but whose id has no canonical decimal form gets no identity.
+    const [padded] = parseBambooHRResponse({ result: [{ id: ' 15 ', jobOpeningName: 'Padded' }] }, 'Acme', 'https://acme.bamboohr.com');
+    if (padded && !('listingIdentity' in padded)) pass('a padded BambooHR id keeps the row but leaves listingIdentity off');
+    else fail(`padded-id row = ${JSON.stringify(padded)}`);
+
+    if (bamboohrListingIdentity('acme', 7)?.posting_id === '7'
+        && bamboohrListingIdentity('acme', '7')?.posting_id === '7'
+        && bamboohrListingIdentity('acme', '007') === undefined
+        && bamboohrListingIdentity('acme', '7a') === undefined
+        && bamboohrListingIdentity('acme', 7.5) === undefined
+        && bamboohrListingIdentity('acme', Number.MAX_SAFE_INTEGER + 1) === undefined
+        && bamboohrListingIdentity('acme', 0) === undefined
+        && bamboohrListingIdentity('acme', null) === undefined
+        && bamboohrListingIdentity('', 7) === undefined
+        && bamboohrListingIdentity(null, 7) === undefined) {
+      pass('bamboohrListingIdentity() accepts only a tenant and a canonical positive integer id');
+    } else {
+      fail('bamboohrListingIdentity() accepted an id or tenant that cannot form a strong identity');
     }
   }
 
