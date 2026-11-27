@@ -7,13 +7,13 @@
  * leaves its body unread for the stream reader.
  *
  * @param {Response} r
- * @returns {Promise<string | null>}
+ * @returns {Promise<{ message: string, configLink?: true } | null>}
  */
 export async function ingestErrorMessage(r) {
   if (r.ok) return null;
   const body = await r.json().catch(() => null);
   const reason = typeof body?.error === "string" ? body.error.trim() : "";
-  if (reason) return reason;
-  if (r.status === 404) return "Connect an AI CLI in Config first — it parses your CV locally.";
-  return `Couldn't read your CV (error ${r.status}) — paste the text instead.`;
+  if (reason) return { message: reason };
+  if (r.status === 404) return { message: "Connect an AI CLI in Config first — it parses your CV locally.", configLink: true };
+  return { message: `Couldn't read your CV (error ${r.status}) — paste the text instead.` };
 }
