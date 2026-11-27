@@ -105,9 +105,9 @@ function emitJd(result, maxChars) {
     process.exitCode = 1;
     return;
   }
-  // bodyText exists only for jdFailure(); drop it so the documented success
+  // `kind` and bodyText (which exists only for jdFailure()) are dropped so the documented success
   // shape `{ url, title, text }` is unchanged.
-  const { bodyText: _bodyText, closed: _closed, evidence: _evidence, ...emitted } = result;
+  const { kind: _kind, bodyText: _bodyText, ...emitted } = result;
   process.stdout.write(JSON.stringify(emitted));
 }
 
