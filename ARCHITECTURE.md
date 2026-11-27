@@ -73,7 +73,7 @@ A standalone Go TUI under `dashboard/` for browsing the pipeline. Isolated from 
 
 - `test-all.mjs` — the full suite (500+ checks across scoring, scan, tracker, PDF, security, updater).
 - `updater-migration-tests.mjs` — enforces the system/user boundary and safe cross-version upgrades.
-- CI: `test` + CodeQL are required; CodeRabbit reviews every PR; Renovate keeps deps current.
+- CI: `test` + CodeQL are required; CodeRabbit reviews every PR; Dependabot keeps deps current.
 
 ## Where to start reading
 
