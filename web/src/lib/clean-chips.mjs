@@ -39,7 +39,7 @@ export function cleanChips(v) {
     const k = item.trim();
     if (!k) continue;
     if (!/[\p{L}\p{N}]/u.test(k)) continue; // drop punctuation-only junk (e.g. a stray "*")
-    const key = k.toLowerCase().normalize("NFKC");
+    const key = k.normalize("NFKC").toLowerCase().normalize("NFKC");
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(k);
