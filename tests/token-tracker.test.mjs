@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { pass, fail } from './helpers.mjs';
-import { estimateCost, TokenAccumulator, formatBreakdown, formatK, RATES } from '../utils/token-tracker.mjs';
+import { estimateCost, normalizeOpenAIUsage, TokenAccumulator, formatBreakdown, formatK, RATES } from '../utils/token-tracker.mjs';
 import { parseTokenVal } from '../batch/aggregate-tokens.mjs';
 
 console.log('\ntoken-tracker.mjs & aggregate-tokens.mjs unit tests');
@@ -111,7 +111,16 @@ try {
     }
   }
 
-  // 9. formatK returns '12.4k' for 12400
+  // 9. An OpenAI-compatible response that omits total_tokens still has a total:
+  //    prompt + completion. Reporting 0 there zeroes the run's token total.
+  const normalized = normalizeOpenAIUsage({ prompt_tokens: 1200, completion_tokens: 300 });
+  if (normalized.total_tokens === 1500) {
+    pass('normalizeOpenAIUsage derives total_tokens from prompt and completion when the API omits it');
+  } else {
+    fail(`normalizeOpenAIUsage should derive total_tokens, got ${normalized.total_tokens}`);
+  }
+
+  // 9b. formatK returns '12.4k' for 12400
   const formatted = formatK(12400);
   if (formatted === '12.4k') {
     pass('formatK(12400) returns "12.4k"');
