@@ -1264,6 +1264,20 @@ if (isMainModule(import.meta.url)) {
     runSelfTest();
   }
 
+  // An explicit --reports-dir or --tracker names the data to check, so a path
+  // that does not exist is an error, not an empty archive: a mistyped
+  // --reports-dir passed as "no report files found", and a mistyped --tracker
+  // silently dropped the tracker join. Only the defaults may be absent (a fresh
+  // install has neither). Exit 2, not 1: 1 means a report has no archived JD.
+  // --jds-dir is left alone: a missing capture folder already shows, as every
+  // report without an embedded JD is listed.
+  for (const [flag, value] of [['--reports-dir', reportsDirArg], ['--tracker', noTrackerMode ? null : trackerArg]]) {
+    if (value && !existsSync(value)) {
+      console.error(`check-jd-archive: ${flag} not found: ${value}`);
+      process.exit(2);
+    }
+  }
+
   const reportsDir = reportsDirArg || DEFAULT_REPORTS_DIR;
   const jdsDir = jdsDirArg || DEFAULT_JDS_DIR;
   const trackerPath = noTrackerMode ? null : (trackerArg || DEFAULT_TRACKER_PATH);
