@@ -25,7 +25,7 @@ test("an error body without a usable `error` string also falls back", async () =
 
 test("404 shows the route's installation instructions", async () => {
   const reason = "No supported CLI is installed. Install one, then choose it in Config.";
-  assert.deepEqual(await ingestErrorMessage(json({ error: reason }, 404)), { message: reason });
+  assert.deepEqual(await ingestErrorMessage(json({ error: reason }, 404)), { message: reason, configLink: true });
 });
 
 test("404 without a usable reason keeps the Config fallback", async () => {
@@ -44,5 +44,6 @@ test("the CV ingest component routes every failed response through it", () => {
   const src = readFileSync(new URL("../../src/components/cv/cv-ingest.tsx", import.meta.url), "utf8");
   assert.match(src, /ingestErrorMessage\(r\)/);
   assert.match(src, /showConfigLink && <Link href="\/config"/);
+  assert.match(src, /Drop a \.md or \.txt file to continue without a CLI/);
   assert.match(src, /setErr\(failure\.message\)/);
 });
