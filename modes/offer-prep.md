@@ -103,7 +103,23 @@ in this conversation.
 incorporates by reference (equity plan, option agreement, PIIA, handbook,
 arbitration rules) and ask for them. Unprovided ones are named in the output
 header, and each generates a lawyer question — a clause that defers to an
-unseen controlling document cannot be fully described.
+unseen controlling document cannot be fully described. A clause that
+states no figure and refers to another instrument for it ("as set out in the
+applicable collective agreement", "per the bonus policy as amended from time
+to time") counts as such a reference and also gets one item to raise:
+"The clause gives no figure and refers to {quoted reference}.
+Which document sets it, in which version, and can you share it?"
+The item says nothing about what that document contains. Nothing is
+looked up: the candidate asks the employer. A clause that refers to a
+statute instead becomes a lawyer question; no statutory figure is stated.
+
+**Package inventory:** ask which documents came with the offer, and list
+every one the contract does not reference (for example a separately signed
+acknowledgement, a policy PDF or a declaration form). Each is named in
+the output header and gets one item to raise: "What is this document,
+and does it form part of the agreement?" Nothing is inferred about what
+it means for the contract, and the list stays separate from the
+referenced-documents inventory above.
 
 ## Step 1 — Jurisdiction framing (no research)
 
@@ -485,6 +501,21 @@ Compare contract terms against:
 - `config/profile.yml` targets and location policy;
 - `data/offers/{company-slug}/notes.md`.
 
+**Within the document:** the contract is also read against itself.
+Quote both places wherever two parts of the same document state a different
+value for the same figure in the same unit (body and annex, a clause and a
+schedule). A clause that takes its figure from one of those places is
+quoted too, together with the clause it cites. A clause that only refers to a
+figure whose value is the same everywhere is not a finding. Say only that the
+two readings differ; neither is called the one that applies. Each is listed in
+the Consistency deltas and also becomes one item to raise: "Can you confirm
+which figure applies?" Where two places state the same quantity in different
+units (days and weeks, a monthly and a yearly amount, 12 or 13 salaries),
+nothing is converted: both places are quoted in one item to raise that
+asks only "Which figure applies?", and no difference is claimed.
+A lawyer question follows only where a quoted clause
+already carries `[ask your lawyer]`; no new tag is added.
+
 List every delta: what was recorded/targeted vs what the contract says, both
 quoted.
 
@@ -521,6 +552,7 @@ Write `data/offers/{company-slug}/prep-{YYYY-MM-DD}.md`:
 # Offer Prep — {Company} — {Role}
 **Date:** {date} · **Jurisdiction:** {jurisdiction} · **Source doc:** {filename} · verified {n} sections
 **Referenced documents not provided:** {list or "none"}
+**Received, not referenced by the contract:** {list or "none"}
 **Contents:** clause walk · notable absences · consistency deltas · lawyer questions · items to raise
 
 ## Clause walk
