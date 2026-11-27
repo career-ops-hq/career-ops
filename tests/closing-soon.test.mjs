@@ -324,9 +324,10 @@ test('captures: pathological unterminated markup is still read around', () => {
 });
 
 test('htmlToText: hostile unterminated markup stays near-linear (in-process, generous bound)', () => {
-  // The old tag regex needed ~17s for 200k of this; a linear scan needs well
-  // under a second. 5s leaves ample headroom for a loaded CI runner while still
-  // failing on quadratic or exponential backtracking.
+  // The old tag regex needed ~17s for 200k of this. None of these inputs has a
+  // '>', so no '<' scans its tag window and each finishes in milliseconds. 5s
+  // leaves ample headroom for a loaded CI runner while still failing if every
+  // '<' rescans its window again or the scan turns quadratic.
   for (const unit of ['<a ', '<a "', '<script ', '<!-- ']) {
     const input = unit.repeat(Math.ceil(200000 / unit.length));
     const t = process.hrtime.bigint();

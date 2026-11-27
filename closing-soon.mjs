@@ -247,9 +247,12 @@ function tagEnd(html, start) {
 /**
  * Flatten HTML to plain text for date matching only (never rendered): comments
  * and script/style blocks are dropped, tags (including quoted attribute values)
- * become spaces, and the few entities that matter are decoded. A single linear
- * pass, so hostile markup cannot trigger regex backtracking; best-effort, not
- * an HTML parser.
+ * become spaces, and the few entities that matter are decoded. No regex runs
+ * over the input, so hostile markup cannot trigger backtracking. Each closer is
+ * searched for once, and an unterminated '<' costs nothing when no '>' follows
+ * within MAX_TAG_CHARS. Only a '<' with a quoted '>' in its window scans that
+ * window, so the worst case is MAX_TAG_CHARS per '<'. Best-effort, not an HTML
+ * parser.
  */
 export function htmlToText(html) {
   const lower = html.toLowerCase();
@@ -272,6 +275,7 @@ export function htmlToText(html) {
     return at;
   };
   let out = '';
+  let gt = html.indexOf('>'); // nothing between the last scanned '<' and gt is a '>'
   let i = 0;
   while (i < html.length) {
     const lt = html.indexOf('<', i);
@@ -289,7 +293,13 @@ export function htmlToText(html) {
         const gt = close === -1 ? -1 : lower.indexOf('>', close);
         if (gt !== -1) end = gt + 1;
       }
-      if (end === -1 && /[a-z!/]/i.test(html[lt + 1] ?? '')) end = tagEnd(html, lt);
+      if (end === -1 && /[a-z!/]/i.test(html[lt + 1] ?? '')) {
+        // A tag cannot close without a '>' inside its window, so skip the scan
+        // when the next '>' is beyond it. gt only moves forward, which keeps a
+        // run of unterminated '<' from rescanning the same stretch.
+        if (gt !== -1 && gt <= lt) gt = html.indexOf('>', lt + 1);
+        if (gt !== -1 && gt < lt + MAX_TAG_CHARS) end = tagEnd(html, lt);
+      }
     }
     if (end === -1) { out += '<'; i = lt + 1; } else { out += ' '; i = end; }
   }
