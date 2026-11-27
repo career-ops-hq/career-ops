@@ -124,6 +124,15 @@ try {
   check('empty companySlug is treated as supplied and matches nothing',
     findCaptureForReport(jds, 4, { companySlug: '' }) === null);
 
+  // archive-posting.mjs without --report writes `YYYY-MM-DD_company_...`. Its
+  // year must not read as a report number, or report 2026 would resolve to
+  // whatever company was captured that year.
+  writeCapture('2026-11-27_kappa_head-of-growth_0123456789abcdef.pdf');
+  check('a date-only capture is not report 2026', findCaptureForReport(jds, 2026) === null);
+  writeCapture('2026-kappa-cmo.txt');
+  check('a real 4-digit report prefix still matches beside a date-only capture',
+    findCaptureForReport(jds, 2026)?.filename === '2026-kappa-cmo.txt');
+
   // ── robustness ─────────────────────────────────────────────────────────────
   check('missing jds dir returns null instead of throwing', findCaptureForReport(join(testDir, 'nope'), 64) === null);
   check('non-numeric report returns null', findCaptureForReport(jds, 'abc') === null);
