@@ -32,8 +32,8 @@ const CLOSER_ALL = new RegExp(CLOSER_SRC, "gm");
  * in that echo parses as a second envelope, failing the run.
  *
  * It says "do not save" rather than "you have no write tools": that claim is
- * only true on Claude Code. The six CLIs invoked via clis.ts's bare args keep
- * their own default tool access (#2507), and telling an agent something false
+ * only true on Claude Code. Every other CLI in clis.ts runs with bare args and
+ * keeps its own default tool access (#2507), and telling an agent something false
  * about its own capabilities invites it to test the claim.
  */
 export const REPORT_ENVELOPE_INSTRUCTION =

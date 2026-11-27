@@ -1,7 +1,6 @@
 import { coreProfileEnv } from "@/lib/core/profile-path.mjs";
 import { execFile } from "node:child_process";
 import fs from "node:fs";
-import path from "node:path";
 import { careerOpsRoot, portalsConfigPath, rootScript } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 

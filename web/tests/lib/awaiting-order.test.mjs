@@ -31,9 +31,9 @@ test("only scored-but-undecided rows are offered", () => {
   );
 });
 
-test("the status match is a case-insensitive prefix, so a dated or lowercase Evaluated still counts", () => {
-  // The tracker carries dated and localized-cased statuses; the page's own
-  // regex has always been /^evaluat/i and the extraction must not narrow it.
+test("the status match goes through canonStatus(), so a dated or lowercase Evaluated still counts", () => {
+  // The tracker carries dated and lowercase statuses; canonStatus() maps both
+  // to EVALUATED once the trailing date is stripped.
   const rows = [row("2026-08-20", "4.0/5", "evaluated"), row("2026-08-21", "4.0/5", "Evaluated 2026-08-21")];
   assert.equal(pickAwaitingDecision(rows, scoreOf).length, 2);
 });
