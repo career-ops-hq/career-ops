@@ -4,6 +4,7 @@
 // capped, the whole transfer bounded by timeoutMs, and the body cancelled when
 // the caller stops early.
 import { createServer } from 'node:http';
+import { listenOnSafePort } from '../helpers/listen-safe-port.mjs';
 import { brotliCompressSync, gzipSync } from 'node:zlib';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
@@ -85,7 +86,7 @@ const server = createServer(async (req, res) => {
   res.writeHead(404);
   res.end();
 });
-await new Promise((r) => server.listen(0, '127.0.0.1', r));
+await listenOnSafePort(server);
 const base = 'http://stream.example.test';
 const viaLocal = (fn) => withLocalServerAs(base, `http://127.0.0.1:${server.address().port}`, fn);
 

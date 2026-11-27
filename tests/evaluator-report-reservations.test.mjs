@@ -1,6 +1,7 @@
 // Exercise the real save paths without models, credentials, or personal data.
 // A relocated tracker still owns its IDs when its old report files are absent.
 import assert from 'node:assert/strict';
+import { listenOnSafePort } from './helpers/listen-safe-port.mjs';
 import { execFile } from 'node:child_process';
 import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -159,10 +160,7 @@ for (const engine of ['openai', 'ollama']) {
           }
         });
       });
-      await new Promise((resolve, reject) => {
-        server.once('error', reject);
-        server.listen(0, '127.0.0.1', resolve);
-      });
+      await listenOnSafePort(server);
       const baseUrl = `http://127.0.0.1:${server.address().port}`;
       const { stdout, stderr } = await exec(NODE, [
         join(codeRoot, `${engine}-eval.mjs`), '--url', engine === 'openai' ? `${baseUrl}/v1` : baseUrl,

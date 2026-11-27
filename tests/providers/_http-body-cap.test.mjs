@@ -13,6 +13,7 @@
 // over-cap header and the mid-stream cap cancel, and the server side proves
 // it by reporting the response as aborted.
 import { createServer } from 'node:http';
+import { listenOnSafePort } from '../helpers/listen-safe-port.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { pass, fail, ROOT, withLocalServerAs } from '../helpers.mjs';
@@ -112,7 +113,7 @@ const server = createServer(async (req, res) => {
   res.writeHead(200, { 'content-type': 'application/json' });
   res.end('{"ok":true}');
 });
-await new Promise((r) => server.listen(0, '127.0.0.1', r));
+await listenOnSafePort(server);
 const base = 'http://caps.example.test';
 const viaLocal = (fn) => withLocalServerAs(base, `http://127.0.0.1:${server.address().port}`, fn);
 try {
