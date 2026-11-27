@@ -353,7 +353,8 @@ export function extractInterviewDate(text) {
   const body = String(text ?? '').replace(/^(?:sent|date|received|from|to|subject|cc|bcc)[ \t]*:[^\r\n]*/gim, '');
   for (const pattern of SCHEDULE_DATE_PATTERNS) {
     const match = body.match(pattern);
-    const date = extractDate(match?.[1]);
+    const schedule = match?.[1].split(/[.!?](?=\s|$)/, 1)[0];
+    const date = extractDate(schedule);
     if (date) return date;
   }
   return null;
@@ -1137,13 +1138,14 @@ export function analyzeInvite(text, trackerRows = null, options = {}) {
  *
  * @param {number} appNumber - Tracker # to update (must be unambiguous).
  * @param {string} newStatus - Target status ('Rejected', 'Interview', etc.).
- * @param {{appsFile?: string, note?: string}} [options] - appsFile overrides CAREER_OPS_TRACKER for the child process (tests only).
+ * @param {{appsFile?: string, note?: string, expectStatus?: string}} [options] - appsFile overrides CAREER_OPS_TRACKER for the child process (tests only).
  * @returns {object} set-status.mjs's own --json result (or its structured error).
  */
 export function applyStatusUpdate(appNumber, newStatus, options = {}) {
   const scriptPath = join(CAREER_OPS_CODE_ROOT, 'set-status.mjs');
   const env = options.appsFile ? { ...process.env, CAREER_OPS_TRACKER: options.appsFile } : process.env;
-  const cmdArgs = [scriptPath, String(appNumber), newStatus];
+  const cmdArgs = [scriptPath, '--row', String(appNumber), newStatus];
+  if (options.expectStatus) cmdArgs.push('--expect-status', options.expectStatus);
   if (options.note !== undefined && options.note !== null && options.note !== '') {
     cmdArgs.push('--note', options.note);
   }
@@ -1197,7 +1199,7 @@ export function applyRejectionStatus(appNumber, options = {}) {
  *
  * @param {number} appNumber - Tracker # to update (must be unambiguous).
  * @param {object} [signals] - Extracted signals {date, interviewer, ...}.
- * @param {{appsFile?: string, note?: string}} [options] - appsFile overrides CAREER_OPS_TRACKER for the child process (tests only).
+ * @param {{appsFile?: string, note?: string, expectStatus?: string}} [options] - appsFile overrides CAREER_OPS_TRACKER for the child process (tests only).
  * @returns {object} set-status.mjs's own --json result (or its structured error).
  */
 export function applyInviteStatus(appNumber, signals = {}, options = {}) {
@@ -1421,7 +1423,7 @@ if (isMainModule(import.meta.url)) {
       const target = selection.target;
 
       const applyResult = result.classification === 'invite'
-        ? applyInviteStatus(target.appNumber, { ...result.signals, date: extractInterviewDate(text) })
+        ? applyInviteStatus(target.appNumber, { ...result.signals, date: extractInterviewDate(text) }, { expectStatus: target.status })
         : applyRejectionStatus(target.appNumber);
       const output = { ...result, applied: applyResult };
       if (summaryMode) {
