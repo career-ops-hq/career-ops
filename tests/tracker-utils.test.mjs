@@ -83,9 +83,8 @@ test('tracker paths follow the workspace selected by the tracker', () => {
     assert.equal(resolveWorkspaceRoot(tracker), canonicalRoot);
     assert.equal(resolvePdfIndexPath(tracker), join(canonicalRoot, 'data', 'pdf-index.tsv'));
 
-    const alternate = join(root, 'custom-applications.md');
-    process.env.CAREER_OPS_TRACKER = alternate;
-    assert.equal(resolveTrackerPath(root), alternate);
+    process.env.CAREER_OPS_TRACKER = join(root, 'custom-applications.md');
+    assert.equal(resolveTrackerPath(root), join(canonicalRoot, 'custom-applications.md'));
   } finally {
     if (oldTracker === undefined) delete process.env.CAREER_OPS_TRACKER;
     else process.env.CAREER_OPS_TRACKER = oldTracker;

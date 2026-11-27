@@ -31,3 +31,36 @@ test('Assessment recovery proves a reply but never an interview', () => {
   const ledger = parseStatusLogStages('2\t2026-10-01\tAssessment\tDiscarded');
   assert.deepEqual([...recoverFunnelStages(statuses, ledger)], [[1, 3], [2, 3]]);
 });
+
+test('a retracted transition proves no stage, and neither does the revert that follows it', () => {
+  const statuses = new Map([[1, 'Applied'], [2, 'Rejected']]);
+  const ledger = parseStatusLogStages([
+    '1\t2026-10-01\tEvaluated\tApplied\tset-status\t',
+    '1\t2026-10-02\tApplied\tOffer\tset-status\t',
+    '1\t2026-10-02\t-\t-\tmanual\tmis-click',
+    '1\t2026-10-02\tOffer\tApplied\tset-status\t',
+    '2\t2026-10-01\tApplied\tInterview\tset-status\t',
+    '2\t2026-10-05\tInterview\tRejected\tset-status\t',
+  ].join('\n'));
+  assert.deepEqual([...recoverFunnelStages(statuses, ledger)], [[1, 1], [2, 4]]);
+});
+
+test('the revert after a retraction proves nothing when it spells the stage in another case', () => {
+  const ledger = parseStatusLogStages([
+    '1\t2026-10-01\tEvaluated\tApplied\tset-status\t',
+    '1\t2026-10-02\tApplied\tOffer\tset-status\t',
+    '1\t2026-10-02\t-\t-\tmanual\tmis-click',
+    '1\t2026-10-02\toffer\tApplied\tmanual\t',
+  ].join('\n'));
+  assert.deepEqual([...recoverFunnelStages(new Map([[1, 'Applied']]), ledger)], [[1, 1]]);
+});
+
+test('a retraction after a date correction removes the corrected stage', () => {
+  const ledger = parseStatusLogStages([
+    '1\t2026-10-01\tEvaluated\tApplied\tset-status\t',
+    '1\t2026-10-05\tApplied\tInterview\tset-status\t',
+    '1\t2026-10-04\tApplied\tInterview\tcorrection\twrong day',
+    '1\t2026-10-06\t-\t-\tmanual\tnever happened',
+  ].join('\n'));
+  assert.deepEqual([...recoverFunnelStages(new Map([[1, 'Applied']]), ledger)], [[1, 1]]);
+});

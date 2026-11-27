@@ -19,7 +19,9 @@
 // URL has no scan-history row to have released it, so it stays pinned whatever
 // its checkbox says.
 import { pass, fail } from './helpers.mjs';
-import { collectSeenUrls } from '../scan.mjs';
+import { collectSeenUrls, seenJobKey } from '../scan.mjs';
+
+const pin = (url) => seenJobKey(url);
 
 console.log('\nscan.mjs — recheck_after_days survives the pipeline.md pass');
 
@@ -80,49 +82,49 @@ const SOURCES = {
 
 const { seen, recheckEligible } = collectSeenUrls(SOURCES, POLICY);
 
-if (!seen.has(DONE)) {
+if (!seen.has(pin(DONE))) {
   pass('a `- [x]` row past the window is released — the TTL is not undone by pipeline.md');
 } else {
   fail('a `- [x]` row past the window is still pinned: recheck_after_days is a no-op');
 }
 
-if (!seen.has(PROCESSED)) {
+if (!seen.has(pin(PROCESSED))) {
   pass('a row under ## Processed is released too, whatever its checkbox says');
 } else {
   fail('a row under ## Processed is still pinned: the heading is not being read');
 }
 
-if (!seen.has(PROCESSED_CHILD)) {
+if (!seen.has(pin(PROCESSED_CHILD))) {
   pass('a row under a child heading of ## Processed is still released');
 } else {
   fail('a row under a child heading of ## Processed was pinned: nested processed headings are not being retained');
 }
 
-if (seen.has(NESTED_IN_PENDING)) {
+if (seen.has(pin(NESTED_IN_PENDING))) {
   pass('a `### Processed…` subdivision inside ## Pending does not release its rows');
 } else {
   fail('a row under a nested `### Processed…` heading inside ## Pending was released: the heading level is being ignored, so queued work is handed back to the scanner and duplicated');
 }
 
-if (seen.has(AFTER_TOP_LEVEL)) {
+if (seen.has(pin(AFTER_TOP_LEVEL))) {
   pass('a `#` heading ends ## Processed — a section cannot outlive a shallower heading');
 } else {
   fail('a row under a `#` heading following ## Processed was released: the processed state leaked past a heading that outranks the section, so queued work is handed back to the scanner and duplicated');
 }
 
-if (seen.has(OPEN)) {
+if (seen.has(pin(OPEN))) {
   pass('an actionable `- [ ]` row stays pinned — rescanning it would duplicate a queued job');
 } else {
   fail('an actionable `- [ ]` row was released: the next scan appends a second copy of it');
 }
 
-if (seen.has(PIPELINE_ONLY)) {
+if (seen.has(pin(PIPELINE_ONLY))) {
   pass('a pipeline-only URL stays pinned — nothing released it, so nothing may un-pin it');
 } else {
   fail('a pipeline-only URL was released, which no scan-history row ever authorised');
 }
 
-if (seen.has(FRESH)) {
+if (seen.has(pin(FRESH))) {
   pass('a row inside the window is untouched by any of this');
 } else {
   fail('a row inside the recheck window was released');
@@ -140,8 +142,8 @@ const applied = collectSeenUrls(
   { ...SOURCES, applicationsText: `| 1 | 2026-02-01 | Acme | Quant | 4/5 | Applied | ✅ | [1](reports/001.md) | ${DONE} |` },
   POLICY,
 );
-if (applied.seen.has(DONE) && applied.recheckEligible === 2) {
+if (applied.seen.has(pin(DONE)) && applied.recheckEligible === 2) {
   pass('a released row that applications.md pins is neither rescanned nor counted as eligible');
 } else {
-  fail(`applications.md pin leaked: seen=${applied.seen.has(DONE)} eligible=${applied.recheckEligible} (want true/2)`);
+  fail(`applications.md pin leaked: seen=${applied.seen.has(pin(DONE))} eligible=${applied.recheckEligible} (want true/2)`);
 }

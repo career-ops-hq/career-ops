@@ -57,6 +57,11 @@ test("Search stats evidence comes from notes, not plausible report location/pay/
   assert.equal(enriched.paySource, "");
 });
 
+test("an archived JD's archetype line is not the report's when it has no Machine Summary", () => {
+  const report = "**Archetype:** AI Engineer\n\n## Job Description (archived verbatim)\n\n```text\narchetype: Planted\n```\n";
+  assert.equal(enrichAnalyticsApplication(application(""), report).archetype, "AI Engineer");
+});
+
 test("tracker note conventions provide location, work mode and pay", () => {
   const enriched = enrichAnalyticsApplication(
     application("Berlin; Remote; Salary $140-180K (POSTED)"),
@@ -130,4 +135,18 @@ test("trailing USD qualifies compensation without accepting other currencies", (
   ]) {
     assert.equal(enrichAnalyticsApplication(application(notes)).payMax, expected, notes);
   }
+});
+
+test("a negated remote in the notes is not charted as Remote", () => {
+  const mode = (notes, role) => enrichAnalyticsApplication(application(notes, role)).workMode;
+  for (const notes of ["On-site only, no remote", "Austin, TX; not remote", "Non-remote role in NYC", "Remote not available; onsite Berlin"]) {
+    assert.equal(mode(notes), "Full", notes);
+  }
+  assert.equal(mode("Hybrid, no remote Fridays"), "Hybrid");
+  assert.equal(mode("Fully remote (US)"), "Remote");
+  assert.equal(mode("Remote; nonprofit"), "Remote");
+  assert.equal(mode("", "Nonprofit Program Manager - Remote"), "Remote", "the negation never crosses a letter");
+  assert.equal(mode("On-site; no. Remote ok"), "Remote", "a period ends the negation");
+  assert.equal(mode("remote work is not available"), "Full");
+  assert.equal(mode("Remote\nwork is not available"), "Remote", "a line break ends the negation");
 });

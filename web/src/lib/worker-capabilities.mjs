@@ -14,7 +14,7 @@
  * only copy it — and the next kind added would then be classified twice, in two
  * files, with nothing comparing the answers. This repo already carries that
  * failure three times over: clis.ts KNOWN, rank-pipeline.mjs CLI_CANDIDATES and
- * doctor.mjs VALID_CLIS are hand-maintained lists of the same CLIs that have
+ * lib/agent-cli.mjs AGENT_CLIS are hand-maintained lists of the same CLIs that have
  * drifted apart (differing entries, differing names for the same binary). One
  * source, many translations — never many sources.
  */
@@ -68,7 +68,7 @@ export const CAPS = Object.freeze({
  * Lives here rather than in claude-invocation.mjs because it is a fact about the
  * run route's workers, not about Claude. Re-exported there for existing importers.
  */
-export const KNOWN_KINDS = Object.freeze(["pdf", "research", "evaluate", "fix-portal"]);
+export const KNOWN_KINDS = Object.freeze(["pdf", "research", "evaluate", "fix-portal", "cover"]);
 
 /**
  * What each run-route kind needs. Derived from what its prompt actually does
@@ -77,9 +77,12 @@ export const KNOWN_KINDS = Object.freeze(["pdf", "research", "evaluate", "fix-po
  * - pdf       reads cv.md/profile/report/template and returns the CV inline in an
  *             envelope the backend persists — no write, and no fetch.
  * - research  "use WebFetch for URLs" — fetches, reports, never writes.
- * - evaluate  "Use WebFetch to read the posting", then writes the report and merges
- *             the tracker.
+ * - evaluate  "Use WebFetch to read the posting", then emits the report inline.
+ *             The backend persists it. The agent must not write: the posting is
+ *             untrusted input.
  * - fix-portal rewrites one portals.yml entry after finding a working ATS URL.
+ * - cover     runs cover.md's web research and re-reads the posting url, then
+ *             returns the draft letter in its reply. It writes nothing.
  *
  * No kind here is search-only: every web-using kind is pointed at a url (the
  * posting, the board). CAPS.webSearchOnly belongs to AI search, which is a route
@@ -88,8 +91,9 @@ export const KNOWN_KINDS = Object.freeze(["pdf", "research", "evaluate", "fix-po
 const KIND_CAPABILITIES = Object.freeze({
   pdf: CAPS.localReadOnly,
   research: CAPS.networkReadOnly,
-  evaluate: CAPS.workspaceWrite,
+  evaluate: CAPS.networkReadOnly,
   "fix-portal": CAPS.workspaceWrite,
+  cover: CAPS.networkReadOnly,
 });
 
 /**

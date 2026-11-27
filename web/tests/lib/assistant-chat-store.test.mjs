@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, existsSync, utimesSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -34,6 +35,31 @@ test('stale tabs and deletes cannot overwrite newer messages', t => {
   assert.throws(() => deleteChat(root, id, 1), /another tab/);
   assert.equal(readChat(root, id).messages.length, 2);
 });
+test('a save whose response was lost does not lock its own page out (#6381)', t => {
+  const root = fixture(t), id = randomUUID();
+  saveChat(root, id, { revision: 0, messages, writer: 'page-a', seq: 1 });
+  // The page never saw revision 1, so it still sends 0 with its newer messages.
+  const next = [...messages, { role: 'assistant', content: 'Reply' }];
+  const saved = saveChat(root, id, { revision: 0, messages: next, writer: 'page-a', seq: 2 });
+  assert.equal(saved.revision, 2);
+  assert.equal(readChat(root, id).messages.length, 2);
+  // A delayed earlier request from the same page cannot undo its retry.
+  assert.throws(() => saveChat(root, id, { revision: 0, messages, writer: 'page-a', seq: 1 }), /another tab/);
+  assert.throws(() => saveChat(root, id, { revision: 2, messages: next, writer: 'page-a', seq: 0 }), /Invalid save sequence/);
+  assert.throws(() => saveChat(root, id, { revision: 1, messages, writer: 'page-b', seq: 1 }), /another tab/);
+  assert.throws(() => saveChat(root, id, { revision: 2, messages: next, writer: 'page-a' }), /Save sequence required/);
+  assert.throws(() => saveChat(root, id, { revision: 1, messages }), /another tab/);
+  assert.throws(() => saveChat(root, id, { revision: 2, messages, writer: '../x' }), /Invalid writer/);
+  assert.equal(readChat(root, id).messages.length, 2);
+});
+test('a later save repeating the stored messages still outranks a delayed earlier save', t => {
+  const root = fixture(t), id = randomUUID();
+  saveChat(root, id, { revision: 0, messages, writer: 'page-a', seq: 1 });
+  const next = [...messages, { role: 'assistant', content: 'Reply' }];
+  assert.equal(saveChat(root, id, { revision: 0, messages, writer: 'page-a', seq: 3 }).seq, 3);
+  assert.throws(() => saveChat(root, id, { revision: 0, messages: next, writer: 'page-a', seq: 2 }), /another tab/);
+  assert.equal(readChat(root, id).messages.length, 1);
+});
 test('migration retries do not duplicate a conversation or increment its revision', t => {
   const root = fixture(t), id = randomUUID();
   const first = saveChat(root, id, { revision: 0, messages });
@@ -58,30 +84,90 @@ test('invalid ids, empty chats, oversized payloads, and corrupt files never over
 test('an in-progress writer is reported rather than bypassed', t => {
   const root = fixture(t), id = randomUUID();
   saveChat(root, id, { revision: 0, messages });
-  writeFileSync(join(root, '.career-ops-web', 'chats', `${id}.json.lock`), '');
+  // A live holder: another live process, so the lock is never judged stale,
+  // however old. Not this process's pid: a stamp of ours with no handle behind
+  // it is aged out (#5390), so it would pass here only while young. Backdated a
+  // day, so "busy" can only come from the liveness rule.
+  const holder = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1 << 30)'], { stdio: 'ignore' });
+  t.after(() => holder.kill());
+  const lockDir = join(root, '.career-ops-web', 'chats', `${id}.json.lock`);
+  mkdirSync(lockDir);
+  writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({ pid: holder.pid, token: 'peer', started_at: new Date().toISOString() }));
+  const dayAgo = new Date(Date.now() - 86_400_000);
+  utimesSync(lockDir, dayAgo, dayAgo);
   assert.throws(() => saveChat(root, id, { revision: 1, messages }), /busy/);
+  assert.throws(() => deleteChat(root, id, 1), /busy/);
   assert.equal(readChat(root, id).revision, 1);
+  assert.ok(existsSync(join(lockDir, 'owner.json')), 'a live holder keeps its lock');
+});
+test('a lock left by a crashed save is reclaimed instead of blocking the conversation for ever', t => {
+  const root = fixture(t), id = randomUUID();
+  saveChat(root, id, { revision: 0, messages });
+  const lockDir = join(root, '.career-ops-web', 'chats', `${id}.json.lock`);
+  const exited = spawnSync(process.execPath, ['-e', '']);
+  mkdirSync(lockDir);
+  writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({ pid: exited.pid, token: 'crashed', started_at: new Date().toISOString() }));
+  assert.equal(saveChat(root, id, { revision: 1, messages }).revision, 2);
+  assert.equal(existsSync(lockDir), false);
+});
+// The previous version locked with an O_EXCL FILE at the same path the lock
+// directory now uses, and never recovered it. A file left by a crash must not
+// wedge the conversation after an upgrade; a fresh one may still be a save in
+// flight in an old process, so it is left alone until it ages out.
+test('a lock file left by the previous version is reclaimed once old, and respected while fresh', t => {
+  const root = fixture(t), id = randomUUID();
+  saveChat(root, id, { revision: 0, messages });
+  const lockPath = join(root, '.career-ops-web', 'chats', `${id}.json.lock`);
+  writeFileSync(lockPath, '');
+  assert.throws(() => saveChat(root, id, { revision: 1, messages }), /busy/);
+  const dayAgo = new Date(Date.now() - 86_400_000);
+  utimesSync(lockPath, dayAgo, dayAgo);
+  assert.equal(saveChat(root, id, { revision: 1, messages }).revision, 2);
+  assert.equal(existsSync(lockPath), false);
+  assert.deepEqual(readdirSync(join(root, '.career-ops-web', 'chats')), [`${id}.json`]);
+});
+
+// A release whose rm is contended (Windows EBUSY) is swallowed by design, so the
+// lock directory survives under the server's own live pid. That pid must not
+// keep it busy until the server restarts: with no handle behind it, it ages
+// out like any ownerless leftover (#5390 review).
+test('a lock the server failed to release does not block the conversation until restart', t => {
+  const root = fixture(t), id = randomUUID();
+  const lockDir = join(root, '.career-ops-web', 'chats', `${id}.json.lock`);
+  const originalRmSync = fs.rmSync;
+  fs.rmSync = (path, ...args) => {
+    if (String(path) === lockDir) throw Object.assign(new Error('simulated contended release'), { code: 'EBUSY' });
+    return originalRmSync(path, ...args);
+  };
+  syncBuiltinESMExports();
+  try {
+    assert.equal(saveChat(root, id, { revision: 0, messages }).revision, 1);
+  } finally {
+    fs.rmSync = originalRmSync;
+    syncBuiltinESMExports();
+  }
+  assert.ok(existsSync(join(lockDir, 'owner.json')), 'the swallowed release left the lock behind');
+  assert.throws(() => saveChat(root, id, { revision: 1, messages }), /busy/, 'a fresh leftover is respected');
+  const dayAgo = new Date(Date.now() - 86_400_000);
+  utimesSync(lockDir, dayAgo, dayAgo);
+  assert.equal(saveChat(root, id, { revision: 1, messages }).revision, 2);
+  assert.equal(existsSync(lockDir), false);
 });
 
 test('lock and temp cleanup errors do not replace a saved conversation', t => {
   const root = fixture(t), lockId = randomUUID(), tempId = randomUUID();
-  const lockPath = join(root, '.career-ops-web', 'chats', `${lockId}.json.lock`);
-  const originalOpenSync = fs.openSync, originalCloseSync = fs.closeSync, originalUnlinkSync = fs.unlinkSync, originalConsoleError = console.error;
+  const lockDir = join(root, '.career-ops-web', 'chats', `${lockId}.json.lock`);
+  const originalRmSync = fs.rmSync, originalUnlinkSync = fs.unlinkSync, originalConsoleError = console.error;
   const logged = [];
-  let lockFd;
-  fs.openSync = (path, ...args) => {
-    const fd = originalOpenSync(path, ...args);
-    if (String(path) === lockPath) lockFd = fd;
-    return fd;
-  };
-  fs.closeSync = fd => {
-    originalCloseSync(fd);
-    if (fd === lockFd) throw new Error('simulated close failure');
+  // A release whose removal fails for a reason other than Windows contention
+  // (which the protocol swallows by design) is reported, never thrown over the
+  // completed save.
+  fs.rmSync = (path, ...args) => {
+    if (String(path) === lockDir) throw Object.assign(new Error('simulated lock release failure'), { code: 'EIO' });
+    return originalRmSync(path, ...args);
   };
   fs.unlinkSync = path => {
-    const target = String(path);
-    if (target === lockPath) throw Object.assign(new Error('simulated lock unlink failure'), { code: 'EACCES' });
-    if (target.endsWith('.tmp')) throw Object.assign(new Error('simulated temp unlink failure'), { code: 'EACCES' });
+    if (String(path).endsWith('.tmp')) throw Object.assign(new Error('simulated temp unlink failure'), { code: 'EACCES' });
     return originalUnlinkSync(path);
   };
   console.error = (...args) => logged.push(args);
@@ -91,14 +177,16 @@ test('lock and temp cleanup errors do not replace a saved conversation', t => {
     assert.equal(readChat(root, lockId).revision, 1);
     assert.equal(saveChat(root, tempId, { revision: 0, messages }).revision, 1);
     assert.equal(readChat(root, tempId).revision, 1);
-    assert.deepEqual(logged.map(([message]) => message), ['chat temp cleanup failed', 'chat lock release failed', 'chat temp cleanup failed']);
+    assert.deepEqual(logged.map(([message]) => message), [
+      'chat temp cleanup failed',
+      `Warning: lock cleanup failed at ${lockDir}: simulated lock release failure`,
+      'chat temp cleanup failed',
+    ]);
   } finally {
-    fs.openSync = originalOpenSync;
-    fs.closeSync = originalCloseSync;
+    fs.rmSync = originalRmSync;
     fs.unlinkSync = originalUnlinkSync;
     console.error = originalConsoleError;
     syncBuiltinESMExports();
-    try { originalUnlinkSync(lockPath); } catch (err) { if (err.code !== 'ENOENT') throw err; }
   }
 });
 

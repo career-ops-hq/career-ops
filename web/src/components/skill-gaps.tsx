@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { GraduationCap, TriangleAlert } from "lucide-react";
-import { skillGapModel, barPct } from "@/lib/skill-gaps.mjs";
+import { skillGapModel, barPct, blockerText } from "@/lib/skill-gaps.mjs";
 import type { SkillGapModel } from "@/lib/skill-gaps.mjs";
 
 // What keeps costing you roles, from the core's upskill.mjs via /api/upskill.
@@ -81,6 +81,7 @@ export function SkillGaps() {
             could not be recognised, or off a fraction of the reports, is the
             most believable wrong answer this panel can give. */}
         <Caveats caveats={model.caveats} />
+        <SkipBlockers blockers={model.blockers} skips={model.skips} />
       </section>
     );
   }
@@ -117,7 +118,43 @@ export function SkillGaps() {
           See the reports
         </Link>
       </p>
+
+      <SkipBlockers blockers={model.blockers} skips={model.skips} />
     </section>
+  );
+}
+
+function SkipBlockers({ blockers, skips }: { blockers: SkillGapModel["blockers"]; skips: number }) {
+  if (blockers.length === 0) return null;
+  return (
+    <div className="mt-5 border-t border-border pt-4">
+      <h3 className="text-sm text-foreground">What blocked your last {skips} skips</h3>
+      <p className="mt-0.5 text-xs text-faint">Critical or high requirements the evaluator marked missing or partial.</p>
+      <ul className="mt-3 grid gap-3">
+        {blockers.map((b) => {
+          const { verdict, nudge } = blockerText(b);
+          return (
+            <li key={b.label}>
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <span className="text-sm text-foreground">{b.label}</span>
+                <span className="text-xs tabular-nums text-brand-text">
+                  {b.skips} of {skips}
+                </span>
+                <span className="text-xs text-muted">{verdict}</span>
+                <span className="ml-auto flex gap-2 text-xs tabular-nums text-faint">
+                  {b.reports.slice(0, 3).map((n) => (
+                    <Link key={n} href={`/pipeline/${n}`} className="underline-offset-2 hover:underline">
+                      #{n}
+                    </Link>
+                  ))}
+                </span>
+              </div>
+              <p className="mt-0.5 text-xs text-faint">{nudge}</p>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
@@ -138,7 +175,7 @@ function Caveats({ caveats }: { caveats: SkillGapModel["caveats"] }) {
 function Header() {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <GraduationCap className="size-4 text-brand" />
+      <GraduationCap className="size-4 text-brand-text" />
       <h2 className="font-display text-base text-landing">What keeps costing you roles</h2>
       <span className="text-xs text-faint">across your tracked evaluations</span>
     </div>

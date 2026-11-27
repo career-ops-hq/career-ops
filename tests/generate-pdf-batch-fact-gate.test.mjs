@@ -15,9 +15,11 @@
 import { spawnSync } from 'child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { pass, fail, rmSync, linkRepoPackage, ROOT, NODE } from './helpers.mjs';
+import { pass, fail, rmSync, linkRepoPackage, ROOT, NODE, SANDBOX_DATA_ROOT } from './helpers.mjs';
 
-const outputRoot = join(ROOT, 'output');
+// Under the suite's own data root, not the checkout's output/: that directory
+// is the developer's, and an interrupted run left this fixture in it (#5113).
+const outputRoot = join(SANDBOX_DATA_ROOT, 'output');
 mkdirSync(outputRoot, { recursive: true });
 // realpathSync for the reason generate-pdf-batch.test.mjs documents (#3165):
 // the main-module guard compares realpaths.
@@ -28,12 +30,12 @@ const script = join(sandbox, 'generate-pdf.mjs');
 // imported lazily, so a sandbox without it would pass every entry unchecked
 // only if the gate were never reached. Here it must be reached.
 for (const file of [
-  'generate-pdf.mjs', 'verify-cv-facts.mjs', 'theme-style.mjs', 'cv-experience-order.mjs',
+  'generate-pdf.mjs', 'verify-cv-facts.mjs', 'cv-voice.mjs', 'theme-style.mjs', 'cv-experience-order.mjs',
   'tracker-utils.mjs', 'tracker-parse.mjs', 'tracker-aliases.json', 'pipeline-lock.mjs',
   'cv-sections-core.mjs', 'path-resolver.mjs',
 ]) copyFileSync(join(ROOT, file), join(sandbox, file));
 mkdirSync(join(sandbox, 'lib'), { recursive: true });
-for (const file of ['is-main-module.mjs', 'page-format.mjs']) {
+for (const file of ['is-main-module.mjs', 'page-format.mjs', 'browser-launch.mjs', 'dir-lock.mjs', 'rename-retry.mjs', 'lock-path.mjs', 'yaml-document.mjs', 'local-today.mjs', 'cv-markdown.mjs']) {
   copyFileSync(join(ROOT, 'lib', file), join(sandbox, 'lib', file));
 }
 mkdirSync(join(sandbox, 'data'), { recursive: true });
@@ -72,6 +74,10 @@ writeFileSync(join(sandbox, 'cv.md'), '# Jordan Example\n\n- Led a team of 4 eng
 writeFileSync(join(sandbox, 'honest.html'), cvDoc('Led a team of 4 engineers and cut p95 latency by 30%.'), 'utf-8');
 writeFileSync(join(sandbox, 'inflated.html'), cvDoc('Led a team of 40 engineers and cut p95 latency by 30%.'), 'utf-8');
 writeFileSync(join(sandbox, 'honest-too.html'), cvDoc('Cut p95 latency by 30%.'), 'utf-8');
+// Counts the extractor cannot read (its lexicon covers English, German and
+// French, not Spanish): the gate warns, and says why.
+writeFileSync(join(sandbox, 'spanish.html'), cvDoc('Dirigió 45 técnicos de mantenimiento en 3 obras.'), 'utf-8');
+writeFileSync(join(sandbox, 'stock.html'), cvDoc('Spearheaded a team of 4 engineers and cut p95 latency by 30%.'), 'utf-8');
 
 function run(args) {
   const result = spawnSync(NODE, [script, ...args], {
@@ -139,6 +145,29 @@ try {
     pass('--batch --skip-fact-check renders every entry without running the gate');
   } else {
     fail(`--batch --skip-fact-check: status=${skipped.status} results=${JSON.stringify(skipped.results)}\n${skipped.output.trim()}`);
+  }
+
+  // The warning carries its reason (#5348). runFactGate printed the header and
+  // the advisory phrases but never the coverage note, so a document the gate
+  // could not read showed "CV fact check warning" with nothing under it.
+  const spanish = run(['spanish.html', 'single/spanish.pdf']);
+  if (spanish.status === 0
+      && /CV fact check warning: spanish\.html/.test(spanish.output)
+      && /not checked: 2 count-like claims/.test(spanish.output)
+      && /45 técnicos/.test(spanish.output)) {
+    pass('a warning prints what the gate could not check, not just the header');
+  } else {
+    fail(`single-file coverage warning: status=${spanish.status}\n${spanish.output.trim()}`);
+  }
+
+  const stock = run(['stock.html', 'single/stock.pdf']);
+  if (stock.status !== 0
+      && !existsSync(join(sandbox, 'single', 'stock.pdf'))
+      && /Voice check failed for stock\.html/.test(stock.output)
+      && /spearheaded/.test(stock.output)) {
+    pass('a stock verb the CV did not use blocks the PDF before render');
+  } else {
+    fail(`stock verb: status=${stock.status}\n${stock.output.trim()}`);
   }
 
   const singleSkipped = run(['inflated.html', 'single/inflated-skipped.pdf', '--skip-fact-check']);

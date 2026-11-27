@@ -81,7 +81,7 @@ Project-level `.claude/settings.json` and `~/.claude/settings.local.json` can se
 
 ### The batch mode is the exception worth knowing
 
-`batch/batch-runner.sh` drives `claude -p` workers, and the headless path does not use the interactive login. If you want batch runs on your subscription rather than on credits, generate a long-lived token once:
+`batch/batch-runner.sh` drives `claude -p` workers by default, and the headless path does not use the interactive login. If you want batch runs on your subscription rather than on credits, generate a long-lived token once:
 
 ```bash
 claude setup-token          # requires an active Claude subscription
@@ -282,7 +282,7 @@ When choosing a budget-friendly model, you need strong reasoning capabilities to
 | **Kimi K2.5** | Moonshot AI | API pricing applies | Verified with OpenCode using the Moonshot OpenAI-compatible endpoint. Produces structured Markdown suitable for Career-Ops evaluations. See the verified OpenCode recipe below. |
 
 
-> **Standalone evaluator (no CLI config needed):** every OpenAI-compatible provider above (DeepSeek, Qwen, GLM, Together, Groq, OpenRouter, Requesty, Cheaper Inference, API Route, …) works directly through `node openai-eval.mjs` — just set a base URL, model, and key:
+> **Standalone evaluator (no CLI config needed):** every OpenAI-compatible provider above (DeepSeek, Qwen, GLM, Together, Groq, OpenRouter, Requesty, Cheaper Inference, API Route, Runcrate, …) works directly through `node openai-eval.mjs` — just set a base URL, model, and key:
 > ```bash
 > OPENAI_BASE_URL=https://openrouter.ai/api/v1 \
 > OPENAI_MODEL=deepseek/deepseek-chat \
@@ -313,9 +313,85 @@ When choosing a budget-friendly model, you need strong reasoning capabilities to
 > ```
 > As with other hosted providers, this sends your CV and job description to the configured endpoint. Use it only if you choose to share that data with the provider.
 >
+> OpenCode Go (`https://opencode.ai/zen/go/v1`) is an OpenAI-compatible gateway that works the same way. Its docs ask clients to identify themselves and send a session id, so `openai-eval.mjs` and `openai-tailor.mjs` send a `User-Agent` (`career-ops/<version>`) and one `x-opencode-session` id per run automatically, for `opencode.ai` only. Per its [docs](https://opencode.ai/v2/docs/console/go/#where-can-i-use-it), Go is designed for coding-agent traffic and is monitored for abuse, so check its terms before pointing batch evaluations at it.
+>
+> Runcrate (`https://api.runcrate.ai/v1`) is another OpenAI-compatible endpoint that works the same way. Model ids carry the vendor prefix, such as `deepseek-ai/DeepSeek-V4.1-Flash`:
+> ```bash
+> OPENAI_BASE_URL=https://api.runcrate.ai/v1 \
+> OPENAI_MODEL=deepseek-ai/DeepSeek-V4.1-Flash \
+> OPENAI_API_KEY=your_runcrate_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint.
+>
+> CloudGPU (`https://cloudgpu.app/v1`) is another OpenAI-compatible endpoint that works the same way, for example with `deepseek-v4.1-flash`:
+> ```bash
+> OPENAI_BASE_URL=https://cloudgpu.app/v1 \
+> OPENAI_MODEL=deepseek-v4.1-flash \
+> OPENAI_API_KEY=your_cloudgpu_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint.
+>
+> cheapaimodel (`https://api.cheapaimodel.ai/v1`) is another OpenAI-compatible endpoint that works the same way, for example with `deepseek-v4-1-flash`:
+> ```bash
+> OPENAI_BASE_URL=https://api.cheapaimodel.ai/v1 \
+> OPENAI_MODEL=deepseek-v4-1-flash \
+> OPENAI_API_KEY=your_cheapaimodel_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint.
+>
+> MartLLM (`https://api.martllm.com/v1`) is another OpenAI-compatible endpoint that works the same way, for example with `deepseek/deepseek-v4-flash`. It is prepaid pay-as-you-go, with no free tier:
+> ```bash
+> OPENAI_BASE_URL=https://api.martllm.com/v1 \
+> OPENAI_MODEL=deepseek/deepseek-v4-flash \
+> OPENAI_API_KEY=your_uberllm_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint. UberLLM then routes each request to one of the third-party model providers it works with, so your CV and job description also reach that provider.
+>
+> Standard Compute (`https://api.stdcmpt.com/v1`) is another OpenAI-compatible endpoint that works the same way. The `StandardCompute` model id sends each request to the cheapest enabled model that can handle it, with automatic fallback; pinned model ids are listed at `https://api.stdcmpt.com/v1/models`:
+> ```bash
+> OPENAI_BASE_URL=https://api.stdcmpt.com/v1 \
+> OPENAI_MODEL=StandardCompute \
+> OPENAI_API_KEY=your_standardcompute_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint.
+>
+> onomeo (`https://onomeo.com/v1`) is another OpenAI-compatible endpoint that works the same way, for example with `deepseek-v4.1-flash`. An evaluation prompt is longer than onomeo's free models accept, so it needs a topped-up balance:
+> ```bash
+> OPENAI_BASE_URL=https://onomeo.com/v1 \
+> OPENAI_MODEL=deepseek-v4.1-flash \
+> OPENAI_API_KEY=your_onomeo_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint. onomeo then forwards each request to the model's upstream provider, so your CV and job description also reach that provider.
+>
+> TrustedRouter (`https://api.trustedrouter.com/v1`) is another OpenAI-compatible endpoint that works the same way, for example with `deepseek/deepseek-v4-flash`. Model ids are vendor-prefixed and listed at `https://api.trustedrouter.com/v1/models`:
+> ```bash
+> OPENAI_BASE_URL=https://api.trustedrouter.com/v1 \
+> OPENAI_MODEL=deepseek/deepseek-v4-flash \
+> OPENAI_API_KEY=your_trustedrouter_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint. TrustedRouter then forwards each request to the model's upstream provider, so your CV and job description also reach that provider.
+>
+> Straitly (`https://api.straitly.ai/v1`) is another OpenAI-compatible endpoint that works the same way, for example with `deepseek/deepseek-v4-1-flash-1017` or `claude-sonnet-5-5`. Model ids for 100+ models are listed at `https://straitly.ai/models` (and `https://api.straitly.ai/v1/models`):
+> ```bash
+> OPENAI_BASE_URL=https://api.straitly.ai/v1 \
+> OPENAI_MODEL=deepseek/deepseek-v4-1-flash-1017 \
+> OPENAI_API_KEY=your_straitly_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint. Straitly then forwards each request to the model's upstream provider, so your CV and job description also reach that provider.
+>
 > Run `node openai-eval.mjs --help` for per-provider examples. For 100% local/private use, point `--url` at a local server (LM Studio / llama.cpp / vLLM) or use `node ollama-eval.mjs`.
 
 > NVIDIA NIM also works (hosted `https://integrate.api.nvidia.com/v1` or a self-hosted container's `/v1`), e.g. `--model meta/llama-3.3-70b-instruct`. The hosted free tier can queue for minutes, so raise `OPENAI_TIMEOUT_MS` above the 300s default.
+
+> **Output cap (`CAREER_OPS_MAX_TOKENS`, default `32768`).** `openai-eval.mjs` and `openai-tailor.mjs` send this as `max_tokens` (as `max_completion_tokens` to `api.openai.com`, whose reasoning models reject `max_tokens`). Without a cap, OpenRouter reserves credit for the model's whole output window before generating anything and answers **HTTP 402** when your balance cannot cover that reservation, even when the report itself costs cents. The default holds a full A-G report (about 9K tokens) plus the reasoning a thinking model spends first. If you see a 402 on a low balance, lower it (`CAREER_OPS_MAX_TOKENS=16384`); if the script warns that the reply stopped at the cap, raise it. `openai-tailor.mjs` saves nothing in that case, since a CV cut off at the cap is missing its last sections. `openrouter-runner.mjs` (`npm run or:*`) reads the same variable, but its default stays at 8192: raise it there when a pinned reasoning model's evaluation fails as cut off at `max_tokens`.
 
 ## 5. Local LLM Tradeoffs (Ollama / Llama.cpp)
 
@@ -380,9 +456,14 @@ To prevent unnecessary API costs or hitting rate limits, implement the following
    ./batch/batch-runner.sh --dry-run
    ```
 3. **Resume Interrupted Runs**:
-   If a batch run is interrupted by a rate limit or network error, do not restart from scratch. Use the `--resume-paused` flag to continue from where it left off, skipping completed jobs and preventing wasted tokens:
+   If a batch run stops part-way, do not restart from scratch. Run the same command again: completed offers are skipped and the rest are picked up, so no tokens go to work that already finished:
+   ```bash
+   ./batch/batch-runner.sh
+   ```
+   If the run paused on a Claude session or usage limit, the offers that hit it are marked `paused_rate_limit`, and a plain run leaves them alone. Once the limit resets, re-run just those with `--resume-paused`, then run without it for the offers that had not started:
    ```bash
    ./batch/batch-runner.sh --resume-paused
+   ./batch/batch-runner.sh
    ```
 4. **Use `--verify` on Scans**:
    When running job board scans, use the liveness verifier to filter out expired postings before they enter your pipeline. This prevents wasting LLM tokens evaluating closed jobs:
@@ -428,9 +509,9 @@ node openai-eval.mjs \
 ```
 
 **Approximate Token Usage:**
-- **Input:** ~20,000 tokens. The static prefix alone is **17,728**: the script sends `modes/_shared.md` (4,127) plus `modes/oferta.md` (13,601) as the system prompt, and your `cv.md` and the JD come on top of that.
+- **Input:** ~32,000 tokens. The static prefix alone is **29,341**: the script sends `modes/_shared.md` (7,307) plus `modes/oferta.md` (22,034) as the system prompt, and your `cv.md` and the JD come on top of that. Measured on 4 November 2026 with the command below.
 - **Output:** ~1,000 tokens (the A-G evaluation report).
-- **Cost:** at DeepSeek V3 prices (~$0.14/1M input, ~$0.28/1M output), roughly **$0.003 per evaluation**. Still cheap, and cheap enough that the number below matters more than this one.
+- **Cost:** at DeepSeek V3 prices (~$0.14/1M input, ~$0.28/1M output), roughly **$0.005 per evaluation**. Still cheap, and cheap enough that the number below matters more than this one.
 
 Measure it yourself rather than trusting this paragraph, because these files grow with every release:
 
@@ -444,12 +525,34 @@ for (const f of ['modes/_shared.md','modes/oferta.md','AGENTS.md'])
 
 ### What the default path costs (this is the number most people are actually paying)
 
-The figures above are for the standalone script. **If you paste a job URL into your CLI instead, the agent loads `AGENTS.md` (8,285) + `modes/_shared.md` (4,127) + `modes/oferta.md` (13,601) = about 26,000 tokens of instructions per evaluation**, before your CV, the job description, or any tool output. That is the real floor of an interactive evaluation, and it is why a long session of pasting URLs burns a quota that a batch of standalone script calls would not.
+The figures above are for the standalone script. **If you paste a job URL into your CLI instead, the agent loads `AGENTS.md` (23,430) + `modes/_shared.md` (7,307) + `modes/oferta.md` (22,034) = about 53,000 tokens of instructions per evaluation** (measured on 4 November 2026 with the command above), before your CV, the job description, or any tool output. That is the real floor of an interactive evaluation, and it is why a long session of pasting URLs burns a quota that a batch of standalone script calls would not.
 
 Two things follow from that, and they are the cheapest wins available:
 
 - **Batch beats pasting** when you have several roles: `batch/batch-runner.sh` reuses one worker instead of re-sending the instructions per role.
-- **One evaluation is not the risk; unbounded research is.** A single evaluation used to be able to fan out into dozens of subagents and burn tens of millions of tokens (issue #1235). The modes now cap web research at five queries and forbid spawning subagents for it, so an evaluation stays bounded. If you write your own mode, keep that cap: it is the difference between a $0.003 evaluation and an exhausted five-hour limit.
+- **One evaluation is not the risk; unbounded research is.** A single evaluation used to be able to fan out into dozens of subagents and burn tens of millions of tokens (issue #1235). The modes now cap web research at five queries and forbid spawning subagents for it, so an evaluation stays bounded. If you write your own mode, keep that cap: it is the difference between a $0.005 evaluation and an exhausted five-hour limit.
+
+### Measured: one Claude Code evaluation, per model
+
+The ~53,000 tokens above are the instruction floor of a single turn. A real evaluation takes 14–25 turns and re-reads its context on each one, so the total it processes is far larger — most of it served from the prompt cache. These are the averages of 108 recorded `/career-ops oferta` runs in headless Claude Code (golden set, one synthetic profile, web research off); method and caveats in [`evals/results/README.md`](../evals/results/README.md).
+
+| Per evaluation | Haiku 4.5 | Sonnet 5 | Opus 5.5 | Opus 5 |
+|---|---|---|---|---|
+| **On a subscription (Pro/Max):** tokens processed / generated | 0.76M / 12k | 2.4M / 32k | 1.1M / 15k | 1.9M / 30k |
+| Turns | 14 | 25 | 14 | 24 |
+| Wall time | 2.6 min | 5.5 min | 2.3 min | 6.4 min |
+| **On an API key:** cost at list price | $0.25 | $1.27 | $1.26 | $2.84 |
+| Mean score difference vs Opus 5 | 0.48 | 0.28 | 0.30 | — |
+
+A subscription spends usage-window allowance rather than dollars; how it weighs each token type is Anthropic's accounting, so read the token row as the relative signal between models, not as an exact share of your limit.
+
+What to do with it:
+
+- **Interactive sessions** run on whatever `/model` you picked — `spend_tier` does not switch it. If you evaluate on Opus 5, Opus 5.5 gave equivalent scores with fewer tokens and about a third of the wait.
+- **Batch** workers run on the tier's model (section 2), billed to your key or to your plan through `CLAUDE_CODE_OAUTH_TOKEN` (section 2b).
+- **Haiku 4.5** is the cheapest on both views but not yet a drop-in: its scores ran ~0.5 higher than Opus and moved ±0.4 between identical runs, so double-check anything it puts near 4.0.
+
+These numbers age with every model and prompt release, and they predate the current tier models: `spend_tier` now maps to Haiku 5.5, Sonnet 5.5 and Opus 5.5 (the Spend Tier table in [`modes/_shared.md`](../modes/_shared.md)), and only Opus 5.5 is in the table above. Re-measure with `node evals/record-claude.mjs` (it spends real money; see [`evals/README.md`](../evals/README.md)).
 
 ### Step 4: Tailor the CV HTML (~3,000 Tokens)
 

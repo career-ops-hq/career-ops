@@ -25,7 +25,7 @@ import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
-import { pass, fail, hermeticGitEnv, hermeticGitRunner } from './helpers.mjs';
+import { pass, fail, hermeticGitEnv, hermeticGitRunner, importSuiteContained } from './helpers.mjs';
 
 console.log('\nhermetic git env — ambient GIT_CONFIG* must not reach a fixture');
 
@@ -237,4 +237,144 @@ try {
   }
 } finally {
   rmSync(signingRoot, { recursive: true, force: true });
+}
+
+// A global `core.hooksPath` is the same leak through a different key. A
+// contributor whose global hooks enforce a commit-message format (or run a
+// scanner) sees every fixture commit rejected, so these suites threw at their
+// first `git commit` before a single assertion ran. Each one is run here under
+// a global config that points hooksPath at hooks that always fail; a fixture
+// that does not pin its own hooksPath cannot commit at all under it.
+console.log('\nhermetic git env — fixture commits survive a global core.hooksPath');
+
+const hooksRoot = mkdtempSync(join(tmpdir(), 'career-ops-hermetic-hooks-'));
+try {
+  const hooksDir = join(hooksRoot, 'hooks');
+  mkdirSync(hooksDir, { recursive: true });
+  for (const hook of ['pre-commit', 'commit-msg']) {
+    writeFileSync(join(hooksDir, hook), '#!/bin/sh\necho "rejected by a global hook" >&2\nexit 1\n', { mode: 0o755 });
+  }
+  const hooksConfig = join(hooksRoot, 'gitconfig');
+  writeFileSync(hooksConfig, `[core]\n\thooksPath = ${hooksDir.replace(/\\/g, '/')}\n`);
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: hooksConfig };
+  for (const name of ['GIT_CONFIG_COUNT', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG']) delete env[name];
+
+  for (const name of [
+    'doctor-code-root-checks',
+    'doctor-tracked-bak-files',
+    'update-system',
+    'updater-commit-file-modes',
+    'updater-drift-detection',
+    'updater-signature-ledger-drift',
+    'updater-status-paths',
+    'updater-upgrade-safety',
+  ]) {
+    const suite = fileURLToPath(new URL(`./${name}.test.mjs`, import.meta.url));
+    const child = spawnSync(process.execPath, [suite], { encoding: 'utf-8', timeout: 120000, env });
+    const out = child.stdout || '';
+    const failures = out.split('\n').filter((line) => line.includes('❌'));
+    if (child.status === 0 && failures.length === 0) {
+      pass(`${name} commits its fixtures under a global hooksPath that rejects every commit`);
+    } else {
+      const why = failures[0]?.trim()
+        || (child.stderr || '').split('\n').find((line) => /fatal:|error:|Error: /.test(line))?.trim()
+        || 'no output';
+      fail(`${name} does not survive a global core.hooksPath (exit ${child.status}): ${why}`);
+    }
+  }
+} finally {
+  rmSync(hooksRoot, { recursive: true, force: true });
+}
+
+// The same signing config, against the suites whose fixtures run git through
+// something that inherits process.env (the updater's own gitIn, a bare
+// execFileSync, a spawned CLI) and so are sealed by sealProcessGitEnv() rather
+// than by a fixture runner. updater-branch-guard tags a fixture commit, which
+// is the "no tag message?" case on a machine that signs tags; the rest only
+// commit, which signs with the contributor's key or fails where none is
+// reachable. A suite that loses its seal cannot build a fixture under this.
+console.log('\nhermetic git env — process-sealed suites survive ambient signing config');
+
+const sealedRoot = mkdtempSync(join(tmpdir(), 'career-ops-hermetic-sealed-'));
+try {
+  const signingConfig = join(sealedRoot, 'gitconfig');
+  writeFileSync(signingConfig, [
+    '[tag]', '\tgpgSign = true', '\tforceSignAnnotated = true',
+    '[commit]', '\tgpgSign = true',
+    '[gpg]', `\tprogram = ${join(sealedRoot, 'no-such-signing-program')}`,
+    '',
+  ].join('\n'));
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: signingConfig };
+  for (const name of ['GIT_CONFIG_COUNT', 'GIT_CONFIG_PARAMETERS', 'GIT_CONFIG']) delete env[name];
+
+  for (const name of [
+    'doctor-code-root-checks',
+    'doctor-tracked-bak-files',
+    'update-system',
+    'updater-branch-guard',
+    'updater-commit-file-modes',
+    'updater-status-paths',
+    'updater-upgrade-safety',
+  ]) {
+    const suite = fileURLToPath(new URL(`./${name}.test.mjs`, import.meta.url));
+    const child = spawnSync(process.execPath, [suite], { encoding: 'utf-8', timeout: 120000, env });
+    const out = child.stdout || '';
+    const failures = out.split('\n').filter((line) => line.includes('❌'));
+    if (child.status === 0 && failures.length === 0) {
+      pass(`${name} builds its fixtures under ambient tag.gpgSign / commit.gpgSign`);
+    } else {
+      const why = failures[0]?.trim()
+        || (child.stderr || '').split('\n').find((line) => /fatal:|error:|Error: /.test(line))?.trim()
+        || 'no output';
+      fail(`${name} does not survive ambient signing config (exit ${child.status}): ${why}`);
+    }
+  }
+} finally {
+  rmSync(sealedRoot, { recursive: true, force: true });
+}
+
+// The serial loop (`test-all.mjs --jobs 1`) imports a suite into test-all's own
+// process, so a seal must end with the suite that made it: every suite after it
+// would otherwise run with the sealed config and without the variables the seal
+// dropped. A probe suite seals and records what it saw; importSuiteContained,
+// the serial loop's own import path, must hand the ambient values back. The
+// mixed-case Git_Dir is the Windows spelling of GIT_DIR, which the seal has to
+// drop too.
+console.log('\nhermetic git env — a process seal ends with the in-process suite that made it');
+
+const unsealRoot = mkdtempSync(join(tmpdir(), 'career-ops-hermetic-unseal-'));
+const savedEnv = { GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL, Git_Dir: process.env.Git_Dir };
+try {
+  const ambientConfig = join(unsealRoot, 'ambient-gitconfig');
+  const ambientGitDir = join(unsealRoot, 'elsewhere.git');
+  process.env.GIT_CONFIG_GLOBAL = ambientConfig;
+  process.env.Git_Dir = ambientGitDir;
+  const probe = join(unsealRoot, 'sealing-probe.mjs');
+  const helpersUrl = new URL('./helpers.mjs', import.meta.url).href;
+  writeFileSync(probe, [
+    `import { sealProcessGitEnv } from ${JSON.stringify(helpersUrl)};`,
+    'sealProcessGitEnv();',
+    'globalThis.__coSealedGitEnv = { global: process.env.GIT_CONFIG_GLOBAL, gitDir: process.env.Git_Dir };',
+    '',
+  ].join('\n'));
+  await importSuiteContained(probe, 'sealing probe');
+  const during = globalThis.__coSealedGitEnv;
+  delete globalThis.__coSealedGitEnv;
+
+  if (during && during.global !== ambientConfig && during.gitDir === undefined) {
+    pass('the probe ran sealed: its own global config, and no Git_Dir');
+  } else {
+    fail(`the probe was not sealed: ${JSON.stringify(during)}`);
+  }
+  if (process.env.GIT_CONFIG_GLOBAL === ambientConfig && process.env.Git_Dir === ambientGitDir) {
+    pass('importSuiteContained hands the ambient git environment back after a sealing suite');
+  } else {
+    fail(`the seal outlived its suite: GIT_CONFIG_GLOBAL=${process.env.GIT_CONFIG_GLOBAL} Git_Dir=${process.env.Git_Dir}`);
+  }
+} finally {
+  for (const [name, value] of Object.entries(savedEnv)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+  rmSync(unsealRoot, { recursive: true, force: true });
 }

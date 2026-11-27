@@ -1,0 +1,133 @@
+# Career-Ops - panelist role table (#5797)
+#
+# Read by panelist-roles.mjs. DATA, not logic: extending it never requires
+# touching the script. Nothing here is personal data; the script never stores
+# the panelist names it reads from an invite.
+#
+# How it is used
+#   - Roles are tried in the order listed. The FIRST role with a keyword hit is
+#     the panelist's `role`; later roles that also hit are reported as
+#     `alsoMatches`, so "Director, Clinical Support Services and Privacy
+#     Officer" is tagged privacy-compliance (listed first) with hiring-manager
+#     as a second reading.
+#   - A keyword matches at the START of a word, case-insensitively: `recruit`
+#     matches recruiter, recruiting and recruitment. Prefix a keyword with `=`
+#     to require a WHOLE word (`=hr` matches "HR" but not "hrs"; `=lead` matches
+#     "Lead" but not "Leadership").
+#   - A title that hits no keyword is tagged `unknown` (the `fallback` below).
+#
+# Your own table
+#   This file is system layer and is replaced on update. To change the
+#   keywords or the one-line focus text, copy it to a path of your own (for
+#   example config/panelist-roles.yml) and run
+#   `node panelist-roles.mjs invite.txt --table config/panelist-roles.yml`.
+#
+# `focus` is ONE line of prep guidance for the interview plan
+# (modes/interview/plan.md). Keep it a pointer, not a script of answers.
+
+fallback:
+  id: unknown
+  label: Unknown
+  focus: "Role not recognised from the title: ask the recruiter what this person owns, and prepare your general pitch."
+
+roles:
+  - id: privacy-compliance
+    label: Privacy / compliance / legal
+    focus: "Confidentiality and sensitive-information handling: prepare real examples and say honestly what you have done versus what you would do."
+    keywords:
+      - privacy
+      - compliance
+      - legal
+      - counsel
+      - =attorney
+      - =lawyer
+      - regulatory
+      - governance
+      - =risk
+      - ethics
+      - confidentiality
+      - data protection
+      - information security
+      - =ciso
+
+  - id: recruiter-ta-hr
+    label: Recruiter / talent acquisition / HR
+    focus: "Fit, motivation, logistics, compensation expectations and timeline: a crisp background pitch and a specific 'why us'; not a depth test."
+    keywords:
+      - recruit
+      - talent
+      - sourcer
+      - staffing
+      - human resources
+      - =hr
+      - people operations
+      - people partner
+      - people and culture
+      - people & culture
+      - onboarding
+
+  - id: executive
+    label: Executive
+    focus: "Strategic alignment and business impact: a concise story, why this organization, and how the role moves a company-level outcome."
+    keywords:
+      - =chief
+      - =ceo
+      - =coo
+      - =cto
+      - =cfo
+      - =cpo
+      - =cio
+      - president
+      - =vp
+      - vice president
+      - executive
+      - founder
+      - managing director
+      - general manager
+
+  - id: hiring-manager
+    label: Hiring manager / director / head
+    focus: "Delivery and judgment: outcomes you owned, how you lead and prioritize, and one or two behavioral stories with results."
+    keywords:
+      - hiring manager
+      - director
+      - =head
+      - manager
+      - superintendent
+      - supervisor
+      - =principal
+      - coordinator of
+
+  - id: technical
+    label: Technical
+    focus: "Depth in the core skill from the JD: worked examples, trade-offs, and a walkthrough of a real project."
+    keywords:
+      - engineer
+      - architect
+      - developer
+      - scientist
+      - analyst
+      - technolog
+      - specialist
+      - =sre
+      - =devops
+      - data
+      - research
+      - clinician
+      - technical
+
+  - id: peer-team-lead
+    label: Peer / team lead
+    focus: "Day-to-day collaboration: how you work with colleagues, handle hand-offs, feedback and ambiguity."
+    keywords:
+      - =lead
+      - team lead
+      - =senior
+      - =staff
+      - =associate
+      - =peer
+      - =colleague
+      - =coordinator
+      - =consultant
+      - =designer
+      - =instructional

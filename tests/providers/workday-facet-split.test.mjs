@@ -133,6 +133,22 @@ try {
     fail('trueTotalFromFacets() should return null for empty/absent facets');
   }
 
+  // Workday counts facets disjunctively: an APPLIED facet's counts describe the
+  // board without that filter. Measured on Nvidia 2026-11-07: slice
+  // jobFamilyGroup=X & workerSubType=Regular reported total 1594 while its own
+  // jobFamilyGroup facet summed to 2308 and workerSubType to 1780.
+  const NVIDIA_SLICE_FACETS = [
+    { facetParameter: 'jobFamilyGroup', values: [{ id: 'x', count: 1594 }, { id: 'y', count: 714 }] },
+    { facetParameter: 'workerSubType', values: [{ id: 'reg', count: 1594 }, { id: 'int', count: 186 }] },
+    { facetParameter: 'timeType', values: [{ id: 'ft', count: 1594 }] },
+  ];
+  const sliceTrue = trueTotalFromFacets(NVIDIA_SLICE_FACETS, { exclude: ['jobFamilyGroup', 'workerSubType'] });
+  if (sliceTrue === 1594) {
+    pass('trueTotalFromFacets() ignores the facets a slice already applies (disjunctive counts)');
+  } else {
+    fail(`trueTotalFromFacets(Nvidia slice, exclude applied) returned ${sliceTrue}, expected 1594`);
+  }
+
   // A facet whose values carry no counts tells us nothing about board size —
   // summing them would report 0 and read as "empty board".
   const uncounted = trueTotalFromFacets([
@@ -182,6 +198,23 @@ try {
     pass('chooseSplitFacet() honors exclude and falls through to the next-best facet');
   } else {
     fail(`chooseSplitFacet(exclude jobFamily) chose ${JSON.stringify(excluded?.facetParameter)}, expected "timeType"`);
+  }
+
+  // A location-hinted split is marked locationScoped, so the coverage check
+  // does not count postings outside the configured locations as unread
+  // (Citi: US slice 1,461 of ~4,200 worldwide was flagged "still incomplete").
+  const scoped = chooseSplitFacet([
+    { facetParameter: 'Country', descriptor: 'Country', values: [
+      { id: 'us', descriptor: 'United States', count: 1461 },
+      { id: 'in', descriptor: 'India', count: 1200 },
+    ] },
+    { facetParameter: 'timeType', values: [{ id: 'ft', count: 3700 }, { id: 'pt', count: 200 }] },
+  ], { locationHints: { always_allow: ['United States'] } });
+  const plain = chooseSplitFacet(DSG_FACETS);
+  if (scoped?.locationScoped === true && scoped.values.length === 1 && !plain?.locationScoped) {
+    pass('chooseSplitFacet() marks a location-hinted split locationScoped (and only that path)');
+  } else {
+    fail(`locationScoped: scoped=${JSON.stringify(scoped)}, plain.locationScoped=${plain?.locationScoped}`);
   }
 
   // A single-valued facet is not a partition — applying it fetches the same
@@ -365,6 +398,39 @@ try {
     pass('workday.fetch() re-splits a still-clamped slice on a second, not-yet-applied facet');
   } else {
     fail(`nested split issued ${JSON.stringify([...new Set(nestedCalls)])}, expected jobFamily=a x timeType slices`);
+  }
+
+  // A slice whose only "big" count is its own applied facet (disjunctive) is
+  // complete: it must not re-split and must not be tagged truncated.
+  const DISJ = {
+    '': {
+      total: 20,
+      facets: [{ facetParameter: 'jobFamily', values: [{ id: 'a', count: 2600 }, { id: 'b', count: 100 }] }],
+      tag: 'unfaceted',
+    },
+    'jobFamily=a': {
+      total: 20,
+      facets: [
+        { facetParameter: 'jobFamily', values: [{ id: 'a', count: 2600 }, { id: 'b', count: 100 }] },
+        { facetParameter: 'timeType', values: [{ id: 'p', count: 10 }, { id: 'f', count: 10 }] },
+      ],
+      tag: 'a',
+    },
+    'jobFamily=b': { total: 20, facets: [], tag: 'b' },
+  };
+  const disjCalls = [];
+  const disjJobs = await captureConsoleErrors(() => workday.fetch(ENTRY, mkCtx(async (_url, opts) => {
+    const body = JSON.parse(opts.body);
+    const key = sliceKey(body.appliedFacets);
+    disjCalls.push(key);
+    const res = DISJ[key];
+    if (!res) throw new Error(`unexpected slice ${JSON.stringify(key)}`);
+    return { total: res.total, facets: res.facets, jobPostings: postings(res.tag, body.offset) };
+  }, { includeUndated: true }))).then((r) => r.result);
+  if (!disjCalls.some((k) => k.includes('timeType')) && disjJobs.workdayTruncated === undefined) {
+    pass('workday.fetch() does not read a slice\'s own (disjunctive) facet counts as a clamp');
+  } else {
+    fail(`disjunctive slice: calls ${JSON.stringify([...new Set(disjCalls)])}, workdayTruncated=${disjJobs.workdayTruncated}`);
   }
 
   if (nestedJobs.length === 100) {
@@ -653,6 +719,54 @@ try {
     pass('workday.fetch() ignores a chosen facet one posting under the max — inside the counted facets’ own spread');
   } else {
     fail('a 1-posting gap against a 77-wide facet spread is ordinary disagreement, not undercoverage, and must not tag');
+  }
+
+  // A split chosen from location_filter hints covers only the configured
+  // locations ON PURPOSE. Citi's US slice is 1,461 of ~4,200 worldwide; judging
+  // it against the whole board flagged it "(still incomplete)" although every
+  // in-scope posting was read. The same under-coverage without hints still tags.
+  // Facet sums 2700 > reported total 2000, so the board is clamped.
+  const LOCATION_SCOPED = [
+    { facetParameter: 'locationCountry', descriptor: 'Country', values: [
+      { id: 'us', descriptor: 'United States', count: 600 },
+      { id: 'in', descriptor: 'India', count: 2100 },
+    ] },
+    { facetParameter: 'jobFamily', values: [{ id: 'a', count: 1500 }, { id: 'b', count: 1200 }] },
+  ];
+  const scopedSlices = [];
+  const scopedResponder = coverageResponder(LOCATION_SCOPED, ['locationCountry=us']);
+  const { result: scopedJobs, errors: scopedErrors } = await captureConsoleErrors(() => workday.fetch(
+    ENTRY,
+    mkCtx(async (url, opts) => {
+      scopedSlices.push(sliceKey(JSON.parse(opts.body).appliedFacets));
+      return scopedResponder(url, opts);
+    }, {
+      includeUndated: true,
+      locationHints: { always_allow: ['United States'] },
+    }),
+  ));
+  const scopedLine = scopedErrors.find((e) => String(e).includes('offset-clamped at'));
+  // Prove the slice ran before reading the line: without these, a fetch that
+  // never split (no clamp detected, no US request, no line) would also pass.
+  if (scopedSlices.includes('locationCountry=us')) {
+    pass('workday.fetch() requests the location-scoped slice (locationCountry=us)');
+  } else {
+    fail(`location-scoped split never requested locationCountry=us; requested ${JSON.stringify([...new Set(scopedSlices)])}`);
+  }
+  if (scopedJobs.some((j) => String(j.title).startsWith('locationCountry=us job'))) {
+    pass('workday.fetch() returns the postings read from the location-scoped slice');
+  } else {
+    fail('location-scoped split returned none of the slice\'s postings');
+  }
+  if (scopedLine) {
+    pass('workday.fetch() prints the offset-clamped recovery line for the location-scoped split');
+  } else {
+    fail(`location-scoped split printed no "offset-clamped at" line; errors: ${JSON.stringify(scopedErrors)}`);
+  }
+  if (scopedJobs.workdayTruncated === undefined && !String(scopedLine ?? '').includes('(still incomplete)')) {
+    pass('workday.fetch() does not call a location-scoped split incomplete for postings outside the configured locations');
+  } else {
+    fail(`location-scoped split: workdayTruncated=${scopedJobs.workdayTruncated}, line=${JSON.stringify(scopedLine)}`);
   }
 
   // The unclamped path must not pay for any of this.

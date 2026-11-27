@@ -219,6 +219,58 @@ if (isRefusedRedirectError(transportFailure) === false) {
   }
 }
 
+// A Cloudflare managed challenge served as 429 (#7182, seen live on every
+// Workday tenant from one egress): the error names the challenge, keeps the
+// header, and is not retried. A plain 429 with no cf-mitigated header is still
+// a rate limit and still retried.
+{
+  const realFetch = globalThis.fetch;
+  const { fetchJson, isCloudflareChallenge } = await import(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href);
+  const challengePage = '<!DOCTYPE html><html><head><title>Just a moment...</title></head><body><script>window._cf_chl_opt={cType:\'managed\'}</script></body></html>';
+  try {
+    let requests = 0;
+    globalThis.fetch = async () => {
+      requests++;
+      return new Response(challengePage, { status: 429, statusText: 'Too Many Requests', headers: { server: 'cloudflare', 'cf-mitigated': 'challenge', 'content-type': 'text/html' } });
+    };
+    const ctx = { fetchJson: (u, o) => fetchJson(u, o), sleep: async () => {} };
+    let err = null;
+    try { await fetchJsonWithRetry(ctx, 'https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/acme/jobs', { method: 'POST', body: '{}' }, { retries: 3 }); } catch (e) { err = e; }
+    if (err?.status === 429 && err.cfMitigated === 'challenge' && isCloudflareChallenge(err)) {
+      pass('a challenged 429 carries status 429 and cf-mitigated on the error');
+    } else {
+      fail(`challenged 429 error shape wrong: ${JSON.stringify({ status: err?.status, cfMitigated: err?.cfMitigated })}`);
+    }
+    if (err?.message === 'HTTP 429 Too Many Requests (Cloudflare challenge, cf-mitigated: challenge)') {
+      pass('a challenged 429 names the Cloudflare challenge in its message');
+    } else {
+      fail(`challenged 429 message: ${JSON.stringify(err?.message)}`);
+    }
+    if (requests === 1 && err?.attempts === 1) pass('a challenged 429 is not retried (1 request, not retries + 1)');
+    else fail(`a challenged 429 was retried: requests=${requests}, attempts=${err?.attempts}`);
+
+    requests = 0;
+    globalThis.fetch = async () => {
+      requests++;
+      return new Response('slow down', { status: 429, statusText: 'Too Many Requests' });
+    };
+    err = null;
+    try { await fetchJsonWithRetry(ctx, 'https://example.test/api', {}, { retries: 2 }); } catch (e) { err = e; }
+    if (requests === 3 && err?.message === 'HTTP 429 Too Many Requests' && err.cfMitigated === null) {
+      pass('a plain 429 with no cf-mitigated header is still retried, with the message unchanged');
+    } else {
+      fail(`plain 429: requests=${requests}, message=${JSON.stringify(err?.message)}, cfMitigated=${JSON.stringify(err?.cfMitigated)}`);
+    }
+  } catch (e) {
+    fail(`Cloudflare challenge test threw: ${e.message}`);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+
+  if (isRetryableError({ status: 503, cfMitigated: 'challenge' }) === false) pass('isRetryableError(challenged 503) is false');
+  else fail('isRetryableError(challenged 503) should be false: a retry gets the same challenge');
+}
+
 // The default redirect policy is the SSRF guard's second half (#4079): the
 // ip guard checks the host that was asked for, and only redirect:'error'
 // stops a 3xx from pointing the follow-up request somewhere else. It has to
@@ -330,5 +382,85 @@ if (isRefusedRedirectError(transportFailure) === false) {
     } else {
       fail(`fetchResponseWithRetry() 403 handling wrong: calls=${calls}, status=${e?.status}`);
     }
+  }
+}
+
+// A request that already spent its whole timeout fails the same way on a
+// retry, and the retry spends that budget again. One hung board was measured
+// at three full timeouts (about 94s for Ashby's 30s budget). Fast transport
+// errors leave timedOut unset and still retry. A 429 keeps its status, so the
+// flag must not hide it.
+{
+  const spent = Object.assign(new Error('This operation was aborted'), { name: 'AbortError', timedOut: true });
+  if (isRetryableError(spent) === false) {
+    pass('isRetryableError(timer already spent) is false');
+  } else {
+    fail('isRetryableError(timer already spent) should be false');
+  }
+  if (isRetryableError({ status: 429, timedOut: true }) === true) {
+    pass('isRetryableError(429) stays true even if timedOut is also set');
+  } else {
+    fail('isRetryableError(429) should stay true when timedOut is set');
+  }
+}
+
+{
+  let calls = 0;
+  const ctx = {
+    fetchJson: async () => { calls++; throw new Error('socket reset'); },
+    sleep: async () => {},
+  };
+  try {
+    await fetchJsonWithRetry(ctx, 'https://example.com/jobs', {}, { retries: 2, baseDelayMs: 1, maxDelayMs: 5 });
+    fail('fetchJsonWithRetry should rethrow a fast transport error after retries');
+  } catch (e) {
+    if (calls === 3 && e?.timedOut !== true) {
+      pass('fetchJsonWithRetry still retries a fast transport error that did not spend the timeout');
+    } else {
+      fail(`fast transport retry: calls=${calls}, timedOut=${e?.timedOut}`);
+    }
+  }
+}
+
+{
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (_url, opts) => {
+    calls++;
+    await new Promise((resolve, reject) => {
+      const signal = opts?.signal;
+      if (!signal) {
+        reject(new Error('missing abort signal'));
+        return;
+      }
+      if (signal.aborted) {
+        reject(Object.assign(new DOMException('This operation was aborted', 'AbortError')));
+        return;
+      }
+      const onAbort = () => {
+        reject(Object.assign(new DOMException('This operation was aborted', 'AbortError')));
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+  };
+  const t0 = Date.now();
+  try {
+    await fetchJsonWithRetry(
+      makeHttpCtx(),
+      'https://example.com/jobs',
+      { timeoutMs: 200 },
+      { retries: 2, baseDelayMs: 20, maxDelayMs: 40 },
+    );
+    fail('fetchJsonWithRetry should throw when the server never answers');
+  } catch (e) {
+    const ms = Date.now() - t0;
+    // One attempt. A retry would be calls=3 and about 3x the timeout.
+    if (calls === 1 && e?.timedOut === true && ms < 1000) {
+      pass('fetchJsonWithRetry does not retry a request that already spent its timeout');
+    } else {
+      fail(`spent-timeout retry: calls=${calls}, timedOut=${e?.timedOut}, ms=${ms}, name=${e?.name}`);
+    }
+  } finally {
+    globalThis.fetch = realFetch;
   }
 }

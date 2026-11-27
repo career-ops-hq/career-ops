@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Check, X, FileText, Loader2 } from "lucide-react";
@@ -8,27 +8,64 @@ import { cn } from "@/lib/cn";
 import { CompanyLogo } from "@/components/company-logo";
 import { scoreNum, scoreTone } from "@/lib/format";
 import { companyPresentation } from "@/lib/company-presentation.mjs";
-import type { Application } from "@/lib/career-ops";
+import { statusWriteError } from "@/lib/home/status-result.mjs";
+import { appliedWriteAllowed } from "@/lib/applied-confirm.mjs";
+import type { Application, AwaitingAge } from "@/lib/career-ops";
+import { ageLabels } from "@/lib/home/awaiting-age.mjs";
+import type { CardReason } from "@/lib/machine-summary.mjs";
+
+const DECISION_TONE: Record<string, string> = {
+  Apply: "text-emerald-800 dark:text-emerald-400",
+  Consider: "text-sky-600 dark:text-sky-400",
+  "Research first": "text-amber-800 dark:text-amber-400",
+  Skip: "text-muted",
+};
 
 // Awaiting-decision row: a scored role with no terminal status. Primary action
-// opens the report (PDF + Apply live there). Skip / Applied still write status.
-export function DecisionCard({ app }: { app: Application }) {
+// opens the report (PDF + Apply live there). Skip writes immediately. Applied
+// asks before it writes. onDecided lets the parent offer an undo once the card is gone.
+export function DecisionCard({ app, reason, age, onDecided }: { app: Application; reason?: CardReason; age?: AwaitingAge; onDecided?: (status: "Applied" | "Discarded") => void }) {
   const router = useRouter();
   const [busy, setBusy] = useState<"" | "Applied" | "Discarded">("");
   const [done, setDone] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [failedStatus, setFailedStatus] = useState<"Applied" | "Discarded" | null>(null);
+  const [askApplied, setAskApplied] = useState(false);
+  const appliedYesRef = useRef<HTMLButtonElement>(null);
+  const submitting = useRef(false);
+  useEffect(() => {
+    if (!askApplied) return;
+    appliedYesRef.current?.focus();
+  }, [askApplied]);
   const score = scoreNum(app.score);
   const tone = scoreTone(app.score);
   const company = companyPresentation(app);
+  const labels = age ? ageLabels(age) : null;
+  const closed = age?.open.state === "closed";
 
   const setStatus = async (status: "Applied" | "Discarded") => {
+    if (submitting.current) return;
+    submitting.current = true;
     setBusy(status);
+    setError(null);
+    setFailedStatus(null);
     try {
-      await fetch("/api/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ n: app.n, status }) });
+      const response = await fetch("/api/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ n: app.n, status }) });
+      const result = await response.json().catch(() => null);
+      const failure = statusWriteError(response.ok, result, status);
+      if (failure) {
+        setError(failure);
+        setFailedStatus(status);
+        return;
+      }
       setDone(status);
+      onDecided?.(status);
       router.refresh();
     } catch {
-      /* ignore */
+      setError("Could not confirm the change. Check your connection and pipeline, then retry.");
+      setFailedStatus(status);
     } finally {
+      submitting.current = false;
       setBusy("");
     }
   };
@@ -36,7 +73,7 @@ export function DecisionCard({ app }: { app: Application }) {
   if (done) return null;
 
   return (
-    <div className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-border bg-surface/40 p-3.5 transition hover:border-brand/30">
+    <div className={cn("flex min-w-0 flex-col gap-2.5 rounded-xl border border-border bg-surface/40 p-3.5 transition hover:border-brand/30", closed && "opacity-70")}>
       <div className="flex items-start gap-2.5">
         <CompanyLogo name={company.logoName} size={24} />
         <div className="min-w-0 flex-1">
@@ -47,13 +84,29 @@ export function DecisionCard({ app }: { app: Application }) {
           <span
             className={cn(
               "shrink-0 rounded-md px-2 py-0.5 text-xs font-semibold tabular-nums",
-              tone === "good" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : tone === "warn" ? "bg-amber-500/10 text-amber-600 dark:text-amber-400" : "bg-surface-hover text-muted",
+              tone === "good" ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-400" : tone === "warn" ? "bg-amber-500/10 text-amber-800 dark:text-amber-400" : "bg-surface-hover text-muted",
             )}
           >
             {app.score}
           </span>
         )}
       </div>
+      {labels && (
+        <p data-testid="card-age" className="flex flex-wrap gap-x-2 text-xs tabular-nums text-muted">
+          <span>{labels.found}</span>
+          <span>·</span>
+          <span>{labels.posted}</span>
+          <span>·</span>
+          <span className={cn("font-medium", closed ? "text-red-700 dark:text-red-400" : age?.open.state === "open" ? "text-emerald-800 dark:text-emerald-400" : "text-faint")}>{labels.open}</span>
+        </p>
+      )}
+      {reason && (
+        <div data-testid="card-reason" className="space-y-0.5 text-xs leading-snug">
+          {reason.decision && <p className={cn("font-medium", DECISION_TONE[reason.decision] ?? "text-muted")}>{reason.decision}</p>}
+          {reason.plus && <p className="line-clamp-1 text-muted"><span className="text-emerald-800 dark:text-emerald-400">+</span> {reason.plus}</p>}
+          {reason.minus && <p className="line-clamp-1 text-muted"><span className="text-red-700 dark:text-red-400">−</span> {reason.minus}</p>}
+        </div>
+      )}
       <div className="flex items-center gap-2">
         {/* Primary is the report (PDF + Apply live there). Marking Applied from
             Today skipped that path and wrote a status with no application. */}
@@ -71,17 +124,55 @@ export function DecisionCard({ app }: { app: Application }) {
         >
           {busy === "Discarded" ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />} Skip
         </button>
-        <button
-          type="button"
-          disabled={!!busy}
-          onClick={() => setStatus("Applied")}
-          title="Record Applied without opening the apply flow"
-          className="inline-flex shrink-0 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-faint transition hover:text-foreground disabled:opacity-60 max-sm:min-h-[44px]"
-        >
-          {busy === "Applied" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
-          Applied
-        </button>
+        {!askApplied && (
+          <button
+            type="button"
+            disabled={!!busy}
+            onClick={() => {
+              const gate = appliedWriteAllowed({ status: "Applied", confirmed: false });
+              if (!gate.write) setAskApplied(true);
+            }}
+            className="inline-flex shrink-0 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-faint transition hover:text-foreground disabled:opacity-60 max-sm:min-h-[44px]"
+          >
+            <Check className="size-3.5" />
+            Applied
+          </button>
+        )}
       </div>
+      {askApplied && (
+        <div role="alert" className="rounded-md border border-border bg-surface px-3 py-2">
+          <p className="text-xs text-foreground">{appliedWriteAllowed({ status: "Applied", confirmed: false }).prompt}</p>
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              ref={appliedYesRef}
+              type="button"
+              disabled={!!busy}
+              onClick={() => {
+                const gate = appliedWriteAllowed({ status: "Applied", confirmed: true });
+                if (gate.write) void setStatus("Applied");
+              }}
+              className="inline-flex items-center justify-center gap-1 rounded-md bg-brand px-2.5 py-1.5 text-xs font-medium text-brand-foreground disabled:opacity-60 max-sm:min-h-[44px]"
+            >
+              {busy === "Applied" ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+              {appliedWriteAllowed({ status: "Applied", confirmed: false }).yesLabel}
+            </button>
+            <button
+              type="button"
+              disabled={!!busy}
+              onClick={() => setAskApplied(false)}
+              className="text-xs text-muted hover:text-foreground disabled:opacity-60 max-sm:min-h-[44px]"
+            >
+              Not yet
+            </button>
+          </div>
+        </div>
+      )}
+      {error && (
+        <div role="alert" className="flex items-start gap-2 text-xs text-red-700 dark:text-red-400">
+          <p className="min-w-0 flex-1">{error}</p>
+          {failedStatus && <button type="button" disabled={!!busy} onClick={() => setStatus(failedStatus)} className="shrink-0 underline disabled:opacity-60 max-sm:min-h-[44px]">Retry</button>}
+        </div>
+      )}
     </div>
   );
 }

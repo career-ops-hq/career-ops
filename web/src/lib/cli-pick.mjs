@@ -9,16 +9,19 @@ export function pickSoleInstalled(clis) {
 }
 
 /**
- * The CLI the Config page should start on: the first installed one, whatever
- * the count.
+ * The CLI the Config page should start on: the remembered one (CAREER_OPS_CLI)
+ * while it is installed, otherwise the first installed one, whatever the count.
  *
  * Config renders this as the active choice, so it must also be the value that
  * gets persisted. Persisting only the SOLE installed CLI left anyone with two
  * or more looking at a selected CLI over empty localStorage -- and every AI
  * surface reads that key, so they all silently did nothing.
+ *
+ * @param {unknown[]} clis
+ * @param {string | null} [remembered]
  */
-export function pickDefaultInstalled(clis) {
-  return (clis || []).find((c) => c && c.installed)?.id || null;
+export function pickDefaultInstalled(clis, remembered = null) {
+  return keepIfInstalled(remembered, clis) || (clis || []).find((c) => c && c.installed)?.id || null;
 }
 
 /**
@@ -35,6 +38,7 @@ export function keepIfInstalled(id, clis) {
 /**
  * The CLI a server route should run for a requested `id`, by the same rule the
  * client's resolveCliId() applies before a Run: `id` itself while it is
+ * installed, otherwise the remembered CLI (CAREER_OPS_CLI) while it is
  * installed, otherwise the sole installed CLI. `substitutedFrom` names the
  * requested id whenever the answer is a different CLI, so the caller can say so
  * instead of silently running another runtime. `id` is null when there is no
@@ -42,12 +46,16 @@ export function keepIfInstalled(id, clis) {
  *
  * Every AI route but Run sends the saved id unchecked, so without this a stale
  * one 404s on each of them with no way back (#4607).
+ *
+ * @param {string | null | undefined} id
+ * @param {unknown[]} clis
+ * @param {string | null} [remembered]
  */
-export function pickUsableCli(id, clis) {
+export function pickUsableCli(id, clis, remembered = null) {
   const kept = keepIfInstalled(id, clis);
   if (kept) return { id: kept, substitutedFrom: null };
-  const sole = pickSoleInstalled(clis);
-  return sole ? { id: sole, substitutedFrom: id || null } : { id: null, substitutedFrom: null };
+  const fallback = keepIfInstalled(remembered, clis) || pickSoleInstalled(clis);
+  return fallback ? { id: fallback, substitutedFrom: id || null } : { id: null, substitutedFrom: null };
 }
 
 /** Installed CLI ids, for an error that tells the user what they can pick. */

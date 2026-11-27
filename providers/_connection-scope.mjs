@@ -30,6 +30,7 @@
 // work with the default pool. CAREER_OPS_CONNECTION_SCOPE=0 opts out.
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { createDirectConnect } from './_tls-connect.mjs';
 
 const storage = new AsyncLocalStorage();
 
@@ -70,16 +71,71 @@ export function currentConnectionScope() {
  * @param {{ agentOptions?: object }} [options]
  * @returns {Promise<T>}
  */
-export async function withConnectionScope(fn, { agentOptions } = {}) {
-  if (process.env.CAREER_OPS_CONNECTION_SCOPE === '0') return fn();
+export async function withConnectionScope(fn, { agentOptions, signal } = {}) {
+  // The board-level abort signal (a sweep's per-company watchdog) rides in the
+  // same store, so every scoped request can fold it into its own timeout and a
+  // timed-out board stops issuing work instead of running on in the background
+  // (#5570). It is carried even when the pool itself is skipped, so cancellation
+  // never depends on undici being present.
+  if (process.env.CAREER_OPS_CONNECTION_SCOPE === '0') {
+    return signal ? storage.run({ signal }, fn) : fn();
+  }
   const undici = await loadUndici();
-  if (!undici) return fn();
-  const agent = new undici.Agent(agentOptions);
+  if (!undici) return signal ? storage.run({ signal }, fn) : fn();
+  const resolvedAgentOptions = typeof agentOptions?.connect === 'function'
+    ? agentOptions
+    : (() => {
+      const connectObj = agentOptions?.connect && typeof agentOptions.connect === 'object'
+        ? agentOptions.connect
+        : undefined;
+      const { socketPath: connectSocketPath, ...restConnect } = connectObj ?? {};
+      const socketPath = connectSocketPath !== undefined
+        ? connectSocketPath
+        : agentOptions?.socketPath;
+      return {
+        ...agentOptions,
+        connect: createDirectConnect({
+          ...agentOptions?.tls,
+          ...(socketPath !== undefined ? { path: socketPath } : undefined),
+          ...(agentOptions?.connectTimeout !== undefined ? { timeout: agentOptions.connectTimeout } : undefined),
+          ...(typeof agentOptions?.autoSelectFamily === 'boolean'
+            ? {
+              autoSelectFamily: agentOptions.autoSelectFamily,
+              autoSelectFamilyAttemptTimeout: agentOptions.autoSelectFamilyAttemptTimeout,
+            }
+            : undefined),
+          ...restConnect,
+        }),
+      };
+    })();
+  const agent = new undici.Agent(resolvedAgentOptions);
   try {
-    return await storage.run({ agent, fetch: undici.fetch }, fn);
+    return await storage.run({ agent, fetch: undici.fetch, signal }, fn);
   } finally {
     await agent.destroy().catch(() => {});
   }
+}
+
+/**
+ * Run `fn` carrying only a board-level abort signal, with no private pool.
+ * Single-host sources deliberately share one pool, but a timed-out board still
+ * needs its work cancelled (#5570), so they carry the signal this way.
+ *
+ * @template T
+ * @param {AbortSignal} signal
+ * @param {() => T} fn
+ * @returns {T}
+ */
+export function withAbortScope(signal, fn) {
+  return storage.run({ signal }, fn);
+}
+
+/**
+ * The board-level abort signal for the unit of work currently running, if any.
+ * @returns {AbortSignal | null}
+ */
+export function currentAbortSignal() {
+  return storage.getStore()?.signal ?? null;
 }
 
 /** Test hook: forget the cached import result. */

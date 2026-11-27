@@ -62,36 +62,47 @@ const PAYLOAD = {
  * fold → resolve template → build → gate. The optional PDF render is skipped
  * (it needs Playwright, and the step marks it optional).
  */
-function runDocumentedStep(payload) {
-  const dir = mkdtempSync(join(tmpdir(), 'pdf-ats-variant-'));
+function runDocumentedStep(payload, report = '', dirPrefix = 'pdf-ats-variant-') {
+  const seg = report ? `-${report}` : '';
+  const dir = mkdtempSync(join(tmpdir(), dirPrefix));
   const dataRoot = join(dir, 'root');
   mkdirSync(join(dataRoot, 'config'), { recursive: true });
   mkdirSync(join(dir, 'output'), { recursive: true });
   writeFileSync(join(dataRoot, 'cv.md'), CV_MD);
-  const styledJson = join(dir, 'cv-jane-smith-acme.json');
+  const styledJson = join(dir, `cv-jane-smith${seg}-acme.json`);
   writeFileSync(styledJson, JSON.stringify(payload, null, 2));
   const env = { ...process.env, CAREER_OPS_ROOT: dataRoot };
 
-  const fill = (cmd, atsTemplate) => cmd
+  // Split the documented template into arguments FIRST, then substitute into
+  // each argument, so a substituted value containing whitespace (a checkout or
+  // tmp path with a space) stays one argument.
+  // {cv-stem} is the #6667 stem: report-led when a report exists, legacy otherwise.
+  const stem = report ? `${report}-acme-cv-jane-smith-2026-11-12` : 'cv-jane-smith-acme-2026-11-12';
+  const fillArg = (arg, atsTemplate) => arg
+    .replaceAll('{cv-stem}', stem)
+    .replaceAll('[-{report}]', seg) // empty for a standalone run with no report number
     .replaceAll('{candidate}', 'jane-smith')
     .replaceAll('{company}', 'acme')
     .replaceAll('/tmp/', `${dir}/`)
-    .replace(/(^|\s)output\//g, `$1${dir}/output/`)
+    .replace(/^output\//, `${dir}/output/`)
     .replaceAll('{ats-template}', atsTemplate ?? '{ats-template}');
 
   let atsTemplate;
   const steps = [];
   for (const raw of documentedCommands()) {
     if (raw.startsWith('node generate-pdf.mjs')) continue;
-    const [command, redirect] = fill(raw, atsTemplate).split(' > ');
-    const args = command.split(/\s+/).slice(1);
+    const tokens = raw.split(/\s+/);
+    const redirectAt = tokens.indexOf('>');
+    const redirect = redirectAt === -1 ? undefined : fillArg(tokens[redirectAt + 1], atsTemplate);
+    const cmdTokens = redirectAt === -1 ? tokens : tokens.slice(0, redirectAt);
+    const args = cmdTokens.slice(1).map((t) => fillArg(t, atsTemplate));
     const r = spawnSync(process.execPath, args, { cwd: ROOT, env, encoding: 'utf-8', timeout: 60_000 });
     assert.equal(r.error, undefined, `${raw} failed to spawn: ${r.error?.message}`);
-    if (redirect) writeFileSync(redirect.trim(), r.stdout);
+    if (redirect) writeFileSync(redirect, r.stdout);
     if (args[0] === 'cv-templates.mjs') atsTemplate = r.stdout.trim();
     steps.push({ raw, status: r.status, stdout: r.stdout, stderr: r.stderr });
   }
-  return { dir, styledJson, steps, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  return { dir, styledJson, stem, steps, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 test('pdf --ats is documented as an opt-in pass and routed from AGENTS.md', () => {
@@ -117,17 +128,31 @@ test('the optional ATS PDF is rendered without --report', () => {
 });
 
 test('the documented commands produce a gated ATS variant with competencies under Skills', () => {
-  const { dir, styledJson, steps, cleanup } = runDocumentedStep(PAYLOAD);
+  const { dir, styledJson, stem, steps, cleanup } = runDocumentedStep(PAYLOAD);
   try {
     for (const s of steps) assert.equal(s.status, 0, `${s.raw} exited ${s.status}\n${s.stderr}`);
-    const html = join(dir, 'output', 'cv-jane-smith-acme-ats.html');
-    assert.ok(existsSync(html), 'output/cv-{candidate}-{company}-ats.html must be written');
+    const html = join(dir, 'output', `${stem}-ats.html`);
+    assert.ok(existsSync(html), 'output/{cv-stem}-ats.html must be written');
     const text = readFileSync(html, 'utf-8');
     assert.match(text, /Core Competencies: <\/span>Distributed Systems, Latency Tuning/,
       'competencies must reach the ATS render as a comma-delimited Skills line');
     assert.doesNotMatch(text, /class="competency-tag"/, 'no CSS-separated tag spans in the ATS render');
     assert.deepEqual(JSON.parse(readFileSync(styledJson, 'utf-8')), PAYLOAD,
       'the styled payload must keep its competency grid; only the ATS copy is folded');
+  } finally {
+    cleanup();
+  }
+});
+
+test('with a report number, every path carries it before the company', () => {
+  const { dir, stem, steps, cleanup } = runDocumentedStep(PAYLOAD, '042');
+  try {
+    for (const s of steps) assert.equal(s.status, 0, `${s.raw} exited ${s.status}\n${s.stderr}`);
+    assert.ok(stem.startsWith('042-'), 'a report-numbered run leads with the report number');
+    assert.ok(existsSync(join(dir, 'output', `${stem}-ats.html`)),
+      'output/{cv-stem}-ats.html must be written');
+    assert.ok(existsSync(join(dir, 'cv-jane-smith-042-acme-ats.json')),
+      '/tmp/cv-{candidate}-{report}-{company}-ats.json must be written');
   } finally {
     cleanup();
   }
@@ -142,6 +167,20 @@ test('the ATS gate catches a claim the styled HTML fix never carried back to the
   try {
     const gate = steps.find((s) => s.raw.startsWith('node verify-cv-facts.mjs'));
     assert.notEqual(gate.status, 0, 'the fact gate must fail the ATS variant on an unsourced metric');
+  } finally {
+    cleanup();
+  }
+});
+
+test('the documented commands still work when the scratch directory name contains a space', () => {
+  // Regression for #5410: substituted paths must stay single arguments.
+  const { dir, stem, steps, cleanup } = runDocumentedStep(PAYLOAD, '', 'pdf ats variant ');
+  try {
+    assert.match(dir, / /, 'fixture directory must contain a space');
+    for (const s of steps) assert.equal(s.status, 0, `${s.raw} exited ${s.status}
+${s.stderr}`);
+    assert.ok(existsSync(join(dir, 'output', `${stem}-ats.html`)),
+      'output/{cv-stem}-ats.html must be written under a spaced directory');
   } finally {
     cleanup();
   }

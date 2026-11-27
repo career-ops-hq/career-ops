@@ -20,18 +20,20 @@
 
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { collectMjsFiles } from '../lib/mjs-files.mjs';
+import { trackedFiles } from '../lib/mjs-files.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 const FIXED = [
   'calibrate.mjs', 'salary-gap.mjs', 'tracker-sync-check.mjs',
   'story-provenance-check.mjs', 'negotiation-roi.mjs', 'jd-skill-gap.mjs',
+  'fetch-jd.mjs', 'seed-fixture.mjs', 'batch-evaluate-gemini.mjs', 'match-star.mjs',
 ];
 
 // ── Isolation ───────────────────────────────────────────────────────────────
@@ -104,7 +106,7 @@ function help(script) {
 for (const script of FIXED) {
   test(`${script} --help prints usage and exits 0`, () => {
     const r = help(script);
-    assert.equal(r.status, 0, `exited ${r.status}: ${r.stderr.slice(0, 200)}`);
+    assert.equal(r.status, 0, describeSpawn(r, `exited ${r.status}: ${r.stderr.slice(0, 200)}`));
     assert.match(r.stdout, /^Usage:/m, `no usage block:\n${r.stdout.slice(0, 200)}`);
   });
 
@@ -152,7 +154,7 @@ test('-h is accepted wherever --help is, and suppresses the same work', () => {
   // own output so the two cannot drift into answering differently.
   for (const script of FIXED) {
     const short = runIn(EMPTY_ROOT, script, ['-h']);
-    assert.equal(short.status, 0, `${script} -h exited ${short.status}: ${short.stderr.slice(0, 200)}`);
+    assert.equal(short.status, 0, describeSpawn(short, `${script} -h exited ${short.status}: ${short.stderr.slice(0, 200)}`));
     assert.match(short.stdout, /^Usage:/m, `${script} -h did not print usage`);
 
     const shortFull = runIn(FULL_ROOT, script, ['-h']);
@@ -174,11 +176,8 @@ test('-h is accepted wherever --help is, and suppresses the same work', () => {
 // Each of these has the same defect the six fixed here had: an unrecognised
 // flag is discarded, so `--help` falls through and the script runs.
 const KNOWN_WITHOUT_HELP = new Set([
-  'batch-evaluate-gemini.mjs', 'cv-templates.mjs', 'fetch-jd.mjs', 'followup-seed.mjs',
-  'generate-cover-letter.mjs', 'generate-pdf.mjs', 'intake.mjs',
-  'match-star.mjs', 'openrouter-runner.mjs', 'plugins.mjs',
-  'seed-fixture.mjs', 'tracker.mjs',
-  'validate-plugin-registry.mjs', 'validate-untrusted-content-coverage.mjs',
+  'cv-templates.mjs',
+  'generate-cover-letter.mjs', 'generate-pdf.mjs',
   // generate-latex.mjs and verify-portals.mjs were here and have since been
   // fixed upstream; the ratchet's other end caught that on the rebase and
   // required their removal, which is the half of it that keeps the list from
@@ -190,17 +189,13 @@ const KNOWN_WITHOUT_HELP = new Set([
 
   // Surfaced by widening the scan below from one directory to the whole tree.
   // These are NOT new CLIs joining a list that is supposed to shrink — they
-  // have always had the defect, and readdirSync(ROOT) simply could not see
+  // have always had the defect, and a readdirSync of ROOT simply could not see
   // them. Listing them is what makes the wider scan adoptable in one change
   // instead of turning it into a seven-script fix; the ratchet's rule is
   // unchanged and the list may only get shorter from here.
   //
-  // keyword-match.mjs is the one worth a second look: it PRINTS usage for
-  // `--help`, which reads as handled, but only because the flag falls through
-  // to its "report file not found" path — so it exits 1 and would run the
-  // comparison if a file by that name existed.
-  'batch/aggregate-tokens.mjs',
-  'keyword-match.mjs',
+  // keyword-match.mjs left once --help printed usage and exited 0
+  // before it looked for a report.
   'plugins/h1b-sponsor/install-h1b-index.mjs',
   'plugins/h1b-sponsor/token.mjs',
 
@@ -245,15 +240,27 @@ function codeOnly(src) {
     .replace(/"(?:\\.|[^"\\\n])*"/g, (m) => m); // double-quoted: kept for the same reason
 }
 
-test('no NEW CLI silently swallows --help, and the allowlist only shrinks', () => {
+/**
+ * The CLIs under `root` that discard `--help`, and the allowlisted ones that no
+ * longer do.
+ *
+ * Enumerated from the INDEX, not the working tree. A readdirSync of ROOT saw only
+ * the top level and missed nested CLIs such as batch/aggregate-tokens.mjs; the
+ * recursive working-tree walk that replaced it then graded whatever a checkout
+ * happened to hold, so a plugin the user installed into the gitignored
+ * plugins.local/ turned the suite red with nothing in the repository changed
+ * (#5307). This ratchet grades the CLIs the repository ships, which is the
+ * question trackedFiles answers — the same enumerator main-guard-convention
+ * uses over the same isMainModule CLIs. A new CLI is graded once it is staged.
+ *
+ * @param {string} root - A git working tree.
+ * @returns {{offenders: string[], fixed: string[]}}
+ */
+function helpFlagFindings(root) {
   const offenders = [];
   const fixed = [];
-  // Recursive, via the shared walker: readdirSync(ROOT) saw only the top level
-  // and missed nested CLIs such as batch/aggregate-tokens.mjs. collectMjsFiles
-  // also carries SKIP_DIRS and the nested-checkout guard, so a second checkout
-  // parked under the tree is not scanned as this repository's source (#3499).
-  for (const abs of collectMjsFiles(ROOT)) {
-    const rel = relative(ROOT, abs).split(sep).join('/');
+  for (const abs of trackedFiles(root, (rel) => rel.endsWith('.mjs'))) {
+    const rel = relative(root, abs).split(sep).join('/');
     if (/(^|\/)tests\//.test(rel)) continue;
     if (/-tests\.mjs$|(^|\/)test-|(^|\/)playwright/.test(rel)) continue;
     const code = codeOnly(readFileSync(abs, 'utf-8'));
@@ -269,16 +276,43 @@ test('no NEW CLI silently swallows --help, and the allowlist only shrinks', () =
     if (!handles && !KNOWN_WITHOUT_HELP.has(key)) offenders.push(rel);
     if (handles && KNOWN_WITHOUT_HELP.has(key)) fixed.push(key);
   }
+  return { offenders: offenders.sort(), fixed: fixed.sort() };
+}
+
+test('no NEW CLI silently swallows --help, and the allowlist only shrinks', () => {
+  const { offenders, fixed } = helpFlagFindings(ROOT);
   assert.deepEqual(
-    offenders.sort(),
+    offenders,
     [],
     `these CLIs discard --help, so the flag falls through and the script runs instead:\n  ${offenders.join('\n  ')}`,
   );
   // The ratchet's other end: a fixed script must leave the list, or the list
   // stops describing anything and quietly rots.
   assert.deepEqual(
-    fixed.sort(),
+    fixed,
     [],
     `these now handle --help and should be removed from KNOWN_WITHOUT_HELP:\n  ${fixed.join('\n  ')}`,
   );
+});
+
+test('the ratchet grades tracked CLIs only, not a plugin installed into plugins.local/ (#5307)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'co-help-tracked-'));
+  sandboxes.push(dir);
+  const git = (...args) => execFileSync('git', ['-C', dir, ...args], {
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  git('init', '-q');
+  // A CLI with the defect: the main guard, and no '--help' anywhere in code.
+  const noHelp = 'if (isMainModule(import.meta.url)) run(process.argv.slice(2));\n';
+  writeFileSync(join(dir, '.gitignore'), 'plugins.local/\n');
+  mkdirSync(join(dir, 'plugins.local', 'probe'), { recursive: true });
+  writeFileSync(join(dir, 'plugins.local', 'probe', 'cli.mjs'), noHelp);
+  writeFileSync(join(dir, 'shipped-cli.mjs'), noHelp);
+  git('add', '-A');
+
+  // The control is what makes the first half mean something: the same source,
+  // tracked, IS reported, so an empty result for plugins.local/ is the
+  // enumeration excluding it rather than the fixture failing to look like a CLI.
+  assert.deepEqual(helpFlagFindings(dir), { offenders: ['shipped-cli.mjs'], fixed: [] });
 });

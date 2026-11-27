@@ -142,3 +142,15 @@ func TestFunnelTopStageCountsUnscoredRowsAndIsNotNamedEvaluated(t *testing.T) {
 		t.Errorf("AvgScore = %v, want 4.2 — the average covers scored rows only, which is why the count beside it cannot be called 'evaluated'", pm.AvgScore)
 	}
 }
+
+// Active means in flight, the same set stats.mjs counts: an evaluated row was
+// never sent and a hire is finished.
+func TestComputeProgressMetricsActiveAppsAreInFlight(t *testing.T) {
+	pm := ComputeProgressMetrics(appsWithStatuses(
+		"Evaluated", "Applied", "Responded", "Assessment", "Interview", "Offer",
+		"Hired", "Rejected", "Discarded", "SKIP",
+	))
+	if pm.ActiveApps != 5 {
+		t.Fatalf("ActiveApps = %d, want 5", pm.ActiveApps)
+	}
+}

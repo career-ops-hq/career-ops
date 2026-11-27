@@ -1293,14 +1293,17 @@ for (const [flag, value, field, expected, label] of flagFallbackCases) {
   eq(label, JSON.parse(out).metadata[field], expected);
 }
 
-// `--min-span=` supplies an EMPTY value, which must fall back too. Number('')
-// is 0, so a validator written with Number()/Number.isInteger() would read this
-// as a deliberate zero and quietly disable the floor.
-const emptySpanOut = execFileSync('node', [scriptPath, '--min-span='], {
-  encoding: 'utf-8', timeout: 10000,
-  cwd: dirname(scriptPath),
-});
-eq('--min-span= (empty value) falls back to 1, not 0', JSON.parse(emptySpanOut).metadata.minSpanDays, 1);
+// `--min-span=` supplies an EMPTY value, which is rejected as a missing operand (#5127).
+try {
+  execFileSync('node', [scriptPath, '--min-span='], {
+    encoding: 'utf-8', timeout: 10000,
+    cwd: dirname(scriptPath),
+  });
+  ok('--min-span= (empty value) exits non-zero', false);
+} catch (e) {
+  ok('--min-span= (empty value) exits non-zero', e.status === 1);
+  ok('--min-span= (empty value) reports the missing operand', /--min-span requires a value/.test(e.stderr || ''));
+}
 
 // 0 remains a legitimate explicit value on both flags — the fallback rules must
 // not swallow it, or the floor could never be switched off on purpose.

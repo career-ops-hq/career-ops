@@ -35,7 +35,91 @@ export function hasToken(filenameLower, token) {
   return re.test(filenameLower);
 }
 
+/**
+ * True for the sibling draft generate-pdf.mjs writes when a render runs over
+ * its page budget: `{name}.overflow.pdf`, then `.overflow-2.pdf` and so on
+ * when that name is taken. The draft is the version the budget rejected, kept
+ * for inspection only, and it is written after the deliverable, so newest-first
+ * resolution would otherwise serve it as the tailored artifact. The suffix is
+ * reserved for drafts: a deliverable deliberately named that way is not found.
+ */
+export function isOverflowDraft(filenameLower) {
+  return /\.overflow(-\d+)?\.pdf$/.test(filenameLower);
+}
+
+const STANDARD_NAME = /^\d{3,}-(.+)-\d{4}-\d{2}-\d{2}(?:-(?:ats|canva))?\.[a-z0-9]+$/;
+
+/**
+ * The `cv`/`cover` words of a name's head (`{company}-{kind}-{candidate}`) that
+ * sit between two dashes. That is what parseOutputName() counts (`-cv-`,
+ * `-cover-`): a company that starts with "Cover" or a candidate that ends with
+ * "Cover" never carries one, because the company and the candidate each come
+ * with the dash that joins them to the kind.
+ */
+export function interiorKinds(head) {
+  return String(head).split('-').slice(1, -1).filter((part) => part === 'cv' || part === 'cover');
+}
+
+/**
+ * The kind (`cv` or `cover`) of a name in the standard layout
+ * `{NNN}-{company-slug}-{kind}-{candidate-slug}-{date}[-{variant}].{ext}`
+ * (lib/output-names.mjs, #6667), or null when the name is not in that layout.
+ *
+ * A standard name has exactly one kind word between two dashes (see
+ * interiorKinds): that is the rule buildOutputName() enforces by reading its own
+ * output back with parseOutputName(), so a name with two is not one this repo
+ * wrote and gets null, since attaching nothing beats attaching the wrong
+ * document. A company that starts with "Cover" or a candidate that ends with it
+ * still has just one. The parity test in apply-cover-resolver.test.mjs runs
+ * the builder and this reader over the same inputs.
+ *
+ * With the caller's company `slug` the match is exact, as cv.ts requires
+ * (#2352: Acme must not resolve an Acme Bank file): the name must start
+ * `{NNN}-{slug}-` and the kind token must come right after it. A candidate
+ * called `Zep` is therefore not the company `zep`, and `acme` does not claim
+ * `024-acme-bank-cv-...`.
+ */
+export function standardKind(filenameLower, slug) {
+  const m = STANDARD_NAME.exec(filenameLower);
+  if (!m) return null;
+  const head = m[1];
+  const kinds = interiorKinds(head);
+  if (kinds.length !== 1) return null;
+  if (slug) {
+    const prefix = `${slug}-`;
+    if (!head.startsWith(prefix)) return null;
+    if (head.slice(prefix.length).split('-')[0] !== kinds[0]) return null;
+  }
+  return kinds[0];
+}
+
+/** True when the name is in the standard layout, whatever its kind. */
+export function isStandardName(filenameLower) {
+  return STANDARD_NAME.test(filenameLower);
+}
+
+/**
+ * Match a file against every slug a company can carry (companySlug().keys): the
+ * first is the folded slug and the rest are legacy slugs that dropped accented
+ * letters. A standard-layout name folds accents, so only the folded slug
+ * identifies it; matching it against a legacy slug ("caf" for Café) could claim
+ * another company's file ("031-caf-cv-..." belongs to CAF). Legacy slugs apply
+ * to non-standard names only.
+ *
+ * @param {(filenameLower: string, slug: string) => boolean} matcher
+ * @param {string} filenameLower
+ * @param {string[]} keys
+ */
+export function matchesCompanyKeys(matcher, filenameLower, keys) {
+  const [folded, ...legacy] = keys;
+  if (matcher(filenameLower, folded)) return true;
+  if (isStandardName(filenameLower)) return false;
+  return legacy.some((key) => matcher(filenameLower, key));
+}
+
 export function matchesTailoredCv(filenameLower, slug) {
+  if (isOverflowDraft(filenameLower)) return false;
+  if (isStandardName(filenameLower)) return standardKind(filenameLower, slug) === 'cv';
   if (!filenameLower.startsWith('cv-')) return false;
   return hasToken(filenameLower, slug);
 }
@@ -53,6 +137,11 @@ export function matchesTailoredCv(filenameLower, slug) {
  */
 export function matchesTailoredCover(filenameLower, slug) {
   if (filenameLower.startsWith('cv-')) return false;
+  if (isOverflowDraft(filenameLower)) return false;
+  // The ATS copy of a CV (`{stem}.ats.pdf`) is never a cover, whatever tokens
+  // its candidate slug happens to carry.
+  if (/\.ats\.pdf$/.test(filenameLower)) return false;
+  if (isStandardName(filenameLower)) return standardKind(filenameLower, slug) === 'cover';
   if (!hasToken(filenameLower, 'cover')) return false;
   return hasToken(filenameLower, slug);
 }

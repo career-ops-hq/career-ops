@@ -445,3 +445,50 @@ const TRACKER_DUP_REPORT = `# Applications Tracker
     }
   }
 }
+
+// ── 15. Usage error honors --json ──
+{
+  // Given no tracker state matters — this fails during arg parsing.
+  // console.log ends stdout with a newline, so the JSON document is the last non-empty line.
+  function lastJson(stdout) {
+    return JSON.parse(stdout.trimEnd().split('\n').pop());
+  }
+
+  const sb = makeSandbox(TRACKER_9);
+  try {
+    // When mark-pdf-ready is run with --json and no positional arguments
+    const noArgs = runMarkPdfReady(['--json'], sb);
+    const noArgsMsg = 'Expected 1 argument: <report#>';
+    let noArgsParsed = null;
+    try { noArgsParsed = lastJson(noArgs.stdout); } catch { /* asserted below */ }
+
+    // Then it exits 1, that last line is the usage payload, and the human line is on stderr
+    if (
+      noArgs.code === 1
+      && JSON.stringify(noArgsParsed) === JSON.stringify({ error: noArgsMsg, code: 'usage' })
+      && noArgs.stderr.includes(`❌ ${noArgsMsg}`)
+    ) {
+      pass('json usage: no args exits 1 with structured payload and ❌ on stderr');
+    } else {
+      fail(`json usage no-args: code=${noArgs.code} json=${JSON.stringify(noArgsParsed)}\nstdout=${noArgs.stdout}\nstderr=${noArgs.stderr}`);
+    }
+
+    // When an unknown flag is seen before --json is parsed (failUsage fires mid-argv)
+    const unknown = runMarkPdfReady(['--not-a-flag', '--json'], sb);
+    const unknownMsg = 'Unknown flag: --not-a-flag';
+    let unknownParsed = null;
+    try { unknownParsed = lastJson(unknown.stdout); } catch { /* asserted below */ }
+
+    if (
+      unknown.code === 1
+      && JSON.stringify(unknownParsed) === JSON.stringify({ error: unknownMsg, code: 'usage' })
+      && unknown.stderr.includes(`❌ ${unknownMsg}`)
+    ) {
+      pass('json usage: unknown flag exits 1 with structured payload and ❌ on stderr');
+    } else {
+      fail(`json usage unknown-flag: code=${unknown.code} json=${JSON.stringify(unknownParsed)}\nstdout=${unknown.stdout}\nstderr=${unknown.stderr}`);
+    }
+  } finally {
+    rmSync(sb.dir, { recursive: true, force: true });
+  }
+}

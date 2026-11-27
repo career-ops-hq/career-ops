@@ -34,12 +34,14 @@
  *   node fix-slugs.mjs --help        # show this message (-h is an alias)
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join, resolve } from 'path';
 
 import { verifyPortalsFile } from './verify-portals.mjs';
+import { replaceUserFile } from './tracker-utils.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 
 // The data root's portals.yml, the same default verify-portals.mjs sweeps
@@ -64,6 +66,28 @@ const USAGE = `Usage:
 const NAME_LINE_RE = /^([ \t]*)-\s*name:\s*(.+?)\s*$/;
 
 /**
+ * The value of a `name:` scalar as the YAML parser reads it. verify-portals
+ * reports a company under its parsed name, so a block keyed by the raw text
+ * (`"Foo Bar"`, `Foo Bar   # London`) never matched its result and the fix was
+ * dropped without a word.
+ *
+ * @param {string} raw - Everything after `name:` on the line.
+ * @returns {string}
+ */
+function nameScalar(raw) {
+  const text = raw.trim();
+  let m = text.match(/^"((?:[^"\\]|\\.)*)"\s*(?:#.*)?$/);
+  if (m) {
+    try { return JSON.parse(`"${m[1]}"`); } catch { return m[1]; }
+  }
+  m = text.match(/^'((?:[^']|'')*)'\s*(?:#.*)?$/);
+  if (m) return m[1].replace(/''/g, "'");
+  // Plain scalar: a comment starts at whitespace followed by #.
+  const hash = text.search(/\s#/);
+  return (hash === -1 ? text : text.slice(0, hash)).trim();
+}
+
+/**
  * Split a portals.yml's raw text into per-company blocks, keyed by the exact
  * `name:` value, so a fix can be applied with plain line edits instead of a
  * full YAML re-serialization (which would drop every comment in the file).
@@ -84,7 +108,7 @@ export function splitCompanyBlocks(text) {
         current.endLine = i;
         blocks.push(current);
       }
-      current = { name: m[2].trim(), indent: m[1], startLine: i, endLine: null };
+      current = { name: nameScalar(m[2]), indent: m[1], startLine: i, endLine: null };
     }
   }
   if (current) {
@@ -286,7 +310,7 @@ function applyFix(lines, block, suggested, oldAts, dateStr) {
  * @param {{dryRun?: boolean, dateStr?: string}} [opts]
  * @returns {{text: string, fixes: Array<{name: string, oldAts: string, newAts: string, careersUrlOld: string, careersUrlNew: string}>}}
  */
-export function computeFixes(rawText, results, { dateStr = new Date().toISOString().slice(0, 10) } = {}) {
+export function computeFixes(rawText, results, { dateStr = localToday() } = {}) {
   const { lines, blocks } = splitCompanyBlocks(rawText);
   const blocksByName = new Map(blocks.map((b) => [b.name, b]));
 
@@ -378,7 +402,7 @@ async function main() {
   printDiff(fixes, { dryRun });
 
   if (!dryRun && fixes.length > 0) {
-    writeFileSync(filePath, text, 'utf-8');
+    replaceUserFile(filePath, text);
     console.log(`\nportals.yml updated (${fixes.length} fixed).`);
   } else if (dryRun && fixes.length > 0) {
     console.log('\nRun with --fix to write these changes to portals.yml.');

@@ -1,7 +1,8 @@
-import { mkdirSync, readFileSync, readdirSync, writeFileSync, renameSync, unlinkSync, openSync, closeSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { cleanMessages, conversationTitle, MAX_CHAT_BYTES } from './assistant-history.mjs';
+import { tryAcquireDirLockSync, releaseOrWarn } from './core/dir-lock.mjs';
 
 export class ChatError extends Error {
   constructor(message, status = 400) { super(message); this.status = status; }
@@ -42,17 +43,25 @@ export function listChats(root) {
   }
   return { chats: chats.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), errors };
 }
+// A chat's lock is the shared directory-lock protocol (core/dir-lock.mjs), at
+// `<id>.json.lock`. It was an O_EXCL lock FILE at that path with no stale
+// recovery, so a server killed mid-save left a file that answered "busy" to
+// every later save of that conversation, for ever (#5358). Now a holder whose
+// pid is gone is reclaimed on the next save, and a leftover file from the old
+// version is read as an ownerless lock, which the protocol reclaims once it is
+// older than CHAT_LOCK_STALE_MS. A save takes milliseconds, so anything that old
+// was abandoned.
+//
+// Non-waiting on purpose: the route answers contention with a 409 and the
+// client retries, so one attempt (plus the in-line reclaim) is the whole job.
+const CHAT_LOCK_STALE_MS = 30_000;
 function withLock(root, id, operation) {
   const file = chatPath(root, id);
   mkdirSync(join(root, '.career-ops-web', 'chats'), { recursive: true });
-  let fd;
-  try { fd = openSync(`${file}.lock`, 'wx', 0o600); }
-  catch (err) { if (err.code === 'EEXIST') throw new ChatError('Conversation is busy; retry saving', 409); throw err; }
+  const lock = tryAcquireDirLockSync(`${file}.lock`, { staleMs: CHAT_LOCK_STALE_MS });
+  if (!lock) throw new ChatError('Conversation is busy; retry saving', 409);
   try { return operation(file); }
-  finally {
-    try { closeSync(fd); } catch { /* best effort */ }
-    try { unlinkSync(`${file}.lock`); } catch (err) { if (err.code !== 'ENOENT') console.error('chat lock release failed', err); }
-  }
+  finally { releaseOrWarn(lock); }
 }
 export function saveChat(root, id, input) {
   if (!input || !Number.isSafeInteger(input.revision) || input.revision < 0) throw new ChatError('Conversation revision required');
@@ -61,11 +70,20 @@ export function saveChat(root, id, input) {
   if (!messages.some(m => m.role === 'user')) throw new ChatError('Empty conversations are not saved');
   if (input.title !== undefined && (typeof input.title !== 'string' || !input.title.trim() || input.title.length > 100)) throw new ChatError('Title must contain 1–100 characters');
   if (Buffer.byteLength(JSON.stringify(messages)) > MAX_CHAT_BYTES) throw new ChatError('Conversation is too large to save', 413);
+  if (input.writer !== undefined && (typeof input.writer !== 'string' || !/^[\w-]{1,64}$/.test(input.writer))) throw new ChatError('Invalid writer');
+  if (input.seq !== undefined && (!Number.isSafeInteger(input.seq) || input.seq < 1)) throw new ChatError('Invalid save sequence');
+  if (input.writer !== undefined && input.seq === undefined) throw new ChatError('Save sequence required with writer');
   return withLock(root, id, file => {
     const prior = readChat(root, id);
-    if (input.revision === 0 && prior && JSON.stringify(prior.messages) === JSON.stringify(messages) && (!input.title || input.title.trim() === prior.title)) return prior;
-    if ((prior?.revision ?? 0) !== input.revision) throw new ChatError('Conversation changed in another tab. Reload before editing; your unsaved text is still visible.', 409);
-    const chat = { version: 1, id, revision: input.revision + 1, title: input.title?.trim() || prior?.title || conversationTitle(messages), updatedAt: new Date().toISOString(), messages };
+    // A page saves one request at a time, so a newer revision stamped with its
+    // own writer id is a save whose response it never got (sleep, dropped
+    // connection), not another tab: its current messages supersede it (#6381).
+    // Only a later save does: a delayed earlier request must not undo its retry.
+    const ownLostSave = input.writer && prior?.writer === input.writer && input.seq > (prior.seq ?? 0);
+    // Not a no-op when it is: its seq must be stored, or a delayed earlier save would still pass.
+    if (input.revision === 0 && prior && !ownLostSave && JSON.stringify(prior.messages) === JSON.stringify(messages) && (!input.title || input.title.trim() === prior.title)) return prior;
+    if ((prior?.revision ?? 0) !== input.revision && !ownLostSave) throw new ChatError('Conversation changed in another tab. Reload before editing; your unsaved text is still visible.', 409);
+    const chat = { version: 1, id, revision: (prior?.revision ?? 0) + 1, title: input.title?.trim() || prior?.title || conversationTitle(messages), updatedAt: new Date().toISOString(), ...(input.writer ? { writer: input.writer, seq: input.seq } : {}), messages };
     const temp = `${file}.${randomUUID()}.tmp`;
     try { writeFileSync(temp, JSON.stringify(chat), { mode: 0o600, flag: 'wx' }); renameSync(temp, file); }
     finally { try { unlinkSync(temp); } catch (err) { if (err.code !== 'ENOENT') console.error('chat temp cleanup failed', err); } }

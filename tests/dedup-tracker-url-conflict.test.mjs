@@ -4,7 +4,7 @@
 // the same role at one company but pointing at two DIFFERENT live postings were
 // merged and the lower-scored one deleted. merge-tracker.mjs already treats two
 // present-and-different posting URLs as proof the rows are distinct (#1524,
-// #2009); dedup now asks the same question through the same normalizeUrl().
+// #2009); dedup now asks the same question through the same url-key.mjs rule.
 //
 // Drives the REAL dedup-tracker.mjs CLI against a temp tracker via the
 // CAREER_OPS_TRACKER hook, because the deletion is what loses data — asserting
@@ -104,6 +104,35 @@ ok('a URL conflict also blocks a shared report number (same order as merge-track
     '| 2 | 2026-09-02 | Acme | Backend Engineer | 3.8/5 | Evaluated | ❌ | [7](reports/007-acme-2026-09-01.md) | second | https://job-boards.greenhouse.io/acme/jobs/2002 |',
   ], (rows) => {
     assert.deepEqual(nums(rows), ['1', '2']);
+  });
+});
+
+ok('the same page with a language param on one side only is not merged by role alone', () => {
+  // The bare row may be the German version and the other its English one: a
+  // role match is not enough to delete either.
+  withTracker(HEADER_URL, SEP_URL, [
+    '| 1 | 2026-09-01 | Acme | Backend Engineer | 4.2/5 | SKIP | ❌ | [1](reports/001-acme-2026-09-01.md) | German JD | https://acme.recruitee.com/o/backend-engineer |',
+    '| 2 | 2026-09-02 | Acme | Backend Engineer | 3.8/5 | Evaluated | ❌ | [2](reports/002-acme-2026-09-02.md) | English version | https://acme.recruitee.com/o/backend-engineer?lang=en |',
+  ], (rows) => {
+    assert.deepEqual(nums(rows), ['1', '2'], 'both rows survive');
+  });
+});
+
+ok('the same page with a language param on one side only still merges on one report', () => {
+  withTracker(HEADER_URL, SEP_URL, [
+    '| 1 | 2026-09-01 | Acme | Backend Engineer | 4.2/5 | Evaluated | ❌ | [7](reports/007-acme-2026-09-01.md) | first | https://acme.recruitee.com/o/backend-engineer |',
+    '| 2 | 2026-09-02 | Acme | Backend Engineer | 3.8/5 | Evaluated | ❌ | [7](reports/007-acme-2026-09-01.md) | second | https://acme.recruitee.com/o/backend-engineer?lang=de |',
+  ], (rows) => {
+    assert.deepEqual(nums(rows), ['1'], 'one report is one evaluation, whatever the language param');
+  });
+});
+
+ok('two known, different languages of one page both survive', () => {
+  withTracker(HEADER_URL, SEP_URL, [
+    '| 1 | 2026-09-01 | Acme | Backend Engineer | 4.2/5 | Evaluated | ❌ | [1](reports/001-acme-2026-09-01.md) | first | https://acme.recruitee.com/o/backend-engineer?lang=de |',
+    '| 2 | 2026-09-02 | Acme | Backend Engineer | 3.8/5 | Evaluated | ❌ | [2](reports/002-acme-2026-09-02.md) | second | https://acme.recruitee.com/o/backend-engineer?lang=en |',
+  ], (rows) => {
+    assert.deepEqual(nums(rows), ['1', '2'], 'two language versions of one posting are two rows');
   });
 });
 

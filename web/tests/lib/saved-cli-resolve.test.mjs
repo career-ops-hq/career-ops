@@ -178,3 +178,16 @@ test("the /api/clis fetch is bounded, and a timeout falls back to the saved id",
   assert.equal(await resolveCliId(), "claude");
   assert.ok(init?.signal instanceof AbortSignal, "fetch('/api/clis') must carry an AbortSignal");
 });
+
+test("a Config save made while /api/clis is pending is not overwritten by the fallback", async () => {
+  const store = stubEnv({ saved: "opencode" });
+  globalThis.fetch = async () => {
+    // The user saves Config while the lookup is in flight.
+    store.set(CONFIG_KEY, JSON.stringify({ mode: "cli", cliId: "codex" }));
+    return { ok: true, status: 200, json: async () => ({ clis: [{ id: "claude", installed: true }, { id: "opencode", installed: false }] }) };
+  };
+  const calls = [];
+  assert.equal(await resolveCliId((...a) => calls.push(a)), "claude", "the return value is unchanged");
+  assert.equal(savedCliId(store), "codex", "the newer Config save survives");
+  assert.deepEqual(calls, [["opencode", "claude"]]);
+});

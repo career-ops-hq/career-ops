@@ -8,6 +8,7 @@ import {
   validateListingFingerprint,
   listingKey,
 } from '../listing-fingerprint.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const STRONG = { ats_provider: 'greenhouse', board_slug: 'example', posting_id: '12345' };
 // Pinned contract fixture: consumers must derive this key without URL context.
@@ -269,18 +270,18 @@ test('direct API rejects accessors without reading them and rejects hidden unkno
 
 test('CLI help, computation and validation accept inline JSON', () => {
   const help = runCli('--help');
-  assert.equal(help.status, 0, help.stderr);
+  assert.equal(help.status, 0, describeSpawn(help));
   assert.match(help.stdout, /usage:/i);
   assert.match(help.stdout, /--validate/);
 
   const input = { url: POSTING_URL, strong: STRONG };
   const compute = runCli(JSON.stringify(input));
-  assert.equal(compute.status, 0, compute.stderr);
+  assert.equal(compute.status, 0, describeSpawn(compute));
   const record = JSON.parse(compute.stdout);
   assert.deepEqual(record, computeListingFingerprint(input));
 
   const validate = runCli('--validate', JSON.stringify(record));
-  assert.equal(validate.status, 0, validate.stderr);
+  assert.equal(validate.status, 0, describeSpawn(validate));
   assert.deepEqual(JSON.parse(validate.stdout), { valid: true, errors: [] });
 });
 
@@ -299,7 +300,7 @@ test('CLI rejects malformed JSON and records without leaking raw input or stack 
   for (const args of inputs) {
     const result = runCli(...args);
     assert.equal(result.error, undefined);
-    assert.notEqual(result.status, 0);
+    assert.ok(exitedNonZero(result), describeSpawn(result, 'expected a non-zero exit'));
     const output = result.stdout + result.stderr;
     assert.ok(output.trim().length > 0);
     assert.ok(!output.includes(privateValue));

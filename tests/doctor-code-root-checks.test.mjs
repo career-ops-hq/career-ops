@@ -19,11 +19,14 @@
 // already pins that it keeps checking the targeted directory. Here the split
 // is the ambient one a real installation hits — CAREER_OPS_ROOT set, no
 // --target — so codeRoot must fall back to doctor.mjs's own directory.
-import { pass, fail, NODE, ROOT, rmSync } from './helpers.mjs';
+import { pass, fail, NODE, ROOT, rmSync, sealProcessGitEnv } from './helpers.mjs';
 import { execFileSync } from 'child_process';
 import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { join, relative } from 'path';
+
+// Fixture git inherits process.env, so keep the contributor's git config out of it.
+sealProcessGitEnv();
 
 console.log('\ndoctor.mjs — code-root checks stay on the code checkout under a split root (#3867)');
 
@@ -59,6 +62,7 @@ try {
   git(dataRoot, 'init', '-q');
   git(dataRoot, 'config', 'user.email', 'test@example.com');
   git(dataRoot, 'config', 'user.name', 'Test');
+  git(dataRoot, 'config', 'core.hooksPath', join(dataRoot, 'no-such-hooks'));
   writeFileSync(join(dataRoot, 'stray.md.bak'), 'a data-root backup that is not the code checkout\n', 'utf-8');
   git(dataRoot, 'add', 'stray.md.bak');
   git(dataRoot, 'commit', '-q', '-m', 'tracked backup living in the data root only');
@@ -87,11 +91,34 @@ try {
   const jsonRun = runDoctor(dataRoot, ['--json']);
   try {
     const state = JSON.parse(jsonRun.out);
+    if (state.data_root === dataRoot && state.project_root === ROOT) {
+      pass("onboardingState() exposes data_root and project_root in --json output (#6498)");
+    } else {
+      fail(`onboardingState() did not expose expected roots: data_root=${state.data_root} (want ${dataRoot}), project_root=${state.project_root} (want ${ROOT})`);
+    }
     const warningText = (state.warnings || []).join('\n');
     if (!/stray\.md\.bak/.test(warningText)) {
       pass("onboardingState()'s checkTrackedBakFiles() does not surface the data root's tracked .bak file either");
     } else {
       fail(`onboardingState()'s checkTrackedBakFiles() leaked the data root's tracked .bak file: ${JSON.stringify(state.warnings)}`);
+    }
+
+    // 3. --target reports the diagnosed checkout as project_root
+    const targetRun = runDoctor(dataRoot, ['--target', dataRoot, '--json']);
+    const targetState = JSON.parse(targetRun.out);
+    if (targetState.project_root === dataRoot) {
+      pass("--target reports the diagnosed checkout as project_root (#6498)");
+    } else {
+      fail(`--target did not report target as project_root: got ${targetState.project_root}, want ${dataRoot}`);
+    }
+
+    // 4. relative --target resolves to an absolute path before reporting
+    const relRun = runDoctor(dataRoot, ['--target', relative(ROOT, dataRoot), '--json']);
+    const relState = JSON.parse(relRun.out);
+    if (relState.project_root === dataRoot) {
+      pass("relative --target resolves to an absolute path before reporting (#6498)");
+    } else {
+      fail(`relative --target was not resolved to absolute path: got ${relState.project_root}, want ${dataRoot}`);
     }
   } catch {
     fail(`doctor --json did not produce parseable JSON under a split CAREER_OPS_ROOT: ${jsonRun.out}\n${jsonRun.stderr || ''}`);

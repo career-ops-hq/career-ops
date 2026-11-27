@@ -59,17 +59,44 @@
 # An employer can publish one requisition in more than one language (for
 # example German and English), with the same title and location in each. By
 # default those are ONE role and the scan keeps whichever version the ATS
-# returned first.
+# returned first — usually the posting's default language; to choose which
+# version that is, see preferred_languages below.
 #
-# Set dedup_include_language: true to keep them apart when the ATS reports each
-# posting's language. Turn it on when you only apply to postings written in some
-# languages and discard the rest (for example, skip every JD written in German):
-# otherwise the version the scan kept may be the one you throw away.
-# Regional variants count as one language (en-GB equals en), and a posting whose
-# language the ATS doesn't report is compared as before.
+# Set dedup_include_language: true when you read several languages and want
+# every version of a posting, each as its own row. Regional variants count as
+# one language (en-GB equals en), and a posting whose language the ATS doesn't
+# report is compared as before.
+#
+# Some ATSes (Personio, Recruitee) serve every language version of a posting
+# under one URL. With the switch off they return each posting in its own
+# default language only (plus the preferred_languages versions, below, of
+# which the scan still keeps one); with it on they return every version —
+# Personio at one extra request per further language (at most 5), Recruitee from the
+# response it already fetches.
 #
 # scan_history:
 #   dedup_include_language: true
+
+# -- Preferred posting languages (optional) --
+# The languages you want a posting in, best first: an order of preference,
+# not a filter. Where a posting has versions in some of them, the scan keeps
+# the one in the language that comes first in this list; otherwise it keeps
+# the default one, as before. It never drops a posting: one with no version
+# in these languages still comes back in its default language. Use it when you
+# apply in some languages and discard the rest (for example, you skip JDs
+# written in German): you get the English version of a posting that has one,
+# and still one row per posting, however many languages you list. With
+# dedup_include_language on as well, every version is kept, in every
+# language, and the preferred ones come first. Regional variants count as one
+# language (en-GB equals en).
+#
+# Personio fetches one more careers page per preferred language some posting
+# has (at most 5); Recruitee needs no extra request. To set the language of one company only, put the
+# ATS's own language param on its careers_url — `?language=xx` on Personio,
+# `?lang=xx` on Recruitee; with dedup_include_language off it overrides this
+# list for that entry, and with it on every version comes back anyway.
+#
+# preferred_languages: [en]
 
 # -- Interamt.de searches (optional, German public sector) --
 # Read by scan-interamt.mjs (`npm run scan:interamt`), a separate Playwright
@@ -88,6 +115,48 @@
 #   - was: "Informatiker"
 #   - was: "Datenanalyst"
 #   - was: "Systemadministrator"
+
+# -- SEEK NZ keyword searches (optional) --
+# Read by scan-seek.mjs (`npm run scan:seek`), which covers NZ-domestic
+# employers and recruiters with no public ATS board. Fetches the SEO path
+# (`nz.seek.com/<keyword>-jobs[/in-<Location>]`), paging `?page=N` up to
+# `max_pages` (default 5, cap 50) and optionally scoping to the last N days via
+# `daterange` (or `--daterange N` / `--pages N` on the CLI). title_filter,
+# location_filter and data/blacklist.md below apply.
+#
+# `keyword` is the search text; `location`, `daterange` and `max_pages` are optional.
+#
+# seek_searches:
+#   - keyword: "data analyst"
+#     location: "Wellington"
+#     daterange: 7
+#     max_pages: 5
+
+# -- TopDev keyword searches (optional, Vietnam) --
+# Read by scan-topdev.mjs (`npm run scan:topdev`), a separate Playwright scanner
+# for TopDev (topdev.vn), a Vietnam-wide job board with no reachable listing
+# API: a bare fetch answers HTTP 200, but the search results are hydrated in the
+# browser, so the postings are not in the HTML. Same architectural pattern as
+# scan-interamt.mjs and scan-dayforce.mjs.
+#
+# `keyword` is required and is submitted to TopDev's own search. `location` is
+# optional and narrows by the board's region id — only Ho Chi Minh, Hanoi and Da
+# Nang have ever been observed, so any other value is rejected rather than
+# guessed into the URL; omit it for a nationwide search. `max_pages` is optional
+# (default 5, cap 50).
+#
+# There is no date filter: a posting older than the last run but never seen
+# before is still new to you, so dedup is decided by scan-history, not by age.
+#
+# Results are still filtered by title_filter/location_filter below, and
+# data/blacklist.md applies.
+#
+# topdev_searches:
+#   - keyword: "backend"
+#     location: "Ho Chi Minh"
+#     max_pages: 5
+#   - keyword: "data engineer"
+#     location: "Hanoi"
 
 # -- Dayforce (Ceridian) Recruiting boards (optional) --
 # Read by scan-dayforce.mjs (`npm run scan:dayforce`), a separate Playwright
@@ -148,15 +217,49 @@
 # Turn strict on for those sweeps. It only bites when a restricting tier
 # (allow / block / block_hard) is set; `strict: true` alone restricts nothing.
 #
+# `remote_title_fallback` defaults to true (also when omitted). After a nonempty
+# allow list fails to match the structured location or a supported URL hint,
+# an explicit Remote title can still admit the posting. Set false to disable
+# only that last rescue in both scan.mjs and scan-ats-full.mjs. Unlike strict,
+# this does not change missing-location handling, tier precedence, URL hints,
+# or an explicitly allowed Remote location. It is not an eligibility check.
+# Opting out can miss remote roles listed under an unrelated hiring office.
+# For configured scan.mjs targets, field_filters.location.positive plus
+# filter_on: [title, location] is an existing alternative that gates the
+# structured location only. Reverse scans do not consume those field gates;
+# unlike the shared location filter, that alternative does not use URL hints.
+#
+# "Washington" in allow or always_allow means the state: it does not match
+# Washington, DC, so "Seattle, Washington" passes and "Washington, DC" does
+# not. To target DC, list "DC" or "D.C." (either one matches both spellings).
+# In block and block_hard, "Washington" still matches both.
+#
+# A generic allow entry ("Remote", "Remote work", "Work from home", "Anywhere",
+# "Distributed") says nothing about where the role is. When always_allow or
+# allow also names a country ("United States", "Germany") or a US state name,
+# that entry no longer admits a location that names only other places: with
+# the example below, "Remote (Hong Kong)" and "Remote - Toronto" are rejected,
+# and a Remote title cannot rescue them either. "Remote" alone and "Remote -
+# Austin, TX" still pass. A bare two-letter code does not count as a country
+# here, because US lists use them for states. A list with no country, or with a
+# region ("Europe", "EMEA", "Worldwide"), matches as before.
+#
 # Example below targets US-based remote + a couple of US metros, blocking
-# common foreign hubs. Customize to your geography.
+# common foreign hubs. Customize to your geography. Keywords match whole words
+# and take no `word:`/`stem:` prefix. A Chinese or Japanese keyword matches
+# anywhere in the location (北京 matches "北京市海淀区"), because those scripts
+# put no space between words. Some providers mark remote roles in their
+# own words: arbeitsagentur writes "Deutschlandweit (Homeoffice)", so a German
+# commute filter needs always_allow: ["Deutschlandweit"] (see its entry below).
 
 # location_filter:
 #   # always_allow is checked BEFORE block — keep this list to your home region only
 #   always_allow:
-#     - "United States"   # also admits City, ST homonyms (Dublin, OH) via USPS states
+#     - "United States"   # also admits City, ST homonyms (Dublin, OH) via USPS states;
+#                         # "Georgia" is also a country, so the name loses to block
 #     - "New York"
 #   # strict: true       # reject postings with no location — see note above
+#   # remote_title_fallback: false  # require allow to match location evidence
 #   allow:
 #     - "Remote"
 #     - "United States"
@@ -175,6 +278,10 @@
 #     - "Brazil"
 #     - "Australia"
 
+# Conditional office/hybrid-city + remote-country rules are also opt-in:
+# location_filter.workplace_policy (see docs/WORKPLACE_GEOGRAPHY.md). Unlike
+# an allow entry of "Remote", this checks where remote applicants may work.
+
 # -- Country-eligibility filter (optional, opt-in, #2093) --
 # location_filter only reads the ATS provider's STRUCTURED location field
 # (e.g. "Remote"). Many US companies tag every remote requisition "Remote"
@@ -182,7 +289,11 @@
 # restriction ("US-based candidates only" vs. "US or Canada eligible")
 # often lives only in the job description BODY TEXT. This filter reads that
 # text (same field content_filter reads) and cross-references it against
-# your own country from `location.country` above.
+# your own country from `location.country` above. It also reads a board's
+# eligibility line when the board states one outside the description:
+# CryptocurrencyJobs says "can be done remotely anywhere in the United
+# States", which a phrase like "remotely anywhere in the united states"
+# matches and none of the example phrases below do.
 #
 # Semantics (case-insensitive substring), same "don't penalize missing
 # data" discipline as location_filter:
@@ -226,6 +337,65 @@
 #   min: 100000
 #   max: 0
 #   currency: "USD"
+
+# -- Employment-type filter (optional) --
+# Keep only the employment types you want: full_time, part_time, contract,
+# temporary, internship. Applied right after the salary filter. It reads the
+# type a provider takes from the source's own field, never the title or
+# description. scan:full does not apply this filter yet.
+# Providers that set it, and the field each reads:
+#   ashby            employmentType
+#   himalayas        employmentType ("Full Time", "Contractor", ...)
+#   kula             employmentType
+#   lever            categories.commitment (free text per employer;
+#                    "Permanent" does not give the hours, so it stays unknown)
+#   personio         employment_type_slug and schedule_slug (careers page),
+#                    <employmentType> and <schedule> (XML feed); trainee
+#                    (an apprenticeship) stays unknown
+#   recruitee        employment_type_code (fixed term counts as temporary)
+#   remotive         job_type ("freelance" counts as contract)
+#   smartrecruiters  typeOfEmployment.label; an experienceLevel of
+#                    internship decides
+#   wellfound        jobType
+#   weworkremotely   <type>
+#   workable         employment_type (widget), the Type column (markdown
+#                    fallback), <jobtype> (scan:full's feed); an
+#                    experience level of Internship decides on the widget and
+#                    the feed, and the markdown fallback cannot see it
+#   wttj             contract_type ("freelance" counts as contract)
+# Every other provider leaves it unknown.
+#
+# Semantics:
+#   - a type in `allow` → kept; any other known type → removed
+#   - unknown type → kept, unless `include_unknown: false`. Most boards expose
+#     no type, so `false` drops every posting from them.
+#   - a value outside the five above is a config error (scan.mjs exits before
+#     fetching), so a typo like "contractor" cannot silently drop contracts
+#   - removals are counted on the "Filtered by employment type" summary line
+#   - the type is also written to scan-history.tsv's employment_type column
+#   - If this entire block is absent, nothing is filtered on employment type.
+#
+# Example: contract and part-time roles only
+# employment_type_filter:
+#   allow: [contract, part_time]
+#   include_unknown: true
+
+# -- Workplace filter (optional) --
+# Filter scanned jobs by workplace model (remote | hybrid | onsite).
+# Set only from the provider's dedicated field (for example Ashby, Lever, Getro,
+# Consider, a16z speedrun).
+#
+# Semantics:
+#   - allow: list of allowed workplace types ('remote', 'hybrid', 'onsite')
+#   - include_unknown: whether jobs with no workplaceType pass (default: true)
+#   - If this entire block is absent, workplace type is not filtered (default behavior)
+#
+# Example: target remote or hybrid roles, dropping postings that don't state workplace type
+# workplace_filter:
+#   allow:
+#     - remote
+#     - hybrid
+#   include_unknown: false
 
 # Read-only portal housekeeping: `node stats.mjs --prune --summary`.
 # Uses exact-lowercase company names, scan history and recent health evidence.
@@ -336,6 +506,45 @@
 #         - "gpt"
 #         - "llm"
 #         - "claude"
+#
+# min_match (optional): require that many DISTINCT positive entries instead of
+# any one. One generic word ("demo", "customers") is a weak signal; two or
+# three together describe the role. Only in a block that sets min_match:
+#   - " | " (with spaces) separates spellings of ONE trait, so
+#     "pre-sales | presales" counts once however many spellings appear
+#   - duplicate entries ("Demo", "demo") count once
+#   - accents, case and typographic hyphens are folded (customer‑facing with a
+#     non-breaking hyphen matches "customer-facing")
+#   - any `negative` entry still rejects, whatever the count
+# min_match must be an integer from 1 to the number of distinct positive
+# entries; scan.mjs refuses to start otherwise. A by_title_keyword rule can set
+# its own min_match; it does not inherit the global one.
+#
+# rescue_title_misses (optional, default false): a posting whose title matches
+# no title_filter.positive keyword normally never reaches this filter. With
+# true, it still gets one chance on its description: it is kept only when its
+# description is non-empty and passes the global positive/negative pair (with
+# min_match). A title_filter.negative hit is never rescued, by_title_keyword
+# rules never apply to a title miss, and a non-empty `positive` list is
+# required. A title miss that this check does not keep is counted under
+# "Filtered by title" and recorded as skipped_title, as before. The summary
+# adds a "Title misses kept by content" line. Providers without a list
+# description (see above) give a title miss nothing to be rescued on.
+# scan.mjs and scan-dayforce.mjs apply it. scan-ats-full.mjs does not: it skips
+# a board by title before downloading descriptions, so it warns and drops
+# title misses as without the key.
+#
+# Example: select customer-facing technical roles whatever they are called
+# content_filter:
+#   positive:
+#     - "customer-facing"
+#     - "pre-sales | presales"
+#     - "proof of concept | poc"
+#     - "word:demo | demos"
+#   negative:
+#     - "no customer interaction"
+#   min_match: 2
+#   rescue_title_misses: true
 
 # -- Visa / work-authorization filter (optional) --
 # Surfaces roles that sponsor a work visa — US (H-1B / H-1B1 / O-1), Singapore
@@ -375,11 +584,52 @@
 #     - "no sponsorship"
 #     - "unable to sponsor"
 
+# -- Experience filter (optional, off unless set) --
+# Reads the years of experience each NEW posting's JD asks for, after every
+# other cut, and marks a posting `above band` when the JD clearly states an
+# overall minimum above your band. By default nothing is dropped: a wrong drop
+# silently costs you a real job, a wrong label costs one glance at a row. Set
+# `action: drop` to remove those postings instead. Your years come from config/profile.yml
+# (candidate.years_of_experience). One JD request per new posting at most, via
+# the ATS's public JSON API: Greenhouse, Lever, Ashby (one request per board),
+# Workday, SmartRecruiters, Workable, Zoho Recruit. Zero LLM tokens. Other hosts
+# fall back to the listing's own description, which is shown but never drops.
+# The first scan with this on reads every new posting's JD, so it runs longer.
+#
+# In band: the JD's minimum is <= your years + stretch_years. A range counts by
+# its floor ("3-5 years" is a 3), and "7 with a BS or 5 with an MS" by its
+# lowest bar, and several required bars by the lowest. Never dropped, only
+# labelled on the pipeline row (`yrs:`): preferred-only and skill-specific
+# figures ("2+ years of SQL"), bars with an "equivalent combination of
+# education and experience" route, JDs that state none, and JDs that could
+# not be read.
+#
+# Independent of skip_tiers: that reads the title, this reads the JD. Use both
+# (skip_tiers drops interns cheaply, before any JD is fetched) or either.
+#
+# experience_filter:
+#   enabled: true
+#   stretch_years: 1     # how far above your years a JD's minimum may go (default 1)
+#   action: label        # label (default: keep every row, mark `above band`) | drop
+#   # years: 4           # overrides candidate.years_of_experience for scanning
+#   # concurrency: 4     # parallel JD requests (1-16)
+#
+# Example, strict: 3 years, stretch_years: 0 keeps "2-4" and "3-5" (floors 2
+# and 3) and marks "4+", "5-7" and "5+" above band (or drops them with
+# `action: drop`).
+
 # -- Title filter --
 # The scanner uses these keywords to decide if a title is relevant.
 # At least 1 positive must match AND 0 negatives must match (case-insensitive).
 #
 # skip_tiers: [intern, entry]  # optional: skip listings by seniority tier (note: unrecognized/plain titles fall back to 'mid')
+#   A tracked_companies / job_boards entry can set its own skip_tiers, which replaces this list for
+#   that entry; skip_tiers: [] turns the tier filter off for it.
+#
+#   A tracked_companies / job_boards entry can carry its own title_filter, which replaces this
+#   global filter for that entry only (including replacing global negatives, so restate any
+#   negatives like junior or intern if that entry still wants them). An entry with negatives
+#   but no positives keeps the global positive keywords and replaces only the negative list.
 
 title_filter:
   # A `positive` entry is matched case-insensitively as a substring — except a
@@ -794,10 +1044,6 @@ search_queries:
     query: 'site:jobs.lever.co ("AI Engineer" OR "Machine Learning") ("visa sponsorship" OR "H-1B")'
     enabled: false
 
-  - name: Wellfound - AI + Visa sponsorship
-    query: 'site:wellfound.com "AI Engineer" OR "LLM Engineer" OR "Forward Deployed" ("visa sponsorship" OR "will sponsor")'
-    enabled: true
-
   # --- Healthcare example (uncomment your profession, remove the rest) ---
   # # -- Healthcare --
   # # Adapt these terms for your healthcare specialty: "Registered Nurse", "Physician Assistant",
@@ -810,10 +1056,6 @@ search_queries:
   # 
   # - name: Greenhouse — Healthcare
   #   query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "Registered Nurse" OR "Physician Assistant" OR "Healthcare Administrator" remote'
-  #   enabled: true
-  # 
-  # - name: Wellfound — Healthcare
-  #   query: 'site:wellfound.com "Registered Nurse" OR "RN" OR "Healthcare Administrator" remote'
   #   enabled: true
 
   # --- Finance/Operations example (uncomment your profession, remove the rest) ---
@@ -831,9 +1073,9 @@ search_queries:
   #   query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "Financial Analyst" OR "FP&A" OR "Operations Manager" remote'
   #   enabled: true
   # 
-  # - name: Wellfound — Finance/Operations
-  #   query: 'site:wellfound.com "Financial Analyst" OR "Operations Manager" OR "Project Manager" remote'
-  #   enabled: true
+  # # Wellfound is read as a board, not searched: copy the "Wellfound (board)"
+  # # stanza from the job_boards examples with
+  # # wellfound.roles: [financial-analyst, operations-manager, project-manager]
 
   # --- Marketing/Sales/Customer Success example (uncomment your profession, remove the rest) ---
   # # -- Marketing / Sales / Customer Success --
@@ -851,9 +1093,9 @@ search_queries:
   #   query: 'site:boards.greenhouse.io OR site:job-boards.greenhouse.io "Marketing Manager" OR "Customer Success Manager" OR "Account Executive" remote'
   #   enabled: true
   # 
-  # - name: Wellfound — Marketing/Sales
-  #   query: 'site:wellfound.com "Marketing Manager" OR "Sales Manager" OR "Customer Success Manager" remote'
-  #   enabled: true
+  # # Wellfound is read as a board, not searched: copy the "Wellfound (board)"
+  # # stanza from the job_boards examples with
+  # # wellfound.roles: [marketing-manager, sales-manager, account-executive]
 
   # -- Ashby (kept as AI example) --
   - name: Ashby — AI Engineer
@@ -1057,7 +1299,9 @@ search_queries:
   #   enabled: true
 
   # -- Türkiye / Turkey job portals --
-  # WebSearch queries for Turkish job boards (no public ATS APIs).
+  # WebSearch queries for Turkish job boards. Kariyer.net has a built-in
+  # provider (`provider: kariyer`, see the job-boards stanzas), so these
+  # site: queries are the keyword-scoped fallback for it and for the others.
   # [CUSTOMIZE] Replace keywords with your target roles in Turkish.
 
   - name: Kariyer.net — Backend / Software Engineer
@@ -1106,10 +1350,12 @@ search_queries:
 # already know their target careers URL. `args` are optional and can help the
 # parser author (reuse across companies, debug flags, JSON snapshots, etc.).
 #
-# The script must resolve inside the repo root (security boundary in
-# providers/local-parser.mjs). Keep a private, non-contributed parser under a
-# gitignored path — `local/` is ignored by default — so it is never staged;
-# `portals.yml` itself is already gitignored. Use `scripts/parsers/` only for a
+# The script must resolve inside the repo root or the data root's `local/`
+# folder (security boundary in providers/local-parser.mjs). Keep a private,
+# non-contributed parser in `local/`: gitignored in a checkout, so it is never
+# staged, and under the data root in a Claude Code plugin install, where a
+# plugin update replaces the code root. `portals.yml` itself is already
+# gitignored. Use `scripts/parsers/` only for a
 # parser you intend to upstream. See docs/local-parser-cookbook.md.
 #
 # JavaScript parser:
@@ -1144,42 +1390,69 @@ search_queries:
 #   recruitee       <slug>.recruitee.com
 #   bamboohr        <tenant>.bamboohr.com               (or api: field)
 #   breezy          <tenant>.breezy.hr                  (or api: field)
+#   taleez          <tenant>.taleez.com                 (or api: field)
+#   inhire          <tenant>.inhire.app                 (or api: field; Brazilian ATS, one list request per tenant)
+#   deel            jobs.deel.com/<slug>                (Deel job board; a tenant that redirects off-host is not readable)
+#   inrecruiting    <tenant>.intervieweb.it             (Zucchetti InRecruiting career page; /en/career etc. picks the language)
+#   keka            <tenant>.keka.com                   (Keka careers page, /careers; the feed id is read off that page)
+#   velorahr        <tenant>.career.velorahr.com/<slug>-<siteId>   (Velora HR career site, any path under it; the site id ending the first path segment is required)
+#   kula            careers.kula.ai/<slug>              (Kula career site, any path under it; reads the tenant RSS feed /<slug>/feed)
+#   darwinbox       <tenant>.darwinbox.in/ms/candidatev2/<companyId>/careers/...   (or darwinbox.com; the company id is required; a bare tenant host is not claimed)
+#   turbohire       <tenant>.turbohire.co               (TurboHire careers page, any path; the org id is looked up from the subdomain)
+#   careerpuck      app.careerpuck.com/job-board/<permalink>   (CareerPuck board, any path under it; the list is read from api.careerpuck.com)
 #   solidjobs       solid.jobs/public-api/offers/<division>
 #   comeet          api: https://www.comeet.co/careers-api/2.0/company/<uid>/positions?token=<token>
 #   personio        <slug>.jobs.personio.(de|com)
 #   pinpoint        <slug>.pinpointhq.com
+#   polymer         jobs.polymer.co/<slug>  (or api: https://api.polymer.co/v1/hire/organizations/<slug>/jobs)
+#   clearcompany    careers-api.clearcompany.com/v1/<siteId>  (or the careers page's embed script
+#                   careers-content.clearcompany.com/js/v1/career-site.js?siteId=<siteId>)
 #   prevueaps       <tenant>.prevueaps.ca  (or api: field; domainId resolved from the tenant's /jobs/ page)
 #   rippling        ats.rippling.com/<slug>/jobs
+#   dover           app.dover.com/<Company>/careers/<board-uuid>
+#   notion          <workspace>.notion.site/<Title>-<page-id>  (the page id must be in the URL; ?v=<view-id> picks a database view)
 #   jibeapply       <slug>.jibeapply.com/jobs  (or provider: jibeapply + api: for a branded host's own /jobs path)
 #   jobvite         jobs.jobvite.com/<slug>  (add company_eid: to skip the board lookup — see the stanza below)
 #   tencent         careers.tencent.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
 #   meituan         zhaopin.meituan.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
 #   alibaba         talent.alibaba.com   (zh-CN board; each keywords: entry queried server-side, results deduped)
+#   aldi-nord       www.aldi-nord.de, www.aldi.(nl|be|lu|fr|es|pt|pl)  (ALDI Nord's own country sites; optional aldi_nord: block, see below)
 #   gupy            portal.gupy.io       (pt-BR board-wide Gupy search; each gupy.keywords entry swept separately, results
 #                   deduped. A single tenant's <slug>.gupy.io career page is NOT claimed)
+#   kariyer         www.kariyer.net/is-ilanlari[/<city>|/<position>|?kw=...]  (TR board-wide; the
+#                   same host's employer profile pages under /firma-profil are NOT claimed)
 #   feishu-jobs     jobs.bytedance.com or <tenant>.jobs.feishu.cn
 #   mokahr          (app|hire-r1).mokahr.com/(social-recruitment|campus-recruitment|apply)/<org>/<siteId>
 #   workday         <tenant>.wd<N>.myworkdayjobs.com[/<locale>]/<board>
 #   avature         <tenant>.avature.net  (branded host → provider: avature + api: the /careers/SearchJobs URL)
 #   amazon          amazon.jobs           (global board; provider: amazon + an amazon: filter block, see below)
+#   goldman         higher.gs.com         (Goldman Sachs careers; optional goldman: { experiences: [...] }, see below)
 #   successfactors  *.successfactors.(eu|com) / *.jobs2web.com  (SAP SF Recruiting Marketing / RMK boards;
 #                   branded hosts like jobs.<company>.com need provider: successfactors + api: <board origin>)
+#   successfactors-classic  career<N>.successfactors.(eu|com)/career?company=<ID>  (SAP's own hosted
+#                   job board, no RMK tiles or CSB API; the same host family as above, told apart by
+#                   the /career?company= path, which successfactors leaves to this provider)
 #   oraclecloud     <tenant>.fa[.<region>][.ocs].oraclecloud[1-99].com/hcmUI/CandidateExperience/.../sites/<siteNumber>/jobs
 #                   (Oracle Recruiting Cloud / Fusion CX — JPMorgan, Oracle, BNY, Amex, Honeywell; siteNumber
 #                   auto-derived from the URL, override with provider: oraclecloud + siteNumber: / optional locationId:.
 #                   Newer tenants are issued a NUMBERED apex, e.g. <tenant>.fa.ocs.oraclecloud26.com — same shapes,
-#                   same provider; just use whichever host the employer's careers link actually points at.)
+#                   same provider; just use whichever host the employer's careers link actually points at.
+#                   A branded host that serves ORC on the employer's own domain needs oracle_host:, see below.)
 #   taleo           <tenant>.taleo.net/careersection/<section>/jobsearch.ftl (Taleo Enterprise Edition public sections)
-#   eightfold       <tenant>.eightfold.ai  (Eightfold AI talent-acquisition boards; a branded CNAME like
-#                   careers.<company>.com is NOT matched — point at the eightfold.ai host. Optional domain:
+#   eightfold       <tenant>.eightfold.ai  (Eightfold AI talent-acquisition boards; a branded host like
+#                   careers.<company>.com is NOT matched unless the entry names it in eightfold_host:. Optional domain:
 #                   for multi-brand tenants. Page size is server-capped at 10, so bound big boards with max_pages)
 #   gem             jobs.gem.com/<boardId>; or explicit api:
 #                   https://api.gem.com/job_board/v0/<vanity_path>/job_posts/
 #                   (copy the vanity path from the employer's public Gem URL;
 #                   do not guess it from the company name)
-#   join            join.com/companies/<slug>  (SSR __NEXT_DATA__ parse, no separate API)
-#   icims           careers-<tenant>.icims.com / *.icims.com
+#   join            join.com/companies/<slug>
+#   wellfound       wellfound.com/company/<slug>  (one company on Wellfound, any path under it; the Wellfound
+#                   board is not detected — provider: wellfound + a wellfound: block, see the stanza below)
+#   icims          careers-<tenant>.icims.com / *.icims.com
 #   jazzhr          <tenant>.applytojob.com or <tenant>.applytojob.com/apply
+#   applicantpro    <tenant>.applicantpro.com (ApplicantPro / isolved Talent Acquisition; also a
+#                   www.applicantpro.com/openings/<tenant>/… link. One entry per tenant subdomain)
 #   pythonorg       python.org/jobs
 #   generalist-world generalist.world/jobs/  (curated generalist / operator roles board; SSR HTML, one fetch; or provider: generalist-world)
 #   applitrack      www.applitrack.com/<district>/onlineapp/  (Frontline AppliTrack K-12 board; optional default_location: "City, ST" is appended to site names that name no place)
@@ -1196,6 +1469,25 @@ search_queries:
 #                   recruiting.ultipro.(ca|com) / recruiting2/3.ultipro.com variants, matched by pattern —
 #                   whichever host the tenant's own board URL uses is preserved, not normalized)
 #   adp-workforcenow  workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=...&ccId=...
+#   adp-myjobs      myjobs.adp.com/<site>/cx/...  (ADP Recruiting Management career site; <site> is the first path segment, e.g. apply or wwtexternalcareersite)
+#   zoho-recruit    <tenant>.zohorecruit.<com|ca|eu|in|com.au|jp|sa|com.cn>  (any path; the board is always read from /jobs/Careers)
+#   hibob           <tenant>.careers.hibob.com  (HiBob "Bob" careers site; any path, including a /jobs/<uuid> or /jobs/<uuid>/apply link)
+#   factorial       <tenant>.factorialhr.com, <tenant>.factorial.com or another Factorial domain (.factorialhr.pt, .factorial.es, ...)  (Factorial ATS careers site; any path, the board is always read from the tenant's home page)
+#   homerun         <slug>.homerun.co or feed.homerun.co/<slug>  (branded careers domain → api: https://feed.homerun.co/<slug>)
+#   computrabajo    <country>.computrabajo.com/<search path>  (LatAm board; e.g. co.computrabajo.com/trabajo-de-sistemas)
+#   magneto         www.magneto365.com/co/<search path>       (Colombia board; e.g. /co/trabajos/buscar/tecnologia)
+#   bulldogjob      bulldogjob.pl/companies/jobs[/s/<filters>]  (Polish tech board; filters live in the path, e.g. /s/role,devops/city,Remote)
+#   jobindex        www.jobindex.dk/jobsoegning?<query>  (Danish board; filters as query parameters, e.g. ?q=python&geoareaid=15182)
+#   paycom          www.paycomonline.net/v4/ats/web.php/portal/<client-key>/career-page  (or a posting link under the
+#                   same /portal/<client-key>/ path; or provider: paycom with client_key:)
+#   paylocity       recruiting.paylocity.com/Recruiting/Jobs/All/<board-guid>  (or api: field; a posting's
+#                   /Jobs/Details/<id> link carries no board id and is NOT claimed)
+#   remote-com      apply.remote.com  (Remote's own ATS, single company; any path, the board is always read whole)
+#   hirehive        <tenant>.hirehive.com  (any path, including a posting link; the board is always read from /api/v2/jobs)
+#   trakstar        <client>.hire.trakstar.com or <client>.recruiterbox.com
+#                   (or api: https://jsapi.recruiterbox.com/v1/openings?client_name=<client>)
+#   talentlink      <tenant>.recruitmentplatform.com/[<site path>/][<page>.html]  (Lumesse TalentLink career page; a
+#                   posting's details.html?jobId=<id> link is claimed too and read as its site's board)
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -1209,11 +1501,39 @@ search_queries:
 # origin (the /widgets endpoint lives on that same origin, so no separate
 # `api:` is needed).
 #
+# rexx is explicit-only too: a rexx systems job portal runs on the employer's
+# own branded host (a CNAME onto rexx's cloud), so there is no URL pattern to
+# claim. Set `provider: rexx` + `careers_url` pointed at the portal's job list
+# page (e.g. https://jobs.exampleco.com/stellenangebote.html).
+#
+# Bizneo HR is explicit-only too: its career sites run on the employer's own
+# domain (empleo.<company>.com, jobs.<company>.com), so there is no vendor host
+# to claim. Set `provider: bizneo` + `careers_url` pointed at the site (only the
+# host is used, and it must be a public named https host: no credentials, port,
+# IP address or local name; the provider reads its `/jobs` list).
+#
 # Eploy is also explicit-only: standard tenants use unrelated branded domains,
 # so a URL cannot be distinguished safely from a non-Eploy careers site. Set
 # `provider: eploy`; the provider reads the public `/live-jobs.xml` on that
 # origin. A custom frontend merely handing applications to Eploy (for example,
 # Specsavers' Attrax jobs page) is not the same protocol and is not supported.
+#
+# viterbit is explicit-only as well: the career sites on Viterbit (a Spanish ATS) run
+# on the employer's own domain (careers.prosegur.com), and its vendor-hosted
+# <slug>.viterbit.site hosts answer a Cloudflare challenge to a plain request, so
+# there is no host to claim. Set `provider: viterbit` + `careers_url` (any path;
+# the board is read from the site's home page).
+#
+# sitemap is explicit-only too: it reads an employer's own careers-site job
+# sitemap (sitemaps.org XML, as announced by a `Sitemap:` line in robots.txt)
+# for an employer with no public ATS API or whose ATS API host disallows
+# crawlers. Set `provider: sitemap` plus `sitemap: { url, job_path }`; every
+# sitemap URL is checked against the site's robots.txt before it is fetched.
+#
+# wp-job-manager is explicit-only too: it reads the WP Job Manager plugin's
+# `/?feed=job_feed` RSS feed off any WordPress job board, and a WordPress
+# host has nothing to detect. Set `provider: wp-job-manager` + `careers_url`
+# (only the host is used). Check that board's robots.txt first.
 #
 # Some providers are job boards / aggregators with no per-company careers
 # URL to detect, so they must be selected with an explicit `provider:`
@@ -1238,6 +1558,82 @@ search_queries:
 #   careers_url: https://exampleco.bamboohr.com/careers   # any *.bamboohr.com host
 #   enabled: true
 #
+# - name: Example Bizneo Co
+#   careers_url: https://empleo.exampleco.com/jobs        # Bizneo HR career site on the employer's own domain
+#   provider: bizneo       # required — branded domains cannot auto-detect
+#   max_pages: 30          # optional page cap (default 30, max 100)
+#   enabled: true
+#
+# - name: Example Homerun Co
+#   careers_url: https://exampleco.homerun.co            # any <slug>.homerun.co host
+#   # Branded careers domain: api: https://feed.homerun.co/exampleco (the feed the careers page links)
+#   enabled: true
+#
+# - name: Example InHire Co
+#   careers_url: https://exampleco.inhire.app             # any <tenant>.inhire.app host
+#   enabled: true
+#
+# - name: Example InRecruiting Co
+#   careers_url: https://exampleco.intervieweb.it/it/career   # any <tenant>.intervieweb.it host
+#   max_pages: 40          # optional page cap (15 jobs/page, default 40, max 200)
+#   enabled: true
+#
+# - name: Example Keka Co
+#   careers_url: https://exampleco.keka.com/careers       # any <tenant>.keka.com host
+#   enabled: true
+#
+# - name: Example VeloraHR Co
+#   careers_url: https://exampleco.career.velorahr.com/exampleco-123   # any <tenant>.career.velorahr.com host; the number ending the first path segment is the site id
+#   enabled: true
+#
+# - name: Example Kula Co
+#   careers_url: https://careers.kula.ai/exampleco        # any careers.kula.ai/<slug> page
+#   enabled: true
+#
+# - name: Example Darwinbox Co
+#   careers_url: https://exampleco.darwinbox.in/ms/candidatev2/main/careers/allJobs   # keep the id after /candidatev2/ as your link has it
+#   max_pages: 20          # optional page cap (50 jobs/page, default 20, max 200)
+#   enabled: true
+#
+# - name: Example TurboHire Co
+#   careers_url: https://exampleco.turbohire.co/          # any <tenant>.turbohire.co host
+#   enabled: true
+#
+# - name: Example CareerPuck Co
+#   careers_url: https://app.careerpuck.com/job-board/exampleco   # the board link off the careers page
+#   enabled: true
+#
+# - name: Example Paycom Co
+#   careers_url: https://www.paycomonline.net/v4/ats/web.php/portal/0123456789ABCDEF0123456789ABCDEF/career-page
+#                          # the career-page link off the company site; the hex segment is the client key
+#   enabled: true
+#
+# - name: Example Paylocity Co
+#   careers_url: https://recruiting.paylocity.com/Recruiting/Jobs/All/00000000-0000-4000-8000-000000000000
+#                          # the board link off the careers page; the GUID is the board id
+#   enabled: true
+#
+# - name: Example HireHive Co
+#   careers_url: https://exampleco.hirehive.com/   # any <tenant>.hirehive.com host
+#   max_pages: 20          # optional page cap (100 jobs/page, default 20, max 100)
+#   enabled: true
+#
+# - name: Example TalentLink Co
+#   careers_url: https://exampleco.recruitmentplatform.com/   # keep the site path your link has, e.g. /internal/ or /FO/<code>/components/
+#   max_pages: 20          # optional page cap (100 jobs/page, default 20, max 200)
+#   enabled: true
+#
+# - name: Example TalentLink Branded Co
+#   careers_url: https://careers.exampleco.example/jobsearch.html   # the employer's page that embeds the TalentLink job list
+#   provider: talentlink   # branded domains are never auto-detected
+#   enabled: true
+#
+# - name: Example Talents Connect Co
+#   careers_url: https://karriere.exampleco.example/   # the "powered by Talents Connect" career site; keep a language path such as /en/
+#   provider: talents-connect   # every tenant is on its own domain, never auto-detected
+#   max_pages: 20          # optional page cap (250 jobs/page, default 20, max 200)
+#   enabled: true
+#
 # - name: Example Collage HR Co
 #   careers_url: https://secure.collage.co/jobs/exampleco      # explicit job-site address
 #   # Or pin the API directly: api: https://api.collage.co/v1/positions/exampleco
@@ -1247,8 +1643,41 @@ search_queries:
 #   careers_url: https://exampleco.breezy.hr              # any *.breezy.hr host
 #   enabled: true
 #
+# - name: Example Taleez Co
+#   careers_url: https://exampleco.taleez.com             # any <tenant>.taleez.com careers site
+#   enabled: true
+#
+# - name: Example Deel Board Co
+#   careers_url: https://jobs.deel.com/exampleco          # the tenant slug is the first path segment
+#   enabled: true
+#
+# - name: Example Factorial Co
+#   careers_url: https://exampleco.factorialhr.com        # or exampleco.factorial.com, exampleco.factorialhr.pt, ...; any path
+#   enabled: true
+#
+# - name: Example Viterbit Co
+#   careers_url: https://careers.exampleco.com            # the employer's own domain; any path, the board is read from the home page
+#   provider: viterbit
+#   enabled: true
+#
+# - name: Example HiBob Co
+#   careers_url: https://exampleco.careers.hibob.com/jobs  # any *.careers.hibob.com host; a label may carry a suffix (exampleco-641e1b39232b)
+#   enabled: true
+#
+# - name: Example ClearCompany Co
+#   careers_url: https://careers-api.clearcompany.com/v1/00000000-0000-4000-8000-000000000000
+#                          # the siteId GUID from the careers page's embed script
+#                          # (career-site.js?siteId=...); that script URL works too
+#   max_pages: 20          # optional page cap (100 jobs/page, default 20, max 300)
+#   enabled: true
+#
 # - name: Example Pinpoint Co
 #   careers_url: https://exampleco.pinpointhq.com         # any *.pinpointhq.com host
+#   enabled: true
+#
+# - name: Example Polymer Co
+#   careers_url: https://jobs.polymer.co/exampleco       # any jobs.polymer.co/<slug> board
+#   max_pages: 20          # optional page cap (server page size, default 20, max 100)
 #   enabled: true
 #
 # - name: Example PrevueAPS Co
@@ -1262,11 +1691,28 @@ search_queries:
 #                          # is logged if the cap truncates real results)
 #   enabled: true
 #
+# - name: Example Notion Co
+#   careers_url: https://exampleco.notion.site/Careers-00000000000040008000000000000000
+#                          # a public careers page or database; the page id is the last
+#                          # 32-hex segment, and an optional ?v=<view-id> picks the view
+#   enabled: true
+#
+# - name: Example Dover Co
+#   careers_url: https://app.dover.com/ExampleCo/careers/00000000-0000-4000-8000-000000000000
+#                          # the careers-page link; the board uuid is the last segment
+#   max_pages: 5           # optional page cap (300 jobs/page, default 5, max 20)
+#   enabled: true
+#
 # - name: Example JibeApply Co
 #   careers_url: https://exampleco.jibeapply.com/jobs     # any *.jibeapply.com/jobs host
 #   max_pages: 50          # optional page cap (10 jobs/page, default 50, max 500) —
 #                          # raise it for a tenant with 500+ open postings (a warning
 #                          # is logged if the cap truncates real results)
+#   enabled: true
+#
+# - name: Example Trakstar Hire Co
+#   careers_url: https://exampleco.hire.trakstar.com   # any <client>.hire.trakstar.com board
+#   max_pages: 20          # optional page cap (100 openings/page, default 20, max 50)
 #   enabled: true
 #
 # - name: Example Jobvite Co
@@ -1286,21 +1732,21 @@ search_queries:
 #   careers_url: https://careers.tencent.com/search.html  # any https://careers.tencent.com URL
 #   keywords: ["AI", "大模型"]   # each keyword is a separate server-side query, results deduped;
 #                                # omit keywords to pull the whole board
-#   max_pages: 20          # optional per-keyword page cap (100 posts/page, default 20)
+#   max_pages: 100         # optional per-keyword page cap (100 posts/page, default 100)
 #   enabled: true
 #
 # - name: 美团 (Meituan)
 #   careers_url: https://zhaopin.meituan.com/web/social   # any https://zhaopin.meituan.com URL
 #   keywords: ["AI", "大模型"]   # each keyword is a separate server-side query, results deduped;
 #                                # omit keywords to pull the whole board
-#   max_pages: 30          # optional per-keyword page cap (100 posts/page, default 30)
+#   max_pages: 100         # optional per-keyword page cap (100 posts/page, default 100)
 #   enabled: true
 #
 # - name: 阿里巴巴 (Alibaba)
 #   careers_url: https://talent.alibaba.com/off-campus/position-list   # any https://talent.alibaba.com URL
 #   keywords: ["AI", "大模型"]   # each keyword is a separate server-side query, results deduped;
 #                                # omit keywords to pull the whole board
-#   max_pages: 50          # optional per-keyword page cap (100 posts/page, default 50)
+#   max_pages: 100         # optional per-keyword page cap (100 posts/page, default 100)
 #   enabled: true
 #
 # - name: Example Feishu Jobs Co
@@ -1319,12 +1765,28 @@ search_queries:
 #   careers_url: https://apply.workable.com/exampleco   # any apply.workable.com/<slug> host
 #   enabled: true
 #
+# - name: Example ADP Myjobs Co
+#   careers_url: https://myjobs.adp.com/examplesite/cx/job-listing   # <site> = first path segment of the career site
+#   max_pages: 100          # optional page cap (200 jobs/page, default 100, max 1500)
+#   adpMyjobs:
+#     orgoid: ABCDEFGH12345678   # optional: skip the site-slug -> orgoid lookup (GET /public/staffing/v1/career-site/<site> returns it)
+#     fetchDetails: true    # optional: fetch each posting's detail for a description + posted date (off by default — the list carries neither)
+#     detailLimit: 25       # optional: max detail calls per sweep when fetchDetails is true
+#   enabled: true
+#
 # - name: Example ADP Workforce Now Co
 #   careers_url: https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=00000000-0000-0000-0000-000000000000&ccId=19000101_000001
 #   max_pages: 100          # optional page cap (20 jobs/page, default 100, max 1500)
 #   adpWorkforcenow:
 #     fetchDetails: true    # optional: fetch each posting's detail JSON for a description (off by default — the list payload carries no JD text)
 #     detailLimit: 25       # optional: max detail calls per sweep when fetchDetails is true
+#   enabled: true
+#
+# - name: Example Zoho Recruit Co
+#   careers_url: https://exampleco.zohorecruit.com/jobs/Careers   # any <tenant>.zohorecruit.<tld> URL
+#   zohoRecruit:
+#     fetchDetails: false   # optional: fetch each posting's page for its full description, date and salary (one extra request per posting)
+#     detailLimit: 25       # optional: max detail fetches per sweep when fetchDetails is true (max 100)
 #   enabled: true
 
 #
@@ -1354,6 +1816,15 @@ search_queries:
 #   max_pages: 25
 #   enabled: true
 #
+# - name: Example Branded ORC Co
+#   # Some employers serve Oracle Recruiting Cloud only on their own domain,
+#   # with no *.oraclecloud.com host to point at. Name that one host exactly
+#   # in oracle_host: (bare hostname: no scheme, port, path or *); the same
+#   # /hcmUI/CandidateExperience/.../sites/<siteNumber>/ URL shape applies.
+#   careers_url: https://careers.exampleco.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs
+#   oracle_host: careers.exampleco.com
+#   enabled: true
+#
 # - name: Example Taleo Co
 #   careers_url: https://example.taleo.net/careersection/demo/jobsearch.ftl
 #   max_pages: 100         # optional page cap (25 jobs/page, default 100, max 1000)
@@ -1363,9 +1834,14 @@ search_queries:
 #
 # - name: Example Eightfold Co
 #   # Eightfold AI talent-acquisition board. Auto-detects any *.eightfold.ai
-#   # tenant host. A branded CNAME (careers.exampleco.com) is NOT matched — the
-#   # API is host-pinned, so point careers_url (or api:) at the eightfold.ai form.
+#   # tenant host. A branded host (careers.exampleco.com) is NOT matched unless
+#   # named in eightfold_host: (below); otherwise point careers_url (or api:) at
+#   # the eightfold.ai form.
 #   careers_url: https://exampleco.eightfold.ai/careers
+#   # Some tenants serve the same API only from their own domain. Name that
+#   # one host exactly to allow it (bare hostname: no scheme, port, path or *):
+#   # careers_url: https://careers.exampleco.com/careers?domain=exampleco.com
+#   # eightfold_host: careers.exampleco.com
 #   # domain: exampleco.com  # optional — the server infers it from the tenant
 #                            # host; set it only for multi-brand tenants that
 #                            # scope their board by domain.
@@ -1382,6 +1858,24 @@ search_queries:
 #   eploy:                       # optional detail-page enrichment
 #     fetchDetails: false        # default false; sitemap-only is one request
 #     detailLimit: 25            # 1..100; ignored unless fetchDetails is true
+#   enabled: true
+#
+# - name: Example Sitemap Co
+#   # An employer's own careers-site job sitemap (sitemaps.org <urlset> or
+#   # <sitemapindex>). Use it when the employer has no public ATS API, or its
+#   # ATS API host disallows crawlers. robots.txt is checked before every
+#   # sitemap fetch; a disallowed sitemap is a named error.
+#   careers_url: https://careers.exampleco.com/jobs/
+#   provider: sitemap            # required — no URL pattern to auto-detect
+#   sitemap:
+#     url: https://careers.exampleco.com/sitemap.xml   # https, on the careers host
+#     # Regex over each <loc> path. (?<slug>) is required (the title);
+#     # (?<posting_id>) → externalId, (?<req_id>) → requisitionId.
+#     job_path: '^/jobs/(?<posting_id>\d+)/(?<slug>[^/]+)/?$'
+#     index_filter: ''           # optional regex over child <loc> in a sitemapindex
+#     max_sitemaps: 50           # 1..1000 child sitemaps read from an index
+#     fetchDetails: false        # JSON-LD JobPosting enrichment, title-filter survivors only
+#     detailLimit: 25            # 1..200; ignored unless fetchDetails is true
 #   enabled: true
 #
 # - name: Example Phenom Co
@@ -1401,11 +1895,28 @@ search_queries:
 #     selectedFields: { country: ["Germany"] }   # optional facet filter
 #   enabled: true
 #
+# - name: Example Rexx Co
+#   # rexx systems job portal on the employer's branded host. No
+#   # auto-detection, so provider: rexx must always be set. careers_url is
+#   # the job list page; a bare host or a path ending in "/" reads
+#   # stellenangebote.html there (portals under a path keep it:
+#   # https://karriere.exampleco.com/stellenmarkt/).
+#   careers_url: https://jobs.exampleco.com/stellenangebote.html
+#   provider: rexx
+#   max_pages: 30          # optional page cap (page size is the portal's own,
+#                          # 10-100 observed; default 30, max 200) — a warning
+#                          # is logged if the cap truncates real results
+#   enabled: true
+#
 # - name: Example Avature Co
 #   # Avature career site. Auto-detects any *.avature.net host; for a branded
 #   # host that proxies Avature (detect() won't auto-claim it), set
 #   # provider: avature + api: the SearchJobs URL explicitly instead.
 #   careers_url: https://exampleco.avature.net/careers/SearchJobs
+#   # A tenant with no SearchJobs lists postings per country; give that page
+#   # (provider: avature), the full URL in careers_url (or in api:, which wins over
+#   # careers_url), e.g. https://jobs.exampleco.com/en_US/careers/JobOpeningsSpain;
+#   # a bare origin in api: is requested as /careers/SearchJobs
 #   max_pages: 50          # optional page cap (only 6 jobs/page — Avature's hard
 #                          # limit — so ~300 postings by default, max 200 pages)
 #   # offset_param: offset  # optional — pins the pagination key for a tenant
@@ -1429,6 +1940,17 @@ search_queries:
 #   jazzhr:
 #     fetchDetails: false # optional: true fetches each posting's JSON-LD detail page (description, posted date)
 #     detailLimit: 25     # optional max detail calls when fetchDetails=true (max 100)
+#   enabled: true
+#
+# - name: Example ApplicantPro Co
+#   # ApplicantPro / isolved Talent Acquisition tenant. Auto-detects any
+#   # <tenant>.applicantpro.com host. A scan is two requests (the site id, cached
+#   # after the first scan, then one JSON list of every open posting).
+#   careers_url: https://exampleco.applicantpro.com/jobs/
+#   applicantpro:
+#     fetchDetails: false # optional: true fetches each posting's JSON-LD page for the description
+#     detailLimit: 25     # optional max detail calls when fetchDetails=true (max 100)
+#     # domainId: 12345   # optional: pin the site id instead of reading it from /jobs/
 #   enabled: true
 #
 # - name: Example PeopleSoft Co
@@ -1471,6 +1993,17 @@ search_queries:
 #   api: https://jobs.exampleco.com                  # RMK board origin
 #   enabled: true
 #
+# - name: Example SuccessFactors Classic Co
+#   # SAP SuccessFactors "classic" career site, hosted by SAP itself at
+#   # career<N>.successfactors.(eu|com)/career?company=<ID> (not an RMK board:
+#   # it has no /tile-search-results/). Auto-detected from that URL. Reads the
+#   # whole board, 50 postings per call, through the DWR calls the public search
+#   # page makes. The list carries no place, so location is empty: filter these
+#   # rows by title, not by location_filter.
+#   careers_url: https://career5.successfactors.eu/career?company=EXAMPLECO
+#   max_pages: 20          # optional cap on search calls of 50 (default 20, max 100)
+#   enabled: true
+#
 # - name: Example UKG Pro Co
 #   # UKG Pro / UltiPro Recruiting public job board. Auto-detects any
 #   # {host}/<tenant>/JobBoard/<boardId>/ URL across UKG's several recruiting
@@ -1485,18 +2018,42 @@ search_queries:
 #   enabled: true
 #
 # - name: Example join.com Co
-#   # join.com career page. Auto-detects any join.com/companies/<slug> URL and
-#   # parses the __NEXT_DATA__ JSON embedded in the server-rendered HTML — no
-#   # separate API.
+#   # join.com career page. Auto-detects any join.com/companies/<slug> URL,
+#   # reads the company id from the page and the job list from the public
+#   # GraphQL endpoint the page itself uses (100 postings per page).
 #   careers_url: https://join.com/companies/exampleco
 #   max_pages: 50           # optional page cap (default 50, max 200) — raise it
 #                            # for a tenant with 50+ pages of postings (a warning
 #                            # is logged if the cap truncates real results)
 #   enabled: true
 #
+# - name: Example Wellfound Co
+#   # A company's jobs on Wellfound. Auto-detects any wellfound.com/company/<slug>
+#   # URL; only the slug is read.
+#   careers_url: https://wellfound.com/company/exampleco
+#   max_pages: 25           # optional page cap (20 jobs/page, default 25, max 100)
+#   enabled: true
+#
 # Single-employer career sites on their own dedicated provider. Most auto-detect
 # from the company's own host (provider: optional, shown for clarity); a few need
 # it named. All still go under tracked_companies:.
+#
+# - name: ALDI Nord                       # single-company; the country sites' own job search API
+#   careers_url: https://www.aldi-nord.de/karriere/jobs.html   # also www.aldi.nl / .be / .lu / .fr / .es / .pt / .pl
+#   provider: aldi-nord                   # optional — those hosts also auto-detect
+#   aldi_nord:
+#     categories: []                      # optional jobCategoryIds, mostly shared by the country sites; [] = all.
+#                                         # 10420 Tech & IT, 19000 Data Analytics & Research, 12297 Finance &
+#                                         # Controlling, 10421 store sales (most postings), 10424 logistics
+#     locales: [de-DE]                    # optional; default: every locale of the host (www.aldi.be: nl-BE, fr-BE)
+#   max_pages: 500                        # optional, 10 postings/page (default 500, max 1000); a whole list is
+#                                         # 2 requests per locale, since the API returns pages cumulatively
+#   enabled: true
+#
+# - name: Bolt                           # single-company; Next.js careers page, every position in one HTML response
+#   careers_url: https://bolt.eu/en/careers/positions/   # a branded domain: never auto-detected
+#   provider: bolt                        # required; always reads the English positions page, one request
+#   enabled: true                         # the whole worldwide board (~190 postings, one request); location is left to location_filter
 #
 # - name: Dassault Systèmes              # single-company; Exalead card_search_api
 #   careers_url: https://www.3ds.com/careers/jobs   # auto-detects on *.3ds.com
@@ -1519,6 +2076,11 @@ search_queries:
 #   careers_url: https://www.heckler-koch.com/de/Karriere/Stellenangebote
 #   provider: hecklerkoch                 # optional — heckler-koch.com host also auto-detects
 #   enabled: true
+#
+# - name: Remote                          # single-company; Remote's own ATS, public JSON list
+#   careers_url: https://apply.remote.com/jobs   # auto-detects on apply.remote.com
+#   provider: remote-com                  # optional — apply.remote.com host also auto-detects
+#   enabled: true                         # location keeps the region codes: "Remote · EMEA (Europe, Middle East & Africa)"
 #
 # - name: Rheinmetall                     # single-company; SSR Nuxt vacancy list
 #   careers_url: https://www.rheinmetall.com/en/career/vacancies
@@ -1558,6 +2120,24 @@ search_queries:
 # - name: Example SchoolSpring District
 #   careers_url: https://exampledistrict.schoolspring.com/   # any <district>.schoolspring.com host
 #   max_pages: 20          # optional page cap (100 postings/page, default 20, max 100)
+#   enabled: true
+#
+# - name: Goldman Sachs                   # one company: Goldman's own careers search
+#   careers_url: https://higher.gs.com/results   # auto-detected (higher.gs.com)
+#   goldman:
+#     experiences: [PROFESSIONAL, EARLY_CAREER, CAMPUS]   # optional; the default reads all three public ones
+#   max_pages: 20          # optional page cap (100 roles/page, default 20, max 100)
+#   enabled: true
+#
+# - name: Google                          # Google Careers (Alphabet companies included)
+#   provider: google
+#   google:
+#     queries: ["business strategy", "business operations"]   # query mode (the default)
+#     location: "United States"
+#     # full_board: true     # walk the whole listing (no q) instead of the queries;
+#     #                      # location still applies, queries are unused
+#   max_pages: 10          # pages per query (20 cards/page, default 10, max 50);
+#                          # full_board: pages for the one walk (default 200, max 300)
 #   enabled: true
 #
 # -- Job boards / aggregators  (→ job_boards:; set provider: explicitly unless the host auto-detects) --
@@ -1602,6 +2182,28 @@ search_queries:
 #   max_pages: 3                          # optional page cap (20 jobs/page, default 3, max 10)
 #   enabled: true                         # 750ms pacing between pages
 #
+# - name: Example Computrabajo Co         # LatAm general board, one host per country
+#   careers_url: https://co.computrabajo.com/trabajo-de-sistemas  # auto-detected; any search URL
+#   max_pages: 3                          # optional; default 3 is also the cap (crawl kept tight)
+#   max_jobs: 15                          # optional; default 15 is also the cap
+#   enabled: true                         # random 2-5s pause between pages
+#
+# - name: Example Magneto365 Co           # Colombia general board
+#   careers_url: https://www.magneto365.com/co/trabajos/buscar/tecnologia  # auto-detected; any search URL
+#   max_pages: 5                          # optional page cap (20 jobs/page, default 5, max 20)
+#   max_jobs: 100                         # optional (default 100, max 500)
+#   enabled: true                         # random 1-2s pause between pages
+#
+# - name: Example Bulldogjob              # Polish tech board, many employers
+#   careers_url: https://bulldogjob.pl/companies/jobs/s/role,devops/experienceLevel,medium/city,Remote  # auto-detected; any search URL
+#   max_pages: 5                          # optional page cap (50 jobs/page, default 25, max 100)
+#   enabled: true                         # 250ms pacing between pages
+#
+# - name: Example Jobindex                # Danish general board, many employers
+#   careers_url: https://www.jobindex.dk/jobsoegning?q=python  # auto-detected; filters as query parameters
+#   max_pages: 25                         # optional page cap (20 jobs/page, default 25, max 250)
+#   enabled: true                         # 250ms pacing between pages
+#
 # - name: The Hub                         # Nordic/EU startup board
 #   provider: thehub
 #   max_pages: 3          # optional page cap (15 jobs/page, default 3, max 67; applies to each pass below)
@@ -1612,8 +2214,17 @@ search_queries:
 #
 # - name: a16z speedrun talent network    # a16z speedrun + wider a16z portfolio (~200 startups)
 #   provider: a16z-speedrun-talent
-#   max_pages: 3          # optional page cap (50 jobs/page, default 3)
+#   max_pages: 6          # optional page cap (50 jobs/page, default 6)
 #   q: machine learning   # optional server-side full-text search (synonyms expand)
+#   a16z_speedrun_talent:
+#     filters:            # optional feed filters (documented parameters only)
+#       scope: everywhere # speedrun | portfolio | everywhere
+#       fn: engineering   # list values as a string or a YAML list
+#       wp: remote
+#       sen: [senior, staff, founding, _]   # _ = roles with no stated level
+#       posted: 7d        # 24h | 7d | 30d
+#     fetchDetails: false # optional: read each job's detail for its description and the employer's own apply URL
+#     detailLimit: 25     # optional: max detail requests per scan (default 25, max 100)
 #   enabled: true
 #
 # - name: Arbeitnow                       # EU/DACH-heavy board, newest-first
@@ -1648,6 +2259,25 @@ search_queries:
 #     umkreis: 50         # optional km radius around wo (0-1000)
 #     days: 30            # optional recency window (1-1000)
 #     size: 100           # optional results per keyword (1-100)
+#     angebotsart: [1]    # optional offer types: 1 job (default), 34 internship/
+#                         #   trainee (most Werkstudent/Praktikum ads), 4 vocational
+#                         #   training, 2 self-employment; [1, 34] queries both
+#     # Remote roles: a posting in Germany whose title says it is remote, or
+#     # that states 100 % home office, gets "Deutschlandweit (Homeoffice)" added
+#     # to its location, next to its city. If your location_filter is limited to a
+#     # commute area, add always_allow: ["Deutschlandweit"] to keep these roles.
+#     # Keywords match whole words, so "Deutschland" or "Remote" do not match it.
+#     # The optional nationwide pass below also finds remote roles whose office
+#     # is outside wo/umkreis. It runs only when wo is set.
+#     remoteNationwide: false # optional: true runs the remote pass
+#     remoteMatch: title  # optional, how the pass finds remote roles:
+#                         #   title  (default) nationwide search, keeps hits whose
+#                         #          title says remote or that state 100 % home office
+#                         #   filter (recommended) server-side "home office possible"
+#                         #          search, paginated; same proof needed for the
+#                         #          marker, other hits keep their own city
+#                         #   off    no remote pass
+#     remoteMaxPages: 1   # optional, filter mode: pages per keyword (1-20)
 #   enabled: true
 #
 # - name: VDAB — AI/ML Vlaanderen        # Flanders (BE) public employment service
@@ -1714,17 +2344,28 @@ search_queries:
 # - name: Jobstreet — Indonesia          # SEEK aggregator
 #   provider: jobstreet
 #   searchKeywords: "Software Engineer"
-#   siteKey: ID-Main      # SEEK site key (ID-Main, SG-Main, MY-Main, AU-Main, NZ-Main)
+#   siteKey: ID-Main      # SEEK site key (ID-Main, SG-Main, MY-Main, PH-Main, AU-Main, NZ-Main)
 #   searchLocation: ""    # optional location filter
 #   enabled: true
 #
 # - name: SEEK — Australia (Melbourne)   # same SEEK platform, AU host + site key
 #   provider: jobstreet
-#   api: https://www.seek.com.au/api/jobsearch/v5/search
+#   api: https://au.seek.com/api/jobsearch/v5/search
 #   siteKey: AU-Main
 #   searchKeywords: "strategy consultant"
 #   searchLocation: "Melbourne VIC"
 #   appendWorkType: true  # optional: title becomes "Strategy Consultant [Part time]"
+#   enabled: true
+#
+# - name: Kalibrr — Indonesia            # SEA job board (Indonesia-heavy)
+#   provider: kalibrr
+#   searchKeywords: ""    # optional — the API's own `text` filter (whole board when empty)
+#   max_pages: 20         # optional page cap (100 rows/request, default 20, max 200)
+#   enabled: true
+#
+# - name: Tech in Asia                   # SEA startup-ecosystem board
+#   provider: techinasia
+#   max_pages: 5          # optional page cap (1000 rows/request, default 5, max 50)
 #   enabled: true
 #
 # - name: IBM — Germany SWE              # IBM global careers
@@ -1732,6 +2373,7 @@ search_queries:
 #   ibm:
 #     country: Germany                      # optional facet filter
 #     categories: ["Software Engineering"]  # optional facet filter
+#   max_pages: 20         # optional page cap (30 jobs/page, default 20, max 300)
 #   enabled: true
 #
 # - name: SolidJobs — Engineering        # Polish multi-division job board
@@ -1739,6 +2381,12 @@ search_queries:
 #   # Division path is required; one of:
 #   # it, engineering, marketing, sales, hr, logistics, finances, other
 #   careers_url: https://solid.jobs/public-api/offers/engineering
+#   enabled: true
+#
+# - name: Example WP Job Manager Board   # any WordPress board on the WP Job Manager plugin
+#   provider: wp-job-manager             # required — WordPress hosts are not auto-detected
+#   careers_url: https://jobs.example.com/   # board address; only the host is used
+#   max_pages: 20         # optional page cap (100 items/request, default 20, max 100)
 #   enabled: true
 #
 # -- Remote-job feeds  (→ job_boards:; set provider: plus any provider-specific fields) --
@@ -1755,6 +2403,10 @@ search_queries:
 #   provider: himalayas
 # - name: Landing.jobs                    # tech board, Europe-focused
 #   provider: landingjobs
+#   enabled: true
+#
+# - name: ITJobs                          # Portuguese IT jobs (public RSS feed)
+#   provider: itjobs                      # whole board in one request
 #   enabled: true
 #
 # - name: RemoteOK
@@ -1781,8 +2433,18 @@ search_queries:
 #   provider: workingnomads
 #   enabled: true
 #
-# - name: Jobicy
+# - name: Jobicy                          # remote-only board; walks its whole 7-day feed
 #   provider: jobicy
+#   # geo: latam            # optional: a geoSlug from https://jobicy.com/api/v2/remote-jobs?get=locations
+#   # industry: engineering # optional: an industrySlug from https://jobicy.com/api/v2/remote-jobs?get=industries
+#   # tag: python           # optional: keyword matched against the job title
+#   # max_pages: 25         # optional page cap (100 postings/page, default 25, max 100)
+#   enabled: true
+#
+# - name: Tes                             # UK and international teaching jobs; walks the whole board
+#   provider: tes
+#   # keywords: maths       # optional: Tes's own keyword search, applied server-side
+#   # max_pages: 40         # optional page cap (50 postings/page, default 150, max 400)
 #   enabled: true
 #
 # - name: getManfred                      # Spanish/EU tech roles, salary ranges published
@@ -1814,12 +2476,26 @@ search_queries:
 #   provider: jobspresso
 #   enabled: true
 #
-# - name: The Muse                        # board-wide public jobs API
+# - name: The Muse                        # board-wide search page (server-rendered HTML)
+#   # Availability: Cloudflare challenges this board from US and Canadian egresses
+#   # (2026-11-15), so a scan may fail with a named "Cloudflare challenge" error.
+#   # See The Muse in docs/SUPPORTED_JOB_BOARDS.md.
 #   provider: themuse
+#   location: Germany                     # optional: narrows the search (country or city)
+#   posted: 30                            # optional: 1, 7 or 30 (days) — keeps the run small
 #   enabled: true
 #
 # - name: LaraJobs                        # Laravel / PHP jobs (public RSS feed)
 #   provider: larajobs
+#   enabled: true
+#
+# - name: GermanTechJobs                  # German IT jobs, salary on every posting (public RSS feed)
+#   provider: germantechjobs              # whole board in one request; rows carry no location
+#   enabled: true
+#
+# - name: SwissDevJobs                    # Swiss IT jobs, same family and feed shape as GermanTechJobs
+#   provider: germantechjobs
+#   feed_url: https://swissdevjobs.ch/rss # or https://devitjobs.uk/rss, https://devitjobs.nl/rss
 #   enabled: true
 #
 # - name: Python.org Jobs                 # Python Software Foundation jobs (public RSS feed)
@@ -1858,14 +2534,34 @@ search_queries:
 #
 # - name: Welcome to the Jungle           # global board via WTTJ's public Algolia index
 #   provider: wttj
-#   wttj:
-#     queries: ["ai engineer", "data platform engineer"]  # REQUIRED — the board is global,
-#                                 # so explicit searches must be configured; each query is a
-#                                 # separate Algolia search, results deduped across queries
-#     max_hits: 100        # optional per-query hit cap (default 100, max 200)
+#   wttj:                       # REQUIRED: the board is global; narrow it with
+#                               # `filters`, `queries`, or both
+#     filters: "offices.country_code:FR AND contract_type:full_time"
+#                               # Algolia filter, applied server-side (recommended,
+#                               # max 1000 chars); with it, `queries` is optional
+#     queries: ["ai engineer", "data platform engineer"]
+#                               # each query is a separate Algolia search,
+#                               # results deduped across queries
+#     max_hits: 100             # optional per-query hit cap (default 100;
+#                               # max 200, or 1000 with filters)
 #   enabled: true
 #
-# - name: Agentic Engineering Jobs        # AI-agent engineering roles (SSR HTML, one fetch)
+# - name: Wellfound (board)               # startup jobs; server-rendered search pages
+#   provider: wellfound
+#   wellfound:                  # REQUIRED: the board is global; narrow it with
+#                               # `roles`, `locations`, or both (slugs from the
+#                               # address bar of a Wellfound search page)
+#     roles: [software-engineer, product-manager]   # /role/<slug>
+#     locations: [berlin]       # /location/<slug>; with roles → /role/l/<role>/<location>
+#     remote: true              # optional: also /role/r/<role> (remote jobs) for each role
+#     max_companies: 25         # optional (default 25, max 100): the board shows at most 3
+#                               # jobs per company; for an incomplete page, all jobs of
+#                               # up to this many such companies are read
+#   max_pages: 10               # optional page cap per search page (20 companies/page,
+#                               # default 10, max 250)
+#   enabled: true
+#
+# - name: Agentic Engineering Jobs       # AI-agent engineering roles (SSR HTML, one fetch)
 #   provider: agentic-jobs
 #   enabled: true
 #
@@ -1873,6 +2569,15 @@ search_queries:
 #   provider: yourator
 #   careers_url: https://www.yourator.co/jobs
 #   max_pages: 120                        # optional page cap (default 120, max 500)
+#   enabled: true
+#
+# - name: Kariyer.net                     # Turkish board-wide aggregator (public JSON gateway, no auth)
+#   provider: kariyer
+#   careers_url: https://www.kariyer.net/is-ilanlari
+#   max_pages: 50                         # optional page cap (default 50, max 100)
+#   kariyer:
+#     fetchDetails: false                 # optional: fetch each posting's JD text
+#     detailLimit: 25                     # 1..100, default 25
 #   enabled: true
 #
 # Comeet needs the full careers-api URL (it carries a per-tenant token that a
@@ -1887,14 +2592,34 @@ search_queries:
 # Integrated website → Careers API.
 #
 # Personio (common across DACH/EU) auto-detects from its careers host and
-# pulls the public no-auth XML feed at <slug>.jobs.personio.de/xml — e.g.:
+# reads the public no-auth careers page (XML feed at /xml as the fallback).
+# Postings come back in their own default language; to get them in another
+# language wherever a posting has one, set the top-level preferred_languages
+# (see "Preferred posting languages" above) rather than a per-entry param:
 #
 #   - name: Example GmbH
-#     careers_url: https://example-gmbh.jobs.personio.de
+#     careers_url: https://example-gmbh.jobs.personio.de/
 #     enabled: true
 #
+# A ?language=<code> on one careers_url overrides preferred_languages for that
+# entry only (with dedup_include_language off).
+#
+# Recruitee auto-detects from a <slug>.recruitee.com careers host and reads the
+# public no-auth offers API. Offers come back in their own default language;
+# to get them in another language wherever an offer has one, set the top-level
+# preferred_languages (see "Preferred posting languages" above) rather than a
+# per-entry param:
+#
+#   - name: Example Recruitee Co
+#     careers_url: https://exampleco.recruitee.com
+#     enabled: true
+#
+# A ?lang=<code> on one careers_url overrides preferred_languages for that
+# entry only (with dedup_include_language off).
+#
 # Teamtailor auto-detects from a <slug>.teamtailor.com careers host and reads
-# the public no-auth /jobs.rss feed — e.g.:
+# the public no-auth /jobs.rss feed (100 postings per request, so it is paged
+# with ?offset= up to max_pages, default 20, hard ceiling 100) — e.g.:
 #
 #   - name: Example Co
 #     careers_url: https://example.teamtailor.com
@@ -1938,9 +2663,13 @@ search_queries:
 #   Fin: [Intercom]
 
 # ── aggregator: true (optional, per entry) ────────────────────────────
-# Marks a tracked_companies entry as a MULTI-EMPLOYER BOARD rather than one
-# employer — a job platform, a VC portfolio board, a recruiting marketplace that
-# posts partner companies' roles under its own ATS account.
+# Marks an entry whose postings all carry the entry's OWN name as the company,
+# while they are really different employers' jobs. The typical case is a
+# recruiting agency or marketplace that posts its clients' roles through its
+# own account on an ordinary ATS. An ATS account belongs to one company, so the
+# ATS feed has no employer field, and the provider sets every posting's company
+# to the entry name. A board whose provider reads each posting's real employer
+# from the feed does not need the flag.
 #
 # Everything in the post-tracking layer assumes "same company + same title = the
 # same opening". On such a board that assumption is false: two identical titles
@@ -1958,10 +2687,54 @@ search_queries:
 # and only the URL dedups. Companies with no flag are untouched, so leaving
 # this out changes nothing.
 #
-#   - name: SomeBoard
-#     careers_url: https://jobs.lever.co/someboard
-#     provider: lever
+# A recruiting agency's own Lever account, where every posting comes back with
+# company "SomeAgency":
+#
+#   - name: SomeAgency
+#     careers_url: https://jobs.lever.co/someagency
 #     aggregator: true
+
+# ── max_response_mb (optional, per entry) ─────────────────────────────
+# The scanner refuses a response body over 10 MB, so a broken or hostile
+# endpoint cannot fill its memory. A board that returns its whole catalogue,
+# descriptions included, in one response can be bigger, and the scan then
+# reports "HTTP body exceeded maxBytes" for it. Raise the cap for that entry
+# only, in megabytes. The value wins over any limit the provider sets; every
+# other entry keeps the default.
+#
+#   - name: BigCo
+#     careers_url: https://jobs.ashbyhq.com/bigco
+#     max_response_mb: 20
+
+# ── timeout_ms (optional, per entry) ──────────────────────────────────
+# A request has a limited time, which also covers reading the response body. A
+# board that returns its whole catalogue in one response can need more, and the
+# scan then reports "This operation was aborted" for it. Raise the timeout for
+# that entry only, in milliseconds. The value wins over any timeout the provider
+# sets; every other entry keeps its timeout.
+#
+#   - name: BigCo
+#     careers_url: https://jobs.lever.co/bigco
+#     timeout_ms: 60000
+
+# ── title_filter (optional, per entry) ─────────────────────────────────
+# When an entry defines its own title_filter, it replaces the top-level
+# title_filter for that entry only. This replaces the global positive and
+# negative lists entirely, allowing you to target titles that a global negative
+# would normally drop, or customize keywords for specific employers.
+# An entry with negatives but no positives keeps the global positive keywords
+# and replaces only the negative list.
+#
+#   - name: Example County
+#     careers_url: https://www.governmentjobs.com/careers/examplecounty
+#     title_filter:
+#       positive: ["Librarian", "Library"]
+#       negative: ["Page", "Custodian"]
+#
+#   - name: Example Tech
+#     careers_url: https://example.invalid/jobs
+#     title_filter:
+#       negative: ["Contractor", "Intern"]
 
 tracked_companies:
 
@@ -1970,9 +2743,19 @@ tracked_companies:
     provider: ultipro
     enabled: false
 
+  - name: ADP
+    careers_url: https://myjobs.adp.com/apply/cx/job-listing
+    provider: adp-myjobs
+    enabled: false
+
   - name: Ivey Business School
     careers_url: https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=ffe28c5e-dcff-41b8-b801-1ae1a70edb00&ccId=19000101_000001
     provider: adp-workforcenow
+    enabled: false
+
+  # Polymer's public demo tenant. Disabled so copying this file does not scan it.
+  - name: Aperture Labs
+    careers_url: https://jobs.polymer.co/aperturelabs
     enabled: false
 
   # -- AI Labs & LLM providers --
@@ -2007,9 +2790,8 @@ tracked_companies:
     enabled: true
 
   - name: Parloa
-    careers_url: https://job-boards.eu.greenhouse.io/parloa
-    api: https://boards-api.greenhouse.io/v1/boards/parloa/jobs
-    notes: "Berlin EMEA. Voice AI enterprise."
+    careers_url: https://jobs.ashbyhq.com/parloa
+    notes: "Berlin EMEA. Voice AI enterprise. Moved from Greenhouse to Ashby; greenhouse.io/parloa answers 404."
     enabled: true
 
   - name: Intercom
@@ -2079,8 +2861,7 @@ tracked_companies:
     enabled: true
 
   - name: Temporal
-    careers_url: https://job-boards.greenhouse.io/temporal
-    api: https://boards-api.greenhouse.io/v1/boards/temporal/jobs
+    careers_url: https://jobs.ashbyhq.com/temporal
     notes: "Workflow orchestration."
     enabled: true
 
@@ -2091,8 +2872,7 @@ tracked_companies:
     enabled: true
 
   - name: RunPod
-    careers_url: https://job-boards.greenhouse.io/runpod
-    api: https://boards-api.greenhouse.io/v1/boards/runpod/jobs
+    careers_url: https://jobs.ashbyhq.com/runpod
     notes: "GPU cloud for AI."
     enabled: true
 
@@ -2111,10 +2891,9 @@ tracked_companies:
   # -- Contact Center AI & CX --
 
   - name: Ada
-    careers_url: https://job-boards.greenhouse.io/ada
-    scan_method: websearch
-    scan_query: '"ada.cx" OR "ada" "AI" "Solutions" OR "Engineer" site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io'
-    notes: "Toronto + remote. AI customer service."
+    careers_url: https://job-boards.greenhouse.io/ada18
+    api: https://boards-api.greenhouse.io/v1/boards/ada18/jobs
+    notes: "Toronto + remote. AI customer service. The Greenhouse board is ada18 (its postings point to ada.cx); greenhouse.io/ada is gone."
     enabled: true
 
   - name: LivePerson
@@ -2156,15 +2935,13 @@ tracked_companies:
 
   - name: Dialpad
     careers_url: https://www.dialpad.com/careers
-    scan_method: websearch
-    scan_query: '"dialpad" "AI" "Solutions" OR "Engineer" site:job-boards.greenhouse.io OR site:jobs.ashbyhq.com'
+    api: https://boards-api.greenhouse.io/v1/boards/dialpad/jobs
     notes: "Voice AI for business comms."
     enabled: true
 
   - name: Gong
     careers_url: https://www.gong.io/careers
-    scan_method: websearch
-    scan_query: 'site:gong.io/careers "AI" OR "Solutions" OR "Architect"'
+    api: https://boards-api.greenhouse.io/v1/boards/gongio/jobs
     notes: "Revenue intelligence with voice AI."
     enabled: true
 
@@ -2196,7 +2973,7 @@ tracked_companies:
     scan_method: websearch
     scan_query: '"lindy.ai" "AI" "Forward Deployed" OR "Solutions" site:jobs.ashbyhq.com'
     notes: "AI agent management platform."
-    enabled: true
+    enabled: false
 
   - name: Cognigy
     careers_url: https://careers.cognigy.com
@@ -2240,6 +3017,19 @@ tracked_companies:
     notes: "Integration and automation platform."
     enabled: true
 
+  - name: ServiceNow
+    # Its SmartRecruiters Posting API host disallows crawlers in robots.txt;
+    # the careers site's own sitemap is open to all agents and lists every
+    # live job. Detail pages challenge non-browser clients, so titles come
+    # from URL slugs (fetchDetails stays off).
+    careers_url: https://careers.servicenow.com/jobs/
+    provider: sitemap
+    sitemap:
+      url: https://careers.servicenow.com/sitemap.xml
+      job_path: '^/jobs/(?<posting_id>\d+)/(?<slug>[^/]+)/?$'
+    notes: "Workflow automation / AI platform."
+    enabled: false
+
   # -- Ashby-based (Playwright direct) --
 
   - name: Cohere
@@ -2260,8 +3050,8 @@ tracked_companies:
   # -- Lever-based (Playwright direct) --
 
   - name: Mistral AI
-    careers_url: https://jobs.lever.co/mistral
-    notes: "Paris. European AI lab."
+    careers_url: https://jobs.ashbyhq.com/mistral.ai
+    notes: "Paris. European AI lab. Moved from Lever to Ashby (mistral.ai/careers links here)."
     enabled: true
 
   - name: Palantir
@@ -2302,7 +3092,7 @@ tracked_companies:
   - name: Sanctuary AI
     careers_url: https://jobs.lever.co/sanctuary
     notes: "Vancouver. Humanoid robotics and embodied AI."
-    enabled: true
+    enabled: false
 
   - name: Semios
     careers_url: https://apply.workable.com/semios/
@@ -2320,9 +3110,12 @@ tracked_companies:
 
   - name: Factorial
     careers_url: https://careers.factorialhr.com
-    scan_method: websearch
-    scan_query: 'site:careers.factorialhr.com'
-    notes: "Barcelona. HR SaaS unicorn."
+    notes: "Barcelona. HR SaaS unicorn. Its own board on its own ATS (provider: factorial)."
+    enabled: true
+
+  - name: Productsup
+    careers_url: https://productsup.careers.hibob.com/jobs
+    notes: "Berlin. Product content syndication SaaS."
     enabled: true
 
   - name: Attio
@@ -2333,9 +3126,7 @@ tracked_companies:
     enabled: true
 
   - name: Tinybird
-    careers_url: https://jobs.ashbyhq.com/tinybird
-    scan_method: websearch
-    scan_query: 'site:tinybird.co/careers OR site:jobs.ashbyhq.com/tinybird'
+    careers_url: https://jobs.lever.co/tinybird
     notes: "Remote. Real-time data platform."
     enabled: true
 
@@ -2344,7 +3135,7 @@ tracked_companies:
     scan_method: websearch
     scan_query: 'site:clarity.ai/careers OR site:jobs.lever.co/clarity-ai'
     notes: "Madrid/Remote. Sustainability analytics with AI."
-    enabled: true
+    enabled: false
 
   - name: Travelperk
     careers_url: https://jobs.ashbyhq.com/perk
@@ -2352,6 +3143,41 @@ tracked_companies:
     scan_query: 'site:jobs.ashbyhq.com/perk'
     notes: "Barcelona. Business travel unicorn (rebranded Perk)."
     enabled: true
+
+  - name: Channable
+    careers_url: https://channable.recruitee.com
+    notes: "Utrecht. Product feed management for e-commerce."
+    enabled: true
+
+  - name: Shiji Group
+    careers_url: https://shijigroup.zohorecruit.com/jobs/Careers
+    notes: "Katowice / Barcelona. International hubs of a Beijing-based hospitality technology group."
+    # The board page carries every opening inline (about 2 MB) and takes 6-48s to
+    # arrive, so the 10s default aborts it on most runs. See timeout_ms above.
+    timeout_ms: 60000
+    enabled: true
+
+  - name: Remote
+    careers_url: https://apply.remote.com/jobs
+    notes: "Fully remote. Employer-of-record / global HR platform. Each posting names its hiring regions (EMEA, NORAM, LATAM, APAC)."
+    enabled: true
+
+  - name: ALDI Nord
+    careers_url: https://www.aldi-nord.de/karriere/jobs.html
+    aldi_nord:
+      categories: ['10420', '19000']   # example: Tech & IT, Data Analytics & Research; omit for every category
+    notes: "Essen, Germany HQ. Discount grocery retailer with country sites across Europe; tech roles in Germany and Poland (www.aldi.pl needs its own entry)."
+    enabled: false
+
+  - name: AMCS Group
+    careers_url: https://amcsgroup.hirehive.com/
+    notes: "Limerick / Dublin / Berlin. Software for the waste, recycling and utilities industry."
+    enabled: true
+
+  - name: Avalara
+    careers_url: https://app.careerpuck.com/job-board/avalara
+    notes: "Remote / US / India. Tax compliance software. Board hosted on CareerPuck; job links go to the employer's own ATS."
+    enabled: false
 
   # -- DACH & European AI ecosystem --
   # All entries below have been verified against the Greenhouse / Ashby /
@@ -2376,8 +3202,7 @@ tracked_companies:
     enabled: true
 
   - name: Black Forest Labs
-    careers_url: https://job-boards.greenhouse.io/blackforestlabs
-    api: https://boards-api.greenhouse.io/v1/boards/blackforestlabs/jobs
+    careers_url: https://jobs.ashbyhq.com/black-forest-labs
     notes: "Freiburg DE / SF. FLUX image models, ex-Stable Diffusion team."
     enabled: true
 
@@ -2402,9 +3227,8 @@ tracked_companies:
     enabled: true
 
   - name: GetYourGuide
-    careers_url: https://job-boards.greenhouse.io/getyourguide
-    api: https://boards-api.greenhouse.io/v1/boards/getyourguide/jobs
-    notes: "Berlin. Travel marketplace, ML & data platform roles."
+    careers_url: https://jobs.ashbyhq.com/GetYourGuide
+    notes: "Berlin. Travel marketplace, ML & data platform roles. Moved from Greenhouse to Ashby; greenhouse.io/getyourguide is live but empty."
     enabled: true
 
   - name: HelloFresh
@@ -2440,9 +3264,15 @@ tracked_companies:
     enabled: true
 
   - name: Qonto
-    careers_url: https://jobs.lever.co/qonto
-    notes: "Paris / Berlin / Barcelona / Milan. SMB neobank, MLOps for AI Product roles."
+    careers_url: https://jobs.ashbyhq.com/qonto
+    notes: "Paris / Berlin / Barcelona / Milan. SMB neobank, MLOps for AI Product roles. Moved from Lever to Ashby (qonto.com/en/careers links here)."
     enabled: true
+
+  - name: Deutsche Börse
+    careers_url: https://careers.deutsche-boerse.com/
+    provider: talents-connect
+    notes: "Frankfurt / Prague / Luxembourg. Exchange and post-trade group (Clearstream, Eurex), IT and QA roles, English postings."
+    enabled: false
 
   # -- DACH logistics / mobility --
 
@@ -2450,6 +3280,11 @@ tracked_companies:
     careers_url: https://jobs.ashbyhq.com/forto
     notes: "Berlin DE. Digital freight forwarder, product & data roles, German + English."
     enabled: true
+
+  - name: Mubea
+    careers_url: https://mubeacareers.recruitmentplatform.com/
+    notes: "Attendorn DE. Automotive and aerospace components, engineering and plant roles across DE, CZ, PL, MX, US."
+    enabled: false
 
   # -- DACH IT services / digital transformation consulting --
 
@@ -2501,16 +3336,25 @@ tracked_companies:
     notes: "Paris FR / NYC / London. AI-powered FP&A planning platform."
     enabled: true
 
+  - name: Diabeloop
+    careers_url: https://diabeloop.taleez.com
+    notes: "Grenoble FR. AI-driven automated insulin delivery (closed-loop algorithm) — Taleez careers site."
+    enabled: false   # live Taleez board, no open posting when added (2026-11-13)
+
   - name: Diabolocom
     careers_url: https://jobs.eu.lever.co/diabolocom
     notes: "Paris FR. AI-native contact center (CCaaS) platform — Frost & Sullivan 2026 AI CX Leader in Europe; hybrid LLM/SLM architecture powering Agent Assist, Voice Analytics, and automated QA."
     enabled: true
 
+  - name: Doctolib
+    careers_url: https://jobs.ashbyhq.com/doctolib
+    notes: "Paris FR / Berlin DE / Nantes / Milan. European healthtech: patient booking, practice software, AI medical assistant."
+    enabled: true
+
   # -- UK & Ireland AI (EU-friendly hiring) --
 
   - name: Wayve
-    careers_url: https://job-boards.greenhouse.io/wayve
-    api: https://boards-api.greenhouse.io/v1/boards/wayve/jobs
+    careers_url: https://jobs.ashbyhq.com/wayve
     notes: "London UK. Embodied AI for self-driving, ML & robotics roles."
     enabled: true
 
@@ -2589,15 +3433,14 @@ tracked_companies:
     enabled: true
 
   - name: Klarna
-    careers_url: https://www.klarna.com/careers/
-    scan_method: websearch
-    scan_query: 'site:klarna.com/careers "Engineer" OR "Backend" OR "Platform"'
-    notes: "Stockholm. Fintech. SPA at klarna.com/careers."
+    careers_url: https://jobs.deel.com/klarna
+    notes: "Stockholm. Fintech. Hosted on the Deel job board (jobs.deel.com/<slug>); the scanner reads it directly."
     enabled: true
 
   - name: Bolt
-    careers_url: https://jobs.ashbyhq.com/bolt
-    notes: "Tallinn. Ride-hailing/mobility."
+    careers_url: https://bolt.eu/en/careers/positions/
+    provider: bolt
+    notes: "Tallinn. Ride-hailing/mobility. Lists its roles on its own site, which the scanner reads directly (every position is in one page); the Ashby board named Bolt has no postings."
     enabled: true
 
   - name: Bosch
@@ -2613,6 +3456,12 @@ tracked_companies:
     api: https://jobs.bmwgroup.com
     notes: "Munich/Remote DE. Automotive software. SuccessFactors portal."
     enabled: true
+
+  - name: Böllhoff
+    careers_url: https://jobs.boellhoff.com/stellenangebote.html
+    provider: rexx
+    notes: "Bielefeld. Fastening and assembly technology. rexx systems job portal; the list page carries location, an Atom feed adds posting dates."
+    enabled: false
 
   - name: CARIAD (Volkswagen)
     careers_url: https://jobs.volkswagen-group.com/cariad
@@ -2667,13 +3516,15 @@ tracked_companies:
     enabled: true
 
   - name: Toggl
-    careers_url: https://apply.workable.com/toggl
-    notes: "Remote EU. Time tracking. Workable board."
+    careers_url: https://jobs.ashbyhq.com/toggl
+    ashby:
+      embed: true        # the board is live but its public posting API answers 404
+    notes: "Remote EU. Time tracking. Moved from Workable to Ashby (toggl.com/jobs embeds this board)."
     enabled: true
 
   - name: Doist
-    careers_url: https://apply.workable.com/doist
-    notes: "Remote global. Productivity (Todoist). Workable board."
+    careers_url: https://jobs.ashbyhq.com/todoist-inc
+    notes: "Remote global. Productivity (Todoist). Moved from Workable to Ashby (todoist.com/careers links here)."
     enabled: true
 
   # -- Denmark AI / tech --
@@ -2693,10 +3544,14 @@ tracked_companies:
     enabled: true
 
   - name: Templafy
-    careers_url: https://job-boards.greenhouse.io/templafy
-    api: https://boards-api.greenhouse.io/v1/boards/templafy/jobs
-    notes: "Copenhagen DK. Document-generation / content-enablement platform."
+    careers_url: https://templafy.teamtailor.com
+    notes: "Copenhagen DK. Document-generation / content-enablement platform. Moved from Greenhouse to Teamtailor (templafy.com careers links here)."
     enabled: true
+
+  # Trakstar Hire's public demo client. Disabled so copying this file does not scan the demo board.
+  - name: Trakstar demo board
+    careers_url: https://demoaccount.hire.trakstar.com
+    enabled: false
 
   # -- Iberia AI --
 
@@ -2705,6 +3560,41 @@ tracked_companies:
     api: https://boards-api.greenhouse.io/v1/boards/amplemarket/jobs
     notes: "Lisbon PT / Remote. AI-native sales platform."
     enabled: true
+
+  - name: Naturgy
+    careers_url: https://career5.successfactors.eu/career?company=C0000880172P
+    notes: "Madrid/Barcelona and Latin America. Energy utility. SAP-hosted classic SuccessFactors board (27 postings on 2026-11-18, Spanish and Brazilian); no place in the list, so filter by title."
+    enabled: true
+
+  # -- Spain (Bizneo HR career pages) --
+
+  - name: Bit2Me
+    careers_url: https://empleo.bit2me.com/jobs
+    provider: bizneo
+    notes: "Madrid / Remote. Crypto exchange. Bizneo HR career site on its own domain (3 postings on 2026-11-18)."
+    enabled: true
+
+  # -- Spain (Viterbit career sites) --
+
+  - name: Prosegur
+    careers_url: https://careers.prosegur.com/
+    provider: viterbit
+    notes: "Madrid. Security and cash logistics group; the whole board (all countries) in one request."
+    enabled: false
+
+  # -- Italy (Zucchetti InRecruiting career pages) --
+
+  - name: Maggioli
+    careers_url: https://maggioli.intervieweb.it/it/career
+    notes: "Santarcangelo di Romagna IT. Software and services for public administration; developer, data and analyst roles across Italy."
+    enabled: false
+
+  # -- Spain (Velora HR career sites) --
+
+  - name: Calidad Pascual
+    careers_url: https://pascual.career.velorahr.com/calidad-pascual-248
+    notes: "Madrid. Food and dairy group (Pascual, Cafés Saula, Priégola); a few dozen offers at most, mostly operations, supply chain and administration. Velora HR is a Spanish ATS."
+    enabled: false
 
   # -- AI / Developer Tools --
 
@@ -2723,16 +3613,15 @@ tracked_companies:
     enabled: true
 
   - name: Runway
-    careers_url: https://job-boards.greenhouse.io/runwayml
-    api: https://boards-api.greenhouse.io/v1/boards/runwayml/jobs
-    notes: "Generative AI video and creative tooling platform."
+    careers_url: https://jobs.ashbyhq.com/runway-ml
+    notes: "Generative AI video and creative tooling platform. Moved from Greenhouse to Ashby (runway.com/careers links here); greenhouse.io/runwayml is gone."
     enabled: true
 
   - name: Hightouch
     careers_url: https://job-boards.greenhouse.io/hightouch
     api: https://boards-api.greenhouse.io/v1/boards/hightouch/jobs
     notes: "Data activation platform with AI agents and solutions engineering roles."
-    enabled: true
+    enabled: false
 
   - name: WorkOS
     careers_url: https://jobs.ashbyhq.com/workos
@@ -2740,6 +3629,21 @@ tracked_companies:
     scan_query: 'site:jobs.ashbyhq.com/workos "Solutions Engineer" OR "Developer Success" OR "Engineer"'
     notes: "Developer tools and enterprise-ready auth/platform APIs."
     enabled: true
+
+  - name: CloudBees
+    careers_url: https://recruiting.paylocity.com/Recruiting/Jobs/All/a432d829-f701-4cf3-9108-56ef703b2ac5
+    notes: "CI/CD and software delivery platform."
+    enabled: true
+
+  - name: Kula
+    careers_url: https://careers.kula.ai/hire
+    notes: "Recruiting software. The vendor's own careers site, read through its public RSS feed."
+    enabled: false
+
+  - name: Qase
+    careers_url: https://wellfound.com/company/qase-1
+    notes: "Remote, distributed team. AI-powered test management platform for QA and engineering teams."
+    enabled: false
 
   # -- Dev Tools / AI Infra (DevRel, SA, FDE focus) --
 
@@ -2790,6 +3694,12 @@ tracked_companies:
     scan_query: '"Maxim AI" OR "getmaxim" careers "engineer" OR "product"'
     notes: "AI evaluation and observability platform. Bangalore-based, mostly on-site."
     enabled: true
+
+  # -- US healthcare technology --
+  - name: ROMTech
+    careers_url: https://www.paycomonline.net/v4/ats/web.php/portal/74B8425BF3D1B3ACB19CC1353DC5FA0E/career-page
+    notes: "Connected rehabilitation devices. Paycom career page."
+    enabled: false
 
   # ============================================================
   # -- Türkiye / Turkey market
@@ -2953,6 +3863,160 @@ tracked_companies:
     notes: "African-founded talent marketplace. Verified 2026-08-17: 19 postings, but mostly North America and the UK with a single Kenya role — enable it for the company, not for African coverage."
     enabled: false
 
+  # -- Latin America (employers on already-supported ATS) --
+  #
+  # The scanner reads LatAm job boards (Get on Board, OCC, Gupy, HiringRoom),
+  # but no LatAm employer was tracked here. These companies publish through
+  # Greenhouse, Lever, Ashby, Workable, Teamtailor, SuccessFactors and
+  # Magneto365, whose public zero-auth endpoints the
+  # scanner already reads. The note on each says where it actually hires, so a
+  # candidate in Colombia doesn't enable a board that only posts in Brazil.
+  # Left `enabled: false` like every other example.
+
+  - name: Nubank
+    careers_url: https://jobs.ashbyhq.com/nubank
+    notes: "Brazil / Mexico / Colombia. Digital bank."
+    enabled: false
+
+  - name: Clara
+    careers_url: https://job-boards.greenhouse.io/clara
+    notes: "Brazil / Mexico / Colombia. Corporate cards and spend management."
+    enabled: false
+
+  - name: dLocal
+    careers_url: https://jobs.lever.co/dlocal
+    notes: "Uruguay / Brazil / Argentina. Cross-border payments."
+    enabled: false
+
+  - name: EBANX
+    careers_url: https://job-boards.greenhouse.io/ebanx
+    notes: "Brazil, some Argentina and UK. Payments."
+    enabled: false
+
+  - name: Yuno
+    careers_url: https://jobs.lever.co/yuno
+    notes: "Remote LatAm (Colombia, Mexico, Brazil, Argentina, Chile) + UK. Payments orchestration."
+    enabled: false
+
+  - name: Addi
+    careers_url: https://jobs.ashbyhq.com/addi
+    notes: "Colombia. Buy-now-pay-later."
+    enabled: false
+
+  - name: Platzi
+    careers_url: https://apply.workable.com/platzi
+    notes: "Mexico / Colombia. Online tech education."
+    enabled: false
+
+  - name: Deuna
+    careers_url: https://jobs.lever.co/deuna
+    notes: "Mexico / US / Colombia, mostly remote. Payments."
+    enabled: false
+
+  - name: Cobre
+    careers_url: https://job-boards.greenhouse.io/cobre
+    notes: "Colombia / Mexico. B2B payments."
+    enabled: false
+
+  - name: Simetrik
+    careers_url: https://jobs.ashbyhq.com/simetrik
+    notes: "Remote LatAm + US. Financial reconciliation."
+    enabled: false
+
+  - name: La Haus
+    careers_url: https://jobs.lever.co/lahaus
+    notes: "Colombia (Bogotá / Medellín). Proptech. Verified 2026-11-07: small board, 2 postings."
+    enabled: false
+
+  - name: Sofka
+    careers_url: https://oportunidades.sofka.com.co
+    provider: teamtailor
+    notes: "Colombia / Panama / Honduras. Software services and QA. Branded Teamtailor domain. Verified 2026-11-07: 37 postings."
+    enabled: false
+
+  - name: Habi
+    careers_url: https://www.magneto365.com/co/empresas/habi/empleos
+    notes: "Colombia (Bogotá / Cali). Proptech. Company page on Magneto365, mostly commercial roles. Verified 2026-11-07: 10 postings."
+    enabled: false
+
+  - name: Davivienda
+    careers_url: https://www.magneto365.com/co/empresas/davivienda/empleos
+    notes: "Colombia, several cities. Bank. Company page on Magneto365. Verified 2026-11-07: 20 postings."
+    enabled: false
+
+  - name: Bancolombia
+    careers_url: https://empleo.grupobancolombia.com/bancolombia
+    provider: successfactors
+    notes: "Colombia. Bank. Branded SuccessFactors board; /bancolombia scopes it to the bank within the Grupo Bancolombia tenant. Verified 2026-11-07: 42 postings."
+    enabled: false
+    
+  # -- Cybersecurity (vendors, offensive security, bug bounty) --
+  #
+  # No security employer was tracked here, though a SOC analyst, pentester or
+  # AppSec engineer reads the same Greenhouse / Lever / Ashby boards as
+  # everyone else. Most of these hire in the US and UK only; the note on each
+  # says where it actually hires. Left `enabled: false`.
+
+  - name: Huntress
+    careers_url: https://job-boards.greenhouse.io/huntress
+    notes: "US / UK. Managed EDR and SOC for SMBs."
+    enabled: false
+
+  - name: Sophos
+    careers_url: https://jobs.lever.co/sophos
+    notes: "Remote; UK / US, some Brazil. Endpoint and MDR vendor."
+    enabled: false
+
+  - name: Wiz
+    careers_url: https://job-boards.greenhouse.io/wizinc
+    notes: "US / UK / Brazil / Mexico. Cloud security."
+    enabled: false
+
+  - name: Abnormal Security
+    careers_url: https://job-boards.greenhouse.io/abnormalsecurity
+    notes: "US / UK. Email security."
+    enabled: false
+
+  - name: 1Password
+    careers_url: https://jobs.ashbyhq.com/1password
+    notes: "Remote US / UK. Identity and password management."
+    enabled: false
+
+  - name: Chainguard
+    careers_url: https://job-boards.greenhouse.io/chainguard
+    notes: "Remote US / UK. Software supply-chain security."
+    enabled: false
+
+  - name: Semgrep
+    careers_url: https://jobs.ashbyhq.com/semgrep
+    notes: "Remote US. Static analysis / AppSec."
+    enabled: false
+
+  - name: Bishop Fox
+    careers_url: https://job-boards.greenhouse.io/bishopfox
+    notes: "Remote US + Mexico. Offensive security consultancy."
+    enabled: false
+
+  - name: Praetorian
+    careers_url: https://job-boards.greenhouse.io/praetorian
+    notes: "Remote US. Offensive security consultancy."
+    enabled: false
+
+  - name: Coalfire
+    careers_url: https://jobs.lever.co/coalfire
+    notes: "Remote US. Pentest and compliance (FedRAMP, PCI)."
+    enabled: false
+
+  - name: Bugcrowd
+    careers_url: https://job-boards.greenhouse.io/bugcrowd
+    notes: "Remote US / UK / Brazil. Bug bounty platform."
+    enabled: false
+
+  - name: HackerOne
+    careers_url: https://jobs.ashbyhq.com/hackerone
+    notes: "Remote US. Bug bounty platform."
+    enabled: false
+
   # -- US K-12 school districts & community colleges (single-employer boards) --
   # Examples of the applitrack / neogov / redrover / schoolspring providers.
   # Disabled: these are one region's boards — copy the pattern for your own
@@ -2996,6 +4060,18 @@ tracked_companies:
   - name: Oklahoma State University
     careers_url: https://careers.pageuppeople.com/1216/cw/en-us/listing/
     notes: "PageUp. US tenants use the en-us locale segment. 367 postings when checked."
+    enabled: false
+
+  - name: Freshworks
+    careers_url: https://careers.smartrecruiters.com/freshworks
+    notes: "SmartRecruiters. 123 postings when checked."
+    enabled: true
+
+  # -- Middle East & Pakistan --
+  - name: Careem
+    careers_url: https://jobs.careem.com/
+    api: https://boards-api.greenhouse.io/v1/boards/careem/jobs
+    notes: "Greenhouse. Technology and operations roles in Pakistan and the Middle East."
     enabled: false
 
 # ── Job Boards ────────────────────────────────────────────────────────
@@ -3084,7 +4160,7 @@ job_boards:
     enabled: false
     notes: "Polish job board — Other specialists division"
 
-  # ── JustJoin.it / NoFluffJobs (Polish tech market) ────────────────────────
+  # ── JustJoin.it / NoFluffJobs / Bulldogjob (Polish tech market) ───────────
   # Public job-board APIs. Disabled by default; enable and rely on the global
   # title_filter/location_filter/salary_filter above for your target profile.
 
@@ -3100,7 +4176,35 @@ job_boards:
     enabled: false
     notes: "Polish tech job board — newest public postings"
 
-  # -- Indonesia job boards (provider: jobstreet / glints) --
+  - name: Bulldogjob
+    careers_url: https://bulldogjob.pl/companies/jobs
+    provider: bulldogjob
+    enabled: false
+    notes: "Polish tech job board — whole board; narrow it with a search URL from the site"
+
+  # ── Jobs.cz / Prace.cz (Czech job portals) ─────────────────────────────────
+  # Keyword search; keywords default to config/profile.yml target_roles.
+  # Czech-titled ads need Czech terms ("vývojář", "programátor") in keywords
+  # AND in title_filter.positive. Both portals give city-only locations, so
+  # allow Czech cities (Praha, Brno, …) in location_filter.
+
+  - name: Jobs.cz
+    provider: jobscz
+    enabled: false
+    # jobscz:
+    #   keywords: ["backend developer", "vývojář"]   # optional
+    #   location: praha                               # optional site slug
+    # max_pages: 10
+
+  - name: Prace.cz
+    provider: pracecz
+    enabled: false
+    # pracecz:
+    #   keywords: ["backend developer", "vývojář"]   # optional
+    #   location: brno                                # optional site slug
+    # max_pages: 10
+
+  # -- Indonesia job boards (provider: jobstreet / glints / kalibrr / techinasia) --
 
   - name: Jobstreet Indonesia
     provider: jobstreet
@@ -3109,9 +4213,24 @@ job_boards:
     searchKeywords: "data scientist"
     searchLocation: "Jakarta"
     pageSize: 30
-    maxPages: 3
+    # max_pages: 100                   # optional (default 100, hard max 500); warns if truncated
     enabled: false
     notes: "Indonesia's largest job board (SEEK group). Uses SEEK v5 JobSearch API — zero tokens."
+
+  - name: Kalibrr Indonesia
+    provider: kalibrr
+    api: https://www.kalibrr.com/kjs/job_board/search
+    searchKeywords: "engineer"        # optional: maps to the API's own `text` filter
+    pageSize: 100                     # optional (default 100; 500 is accepted)
+    max_pages: 20                     # optional (default 20); `count` in the response bounds the real total
+    enabled: false
+    notes: "SEA job board, Indonesia-heavy. Public no-auth job-board search JSON — zero tokens."
+
+  - name: Tech in Asia
+    provider: techinasia
+    max_pages: 5                      # optional (default 5; 1000 rows per page)
+    enabled: false
+    notes: "SEA startup-ecosystem job board (~300 live postings, mostly Indonesia). Reads the Algolia index the site's own UI queries; the app id + client key are discovered from the live bundle on every run, so nothing is hardcoded."
 
   - name: Glints Indonesia
     provider: glints
@@ -3136,26 +4255,23 @@ job_boards:
 
   # ── Getro — VC portfolio "talent network" boards ───────────────────
   # One board aggregates jobs across a fund's portfolio companies (each job
-  # belongs to the portfolio company, not the fund). `careers_url` is
-  # required — it also supplies the referer header the search API needs.
-  # `getro_collection` (the board's numeric network id, the `network.id` in
-  # the board page's __NEXT_DATA__) is optional: omit it and the id
-  # auto-resolves from `careers_url` on first fetch; set it to skip that
-  # lookup. Optional knobs: `getro_max_pages` (default 40, hard-capped at
-  # 1500), `getro_max_age_days` (default 90, a pagination bound — newest-first,
-  # stops once postings cross the age).
+  # belongs to the portfolio company, not the fund). Required: `provider: getro`
+  # (boards live on their own hosts, so there is no auto-detect) and
+  # `careers_url`; the board's collection id is read from that page. Optional
+  # knobs: `getro_max_pages` (default 40, hard-capped at 1500),
+  # `getro_max_age_days` (default 90, a pagination bound — newest-first, stops
+  # once postings cross the age), `getro_collection` (the collection id, only
+  # when the scan reports that it cannot be read from the page).
 
   - name: b2venture (portfolio)
     careers_url: https://jobs.b2venture.vc/jobs
     provider: getro
-    getro_collection: 4283
     enabled: false
     notes: "Swiss VC portfolio board (Getro)"
 
   - name: Cherry Ventures (portfolio)
     careers_url: https://talent.cherry.vc/jobs
     provider: getro
-    getro_collection: 44081
     enabled: false
     notes: "VC portfolio board (Getro)"
 
@@ -3163,37 +4279,36 @@ job_boards:
                                         # 200+ portfolio companies (Klarna, Lime, Hinge Health among alumni).
     careers_url: https://careers.atomico.com/jobs
     provider: getro
-    # getro_collection left out on purpose — auto-resolves from careers_url on first fetch
     enabled: false
-    notes: "VC portfolio board (Getro), collection_id auto-resolved"
+    notes: "VC portfolio board (Getro)"
 
   - name: Earlybird Venture Capital (portfolio)   # Berlin. Founded 1997, ~€2.5B AUM across fund streams,
                                                    # one of Europe's oldest and most active VCs (fintech/insurtech, enterprise software, deep tech).
     careers_url: https://jobs.earlybird.com/jobs
     provider: getro
     enabled: false
-    notes: "German VC portfolio board (Getro), collection_id auto-resolved"
+    notes: "German VC portfolio board (Getro)"
 
   - name: Speedinvest (portfolio)      # Vienna. Pan-European/CEE early-stage VC, ~€1B+ AUM,
                                         # ~250 portfolio companies (wikifolio, Bitmovin, byrd) — strong DACH presence.
     careers_url: https://careers.speedinvest.com/jobs
     provider: getro
     enabled: false
-    notes: "DACH-region VC portfolio board (Getro), collection_id auto-resolved"
+    notes: "DACH-region VC portfolio board (Getro)"
 
   - name: HV Capital (portfolio)       # Munich/Berlin. One of Europe's largest early-to-growth VCs,
                                         # ~€2.8B AUM, 200+ portfolio companies (Zalando, HelloFresh, Delivery Hero, FlixBus).
     careers_url: https://hv.getro.com/jobs
     provider: getro
     enabled: false
-    notes: "VC portfolio board (Getro), collection_id auto-resolved"
+    notes: "VC portfolio board (Getro)"
 
   - name: Point Nine (portfolio)       # Berlin. Early-stage "angel-VC" for B2B SaaS/AI, smaller fund (~$550M AUM),
                                         # ~90 portfolio companies (early Zendesk, Algolia, Contentful, Revolut rounds).
     careers_url: https://jobs.pointnine.com/jobs
     provider: getro
     enabled: false
-    notes: "VC portfolio board (Getro), collection_id auto-resolved"
+    notes: "VC portfolio board (Getro)"
 
   - name: Insight Partners (portfolio)  # New York. Global growth-equity/VC, one of the largest tech-focused funds,
                                          # 500+ portfolio companies worldwide.
@@ -3201,7 +4316,7 @@ job_boards:
     provider: getro
     getro_max_pages: 700   # large global board — raise the default page cap to reach deeper pages
     enabled: false
-    notes: "VC portfolio board (Getro), collection_id auto-resolved"
+    notes: "VC portfolio board (Getro)"
 
   # ── Getro — regional / economic-development "tech ecosystem" boards ─
   # Getro doesn't only power VC portfolio boards above -- city and regional
@@ -3217,38 +4332,41 @@ job_boards:
     careers_url: https://techjobfinder.investottawa.ca/jobs
     provider: getro
     enabled: false
-    notes: "Ottawa tech ecosystem board (Getro), collection_id auto-resolved from careers_url"
+    notes: "Ottawa tech ecosystem board (Getro)"
 
-  # ── Consider (getconsider.com) — VC portfolio boards ───────────────
-  # JS board backed by a same-origin JSON API. Set `consider_board` to the
-  # board id — NOT the host (Founderful's board id is "wingman"). `careers_url`
-  # supplies the board origin. Optional: `consider_size` (default 500).
+  # ── Consider (consider.com) — VC portfolio boards ──────────────────
+  # JS board backed by a same-origin JSON API. Required: `provider: consider`
+  # (boards live on their own hosts, so there is no auto-detect) and
+  # `careers_url`; the board id (not the host: Founderful's is "wingman") is
+  # read from that page. Optional knobs: `consider_size` (default 500, maximum 1000,
+  # the jobs one request returns), `max_pages` (default 10, hard cap 100, the
+  # requests per board), `consider_posted_since` (an ISO 8601 duration such as
+  # "P7D": the board's own "Posted" filter, so only jobs posted in that window
+  # are read; off by default), `consider_board` (the board id, only when the
+  # scan reports that it cannot be read from the page).
 
   - name: Founderful (portfolio)
     careers_url: https://jobs.founderful.com/jobs
     provider: consider
-    consider_board: wingman
     enabled: false
-    aggregator: true          # portfolio board: many employers under one entry
     notes: "Swiss VC portfolio board (Consider)"
 
   # ── Swiss startup job boards ───────────────────────────────────────
   # Aggregators of Swiss startup roles. No extra config — auto-detected from
   # the careers_url host.
 
-
   - name: joinup.ch
     careers_url: https://joinup.ch/browse/jobs
-    provider: joinup
     enabled: false
-    aggregator: true          # many employers under one entry
     notes: "Swiss startup job platform (newest SSR page)"
-  # ── CryptocurrencyJobs (Web3 / crypto) ─────────────────────────────
-  # Curated Web3/crypto job board. Public RSS feed, zero-auth, 100% remote
-  # listings. The feed URL is hardcoded in the provider — no careers_url
-  # or api field needed.
 
-  # - name: CryptocurrencyJobs             # curated Web3/crypto board (RSS, all-remote)
+  # ── CryptocurrencyJobs (Web3 / crypto) ─────────────────────────────
+  # Curated Web3/crypto job board. Public RSS feed, zero-auth, mostly
+  # remote listings; some are limited to a region or based in a city. The
+  # feed URL is hardcoded in the provider — no careers_url or api field
+  # needed.
+
+  # - name: CryptocurrencyJobs             # curated Web3/crypto board (RSS, mostly remote)
   #   provider: cryptocurrencyjobs
   #   enabled: true
 
@@ -3261,3 +4379,19 @@ job_boards:
     careers_url: https://www.python.org/jobs/
     enabled: false
     notes: "Official Python Software Foundation job board (public RSS feed)"
+
+  # ── Latin America general boards (Computrabajo, Magneto365) ──
+  # Server-rendered search pages, zero-auth, auto-detected from careers_url.
+  # Point careers_url at the search you would run in a browser; the search
+  # path is the only filter these boards offer. Measured 2026-10-23 (one GET
+  # of each page below, 20 postings each). Left `enabled: false`.
+
+  - name: Computrabajo Colombia
+    careers_url: https://co.computrabajo.com/trabajo-de-sistemas
+    enabled: false
+    notes: "Colombia; other <country>.computrabajo.com hosts are detected but unmeasured. Crawl capped at 3 pages / 15 postings per entry; narrow the search URL."
+
+  - name: Magneto365 Tecnologia
+    careers_url: https://www.magneto365.com/co/trabajos/buscar/tecnologia
+    enabled: false
+    notes: "Colombia. 'tecnologia' search; swap the last path segment for another search."

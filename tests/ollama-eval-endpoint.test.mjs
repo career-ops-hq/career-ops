@@ -9,6 +9,7 @@
 // request, asserting the endpoint and the params, and that the native response
 // shape ({message:{content}}) is parsed.
 import { createServer } from 'http';
+import { listenOnSafePort } from './helpers/listen-safe-port.mjs';
 import { execFile } from 'child_process';
 import { join } from 'path';
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
@@ -32,7 +33,7 @@ const server = createServer((req, res) => {
   });
 });
 
-await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+await listenOnSafePort(server);
 const port = server.address().port;
 
 const done = new Promise((resolve) => {

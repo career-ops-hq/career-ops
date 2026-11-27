@@ -3,6 +3,7 @@
 
 import { decodeEntities } from './_html-entities.mjs';
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 // SchoolSpring provider — K-12 districts hosted at `<district>.schoolspring.com`.
 // tracked_companies: (one entry = one district). Auto-detects from careers_url.
@@ -16,8 +17,9 @@ import { fetchJsonWithRetry, sleep } from './_http.mjs';
 // target loudly rather than returning a silently partial board.
 
 const SCHOOLSPRING_HOST_RE = /^[a-z0-9][a-z0-9-]*\.schoolspring\.com$/;
+const API_HOST = 'api.schoolspring.com';
 // `www` and `api` are the platform's own hosts, not districts.
-const NON_DISTRICT = new Set(['www.schoolspring.com', 'api.schoolspring.com']);
+const NON_DISTRICT = new Set(['www.schoolspring.com', API_HOST]);
 
 const PAGE_SIZE = 100;
 const DEFAULT_MAX_PAGES = 20; // 2,000 postings; a district never comes close
@@ -71,12 +73,16 @@ function pageUrl(host, page) {
     size: String(PAGE_SIZE),
     sortDateAscending: 'false',
   });
-  return `https://api.schoolspring.com/api/Jobs/GetPagedJobsWithSearch?${q}`;
+  return `https://${API_HOST}/api/Jobs/GetPagedJobsWithSearch?${q}`;
 }
 
 /** @type {Provider} */
 export default {
   id: 'schoolspring',
+
+  fetchHost() {
+    return API_HOST;
+  },
 
   detect(entry) {
     const host = resolveHost(entry);
@@ -122,10 +128,15 @@ export default {
         break;
       }
     }
-    // Warn only when OUR ceiling cut a board that had more, never for a
-    // ctx.maxPages probe cap and never when the API just repeated itself.
-    if (lastPageFull && !stoppedOnRepeat && pagesFetched >= ceiling && !(ctxMax > 0 && ctxMax < ceiling)) {
+    // Warn only when OUR ceiling cut a board that had more, never during a
+    // ctx.maxPages probe and never when the API just repeated itself. A probe on
+    // a max_pages: 1 entry ends on the entry's own last page too, so any probe
+    // is excluded, not only one whose cap is below the ceiling (#7180).
+    if (lastPageFull && !stoppedOnRepeat && pagesFetched >= ceiling && !(ctxMax > 0)) {
       console.warn(`schoolspring: ${entry.name}: stopped at ${ceiling} pages (${ceiling * PAGE_SIZE} postings); raise max_pages on this entry`);
+      // The same cut marks the result, so scan.mjs logs the board partial
+      // instead of reachable (lib/board-truncation.mjs).
+      markTruncated(jobs, 'page-cap', { fetched: jobs.length });
     }
     return jobs;
   },

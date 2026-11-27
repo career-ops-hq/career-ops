@@ -138,25 +138,6 @@ export async function createScheduledJob(fields: JobFields): Promise<ScheduledJo
   });
 }
 
-export async function updateScheduledJob(
-  id: string,
-  fields: JobFields & { status?: Exclude<JobStatus, "deleted"> },
-): Promise<ScheduledJob | null> {
-  return withScheduledStore(storeFile(), (store: Store) => {
-    const job = store.jobs.find((item) => item.id === id && item.status !== "deleted");
-    if (!job) return null;
-    const startChanged = fields.startAt !== job.startAt;
-    const cadenceChanged = fields.every !== job.every || fields.unit !== job.unit;
-    Object.assign(job, fields, { updatedAt: new Date().toISOString() });
-    if (startChanged) {
-      job.nextRunAt = fields.startAt;
-    } else if (cadenceChanged) {
-      job.nextRunAt = nextScheduledRun(job.startAt, fields.every, fields.unit, Date.now(), fields.timezone) || job.nextRunAt;
-    }
-    return job;
-  });
-}
-
 export async function patchScheduledJob(id: string, raw: unknown): Promise<ScheduledJob | null> {
   if (!isSafeScheduledId(id)) return null;
   return withScheduledStore(storeFile(), (store: Store) => {
@@ -175,19 +156,6 @@ export async function patchScheduledJob(id: string, raw: unknown): Promise<Sched
     if (startChanged) current.nextRunAt = fields.startAt;
     else if (cadenceChanged) current.nextRunAt = nextScheduledRun(current.startAt, fields.every, fields.unit, Date.now(), fields.timezone) || current.nextRunAt;
     return current;
-  });
-}
-
-export async function setScheduledJobStatus(
-  id: string,
-  status: Exclude<JobStatus, "deleted">,
-): Promise<ScheduledJob | null> {
-  return withScheduledStore(storeFile(), (store: Store) => {
-    const job = store.jobs.find((item) => item.id === id && item.status !== "deleted");
-    if (!job) return null;
-    job.status = status;
-    job.updatedAt = new Date().toISOString();
-    return job;
   });
 }
 

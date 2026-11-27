@@ -49,7 +49,8 @@ function dependencyLine(codeRoot, { nodePath = '' } = {}) {
     cwd: codeRoot,
     encoding: 'utf-8',
     // Pinned so an inherited NODE_PATH can never be what decides the outcome.
-    env: { ...process.env, NODE_PATH: nodePath },
+    // No browser launches: this suite tests dependency resolution, not them.
+    env: { ...process.env, NODE_PATH: nodePath, CAREER_OPS_DOCTOR_SKIP_BROWSER: '1' },
   });
   assert.equal(run.stderr, '', `doctor wrote to stderr: ${run.stderr}`);
   const line = run.stdout.split('\n').find((l) => /Dependencies/.test(l));

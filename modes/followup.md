@@ -20,6 +20,10 @@ elapsed-time cadence case — see `confirmed_time_noshow` in `modes/email.md`
 - `config/profile.yml` — User profile (name, identity)
 - `cv.md` — CV for proof points in drafts
 
+## Step 0: Check that follow-ups are on
+
+If `config/profile.yml` sets `follow_ups.enabled: false`, stop here. Tell the user follow-ups are turned off and that they can turn them back on with `follow_ups.enabled: true` in `config/profile.yml` or the "Track follow-ups" checkbox on the web Config page. Do not run the cadence script or draft follow-up messages. The `contacto` mode is a first outreach, not a follow-up, so it still works when follow-ups are off. `followup-cadence.mjs --json` also reports `"followupsEnabled": false` with no entries in that case.
+
 ## Step 1 — Run Cadence Script
 
 Execute:
@@ -39,7 +43,7 @@ Parse the JSON output. It contains:
 If no actionable entries, tell the user:
 > "No active applications to follow up on. Apply to some roles first with `/career-ops` and come back when they're aging."
 
-**Calibration cross-reference:** `node funnel-velocity.mjs --summary` reports which in-flight applications sit beyond the typical first-response window (its `waiting` block) — those rows are natural follow-up candidates; feed them into this cadence view rather than treating the wait itself as a verdict (silence past the window is common, not a rejection). When the user reports a status change here ("they replied", "rejected"), route it through `node set-status.mjs <report#> <state>` and pass `--on YYYY-MM-DD` when they name the real event day.
+**Calibration cross-reference:** `node funnel-velocity.mjs --summary` reports which in-flight applications sit beyond the typical first-response window (its `waiting` block) — those rows are natural follow-up candidates; feed them into this cadence view rather than treating the wait itself as a verdict (silence past the window is common, not a rejection). When the user reports a status change here ("they replied", "rejected"), route it through `node set-status.mjs --report <report#> <state>` and pass `--on YYYY-MM-DD` when they name the real event day.
 
 ## Step 1b — Employer Response-Latency Check
 

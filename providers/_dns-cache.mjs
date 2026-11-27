@@ -266,7 +266,7 @@ export function createCachedLookup(realLookup, options = {}) {
         ? rest[0].map((entry) => entry && entry.address)
         : [rest[0]];
       const bad = addresses.find((address) => isBlockedAddress(address));
-      if (bad !== undefined && !isTrustedProxyLookup(hostname)) return callback(blockedAddressError(hostname, bad));
+      if (bad !== undefined && !isTrustedProxyLookup(hostname)) return callback(blockedAddressError(hostname, bad, addresses));
       return callback(err, ...rest);
     };
   }
@@ -375,6 +375,16 @@ export function lookupsPerMinFromEnv(env = process.env) {
 
 /** @type {{ pacingStats: () => { delayed: number, waitedMs: number } } | null} */
 let patched = null;
+
+/**
+ * Is the process-wide dns.lookup patch installed? It is the connect-time address
+ * guard's carrier, so it is absent only when CAREER_OPS_NO_DNS_CACHE=1 opted out.
+ *
+ * @returns {boolean}
+ */
+export function dnsLookupPatched() {
+  return Boolean(patched);
+}
 
 /**
  * Pacing counters for the process-wide patched lookup.

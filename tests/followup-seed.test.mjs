@@ -237,6 +237,12 @@ function cleanup(sandbox) {
   else fail(`4. --date beats notes date — got ${parsed.appliedDate}`);
   if (parsed.appliedDate !== '2026-01-01') pass('4. tracker date column does not outrank --date or notes');
   else fail('4. tracker date column does not outrank --date or notes — got column date');
+
+  // --date=value syntax (#5197)
+  const withEqDate = run(['1', '--date=2026-06-25', '--json'], sb);
+  const parsedEq = JSON.parse(withEqDate.stdout);
+  if (parsedEq.appliedDate === '2026-06-25') pass('4. --date=X equals syntax works identically');
+  else fail(`4. --date=X equals syntax failed — got ${parsedEq.appliedDate}`);
   cleanup(sb);
 
   // Unit-level: resolveAppliedDate directly. Returns {appliedDate, appDateSource}
@@ -600,5 +606,17 @@ function cleanup(sandbox) {
     if (setDates[i] === expected) pass(`18. (set …) matches the ${TZ} calendar day`);
     else fail(`18. (set …) for ${TZ} — expected ${expected}, got ${setDates[i]}`);
   });
+}
+
+// ── Test: --help and -h print usage and exit 0 (#5197) ──
+{
+  const sb = makeSandbox();
+  const resHelp = run(['--help'], sb);
+  if (resHelp.code === 0 && /^Usage:/m.test(resHelp.stdout)) pass('--help prints usage and exits 0');
+  else fail(`--help failed — code ${resHelp.code}, stdout: ${resHelp.stdout}`);
+  const resH = run(['-h'], sb);
+  if (resH.code === 0 && /^Usage:/m.test(resH.stdout)) pass('-h prints usage and exits 0');
+  else fail(`-h failed — code ${resH.code}, stdout: ${resH.stdout}`);
+  cleanup(sb);
 }
 

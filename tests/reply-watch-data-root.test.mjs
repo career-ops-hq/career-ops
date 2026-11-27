@@ -16,12 +16,12 @@
 // which is what made the pair look correct, so both legs are asserted here: a fix
 // to one alone splits the documented handoff.
 
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
-import { join, relative, sep } from 'path';
+import { basename, join, relative, sep } from 'path';
 import { execFileSync } from 'child_process';
 import { pass, fail, warn, ROOT, NODE } from './helpers.mjs';
-import { isNestedCheckout } from '../lib/mjs-files.mjs';
+import { walkTree } from '../lib/walk-tree.mjs';
 
 console.log('\nreply-watch + paste-reply — user-layer paths follow the data root');
 
@@ -98,23 +98,14 @@ function env(root, extra = {}) {
  * the same string the assertion was built from.
  *
  * Today it is only ever pointed at a mkdtemp root this suite created, where
- * there is no nested checkout to meet — but it consults the shared predicate
- * anyway (#3499, #3762) rather than taking an exemption on that reasoning. An
- * exemption would have to be re-earned by whoever next points this at a
- * different directory, and the guard costs one existsSync per directory.
+ * there is no nested checkout to meet — but it goes through walkTree, which
+ * applies the shared guard on every descent (#3499, #3762), rather than taking
+ * an exemption on that reasoning. An exemption would have to be re-earned by
+ * whoever next points this at a different directory, and the guard costs one
+ * existsSync per directory.
  */
 function findByName(dir, name) {
-  const found = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const child = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (isNestedCheckout(child)) continue;
-      found.push(...findByName(child, name));
-    } else if (entry.name === name) {
-      found.push(child);
-    }
-  }
-  return found;
+  return walkTree(dir).filter((f) => basename(f) === name);
 }
 
 // The checkout's own ledger. Only ever probed with existsSync — never read,

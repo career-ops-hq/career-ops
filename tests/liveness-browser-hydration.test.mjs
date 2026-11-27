@@ -81,12 +81,13 @@ const live = { text: POSTING, controls: ['Apply for this job'] };
   }
 }
 
-// Any text at all keeps insufficient_content: a short page can be a closure page.
+// Any text at all keeps the insufficient_content code, which is uncertain: a
+// short page with no closure notice has not said the posting is closed.
 {
   const page = scriptedPage({ render: () => ({ text: 'Careers', controls: [] }) });
   const verdict = await checkUrlLiveness(page, POSTING_URL);
-  if (verdict.result === 'expired' && verdict.code === 'insufficient_content' && page.waits.length === 16) {
-    pass('a short page that is not empty still reads insufficient_content when the poll ends');
+  if (verdict.result === 'uncertain' && verdict.code === 'insufficient_content' && page.waits.length === 16) {
+    pass('a short page that is not empty reads uncertain/insufficient_content when the poll ends');
   } else {
     fail(`short page: ${JSON.stringify(verdict)}, waits=${page.waits.length}`);
   }
@@ -144,7 +145,7 @@ const live = { text: POSTING, controls: ['Apply for this job'] };
 }
 
 // An unrendered first read followed only by failing reads must not be
-// reported from that stale snapshot as insufficient_content (expired).
+// reported from that stale snapshot as insufficient_content.
 {
   const page = scriptedPage({
     render: (n) => {

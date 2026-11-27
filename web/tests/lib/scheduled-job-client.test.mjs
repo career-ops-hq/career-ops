@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { cadenceMinimum, cadenceValueForUnit, createScheduledJobRequest, MIN_SCHEDULE_MINUTES, updateScheduledJobRequest } from "../../src/lib/scheduled-job-client.mjs";
 import { runStatusTone } from "../../src/lib/scheduled-run-status.mjs";
 import { isSchedulerStatusPayload } from "../../src/lib/scheduled-scheduler-status.mjs";
-import { cycleFocusIndex } from "../../src/lib/scheduled-overlay-focus.mjs";
+import { cycleFocusIndex, recoverFocusIndex, tabMovesInsideControl } from "../../src/lib/modal-focus.mjs";
 import { scheduledRunnerResourcePath, scheduledStorePath } from "../../src/lib/scheduled-runner-path.mjs";
 
 test("scheduled-job client keeps one cadence minimum and preserves payload", async () => {
@@ -44,6 +45,17 @@ test("scheduler payload and overlay focus helpers fail closed and wrap", () => {
   assert.equal(cycleFocusIndex(0, 2, true), 1);
   assert.equal(cycleFocusIndex(1, 2, false), 0);
   assert.equal(cycleFocusIndex(0, 0), -1);
+  const date = { tagName: "INPUT", type: "date", disabled: false };
+  assert.equal(tabMovesInsideControl(date), true);
+  assert.equal(tabMovesInsideControl({ tagName: "INPUT", type: "time", disabled: false }), true);
+  assert.equal(tabMovesInsideControl({ tagName: "INPUT", type: "text", disabled: false }), false);
+  assert.equal(tabMovesInsideControl({ ...date, disabled: true }), false);
+  assert.equal(tabMovesInsideControl({ tagName: "BUTTON", type: "button" }), false);
+  assert.equal(recoverFocusIndex({ stayedOnControl: true, stillInside: false, count: 4, backwards: false }), -1);
+  assert.equal(recoverFocusIndex({ stayedOnControl: false, stillInside: true, count: 4, backwards: false }), -1);
+  assert.equal(recoverFocusIndex({ stayedOnControl: false, stillInside: false, count: 4, backwards: false }), 0);
+  assert.equal(recoverFocusIndex({ stayedOnControl: false, stillInside: false, count: 4, backwards: true }), 3);
+  assert.equal(recoverFocusIndex({ stayedOnControl: false, stillInside: false, count: 0, backwards: false }), -1);
 });
 
 test("runner and scheduler-status derive the same default and custom lock path", () => {
@@ -57,8 +69,11 @@ test("runner and scheduler-status derive the same default and custom lock path",
 });
 
 test("relative configured store paths resolve against the supplied career-ops root", () => {
-  const firstRoot = fs.mkdtempSync(path.join(process.env.TEMP || process.cwd(), "career-ops-store-root-a-"));
-  const secondRoot = fs.mkdtempSync(path.join(process.env.TEMP || process.cwd(), "career-ops-store-root-b-"));
+  // os.tmpdir(), which reads TEMP on Windows. Falling back to the working
+  // directory when TEMP is unset, as it is on macOS and Linux, put both of
+  // these in the repository root whenever test-all.mjs ran this file.
+  const firstRoot = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-store-root-a-"));
+  const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-store-root-b-"));
   try {
     const relative = "data/custom-scheduled-jobs.json";
     assert.equal(scheduledStorePath(firstRoot, relative), path.resolve(firstRoot, relative));
@@ -89,4 +104,10 @@ test("scheduled run route has a bounded SIGKILL fallback and idempotent cleanup"
   assert.match(source, /killTimer/);
   assert.match(source, /if \(settled\) return/);
   assert.match(source, /clearTimeout\(killTimer\)/);
+});
+
+test("scheduled run route reports the runner's cause, not the first stderr line", () => {
+  const source = fs.readFileSync(new URL("../../src/app/api/scheduled-jobs/[id]/run/route.ts", import.meta.url), "utf8");
+  assert.match(source, /stderrCause\(result\.stderr\)/);
+  assert.doesNotMatch(source, /stderr\.split\([^)]*\)\.find\(Boolean\)/);
 });

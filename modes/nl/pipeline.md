@@ -4,7 +4,7 @@ Processen bieden URL's aan die zijn verzameld in `data/pipeline.md`. De kandidaa
 
 ## Werkstroom
 
-1. **Lees** `data/pipeline.md` -> zoek de items `- [ ]` in de sectie "In afwachting" / "Pending" / "Pendientes" / "Offen" / "En attente"
+1. **Lees** `data/pipeline.md` (zoek met `grep -n -m 20 '^- \[ \] ' data/pipeline.md` en zoek na elke ronde opnieuw tot alleen items verschijnen die je deze ronde in Pending hebt laten staan, lees niet het hele bestand) -> zoek de items `- [ ]` in de sectie "In afwachting" / "Pending" / "Pendientes" / "Offen" / "En attente"
 2. **Voor elke openstaande URL**:
    a. **Extraheer de vacature** met Playwright (`browser_navigate` + `browser_snapshot`) -> WebFetch -> WebSearch. Alleen geslaagde Playwright-navigatie plus een snapshot mogen bevestigen dat de vacature actief is. WebFetch en WebSearch dienen uitsluitend voor extractie en bevestigen nooit de actieve status
    b. Als de URL niet toegankelijk is -> laat het item als `- [ ]` staan of markeer het als `- [!]` met de foutdetails, zodat het zichtbaar en opnieuw uitvoerbaar blijft; er is dan nog geen rapportnummer gereserveerd. Als extractie alleen via WebFetch of WebSearch lukt, ga dan verder met `**Verification:** unconfirmed` in het rapport. Gebruik `**Verification:** unconfirmed (batch mode)` uitsluitend bij headless batchverwerking

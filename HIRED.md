@@ -15,6 +15,76 @@ nothing leaves your machine until you press Submit yourself).
 
 <!-- ENTRIES -->
 
+<!-- hire n=25 level=role role="Information Technology Engineer" sector="MSP" geo="Colorado" weeks=12 link="https://github.com/career-ops-hq/career-ops/issues/4918" -->
+### Hire #25
+
+> Landed an Information Technology Engineer role after a multi-round process, including a values-alignment presentation to the hiring panel. career-ops tracked 25+ evaluations, built
+
+**Information Technology Engineer** · MSP · Colorado · 12 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/4918)
+
+<!-- hire n=24 level=handle handle=briacSck role="Country Launcher France / Head of Francophone Markets" sector="Corgi — YC-backed insurtech, London" geo="London, UK" weeks=5 link="https://github.com/career-ops-hq/career-ops/issues/4118" -->
+### Hire #24
+
+> career-ops scanned Corgi's whole job board in one pass and told me which of the six openings was actually mine, instead of me guessing. The outreach mode got me a warm LinkedIn int
+
+<a href="https://github.com/briacSck"><img src="https://github.com/briacSck.png?size=64" width="28" height="28" align="top" alt="@briacSck"> **@briacSck**</a> · Country Launcher France / Head of Francophone Markets · London, UK · 5 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/4118)
+
+<!-- hire n=23 level=handle handle=MainKataVerde role="Cash Solutions Technician (Productivity & Innovation)" sector="Multinational" weeks=1 link="https://github.com/career-ops-hq/career-ops/issues/7125" -->
+### Hire #23
+
+> Junior profile with a few months of QA and support experience. With career-ops I evaluated around 40 offers, prepared my emails and interviews, and reviewed the offer before signin
+
+<a href="https://github.com/MainKataVerde"><img src="https://github.com/MainKataVerde.png?size=64" width="28" height="28" align="top" alt="@MainKataVerde"> **@MainKataVerde**</a> · Cash Solutions Technician (Productivity &amp; Innovation) · 1 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/7125)
+
+<!-- hire n=22 level=handle handle=pelarson28 role="Customer Success Associate" sector="Startup (growth-stage)" geo="United States" weeks=10 link="https://github.com/career-ops-hq/career-ops/issues/6337" -->
+### Hire #22
+
+> After a layoff, I used career-ops to scan and evaluate roles, prep a take-home and a final round that walked through every job on my LinkedIn, and script my offer call. About 10 we
+
+<a href="https://github.com/pelarson28"><img src="https://github.com/pelarson28.png?size=64" width="28" height="28" align="top" alt="@pelarson28"> **@pelarson28**</a> · Customer Success Associate · United States · 10 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/6337)
+
+<!-- hire n=21 level=handle handle=gpirujo role="Staff Software Engineer" sector="Full remote agency" geo="Remote LATAM + EU" weeks=5 link="https://github.com/career-ops-hq/career-ops/issues/6249" -->
+### Hire #21
+
+> Landed a Staff Software Engineer role at Fluxon, ~5.5 weeks from first application to signed offer, through a 4-round interview process ending with a conversation with the CTO. Tar
+
+<a href="https://github.com/gpirujo"><img src="https://github.com/gpirujo.png?size=64" width="28" height="28" align="top" alt="@gpirujo"> **@gpirujo**</a> · Staff Software Engineer · Remote LATAM + EU · 5 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/6249)
+
+<!-- hire n=20 level=handle handle=bluezeb12 role="Database Systems Engineer" sector="Contracting Firm" geo="remote US" weeks=9 link="https://github.com/career-ops-hq/career-ops/issues/5921" -->
+### Hire #20
+
+> Applied through career-ops targeting health tech and federal systems. The initial application opened up a referral for a remote contracting role as a Database Systems Engineer supp
+
+<a href="https://github.com/bluezeb12"><img src="https://github.com/bluezeb12.png?size=64" width="28" height="28" align="top" alt="@bluezeb12"> **@bluezeb12**</a> · Database Systems Engineer · remote US · 9 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/5921)
+
+<!-- hire n=19 level=role role="Project Manager" sector="Mid Size Tech - Health" geo="Hibrid - Brazil" link="https://github.com/career-ops-hq/career-ops/issues/5786" -->
+### Hire #19
+
+> Career-Ops changed the game and completely switched my approach to jobhunt. Interviews started to appear because my career facts were being finally shown in my curriculum and I had
+
+**Project Manager** · Mid Size Tech - Health · Hibrid - Brazil · [story →](https://github.com/career-ops-hq/career-ops/issues/5786)
+
+<!-- hire n=18 level=handle handle=bravely role="Technical Lead Software Engineer" sector="Remote-first Health-tech Startup" geo="Remote US" weeks=22 link="https://github.com/career-ops-hq/career-ops/issues/5761" -->
+### Hire #18
+
+> `career-ops` was such a game changer, I'll never job hunt without it (or something like it) ever again. The portal scan/auto-evaluation pipeline made combing through jobs a breeze
+
+<a href="https://github.com/bravely"><img src="https://github.com/bravely.png?size=64" width="28" height="28" align="top" alt="@bravely"> **@bravely**</a> · Technical Lead Software Engineer · Remote US · 22 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/5761)
+
+<!-- hire n=17 level=handle handle=inesp role="Product Engineer" sector="remote-first, series D startup" geo="remote EU" weeks=6 link="https://github.com/career-ops-hq/career-ops/issues/5397" -->
+### Hire #17
+
+> Remote-first companies are hard to find. I was able to hand over the search to career-ops and it actually found jobs that fit me. The 2nd great feature is it's ability to read the
+
+<a href="https://github.com/inesp"><img src="https://github.com/inesp.png?size=64" width="28" height="28" align="top" alt="@inesp"> **@inesp**</a> · Product Engineer · remote EU · 6 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/5397)
+
+<!-- hire n=16 level=handle handle=rldzkl role="Senior Front-End Developer – UI/UX" sector="Energy sector" geo="Jakarta, Indonesia" weeks=12 link="https://github.com/career-ops-hq/career-ops/issues/5118" -->
+### Hire #16
+
+> Tracked the role through three interview rounds to the offer, then used career-ops to check the offer before accepting.
+
+<a href="https://github.com/rldzkl"><img src="https://github.com/rldzkl.png?size=64" width="28" height="28" align="top" alt="@rldzkl"> **@rldzkl**</a> · Senior Front-End Developer – UI/UX · Jakarta, Indonesia · 12 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/5118)
+
 <!-- hire n=15 level=handle handle=RiyaMathew-11 role="Applied Sciences Intern - ML Team" sector="start-up - scale-up" geo="United Kingdom" weeks=16 link="https://github.com/career-ops-hq/career-ops/issues/4915" -->
 ### Hire #15
 

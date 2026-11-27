@@ -1,6 +1,12 @@
 import type { Page, Frame } from "playwright-core";
 import type { ApplyField } from "./extract";
 import type { ApplyIssue } from "./issue";
+import { pickComboboxOption } from "./option-match.mjs";
+import { checkboxSelections } from "./checkbox-options.mjs";
+import { unsupportedAtsMessage, unsupportedInAppAts } from "./unsupported-ats.mjs";
+import { isApplicationHref } from "./apply-link.mjs";
+import { factsOf } from "./drive-action.mjs";
+import { isSubmitControl } from "./submit-guard.mjs";
 
 export type { ApplyIssue };
 
@@ -85,19 +91,130 @@ export async function dropNewTabs(page: Page): Promise<void> {
   }
 }
 
+/**
+ * Absolute posting URL when this href is Workday, iCIMS, UKG, or a host in
+ * apply.handoff_hosts. `handoffHosts` is the list openSession read once before
+ * the window opened; without it the profile is read here.
+ */
+async function blockedTriggerHref(page: Page, href: string | null, handoffHosts?: string[]): Promise<string | null> {
+  if (!href) return null;
+  let abs = href;
+  try {
+    abs = new URL(href, page.url()).href;
+  } catch {
+    return null;
+  }
+  const hit = await unsupportedInAppAts(abs, { handoffHosts });
+  return hit ? hit.postingUrl : null;
+}
+
+type OpenPage = { url: () => string };
+
+function pageUrl(candidate: OpenPage): string {
+  try {
+    return candidate.url() || "";
+  } catch {
+    return "";
+  }
+}
+
+function contextPages(page: Page): OpenPage[] {
+  try {
+    const opened = page.context().pages();
+    return Array.isArray(opened) ? opened : [];
+  } catch {
+    return [];
+  }
+}
+
+function urlSnapshot(page: Page): Map<OpenPage, string> {
+  const snap = new Map<OpenPage, string>();
+  snap.set(page, pageUrl(page));
+  for (const opened of contextPages(page)) snap.set(opened, pageUrl(opened));
+  return snap;
+}
+
+async function blockedAmong(page: Page, candidates: OpenPage[], handoffHosts?: string[]): Promise<string | null> {
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const landed = pageUrl(candidate);
+    if (!landed || seen.has(landed)) continue;
+    seen.add(landed);
+    const blocked = await blockedTriggerHref(page, landed, handoffHosts);
+    if (blocked) return blocked;
+  }
+  return null;
+}
+
+// Consent can leave another tab open. Only the main page, a new tab, or a tab
+// whose URL changed during this Apply action can refuse the posting. A click
+// can open its popup after click() returns, so that path looks a second time.
+export async function blockedAfterAction(page: Page, before: Map<OpenPage, string>, retry: boolean, handoffHosts?: string[]): Promise<string | null> {
+  const read = () => {
+    const now = [page, ...contextPages(page)];
+    const seen = new Set<OpenPage>();
+    const changed: OpenPage[] = [];
+    for (const candidate of now) {
+      if (seen.has(candidate)) continue;
+      seen.add(candidate);
+      if (candidate === page || !before.has(candidate) || before.get(candidate) !== pageUrl(candidate)) changed.push(candidate);
+    }
+    return blockedAmong(page, changed, handoffHosts);
+  };
+  const first = await read();
+  if (first || !retry) return first;
+  await page.waitForTimeout(400).catch(() => {});
+  return read();
+}
+
+export async function waitForBlankPopup(page: Page, before: Map<OpenPage, string>): Promise<void> {
+  const pending = () => {
+    const seen = new Set<OpenPage>();
+    for (const candidate of contextPages(page)) {
+      if (seen.has(candidate) || candidate === page || before.has(candidate)) continue;
+      seen.add(candidate);
+      const landed = pageUrl(candidate);
+      if (!landed || landed === "about:blank") return true;
+    }
+    return false;
+  };
+  if (!pending()) return;
+  await page.waitForTimeout(1000).catch(() => {});
+}
+
 /** SPA / apply-behind-a-button: if no form yet, click the first visible Apply CTA
  *  (NEVER a submit) to reveal the form. If it's an <a> with an application href,
- *  NAVIGATE there directly (robust vs popups). Returns true if it acted. */
-export async function tryApplyTrigger(page: Page): Promise<boolean> {
+ *  NAVIGATE there directly (robust vs popups). Returns true if it acted.
+ *  A Workday, iCIMS, or UKG href is returned as `{ blocked }` and is not opened. */
+export async function tryApplyTrigger(page: Page, handoffHosts?: string[]): Promise<boolean | { blocked: string } | { followed: Map<OpenPage, string> }> {
   try {
     // 1) Most reliable: an <a> linking straight to a known ATS application (e.g.
     //    openai.com → jobs.ashbyhq.com/…/application). Navigate there in-tab.
-    const atsLink = page.locator('a[href*="ashbyhq"], a[href*="greenhouse"], a[href*="lever.co"], a[href*="smartrecruiters"], a[href*="workable"], a[href*="recruitee"], a[href*="bamboohr"], a[href*="jobvite"], a[href*="teamtailor"], a[href*="myworkdayjobs"], a[href*="/apply"], a[href*="/application"]').first();
-    if (await atsLink.count().catch(() => 0)) {
-      const href = await atsLink.getAttribute("href").catch(() => null);
-      if (href && /^https?:\/\//i.test(href) && !/submit/i.test(href)) {
-        await page.goto(href, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
-        return true;
+    //    A link that fails isApplicationHref (a "Powered by" logo pointing at
+    //    the vendor's homepage) is skipped, and the next one is checked.
+    const atsLinks = page.locator('a[href*="ashbyhq"], a[href*="greenhouse"], a[href*="lever.co"], a[href*="smartrecruiters"], a[href*="workable"], a[href*="recruitee"], a[href*="bamboohr"], a[href*="jobvite"], a[href*="teamtailor"], a[href*="myworkdayjobs"], a[href*="myworkdaysite"], a[href*="icims.com"], a[href*="ultipro.com"], a[href*="ultipro.ca"], a[href*="/apply"], a[href*="/application"]');
+    //    The hrefs are read in one pass, so a list that changes in between
+    //    cannot skip a link or wait out a locator timeout per index.
+    const hrefs = await atsLinks
+      .evaluateAll((links) => links.slice(0, 20).map((a) => a.getAttribute("href")))
+      .catch(() => [] as (string | null)[]);
+    const href = hrefs.find((h): h is string => !!h && isApplicationHref(h)) ?? null;
+    if (href) {
+      const blocked = await blockedTriggerHref(page, href, handoffHosts);
+      if (blocked) return { blocked };
+      const before = urlSnapshot(page);
+      // A link that fails to load can leave the posting in place, and then
+      // the Apply control below is still the way in. A marker on the posting's
+      // window tells that apart from an error page that replaced it: Chrome's
+      // error page still reports the posting's URL.
+      const mark = `co-${Date.now()}-${Math.random()}`;
+      await page.evaluate((m) => { (window as unknown as { __coPosting?: string }).__coPosting = m; }, mark).catch(() => {});
+      const failed = await page.goto(href, { waitUntil: "domcontentloaded", timeout: 30_000 }).then(() => false, () => true);
+      const stayed = failed && (await page.evaluate(() => (window as unknown as { __coPosting?: string }).__coPosting).catch(() => null)) === mark;
+      if (!stayed) {
+        const landed = await blockedAfterAction(page, before, false, handoffHosts);
+        if (landed) return { blocked: landed };
+        return { followed: before };
       }
     }
     // 2) Otherwise click a visible Apply CTA (never a submit). dropNewTabs() has
@@ -109,8 +226,19 @@ export async function tryApplyTrigger(page: Page): Promise<boolean> {
     if ((await t.count().catch(() => 0)) && (await t.isVisible().catch(() => false))) {
       const label = (await t.innerText().catch(() => "")).toLowerCase();
       if (/submit|applied|withdraw/.test(label)) return false;
+      // The wording test misses a form's own <button type="submit">Apply</button>,
+      // and clicking that would file the form. Same guard as the drive loop;
+      // a control whose facts cannot be read is not clicked either.
+      const facts = await t.evaluate(factsOf, null).catch(() => null);
+      if (!facts || isSubmitControl(facts)) return false;
+      const href = await t.getAttribute("href").catch(() => null);
+      const blocked = await blockedTriggerHref(page, href, handoffHosts);
+      if (blocked) return { blocked };
+      const before = urlSnapshot(page);
       await t.click({ timeout: 3000 }).catch(() => {});
-      return true;
+      const landed = await blockedAfterAction(page, before, true, handoffHosts);
+      if (landed) return { blocked: landed };
+      return { followed: before };
     }
   } catch {
     /* ignore */
@@ -118,16 +246,12 @@ export async function tryApplyTrigger(page: Page): Promise<boolean> {
   return false;
 }
 
+export const LOGIN_WALL_MESSAGE =
+  "This page wants you to sign in or create an account first. Open it directly, log in, then paste the actual application-form URL here.";
+
 /** When extraction yields 0 fields, classify WHY so we abort with the RIGHT
  *  message (bot-challenge vs login wall vs closed posting vs unsupported). */
-export async function classifyEmpty(page: Page, url: string): Promise<ApplyIssue> {
-  const host = (() => {
-    try {
-      return new URL(url).hostname;
-    } catch {
-      return "";
-    }
-  })();
+export async function classifyEmpty(page: Page, url: string, handoffHosts?: string[]): Promise<ApplyIssue> {
   const sig = await page
     .evaluate(() => {
       const t = (document.title || "").toLowerCase();
@@ -148,13 +272,22 @@ export async function classifyEmpty(page: Page, url: string): Promise<ApplyIssue
     return { level: "block", code: "bot-challenge", message: "This page is asking you to verify you're human before showing the form. Open it directly in your browser, complete the check, then paste the URL back here." };
   }
   if (sig.hasPassword || /\/(login|sign-?in|register|sign-?up|auth|account|mfa|2fa)(\/|$|\?)/.test(u)) {
-    return { level: "block", code: "login-wall", message: "This page wants you to sign in or create an account first. Open it directly, log in, then paste the actual application-form URL here." };
+    return { level: "block", code: "login-wall", message: LOGIN_WALL_MESSAGE };
   }
-  if (/no longer accepting|position has been filled|posting is closed|no longer available|this (job|position|posting) (is |has )?(closed|expired|been filled)/.test(sig.body) || /not found|no longer|removed|closed/.test(sig.t)) {
+  // "job not found" is how Ashby renders a closed posting: the page title stays the
+  // company name, so only the body says the job is gone.
+  if (/no longer accepting|position has been filled|posting is closed|no longer available|job (listing )?not found|this (job|position|posting) (is |has )?(closed|expired|been filled)/.test(sig.body) || /not found|no longer|removed|closed/.test(sig.t)) {
     return { level: "block", code: "expired", message: "This job posting is closed or expired — it's no longer accepting applications." };
   }
-  if (/myworkdayjobs\.com$/i.test(host)) {
-    return { level: "block", code: "workday", message: "Workday forms aren't supported for in-app fill yet (multi-step, account-gated). Open the posting and apply there directly." };
+  let landedUrl = "";
+  try {
+    landedUrl = page.url();
+  } catch {
+    landedUrl = "";
+  }
+  const blockedAts = (await unsupportedInAppAts(landedUrl, { handoffHosts })) || (await unsupportedInAppAts(url, { handoffHosts }));
+  if (blockedAts) {
+    return { level: "block", code: blockedAts.vendor, message: unsupportedAtsMessage(blockedAts, true) };
   }
   if (/^(jobs|careers|empleos|empregos|all jobs|open (positions|roles)|search jobs|current openings)/i.test(sig.t) || /\/(jobs|careers|search|positions)\/?(\?|$)/.test(u)) {
     return { level: "block", code: "listing-page", message: "This looks like the careers listing, not a single application — the posting may have moved or closed. Open the specific job and paste its “Apply” URL." };
@@ -207,22 +340,52 @@ export async function multiStepInfo(page: Page): Promise<ApplyIssue | null> {
   return ms ? { level: "info", code: "multi-step", message: "This form has more than one step — after this page, you'll continue on the real form." } : null;
 }
 
+/** True when the displayed combobox text is the option fill would click. */
+export function comboboxDisplayMatches(actual: string, intended: string): boolean {
+  return pickComboboxOption([actual], intended) === 0;
+}
+
 /** READ THE REAL FORM BACK after filling: did every answer land? required fields
  *  still empty? any validation error visible? — the self-verification a blind
  *  selector script can't do. Returns warnings to show BEFORE the human submits. */
 export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Record<string, string>): Promise<ApplyIssue[]> {
-  const meta = fields.map((f) => ({ id: f.id, label: f.label || "this field", type: f.type, required: !!f.required, combobox: !!f.combobox }));
-  type R = { mismatches: string[]; requiredEmpty: string[]; valErrors: string[] };
+  const meta = fields.map((f) => ({ id: f.id, label: f.label || "this field", type: f.type, required: !!f.required, combobox: !!f.combobox, options: f.options ?? [] }));
+  const normOption = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();
+  const checkboxWanted = Object.fromEntries(
+    meta
+      .filter((f) => f.type === "checkbox" && f.options.length)
+      .map((f) => [f.id, checkboxSelections(answers[f.id] || "", f.options).map(normOption)]),
+  );
+  type Combo = { label: string; intended: string; actual: string; required: boolean };
+  type R = { mismatches: string[]; requiredEmpty: string[]; unverified: string[]; valErrors: string[]; comboboxes: Combo[] };
+  let readFailed = false;
   const res = await frame
     .evaluate(
-      ({ meta, answers }): R => {
+      ({ meta, answers, checkboxWanted }): R => {
         const norm = (s: string | null | undefined) => (s || "").replace(/\s+/g, " ").trim().toLowerCase();
+        const checkedWord = (s: string | null | undefined) => /^(true|yes|1|on|checked)$/.test(norm(s));
         const mismatches: string[] = [];
         const requiredEmpty: string[] = [];
+        const unverified: string[] = [];
+        const comboboxes: { label: string; intended: string; actual: string; required: boolean }[] = [];
+        const note = (label: string, intended: string | undefined, actual: string, required: boolean) => {
+          if (intended && intended.trim()) {
+            if (norm(actual) !== norm(intended)) mismatches.push(label);
+          } else if (required && !norm(actual)) {
+            requiredEmpty.push(label);
+          }
+        };
         for (const f of meta) {
           const intended = answers[f.id];
           const el = document.querySelector(`[data-co-field="${f.id}"]`) as HTMLElement | null;
-          if (!el) continue;
+          if (!el) {
+            // A file field is filled from the CV path, not from the answer map.
+            // Any other field we meant to fill, and every required field, has
+            // to be read back. A missing element is unverified either way.
+            const answered = f.type !== "file" && typeof intended === "string" && intended.trim();
+            if (f.required || answered) unverified.push(f.label);
+            continue;
+          }
           if (f.type === "file") {
             // confirm a file actually landed on the input (the CV attach can fail
             // silently on a custom dropzone). Only warn if the field is required.
@@ -231,29 +394,69 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
             if (f.required && !has) requiredEmpty.push(f.label);
             continue;
           }
-          let actual = "";
-          if (f.type === "checkbox") {
-            actual = (el as HTMLInputElement).checked ? "true" : "";
-          } else if (f.type === "radio") {
+          if (f.type === "checkbox" && Array.isArray(f.options) && f.options.length) {
             const grp = Array.from(document.querySelectorAll(`[data-co-field="${f.id}"]`)) as HTMLInputElement[];
-            actual = grp.some((r) => r.checked) ? "checked" : "";
-          } else if (f.combobox) {
-            // react-select keeps the chosen value in a sibling .select__single-value
-            // (the tagged input stays empty). Read leniently: only conclude "empty"
-            // when a placeholder is visibly shown — otherwise assume OK (never a
-            // false "didn't land" warning).
+            const selected = grp.filter((box) => box.checked).map((box) => norm(box.getAttribute("data-co-option") || box.value || ""));
+            const wanted = checkboxWanted[f.id] || [];
+            const same = selected.length === wanted.length && wanted.every((part) => selected.includes(part));
+            if (wanted.length && !same) mismatches.push(f.label);
+            if (f.required && selected.length === 0) requiredEmpty.push(f.label);
+            continue;
+          }
+          if (f.type === "checkbox") {
+            const on = (el as HTMLInputElement).checked;
+            if (intended && intended.trim() && checkedWord(intended) !== on) mismatches.push(f.label);
+            // An intended "false" matches an unchecked box, so the mismatch
+            // branch stays quiet. A required box still has to be checked.
+            if (f.required && !on) requiredEmpty.push(f.label);
+            continue;
+          }
+          if (f.type === "radio") {
+            const grp = Array.from(document.querySelectorAll(`[data-co-field="${f.id}"]`)) as HTMLInputElement[];
+            const chosen = grp.find((r) => r.checked);
+            const actual = chosen ? (chosen.getAttribute("data-co-option") || chosen.value || "") : "";
+            const matches = !!(intended && intended.trim() && chosen && (norm(actual) === norm(intended) || norm(chosen.value) === norm(intended)));
+            if (intended && intended.trim()) {
+              if (!matches) mismatches.push(f.label);
+            } else if (chosen) {
+              // A selected radio with no intended answer was not one we listed.
+              mismatches.push(f.label);
+            } else if (f.required && !chosen) requiredEmpty.push(f.label);
+            continue;
+          }
+          if (f.combobox) {
+            // react-select keeps the chosen value in a sibling .select__single-value.
+            // The tagged input stays empty. A visible placeholder means empty.
+            // No value and no placeholder means we cannot see the choice.
+            // Whole-word comparison happens in Node: this callback cannot import
+            // the fill matcher, and exact equality flags "Springfield, IL" when
+            // the answer was "Springfield".
             const shell = el.closest('[class*="select-shell" i], [class*="select__container" i], [class*="select__control" i], [class*="value-container" i]') || el.parentElement?.parentElement || el.parentElement;
             const sv = shell?.querySelector('.select__single-value, [class*="single-value" i], [class*="singleValue" i], [class*="multi-value" i]');
             const ph = shell?.querySelector('.select__placeholder, [class*="placeholder" i]');
             const svText = (sv?.textContent || "").trim();
-            if (svText) actual = svText; // a value is shown
-            else if (ph && (ph as HTMLElement).offsetParent !== null) actual = ""; // placeholder visible → empty
-            else actual = intended || "ok"; // can't read reliably → don't flag
-          } else {
-            actual = (el as HTMLInputElement).value || "";
+            const intendedText = typeof intended === "string" ? intended : "";
+            if (svText) comboboxes.push({ label: f.label, intended: intendedText, actual: svText, required: f.required });
+            else if (ph && (ph as HTMLElement).offsetParent !== null) comboboxes.push({ label: f.label, intended: intendedText, actual: "", required: f.required });
+            else if (f.required || intendedText.trim()) unverified.push(f.label);
+            continue;
           }
-          if (intended && intended.trim() && !norm(actual)) mismatches.push(f.label);
-          else if (f.required && !norm(actual) && !(intended && intended.trim())) requiredEmpty.push(f.label);
+          if ((el as HTMLSelectElement).tagName === "SELECT") {
+            const sel = el as HTMLSelectElement;
+            const opt = sel.selectedOptions?.[0];
+            // "Choose…" uses an ellipsis, not three ASCII periods. An empty
+            // value with that label used to count as a filled select.
+            const blankish = (part: string) => !part || /^(?:please\s+select|select|choose)(?:\.{3}|…)?$|^--$/i.test(part);
+            const value = (sel.value || "").replace(/\s+/g, " ").trim();
+            const texts = [value, opt?.textContent, opt?.value]
+              .map((part) => (part || "").replace(/\s+/g, " ").trim())
+              .filter((part) => !blankish(part));
+            if (intended && intended.trim()) {
+              if (!texts.some((part) => norm(part) === norm(intended))) mismatches.push(f.label);
+            } else if (f.required && (blankish(value) || texts.length === 0)) requiredEmpty.push(f.label);
+            continue;
+          }
+          note(f.label, intended, (el as HTMLInputElement).value || "", f.required);
         }
         const errSel = '[aria-invalid="true"], [role="alert"], [class*="error" i]:not([class*="clear" i]):not([class*="error-free" i])';
         const valErrors: string[] = [];
@@ -261,15 +464,29 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
           const txt = (e.textContent || "").replace(/\s+/g, " ").trim();
           if (txt && txt.length > 2 && txt.length < 160 && e.offsetParent !== null) valErrors.push(txt);
         }
-        return { mismatches, requiredEmpty, valErrors: Array.from(new Set(valErrors)).slice(0, 5) };
+        return { mismatches, requiredEmpty, unverified, valErrors: Array.from(new Set(valErrors)).slice(0, 5), comboboxes };
       },
-      { meta, answers },
+      { meta, answers, checkboxWanted },
     )
-    .catch(() => ({ mismatches: [], requiredEmpty: [], valErrors: [] }) as R);
+    .catch(() => {
+      readFailed = true;
+      return { mismatches: [], requiredEmpty: [], unverified: meta.map((f) => f.label), valErrors: [], comboboxes: [] } as R;
+    });
+
+  for (const box of res.comboboxes ?? []) {
+    const intended = box.intended.trim();
+    if (intended) {
+      if (!comboboxDisplayMatches(box.actual, intended)) res.mismatches.push(box.label);
+    } else if (box.required && !box.actual.trim()) {
+      res.requiredEmpty.push(box.label);
+    }
+  }
 
   const out: ApplyIssue[] = [];
   if (res.mismatches.length) out.push({ level: "warn", code: "fill-mismatch", message: `These answers didn't seem to land on the real form — check them: ${res.mismatches.slice(0, 4).join(", ")}${res.mismatches.length > 4 ? "…" : ""}.` });
-  if (res.requiredEmpty.length) out.push({ level: "warn", code: "required-empty", message: `Required and still empty — you'll need to fill ${res.requiredEmpty.length > 1 ? "these" : "this"}: ${res.requiredEmpty.slice(0, 4).join(", ")}${res.requiredEmpty.length > 4 ? "…" : ""}.` });
+  if (res.requiredEmpty.length) out.push({ level: "warn", code: "required-empty", labels: res.requiredEmpty, message: `Required and still empty — you'll need to fill ${res.requiredEmpty.length > 1 ? "these" : "this"}: ${res.requiredEmpty.slice(0, 4).join(", ")}${res.requiredEmpty.length > 4 ? "…" : ""}.` });
+  if (res.unverified.length) out.push({ level: "warn", code: "fill-unverified", message: `Couldn't read these back, so they are not counted as pre-filled: ${res.unverified.slice(0, 4).join(", ")}${res.unverified.length > 4 ? "…" : ""}.` });
+  else if (readFailed) out.push({ level: "warn", code: "fill-unverified", message: "Couldn't read the form back, so it is not counted as pre-filled." });
   for (const v of res.valErrors) out.push({ level: "warn", code: "validation", message: `The form flagged: “${v}”.` });
   return out;
 }

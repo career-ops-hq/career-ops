@@ -47,7 +47,7 @@ const standalone = appliesTo('Standalone modes with profile and custom context')
 const ownContext = appliesTo('Modes that load only their mode file');
 const delegated = skill.split('### Modes delegated to subagent')[1] ?? '';
 
-for (const mode of ['triage', 'calibrate', 'intake', 'ats']) {
+for (const mode of ['triage', 'calibrate', 'intake', 'ats', 'retro']) {
   const missing = [];
   if (!argumentHint.includes(mode)) missing.push('argument-hint');
   if (!skill.includes(`| \`${mode}\` | \`${mode}\` |`)) missing.push('routing table');
@@ -67,4 +67,82 @@ for (const mode of ['triage', 'calibrate', 'intake', 'ats']) {
   } else {
     fail(`router registration for ${mode} is incomplete: ${missing.join(', ')}`);
   }
+}
+
+// Every routed mode needs a context-loading rule too. A mode in none of the
+// three lists is loaded however the agent guesses: without `_custom.md` it
+// skips the user's house rules, which AGENTS.md says apply in every mode.
+const routedModes = [...skill.matchAll(/^\| `[^`]+` \| `([^`]+)` \|$/gm)].map((m) => m[1]);
+const withoutContextRule = [...new Set(routedModes)]
+  .filter((m) => ![shared, standalone, ownContext].some((list) => list.includes(`\`${m}\``)));
+if (routedModes.length < 20) {
+  fail(`could not read the router's routing table (found ${routedModes.length} modes)`);
+} else if (withoutContextRule.length === 0) {
+  pass(`all ${routedModes.length} routed modes have a context-loading rule`);
+} else {
+  fail(`routed modes with no context-loading rule: ${withoutContextRule.join(', ')}`);
+}
+
+// The discovery menu is what the agent prints for `/career-ops` with no
+// arguments. It had drifted from the routing table: `interview-redflag` and
+// `reply-watch` were routed but never listed, and `oferta` still read "A-F"
+// after the evaluation grew to A-H (#6214). The per-mode loop above only knows
+// five hard-coded names, so compare the two lists in full.
+const menu = skill.split('Show this menu:')[1]?.match(/```\n([\s\S]*?)\n```/)?.[1] ?? '';
+// The first word after `/career-ops` is the input, whatever arguments follow it.
+// `{JD}` is the auto-pipeline line, not a mode name, so it is checked on its own.
+const menuLines = [...menu.matchAll(/^  \/career-ops (\S+)/gm)].map((m) => m[1]);
+const menuInputs = menuLines.filter((input) => input !== '{JD}');
+// Rows may carry extra spacing; the two special rows (no arguments, a pasted JD)
+// are the only ones without a backticked input and mode.
+const routingSection = skill.split('## Mode Routing')[1]?.split('**Auto-pipeline')[0] ?? '';
+const routingRows = routingSection.split('\n').filter((line) => line.startsWith('|')).slice(2);
+const parsedRows = routingRows.map((row) => row.match(/^\|\s*`([^`]+)`\s*\|\s*`([^`]+)`\s*\|$/));
+const unparsedRows = routingRows.filter((row, i) => !parsedRows[i] && !/^\|\s*(\(empty|JD text)/.test(row));
+const routeInputs = new Map(parsedRows.filter(Boolean).map((m) => [m[1], m[2]]));
+// A Map keeps one mode per input, so a second row for the same input would
+// drop a mode from the comparison below without a word.
+const duplicateInputs = [...new Set(parsedRows.filter(Boolean).map((m) => m[1])
+  .filter((input, i, all) => all.indexOf(input) !== i))];
+
+if (menuInputs.length < 20 || routeInputs.size < 20 || unparsedRows.length) {
+  fail(`could not read the discovery menu (${menuInputs.length} entries) or routing table (${routeInputs.size} inputs${unparsedRows.length ? `; unparsed rows: ${unparsedRows.join(' ')}` : ''})`);
+} else if (duplicateInputs.length) {
+  fail(`routing table routes the same input more than once: ${duplicateInputs.join(', ')}`);
+} else if (!menuLines.includes('{JD}')) {
+  fail('discovery menu has no `/career-ops {JD}` auto-pipeline line');
+} else {
+  // An alias such as `inbox` → `agent-inbox` needs no line of its own while
+  // another input for the same mode is listed.
+  const listedModes = new Set(menuInputs.map((input) => routeInputs.get(input)));
+  const missing = [...new Set(routeInputs.values())].filter((mode) => !listedModes.has(mode));
+  const unrouted = menuInputs.filter((input) => !routeInputs.has(input));
+  if (missing.length === 0 && unrouted.length === 0) {
+    pass(`discovery menu lists every routed mode (${listedModes.size}) and only routed ones`);
+  } else {
+    if (missing.length) fail(`routed modes missing from the discovery menu: ${missing.join(', ')}`);
+    if (unrouted.length) fail(`discovery menu lists inputs the routing table does not route: ${unrouted.join(', ')}`);
+  }
+}
+
+const oferta = menu.match(/^  \/career-ops oferta .*$/m)?.[0] ?? '';
+// Oferta always writes blocks A-G. Block H is included at or above 4.5.
+// The short "A-H" token hides that, and "A-F" drops Block H entirely.
+if (/A-G always/.test(oferta) && /Block H at or above 4\.5/.test(oferta) && !/A-F/.test(oferta)) {
+  pass('discovery menu describes oferta as blocks A-G always, Block H at or above 4.5');
+} else {
+  fail(`discovery menu line for oferta should say "A-G always" and "Block H at or above 4.5", not A-F: ${oferta || '(no oferta line found)'}`);
+}
+
+// gambit stops at its Step 3 checkpoint to let the candidate choose a role
+// thesis before any document exists. A worker has no way to ask the candidate,
+// so a delegated gambit either stopped before the theses or picked one alone
+// (#824).
+const delegatedModes = delegated.split('\n## ')[0];
+if (/`gambit`/.test(delegatedModes)) {
+  fail('gambit is listed under "Modes delegated to subagent": its Step 3 checkpoint needs the interactive session');
+} else if (!/Run `gambit` here, in the interactive session/.test(skill)) {
+  fail('router no longer says gambit runs in the interactive session');
+} else {
+  pass('gambit runs in the interactive session, so its Step 3 checkpoint reaches the candidate');
 }

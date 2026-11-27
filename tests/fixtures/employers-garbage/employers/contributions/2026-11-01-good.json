@@ -1,0 +1,18 @@
+{
+  "id": "2026-11-01-good",
+  "contributor": "fixture-user",
+  "signed_by": "Fixture Signer",
+  "rows": 33,
+  "source": "community",
+  "origin": "Synthetic rows written by hand for the validator tests.",
+  "no_conflicting_contract": true,
+  "personal_data": false,
+  "exclusive": false,
+  "license": "CC-BY-4.0",
+  "also_permits": [
+    "ODbL-1.0",
+    "CC0-1.0"
+  ],
+  "attribution": "Fixture rows",
+  "date": "2026-11-01"
+}

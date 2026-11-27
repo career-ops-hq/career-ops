@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { walkTree } from '../lib/walk-tree.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const TARGETS = ['modes/_profile.md', 'modes/_custom.md', 'modes/_brief.md', 'voice-dna.md'];
@@ -18,7 +20,16 @@ function fixture(t) {
 function doctor(dir, args = ['--json']) {
   const result = spawnSync(process.execPath, [join(ROOT, 'doctor.mjs'), '--target', dir, ...args], {
     cwd: dir, encoding: 'utf8', timeout: 30_000,
-    env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_CLI: 'claude' },
+    // CAREER_OPS_PIPELINE names a specific pipeline file, so an inherited value
+    // would have the run read or write outside this fixture.
+    env: {
+      ...process.env,
+      CAREER_OPS_ROOT: dir,
+      CAREER_OPS_DATA_DIR: '',
+      CAREER_OPS_PIPELINE: '',
+      CAREER_OPS_PORTALS: join(dir, 'portals.yml'),
+      CAREER_OPS_CLI: 'claude',
+    },
   });
   assert.ifError(result.error);
   return result;
@@ -26,18 +37,31 @@ function doctor(dir, args = ['--json']) {
 
 function state(dir, args) {
   const result = doctor(dir, args);
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, 0, describeSpawn(result));
   assert.equal(result.stderr, '');
   return JSON.parse(result.stdout);
 }
 
 // Check names, contents and modification times, including unexpected new files.
+//
+// walkTree with every guard that could hide a write turned off: this is a
+// no-write assertion, so a file the walk skipped would be a write it cannot
+// see. `allowNestedCheckouts` keeps a directory doctor marked with `.git` (or
+// named like a scratch copy) in view, and `onDir` records every directory —
+// empty ones included — with its mtime, as the nested form this replaced did.
+// `links: 'reject'`, not 'follow': walkTree's 'follow' silently skips a dangling
+// link, where the statSync form this replaced threw on one. The fixture is
+// built without links, so any link at all is a write, and rejecting it fails
+// the snapshot loudly instead of either form's quieter reading.
 function snapshot(dir) {
-  return readdirSync(dir).sort().map((name) => {
-    const path = join(dir, name);
-    const stat = statSync(path);
-    return [name, stat.mtimeMs, stat.isDirectory() ? snapshot(path) : readFileSync(path).toString('base64')];
+  const entries = [];
+  walkTree(dir, {
+    allowNestedCheckouts: true,
+    links: 'reject',
+    onDir: (abs) => entries.push([relative(dir, abs), statSync(abs).mtimeMs, 'dir']),
+    onFile: (abs) => entries.push([relative(dir, abs), statSync(abs).mtimeMs, readFileSync(abs).toString('base64')]),
   });
+  return entries;
 }
 
 test('--json reports missing prerequisites without copying available templates', (t) => {
@@ -60,6 +84,43 @@ test('--json leaves an empty data root empty with shipped templates available', 
   assert.equal(result.missing.length, 4);
   assert.deepEqual(result.autoCopied, []);
   assert.deepEqual(readdirSync(dir), []);
+});
+
+test('--json requests onboarding when either YAML prerequisite has no settings', (t) => {
+  const dir = fixture(t);
+  mkdirSync(join(dir, 'config'));
+  mkdirSync(join(dir, 'modes'));
+  writeFileSync(join(dir, 'cv.md'), '# Example Candidate\n');
+  writeFileSync(join(dir, 'modes/_profile.md'), 'Personalized targeting\n');
+  const prereqs = {
+    'config/profile.yml': 'candidate: { full_name: Example Candidate }\n',
+    'portals.yml': 'tracked_companies: []\n',
+  };
+  for (const [path, content] of Object.entries(prereqs)) writeFileSync(join(dir, path), content);
+  assert.equal(state(dir).onboardingNeeded, false);
+
+  for (const [path, content] of Object.entries(prereqs)) {
+    writeFileSync(join(dir, path), '# Settings go here\n');
+    const before = snapshot(dir);
+    const result = state(dir);
+    assert.equal(result.onboardingNeeded, true, path);
+    assert.deepEqual(result.missing, []);
+    assert.ok(result.unpersonalized.some((entry) => entry.path === path));
+    assert.deepEqual(snapshot(dir), before);
+    writeFileSync(join(dir, path), content);
+  }
+});
+
+test('a plain run still creates the data skeleton', (t) => {
+  // The control for the case above. The read-only promise belongs to `--json`,
+  // and the skeleton creation lives in checkAutoDir()/checkPipelineFile(), which
+  // `main()` calls. Without this, the assertion that nothing appears would also
+  // pass if doctor stopped running at all.
+  const dir = fixture(t);
+  doctor(dir, []);
+  const created = readdirSync(dir);
+  assert.ok(created.includes('data'),
+    `a plain run should still create data/ (saw: ${created.join(', ')})`);
 });
 
 test('explicit initialization uses local templates and preserves existing user files', (t) => {
@@ -103,7 +164,7 @@ test('explicit initialization supports a separate empty data root and retains pe
 test('--init-templates requires --json and leaves the target untouched on misuse', (t) => {
   const dir = fixture(t);
   const result = doctor(dir, ['--init-templates']);
-  assert.notEqual(result.status, 0);
+  assert.ok(exitedNonZero(result), describeSpawn(result, 'expected a non-zero exit'));
   assert.match(result.stderr, /--init-templates requires --json/);
   assert.deepEqual(readdirSync(dir), []);
 });

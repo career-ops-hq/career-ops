@@ -21,11 +21,12 @@
 //     careers_url: https://talent.alibaba.com/off-campus/position-list   # auto-detected
 //     keywords: ["AI", "大模型"]   # each keyword is a separate server-side query, results deduped;
 //                                  # omit to pull the whole board (~4100 postings)
-//     max_pages: 50                # per keyword, pageSize 100
+//     max_pages: 100               # per keyword, pageSize 100
 
 import { randomUUID } from 'crypto';
 import { sleep } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const API_HOST = 'talent.alibaba.com';
 const API = `https://${API_HOST}/position/search`;
@@ -37,7 +38,7 @@ const API = `https://${API_HOST}/position/search`;
 const DETAIL = `https://${API_HOST}/off-campus/position-detail?positionId=`;
 const PAGE_SIZE = 100;
 const DEFAULT_KEYWORDS = [''];  // empty keyword = the whole board, no topical bias
-const DEFAULT_MAX_PAGES = 50;   // whole board is ~4100 postings ≈ 42 pages
+const DEFAULT_MAX_PAGES = 100;  // whole board is ~4100 postings ≈ 42 pages
 // Every request after the first pays it — across pages and keyword switches
 // (same idiom as avature/workday). No rate-limiting observed live, but a
 // whole-board pull is 40+ requests, so pace politely.
@@ -107,7 +108,7 @@ export function parseAlibabaResponse(json, companyName) {
       postedAt: Number(p.publishTime) || Number(p.modifyTime) || undefined,
     });
   }
-  return { jobs, total };
+  return { jobs, total, rawCount: list.length };
 }
 
 /** @type {Provider} */
@@ -130,7 +131,8 @@ export default {
       : DEFAULT_KEYWORDS;
     const entryMaxPages = Number(entry.max_pages) > 0 ? Number(entry.max_pages) : DEFAULT_MAX_PAGES;
     // Honor the ctx.maxPages pagination hint (verify-portals' health probe passes 1).
-    const maxPages = Math.min(entryMaxPages, Number(ctx?.maxPages) > 0 ? Number(ctx.maxPages) : Infinity);
+    const probeMaxPages = Number(ctx?.maxPages) > 0 ? Number(ctx.maxPages) : Infinity;
+    const maxPages = Math.min(entryMaxPages, probeMaxPages);
 
     // One token per run, sent as both cookie and header (see file header).
     const csrfToken = randomUUID();
@@ -138,6 +140,9 @@ export default {
     /** @type {Map<string, import('./_types.js').Job>} */
     const seen = new Map();
     let firstRequest = true;
+    // Why part of the board went unread, first cause first; null while it is whole.
+    /** @type {'page-cap' | null} */
+    let partialReason = null;
     let succeededOnce = false;
 
     for (const keyword of keywords) {
@@ -168,20 +173,37 @@ export default {
           // can legitimately match 0 jobs, so seen.size is not the signal.
           if (!succeededOnce) throw err;
           console.error(`  ⚠ alibaba: keyword "${keyword}" page ${page} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
-          return [...seen.values()];
+          // The rest of the board was never read: the result says so, so scan.mjs
+          // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
+          return markTruncated([...seen.values()], partialReason ?? 'fetch-error', { fetched: seen.size });
         }
         succeededOnce = true;
-        const { jobs, total } = parseAlibabaResponse(json, entry.name || '阿里巴巴');
+        const { jobs, total, rawCount } = parseAlibabaResponse(json, entry.name || '阿里巴巴');
         if (jobs.length === 0) break;
 
         for (const job of jobs) {
           if (!seen.has(job.url)) seen.set(job.url, job);
         }
 
-        if (page * PAGE_SIZE >= total) break;
+        // Past the end: the reported total says so, or, when the source sent
+        // no total, a short page (meituan reads a missing total the same way).
+        // A missing total used to end the walk after page 1, unmarked.
+        if (total > 0 ? page * PAGE_SIZE >= total : rawCount < PAGE_SIZE) break;
+        // The page cap, not the board, ended this keyword. Stay quiet when the
+        // cap is the health probe's, not max_pages.
+        // A short page is the board's natural end, even at the cap: the cut needs
+        // a full page by the source's own row count, not the filtered jobs.
+        if (page === maxPages && rawCount >= PAGE_SIZE && probeMaxPages > entryMaxPages) {
+          console.error(`  ⚠ alibaba: keyword "${keyword}" truncated at ${page * PAGE_SIZE}${total > 0 ? ` of ${total}` : ''} postings — raise max_pages on this entry for complete coverage`);
+          partialReason ??= 'page-cap';
+        }
       }
     }
 
-    return [...seen.values()];
+    const result = [...seen.values()];
+    // A keyword max_pages cut is a page-cap stop: the warning above says so, and
+    // the result does too, so scan.mjs logs the board partial (lib/board-truncation.mjs).
+    if (partialReason) markTruncated(result, partialReason, { fetched: result.length });
+    return result;
   },
 };

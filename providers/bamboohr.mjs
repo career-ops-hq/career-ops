@@ -190,43 +190,107 @@ async function isLiveWithNoOpenings(origin, ctx) {
 }
 
 /**
+ * The posting's ATS-native identity: the tenant subdomain the board was fetched
+ * at and the job's `id` from the payload, never parsed out of a URL. BambooHR
+ * ids are positive integers, but the list payload carries them either as a
+ * number or as a decimal string, so both are accepted in their one canonical
+ * decimal form (no leading zeros, no sign, no padding) and give the same
+ * posting_id. Returns undefined for anything else (an empty, padded or
+ * non-decimal id, or a tenant that is empty), so that row falls back to URL
+ * dedup. Exported for unit tests.
+ *
+ * @param {string | null | undefined} tenant
+ * @param {unknown} id
+ * @returns {{ats_provider: 'bamboohr', board_slug: string, posting_id: string} | undefined}
+ */
+export function bamboohrListingIdentity(tenant, id) {
+  if (typeof tenant !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(tenant)) return undefined;
+  let postingId;
+  if (typeof id === 'number') {
+    if (!Number.isSafeInteger(id) || id <= 0) return undefined;
+    postingId = String(id);
+  } else if (typeof id === 'string' && /^[1-9][0-9]*$/.test(id)) {
+    postingId = id;
+  } else {
+    return undefined;
+  }
+  return { ats_provider: 'bamboohr', board_slug: tenant, posting_id: postingId };
+}
+
+/**
+ * An opening's place, with "Remote" appended for a remote opening. The place
+ * is the office in `location` (`city`, `state`), or when that is empty the one
+ * in `atsLocation` (`city`, `state` or `province`, `country`): a remote
+ * opening has no office, and its `atsLocation` is where the hire has to be,
+ * when the employer says. Live boards mark a remote opening with
+ * `locationType: "1"` and leave `isRemote` null (checked 2026-11-23); either
+ * one counts. "Remote" is not appended to a place that already says it.
+ * @param {any} j
+ * @returns {string}
+ */
+function locationOf(j) {
+  const office = j.location || {};
+  const ats = j.atsLocation || {};
+  const place = (office.city || office.state
+    ? [office.city, office.state]
+    : [ats.city, ats.state || ats.province, ats.country]
+  ).filter(Boolean).join(', ');
+  const remote = Boolean(j.isRemote) || String(j.locationType) === '1';
+  return remote && !/\bremote\b/i.test(place) ? [place, 'Remote'].filter(Boolean).join(', ') : place;
+}
+
+/**
  * Parse a BambooHR `/careers/list` response. Exported for unit tests.
  *
  * BambooHR returns:
  *   { meta: {...}, result: [{ id, jobOpeningName,
- *       location: { city?, state? }, isRemote?, employmentStatusLabel? }] }
+ *       location: { city?, state? },
+ *       atsLocation: { city?, state?, province?, country? },
+ *       isRemote?, locationType?, employmentStatusLabel? }] }
  *
  * - url: built as `<origin>/careers/<id>` — matches the public
  *   `jobOpeningShareUrl`. Rows without a non-empty `id` are dropped (no stable
  *   URL, and url is the scanner's dedup key — a blank id would emit
  *   `/careers/` and collapse distinct postings together).
- * - location: join `city` + `state`; append "Remote" when `isRemote` is truthy.
- *   BambooHR's `isRemote` is `1`/`true` when set and `null` otherwise.
+ * - location: the office's `city` + `state`, else the place in `atsLocation`
+ *   (where a remote opening has it), with "Remote" appended when
+ *   `locationType` is "1" or `isRemote` is truthy (see locationOf).
+ * - listingIdentity: `bamboohr` / tenant / payload `id`, when the id has a
+ *   canonical decimal form (see bamboohrListingIdentity); absent otherwise.
  *
  * @param {any} json
  * @param {string} companyName
  * @param {string} origin  e.g. "https://acme.bamboohr.com"
- * @returns {Array<{title: string, url: string, company: string, location: string}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, listingIdentity?: {ats_provider: string, board_slug: string, posting_id: string}}>}
  */
 export function parseBambooHRResponse(json, companyName, origin) {
-  const rows = json?.result;
-  if (!Array.isArray(rows)) return [];
+  // { result: [] } is an empty board (a live tenant with no openings answers
+  // { meta, result: [] }). Any other envelope ({}, { error }, a bare string)
+  // is a changed or failing API and must not read as a board with no open
+  // roles (ADDING_A_PROVIDER.md, "Defensive parsing"; #6906).
+  const rows = json && Array.isArray(json.result) ? json.result : null;
+  if (!rows) {
+    const got = json && typeof json === 'object' ? Object.keys(json).join(', ') : json === null ? 'null' : typeof json;
+    throw new Error(`bamboohr: unexpected response for ${companyName} — expected result[], got: [${got}]`);
+  }
+  let tenant = null;
+  try { tenant = new URL(origin).hostname.replace(/\.bamboohr\.com$/, ''); } catch { /* no identity */ }
   return rows
     .filter(j => j && j.jobOpeningName && String(j.id ?? '').trim().length > 0)
     .map(j => {
-      const loc = j.location || {};
-      const remote = j.isRemote ? 'Remote' : '';
-      const location = [loc.city, loc.state, remote].filter(Boolean).join(', ');
+      const location = locationOf(j);
       const id = String(j.id).trim();
       // A lone surrogate in id throws URIError out of encodeURIComponent and
       // aborts this .map(), losing every job on the page. Drop this one on a
       // null; the trailing .filter(Boolean) removes it.
       const encodedId = safeEncodeURIComponent(id);
       if (encodedId === null) return null;
+      const listingIdentity = bamboohrListingIdentity(tenant, j.id);
       return {
         title: String(j.jobOpeningName),
         url: `${origin}/careers/${encodedId}`,
         company: companyName,
+        ...(listingIdentity ? { listingIdentity } : {}),
         location,
       };
     })

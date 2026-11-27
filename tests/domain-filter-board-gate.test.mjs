@@ -241,7 +241,7 @@ check(!buildDomainFilter(['word:rwa'])('Software RWAs Team'), 'an explicit `word
 // them.
 {
   const src = readFileSync(join(ROOT, 'scan-ats-full.mjs'), 'utf8');
-  const sweep = src.slice(src.indexOf('const truncated = []'), src.indexOf('Second chance for boards'));
+  const sweep = src.slice(src.indexOf('restorePendingRetries('), src.indexOf('Second chance for boards'));
   const at = needle => sweep.indexOf(needle);
 
   const queue = at('truncated.push(entry)');
@@ -268,19 +268,20 @@ check(!buildDomainFilter(['word:rwa'])('Software RWAs Team'), 'an explicit `word
   check(!/boardInDomain\(/.test(retry), 'the retry no longer judges a board with an inline boardInDomain check');
 
   // A failed retry fetch must not cost the deferred board the matches already
-  // in its partial page: the catch processes that page ungated.
+  // in its partial page: the catch processes that page ungated — unless the
+  // retry TIMED OUT, where processing it would run enrichDate outside the
+  // board's scope, uncancelled (#5570).
   const rCatch = retry.slice(retry.lastIndexOf('} catch (err) {'));
-  check(/const partial = deferred\.get\(entry\)\?\.jobs;\s*if \(partial\) await processJobs\(partial,/.test(rCatch),
-    'a failed retry processes the deferred board\'s partial page instead of dropping it');
+  check(/const partial = deferred\.get\(entry\)\?\.jobs;\s*if \(partial && !retrySignal\?\.aborted\) await processJobs\(partial,/.test(rCatch),
+    'a failed retry processes the deferred board\'s partial page, but skips it when the retry timed out');
 
   // A deferred board finishes in the sweep, so a checkpoint can advance past it
-  // before the retry runs. Both checkpoint writes carry the deferred indices,
-  // and a resumed run queues the ones below its offset for the retry.
-  const writes = src.match(/current: \{ name, resumeAt: startAt \+ \w+, datasetLen: list\.length, datasetHash(, deferred: deferredIndices\(\))? \}/g) ?? [];
-  check(writes.length === 2 && writes.every((w) => w.includes('deferred: deferredIndices()')), 'the periodic and outage checkpoints both carry the deferred board indices');
-  check(/checkpoint\.current\.deferred[\s\S]{0,120}if \(index >= startAt/.test(sweep)
-    && /truncated\.push\(entriesAll\[index\]\);\s*deferred\.set\(entriesAll\[index\]/.test(sweep),
-  'a resumed run queues the checkpoint\'s deferred boards below its offset for the retry');
+  // before the retry runs. Both checkpoint writes carry the deferred indices
+  // and the wider retry list. A resumed run restores the ones below its offset.
+  const writes = src.match(/current: \{ name, resumeAt: startAt \+ \w+, datasetLen: list\.length, datasetHash, \.\.\.retryCheckpointFields\(pendingRetries, deferred\) \}/g) ?? [];
+  check(writes.length === 2, 'the periodic and outage checkpoints both carry the deferred board indices and the pending retries');
+  check(sweep.includes('restorePendingRetries('), 'a resumed run restores pending retries below its offset');
+  check(retry.includes('pendingRetries.delete(entry)'), 'a finished retry leaves the pending list');
 }
 
 // ── Bare word:/stem: prefixes ───────────────────────────────────────

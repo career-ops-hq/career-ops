@@ -1,0 +1,92 @@
+# Career-Ops — Accommodation-Notice Requirements (jurisdiction table) (#5449)
+#
+# Consumed prompt-level by modes/oferta.md Block G ("Accommodation-Notice"
+# signal, Signal 22). This file is a DATA REFERENCE, not instruction logic:
+# extending it to a new jurisdiction never requires touching the rule text in
+# modes/oferta-signals/. No script reads it — the agent does. Nothing in this
+# system ever fetches or scrapes an official page: the candidate clicks the
+# official link themselves (zero-fetch by design, same as the other
+# jurisdiction tables). Jurisdiction-compliance-lens umbrella #2026.
+#
+# CONTRIBUTION RULE (mandatory): no entry lands in this table without
+#   1. a regulator-grade citable source (statute, regulation or official
+#      government page), AND
+#   2. an explicit effective date, AND
+#   3. an `as_of` date recording when the row was last verified, AND
+#   4. an `official_source.url` pointing at the OFFICIAL government page —
+#      never a third-party mirror, aggregator, or law-firm copy of the text.
+# Unverified or "I heard that..." rows will be rejected in review. Seed narrow
+# and verified; extend via community PRs.
+#
+# NEVER-ASSERT RULE (mandatory — mirrored in the Signal 22 file): a posting's
+# silence about accommodation is NEVER a basis for asserting that an employer
+# broke the rule. Whether the rule applies depends on the employer's type and
+# size, which a posting does not show, and the statement is often on a
+# careers page or in the application system rather than in the ad. The agent
+# states the rule and the posting's own silence, side by side, and stops
+# there. Not legal advice.
+#
+# Schema per entry (key = jurisdiction code, e.g. CA-ON):
+#   jurisdiction_name: string  — human-readable name for report output
+#   law_name: string           — short name of the regulation
+#   effective: YYYY-MM-DD      — date the obligation applies to the last
+#                                 category of obligated employer
+#   applies_to: string         — who the obligation covers
+#   requires:                  — what the employer must do, per stage
+#     general / assessment / offer
+#   official_source:
+#     url: string              — OFFICIAL government page
+#     what_it_shows: string    — what a candidate finds there
+#   legal_basis: string        — regulation citation
+#   sources: list              — citable pages backing the row
+#   as_of: YYYY-MM-DD          — date this row was last verified
+#
+# CANDIDATE ROWS FOR CONTRIBUTORS (comments only — NOT seeds; do NOT add as
+# rows until each has an official source, an effective date read from the
+# official text, and an as_of date):
+#   - CA-MB : Accessible Employment Standard Regulation under the
+#             Accessibility for Manitobans Act (Manitoba Regulation 70/2019,
+#             said to be in force 2019-05-01), requiring employers to tell
+#             applicants that reasonable accommodation is available during
+#             recruitment. Only employers' policy documents have been seen,
+#             not the regulation text.
+#   - US (federal contractors) : Section 503 of the Rehabilitation Act
+#             (DOL / OFCCP). Solicitations and advertisements must carry an
+#             equal-opportunity statement that covers disability, and federal
+#             contractors must say somewhere in the posting how an applicant
+#             with a disability can request an accommodation to apply. A DOL
+#             proposed rule of 2025-07-01 would modify the regulations; not
+#             checked whether it has taken effect.
+#   - Not rows, only notes: federal Accessible Canada Act Employment Standard
+#             (voluntary; draft regulations published 2024-12, status not
+#             confirmed); Nova Scotia (advisory recommendations only, duty
+#             comes from the Human Rights Act); British Columbia (human rights
+#             accommodation duty, no posting-statement rule found); United
+#             Kingdom (Equality Act 2010 reasonable adjustments in
+#             recruitment, no required posting statement found).
+
+jurisdictions:
+  CA-ON:
+    jurisdiction_name: "Ontario, Canada"
+    law_name: "Integrated Accessibility Standards Regulation, O. Reg. 191/11, Part III (Employment Standards), under the Accessibility for Ontarians with Disabilities Act, 2005"
+    effective: "2017-01-01"
+    applies_to: >-
+      Obligated organizations that are employers, on staggered dates under
+      s. 21: Government of Ontario and Legislative Assembly 2013-01-01, large
+      designated public sector organizations 2014-01-01, small designated
+      public sector organizations 2015-01-01, large organizations 2016-01-01,
+      small organizations 2017-01-01 (all dates have passed; the row's
+      `effective` is the last of them). Whether this rule applies to a given
+      employer depends on the employer's type and size, which a posting does
+      not show.
+    requires:
+      general: "s. 22: every employer shall notify its employees and the public about the availability of accommodation for applicants with disabilities in its recruitment processes."
+      assessment: "s. 23 (1): during a recruitment process, an employer shall notify job applicants, when they are individually selected to participate in an assessment or selection process, that accommodations are available upon request in relation to the materials or processes to be used. s. 23 (2): if a selected applicant requests an accommodation, the employer shall consult with the applicant and provide or arrange for a suitable accommodation."
+      offer: "s. 24: every employer shall, when making offers of employment, notify the successful applicant of its policies for accommodating employees with disabilities."
+    official_source:
+      url: "https://www.ontario.ca/laws/regulation/110191"
+      what_it_shows: "e-Laws text of O. Reg. 191/11: the Part III employment provisions (ss. 22 to 24) and the s. 21 schedule of application dates."
+    legal_basis: "O. Reg. 191/11 ss. 20, 21, 22, 23 (1)-(2) and 24 (verified on ontario.ca/laws against the consolidation period from 2026-03-30)"
+    sources:
+      - "e-Laws — O. Reg. 191/11 Integrated Accessibility Standards (ontario.ca/laws/regulation/110191)"
+    as_of: "2026-10-18"

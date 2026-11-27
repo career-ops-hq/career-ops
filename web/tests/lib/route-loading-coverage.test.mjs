@@ -14,35 +14,32 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative, sep } from "node:path";
+import { readFileSync, statSync } from "node:fs";
+import { basename, dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-// The core's predicate, not a copy: tests/mjs-files.test.mjs requires every
-// recursive walker over this checkout to consult it (#3499, #3762).
-import { isNestedCheckout } from "../../../lib/mjs-files.mjs";
+// The core's walker, not a private recursion: tests/walk-tree.test.mjs allows
+// one recursive directory walk in this checkout, and it applies the
+// nested-checkout guard on every descent (#3499, #3762, #3818).
+import { walkTree } from "../../../lib/walk-tree.mjs";
 
 const WEB = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const APP = join(WEB, "src", "app");
 
-/** Every directory under src/app that holds a page.tsx. */
-function routeDirs(dir, acc = []) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    if (entry.name === "api") continue; // route handlers, not pages
-    const child = join(dir, entry.name);
-    // A second checkout parked under src/app is not this app's routes. Without
-    // this the walk would demand a loading.tsx for someone else's pages and fail
-    // naming files that are correct on the branch under test.
-    if (isNestedCheckout(child)) continue;
-    routeDirs(child, acc);
-  }
-  try {
-    statSync(join(dir, "page.tsx"));
-    acc.push(dir);
-  } catch {
-    /* not a route */
-  }
-  return acc;
+/**
+ * Every directory under src/app that holds a page.tsx.
+ *
+ * A second checkout parked under src/app is not this app's routes: walkTree
+ * does not descend into one, so the walk cannot demand a loading.tsx for
+ * someone else's pages and fail naming files that are correct on the branch
+ * under test.
+ */
+function routeDirs(dir) {
+  return walkTree(dir, {
+    // route handlers, not pages
+    skip: (entry) => entry.isDirectory() && entry.name === "api",
+  })
+    .filter((file) => basename(file) === "page.tsx")
+    .map((file) => dirname(file));
 }
 
 /**

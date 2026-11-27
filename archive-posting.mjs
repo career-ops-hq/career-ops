@@ -13,8 +13,9 @@
  *   node archive-posting.mjs --pipeline          Archive pending URLs in data/pipeline.md
  *   node archive-posting.mjs --dry-run <url>     Preview filename without saving
  *
- * Output:    jds/YYYY-MM-DD_company-slug_role-slug.pdf
- *            jds/NNN-YYYY-MM-DD_company-slug_role-slug.pdf   (with --report)
+ * Output:    jds/YYYY-MM-DD_company-slug_role-slug_{sha256(url)[0:16]}.pdf
+ *            jds/NNN-YYYY-MM-DD_company-slug_role-slug_{sha256(url)[0:16]}.pdf   (with --report)
+ *            Add -2, -3, etc. before .pdf when the filename already exists.
  * Reference: local:jds/{filename}  (paste into pipeline.md)
  *
  * Prefer --report. Without it the capture can only be found again by rebuilding
@@ -22,18 +23,20 @@
  * resolving the next day. outcome.mjs looks captures up by report number.
  */
 
-import { chromium } from 'playwright';
-import { writeFile, readFile } from 'fs/promises';
+import { open, unlink, readFile } from 'fs/promises';
+import { createHash } from 'crypto';
 import { existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { captureSlug, reportPrefix } from './jd-capture.mjs';
 import { rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
+import { cloudflareInterstitial } from './liveness-core.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { detectNonContentMarker } from './check-jd-archive.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -53,6 +56,13 @@ const VALUE_FLAGS = ['--company', '--role', '--report'];
 // page IS essentially the wall, not when a real posting merely mentions one
 // nearby.
 const NON_CONTENT_PAGE_MAX_CHARS = 600;
+
+// A Cloudflare interstitial is recognised by its title instead
+// (cloudflareInterstitial, liveness-core.mjs): a site-branded challenge body
+// can run past NON_CONTENT_PAGE_MAX_CHARS and use none of the phrases
+// detectNonContentMarker knows ("Humans only", "Ray ID:"), so the body check
+// never fires on it (#6713). A challenge the browser passes reloads the real
+// posting under its own title, and that capture is kept.
 
 // ── CLI parsing ──────────────────────────────────────────────────────────────
 
@@ -78,8 +88,9 @@ const HELP_TEXT = `
     --help             Show this help
 
   OUTPUT
-    jds/YYYY-MM-DD_company-slug_role-slug.pdf
-    jds/NNN-YYYY-MM-DD_company-slug_role-slug.pdf     with --report
+    jds/YYYY-MM-DD_company-slug_role-slug_{sha256(url)[0:16]}.pdf
+    jds/NNN-YYYY-MM-DD_company-slug_role-slug_{sha256(url)[0:16]}.pdf     with --report
+    Add -2, -3, etc. before .pdf when the filename already exists.
 
   WHY --report
     Without it, a capture is only findable by rebuilding its filename from
@@ -197,10 +208,21 @@ function today() {
  * report number, which is what makes the capture findable later: the date and
  * the scraped company/role all change between runs, the report number does not.
  */
-function captureFilename(company, role) {
-  const base = `${today()}_${captureSlug(company)}_${captureSlug(role)}.pdf`;
+function captureFilename(company, role, url) {
+  const identity = createHash('sha256').update(url).digest('hex').slice(0, 16);
+  // A company with no letter or digit, such as the `?` placeholder for an
+  // unknown employer, has no slug. It is filed as `unknown`, the name a posting
+  // gets when no company was detected at all: an empty field (`015-…__role_…`)
+  // matched no lookup, so outcome.mjs reported the posting missing after
+  // archiving it, and archived it again on every run.
+  const base = `${today()}_${captureSlug(company) || 'unknown'}_${captureSlug(role)}_${identity}.pdf`;
   return reportNum ? `${reportPrefix(reportNum)}-${base}` : base;
 }
+
+// Whole words only (plural allowed), so a company like "Headway" is not read as a
+// role for containing "head". "Engineering" stays a role word, as it was before
+// the whole-word rule ("Data Engineering | Acme").
+const ROLE_KEYWORDS = /\b(?:engineer(?:s|ing)?|(?:manager|director|analyst|scientist|designer|developer|lead|head|vp|president|officer|specialist|architect)s?)\b/i;
 
 /**
  * Try to extract company/role from the rendered page title.
@@ -208,35 +230,46 @@ function captureFilename(company, role) {
  *   "Senior AI Engineer at Anthropic"   → role + company
  *   "Anthropic | Senior AI Engineer"    → company + role
  *   "Senior AI Engineer - Anthropic"    → role + company
+ *   "Acme - Senior Engineer"            → company + role (Lever)
+ *
+ * The company is one END of the title, never a middle piece: a role often
+ * carries its own separator ("Customer Success Manager - Dutch Speaking -
+ * Teamtailor", "Engineer | Platform | Acme"), and splitting at the first
+ * separator filed such a capture under "Dutch Speaking - Teamtailor". The
+ * other segments, with their separators, stay the role.
  */
-function parsePageTitle(title) {
+export function parsePageTitle(title) {
   if (!title) return { company: null, role: null };
 
-  // Strip common ATS platform suffixes
+  // Strip common ATS platform suffixes after any separator the split below
+  // recognises, so "Engineer — Greenhouse" does not name Greenhouse the company.
   const cleaned = title
-    .replace(/\s*[|–-]\s*(greenhouse|lever|ashby|workday|linkedin|indeed|wellfound|angellist)\s*$/i, '')
+    .replace(/\s*[|–—-]\s*(greenhouse|lever|ashby|workday|linkedin|indeed|wellfound|angellist)\s*$/i, '')
     .trim();
 
   // "Role at Company"
   const atMatch = cleaned.match(/^(.+?)\s+at\s+(.+)$/i);
   if (atMatch) return { role: atMatch[1].trim(), company: atMatch[2].trim() };
 
-  // "Company | Role" or "Company – Role"
-  const pipeMatch = cleaned.match(/^([^|–]+?)\s*[|–]\s*(.+)$/);
-  if (pipeMatch) {
-    const left = pipeMatch[1].trim();
-    const right = pipeMatch[2].trim();
-    const roleKeywords = /engineer|manager|director|analyst|scientist|designer|developer|lead|head|vp|president|officer|specialist|architect/i;
-    if (roleKeywords.test(right)) return { company: left, role: right };
-    if (roleKeywords.test(left)) return { role: left, company: right };
-    return { company: left, role: right };
-  }
+  // Segments and the separators between them, alternating: [seg, sep, seg, …].
+  // A hyphen separates only with spaces around it, so "Co-Founder" stays whole.
+  const parts = cleaned.split(/(\s*[|–—]\s*|\s+-\s+)/);
+  if (parts.length < 3) return { company: null, role: cleaned };
 
-  // "Role - Company"
-  const dashMatch = cleaned.match(/^(.+?)\s+-\s+(.+)$/);
-  if (dashMatch) return { role: dashMatch[1].trim(), company: dashMatch[2].trim() };
+  const first = parts[0].trim();
+  const last = parts[parts.length - 1].trim();
+  const companyFirst = { company: first, role: parts.slice(2).join('').trim() };
+  const companyLast = { company: last, role: parts.slice(0, -2).join('').trim() };
 
-  return { company: null, role: cleaned };
+  // The end that reads like a job title is the role; the other end is the company.
+  const firstIsRole = ROLE_KEYWORDS.test(first);
+  const lastIsRole = ROLE_KEYWORDS.test(last);
+  if (lastIsRole && !firstIsRole) return companyFirst;
+  if (firstIsRole && !lastIsRole) return companyLast;
+
+  // Undecided: "Company | Role" / "Company – Role" lead with the company,
+  // "Role - Company" ends with it.
+  return /[|–—]/.test(cleaned) ? companyFirst : companyLast;
 }
 
 /**
@@ -403,15 +436,13 @@ export async function archiveUrl(browser, url, { company: companyHint, role: rol
     if (httpStatus === 404) {
       throw new Error('refusing to archive: HTTP 404');
     }
+    const interstitial = httpStatus >= 400 ? cloudflareInterstitial(pageTitle) : null;
+    if (interstitial) {
+      throw new Error(`refusing to archive: HTTP ${httpStatus} Cloudflare ${interstitial} ("${pageTitle.trim()}"), not a posting`);
+    }
     if (httpStatus && httpStatus >= 400) {
       console.log(`HTTP ${httpStatus} — page may be closed, archiving anyway`);
     }
-
-    const filename = captureFilename(company, role);
-    const outputPath = join(JDS_DIR, filename);
-    const reference = `local:jds/${filename}`;
-
-    console.log(`   Output:  jds/${filename}`);
 
     mkdirSync(JDS_DIR, { recursive: true });
 
@@ -422,7 +453,32 @@ export async function archiveUrl(browser, url, { company: companyHint, role: rol
       preferCSSPageSize: false,
     });
 
-    await writeFile(outputPath, pdfBuffer);
+    const baseFilename = captureFilename(company, role, url);
+    let filename;
+    // URL identity separates requisitions; exclusive creation also preserves
+    // older snapshots of the same URL, including simultaneous captures.
+    for (let attempt = 0; ; attempt++) {
+      filename = attempt ? baseFilename.replace(/\.pdf$/, `-${attempt + 1}.pdf`) : baseFilename;
+      const outputPath = join(JDS_DIR, filename);
+      let file;
+      try {
+        file = await open(outputPath, 'wx');
+      } catch (err) {
+        if (err.code === 'EEXIST') continue;
+        throw err;
+      }
+      try {
+        await file.writeFile(pdfBuffer);
+        await file.close();
+      } catch (err) {
+        await file.close().catch(() => {});
+        await unlink(outputPath).catch(() => {});
+        throw err;
+      }
+      break;
+    }
+    const reference = `local:jds/${filename}`;
+    console.log(`   Output:  jds/${filename}`);
 
     const sizeKb = (pdfBuffer.length / 1024).toFixed(1);
     console.log(`Saved (${sizeKb} KB)`);
@@ -464,7 +520,7 @@ async function main() {
       const urlCompany = extractCompanyFromUrl(url);
       const resolvedCompany = overrideCompany || company || urlCompany || 'unknown';
       const resolvedRole = overrideRole || role || 'job';
-      const filename = captureFilename(resolvedCompany, resolvedRole);
+      const filename = captureFilename(resolvedCompany, resolvedRole, url);
       const reference = `local:jds/${filename}`;
       console.log(`\n🔗  ${url}`);
       console.log(`   Company: ${resolvedCompany}`);
@@ -474,8 +530,12 @@ async function main() {
       results.push({ url, filename, reference, skipped: true });
     }
   } else {
-    // Sequential — project convention: never Playwright in parallel
-    const browser = await chromium.launch({ headless: true });
+    // Sequential — project convention: never Playwright in parallel.
+    // Loaded here, after --help / --dry-run / a missing pipeline have already
+    // returned. A static import made those paths wait on the browser package
+    // and crash when it was not installed.
+    const { chromium } = await import('./lib/hardened-chromium.mjs');
+    const browser = await chromium.launch(browserLaunchOptions({ headless: true }));
     try {
       for (const { url, company, role } of targets) {
         try {

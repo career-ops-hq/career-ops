@@ -14,6 +14,7 @@
 // Each case drives the real CLI against a mock Ollama that captures the request and replies
 // with newline-delimited JSON, the shape the native /api/chat streaming endpoint produces.
 import { createServer } from 'http';
+import { listenOnSafePort } from './helpers/listen-safe-port.mjs';
 import { execFile } from 'child_process';
 import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
@@ -55,7 +56,7 @@ async function run({ env = {}, trailingNewline = true, cleanCwd = false }) {
     });
   });
 
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await listenOnSafePort(server);
   const port = server.address().port;
 
   // dotenv reads .env from the child's cwd and does not override values already in the

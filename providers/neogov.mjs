@@ -3,6 +3,7 @@
 
 import { decodeEntities } from './_html-entities.mjs';
 import { fetchTextWithRetry, sleep } from './_http.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 // NEOGOV provider — public-sector and education careers sites on
 // `www.schooljobs.com` and `www.governmentjobs.com` (community colleges, school
@@ -97,6 +98,8 @@ export default {
     const jobs = [];
     const seen = new Set();
     let stoppedOnEmpty = false;
+    // A short page is the board's end, even when it is the last one the ceiling allows.
+    let lastPageFull = false;
     let pagesFetched = 0;
     for (let page = 1; page <= pagesToFetch; page++) {
       if (page > 1) await sleep(INTER_PAGE_DELAY_MS, ctx);
@@ -109,6 +112,9 @@ export default {
       });
       pagesFetched++;
       const found = parseNeogovPage(html, entry.name, t.origin);
+      // The cards the source sent, before malformed ones are dropped: one bad
+      // card must not make a full page look short.
+      lastPageFull = countNeogovCards(html) >= PAGE_SIZE;
       // A page that adds nothing new is the end — or the site ignoring `page`
       // and repeating itself. Either way, stop instead of looping.
       let fresh = 0;
@@ -123,15 +129,32 @@ export default {
         break;
       }
     }
-    if (!stoppedOnEmpty && pagesFetched >= ceiling && !(ctxMax > 0 && ctxMax < ceiling)) {
+    // Never during a ctx.maxPages probe: on a max_pages: 1 entry the probe ends
+    // on the entry's own last page too, so a probe cap below the ceiling is not
+    // the only one to exclude (#7180).
+    if (!stoppedOnEmpty && lastPageFull && pagesFetched >= ceiling && !(ctxMax > 0)) {
       console.warn(`neogov: ${entry.name}: stopped at ${ceiling} pages (${ceiling * PAGE_SIZE} postings); raise max_pages on this entry`);
+      // The same cut marks the result, so scan.mjs logs the board partial
+      // instead of reachable (lib/board-truncation.mjs).
+      markTruncated(jobs, 'page-cap', { fetched: jobs.length });
     }
     return jobs;
   },
 };
 
 /** @param {string} s */
-const text = (s) => decodeEntities(String(s).replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+const text = (s) => decodeEntities(String(s).replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag))).replace(/\s+/g, ' ').trim();
+
+/**
+ * How many job cards a list page carries as the source sent it, split the way
+ * parseNeogovPage splits it, before link-less, off-site or untitled items are
+ * dropped. Page fullness is read from this.
+ * @param {string} html
+ * @returns {number}
+ */
+export function countNeogovCards(html) {
+  return typeof html === 'string' ? html.split(/<li class="list-item"/i).length - 1 : 0;
+}
 
 /**
  * Parse one `/careers/home/index` HTML page. Exported for unit tests.

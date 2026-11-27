@@ -22,6 +22,7 @@ import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const NO_PORTALS = join(tmpdir(), 'career-ops-no-such-portals.yml');
@@ -41,7 +42,7 @@ function runScan(...args) {
 
 test('--help prints usage and exits 0, without reaching the portals check', () => {
   const r = runScan('--help');
-  assert.equal(r.status, 0, `expected exit 0, got ${r.status}: ${r.all}`);
+  assert.equal(r.status, 0, describeSpawn(r, `expected exit 0, got ${r.status}`));
   assert.match(r.stdout, /Usage:/);
   assert.match(r.stdout, /node scan\.mjs/);
   assert.doesNotMatch(r.all, PORTALS_NOT_FOUND, '--help must exit before any scan logic runs');
@@ -49,14 +50,14 @@ test('--help prints usage and exits 0, without reaching the portals check', () =
 
 test('-h prints usage and exits 0, without reaching the portals check', () => {
   const r = runScan('-h');
-  assert.equal(r.status, 0, `expected exit 0, got ${r.status}: ${r.all}`);
+  assert.equal(r.status, 0, describeSpawn(r, `expected exit 0, got ${r.status}`));
   assert.match(r.stdout, /Usage:/);
   assert.doesNotMatch(r.all, PORTALS_NOT_FOUND);
 });
 
 test('an unrecognized flag errors and exits 1, without reaching the portals check', () => {
   const r = runScan('--bogus-flag');
-  assert.notEqual(r.status, 0, `expected non-zero exit, got 0: ${r.all}`);
+  assert.ok(exitedNonZero(r), describeSpawn(r, `expected non-zero exit, got 0`));
   assert.match(r.stderr, /unrecognized flag\(s\): --bogus-flag/);
   assert.match(r.stderr, /Valid flags:/);
   assert.doesNotMatch(r.all, PORTALS_NOT_FOUND, 'an unrecognized flag must not fall through to a live scan');
@@ -64,14 +65,14 @@ test('an unrecognized flag errors and exits 1, without reaching the portals chec
 
 test('--help plus an unrecognized flag still errors (unrecognized check runs before --help)', () => {
   const r = runScan('--help', '--bogus-flag');
-  assert.notEqual(r.status, 0, `expected non-zero exit, got 0: ${r.all}`);
+  assert.ok(exitedNonZero(r), describeSpawn(r, `expected non-zero exit, got 0`));
   assert.match(r.stderr, /unrecognized flag\(s\): --bogus-flag/);
   assert.doesNotMatch(r.stdout, /Usage:/, '--help must not print/exit 0 while an unrecognized flag is present');
 });
 
 test('a mistyped known flag (--dryrun for --dry-run) is rejected, not silently ignored', () => {
   const r = runScan('--dryrun');
-  assert.notEqual(r.status, 0, `expected non-zero exit, got 0: ${r.all}`);
+  assert.ok(exitedNonZero(r), describeSpawn(r, `expected non-zero exit, got 0`));
   assert.match(r.stderr, /unrecognized flag\(s\): --dryrun/);
   assert.doesNotMatch(r.all, PORTALS_NOT_FOUND, 'a mistyped flag must not fall through to a live scan');
 });

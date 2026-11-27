@@ -2,7 +2,11 @@
 // BODY read, not just the header phase. A server that sends headers and then
 // stalls the body used to hang fetchJson forever, which could silently freeze
 // a full-directory sweep partway through with no error output.
+import { spawnSync } from 'node:child_process';
+import { listenOnSafePort } from '../helpers/listen-safe-port.mjs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { pass, fail, ROOT, withLocalServerAs } from '../helpers.mjs';
@@ -40,7 +44,7 @@ const server = createServer((req, res) => {
   res.end('{"ok":true}');
 });
 server.on('connection', (s) => { sockets.add(s); s.on('close', () => sockets.delete(s)); });
-await new Promise((r) => server.listen(0, '127.0.0.1', r));
+await listenOnSafePort(server);
 // The provider guard refuses a loopback destination, so the requests go to a
 // public-looking origin and the transport is pointed at the local server.
 const base = 'http://stalls.example.test';
@@ -82,6 +86,110 @@ const isAbort = (err) => { const e = err?.cause ?? err; return e?.name === 'Abor
   const ok = await viaLocal(() => fetchJson(`${base}/ok`, { timeoutMs: 2_000 }));
   if (ok && ok.ok === true) pass('fetchJson still parses a completed body');
   else fail(`fetchJson happy path broken: ${JSON.stringify(ok)}`);
+}
+
+// 4. CAREER_OPS_HTTP_TIMEOUT_MS overrides the default budget.
+// A board that returns its whole catalogue in one response can outlast the 10s
+// default, and the abort surfaces as an unreachable portal rather than as a
+// timeout — so the board reads as broken instead of slow. Raising the budget is
+// a deployment concern, so it is an env var; an unusable value must fall back
+// rather than fail a scan at request time.
+{
+  const { resolveDefaultTimeoutMs } = await import(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href);
+  const eq = (label, actual, expected) => {
+    if (actual === expected) pass(label);
+    else fail(`${label} — got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}`);
+  };
+
+  // Every unusable shape falls back to the documented 10s default.
+  //
+  // Sub-millisecond and 32-bit-overflow values are unusable for the same reason
+  // rather than an arithmetic one: setTimeout rewrites any delay below 1ms or
+  // above 2_147_483_647ms to 1ms, so such a value would abort every request
+  // almost immediately — the exact failure this env var exists to prevent,
+  // reached by a typo instead of a slow board.
+  for (const [raw, label] of [
+    [undefined, 'unset'], [null, 'null'], ['', 'empty string'], ['   ', 'whitespace'],
+    ['abc', 'non-numeric'], ['0', 'zero'], ['-5', 'negative'],
+    ['Infinity', 'Infinity'], ['NaN', 'NaN'],
+    ['0.5', 'sub-millisecond'], ['2147483648', 'timer overflow'],
+  ]) {
+    eq(`CAREER_OPS_HTTP_TIMEOUT_MS ${label} → 10s default`, resolveDefaultTimeoutMs(raw), 10_000);
+  }
+
+  // The bounds are inclusive: both edges are delays setTimeout honors as written.
+  eq('1ms — the smallest delay setTimeout does not rewrite', resolveDefaultTimeoutMs('1'), 1);
+  eq('2147483647ms — the largest delay setTimeout does not rewrite', resolveDefaultTimeoutMs('2147483647'), 2_147_483_647);
+
+  eq('a valid numeric string overrides the default', resolveDefaultTimeoutMs('30000'), 30_000);
+  eq('a valid number overrides the default', resolveDefaultTimeoutMs(45_000), 45_000);
+  eq('an explicit fallback is honored when the value is unusable', resolveDefaultTimeoutMs('nope', 7_000), 7_000);
+}
+
+// 5. The env var reaches the real request budget, not just the helper.
+// The module is already loaded here, so this also checks that the value is read
+// per request. Stall a request that passes no timeoutMs. If the env read is ever
+// disconnected, the request waits out the 10s default and the hard timeout below
+// fails the test.
+{
+  const prev = process.env.CAREER_OPS_HTTP_TIMEOUT_MS;
+  process.env.CAREER_OPS_HTTP_TIMEOUT_MS = '300';
+  try {
+    const t0 = Date.now();
+    try {
+      await hardTimeout(viaLocal(() => fetchJson(`${base}/stall`)), 4_000, 'fetchJson /stall with env budget');
+      fail('fetchJson resolved on a stalled body under CAREER_OPS_HTTP_TIMEOUT_MS');
+    } catch (err) {
+      const elapsed = Date.now() - t0;
+      if (!isAbort(err)) fail(`CAREER_OPS_HTTP_TIMEOUT_MS=300 did not set the request budget: ${err?.message}`);
+      else if (elapsed < MAX_ABORT_MS) pass(`CAREER_OPS_HTTP_TIMEOUT_MS=300 aborted a request with no timeoutMs in ${elapsed}ms`);
+      else fail(`CAREER_OPS_HTTP_TIMEOUT_MS=300 took ${elapsed}ms to abort (env budget not applied)`);
+    }
+  } finally {
+    if (prev === undefined) delete process.env.CAREER_OPS_HTTP_TIMEOUT_MS;
+    else process.env.CAREER_OPS_HTTP_TIMEOUT_MS = prev;
+  }
+}
+
+// 6. A value set only in the data root's .env reaches the request budget.
+// scan.mjs imports _http.mjs statically and loads .env after that, so this runs
+// the real import order in a child process. Its fetch never answers and uses no
+// network, so the time to the abort shows which budget was in force.
+{
+  const dataRoot = mkdtempSync(join(tmpdir(), 'co-http-timeout-env-'));
+  try {
+    writeFileSync(join(dataRoot, '.env'), 'CAREER_OPS_HTTP_TIMEOUT_MS=300\n');
+    const script = `
+      await import(${JSON.stringify(pathToFileURL(join(ROOT, 'scan.mjs')).href)});
+      const { fetchJson } = await import(${JSON.stringify(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href)});
+      let fetchCalled = false;
+      globalThis.fetch = (_url, { signal }) => {
+        fetchCalled = true;
+        return new Promise((_, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason));
+        });
+      };
+      const t0 = Date.now();
+      let error;
+      try {
+        await fetchJson('https://stalls.example.test/');
+      } catch (err) {
+        error = err;
+      }
+      const elapsed = Date.now() - t0;
+      if (!fetchCalled) throw new Error('the request never reached fetch: ' + error?.message);
+      if (error?.name !== 'AbortError') throw new Error('expected an abort, got: ' + (error?.message ?? 'no error'));
+      console.log(elapsed);
+    `;
+    const env = { ...process.env, CAREER_OPS_ROOT: dataRoot };
+    delete env.CAREER_OPS_HTTP_TIMEOUT_MS;
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', env, timeout: 30_000 });
+    const elapsed = Number(child.stdout.trim().split('\n').pop());
+    if (child.status === 0 && elapsed < 5_000) pass(`CAREER_OPS_HTTP_TIMEOUT_MS from .env aborted a request in ${elapsed}ms`);
+    else fail(`CAREER_OPS_HTTP_TIMEOUT_MS from .env not applied: status ${child.status}, elapsed ${elapsed}ms, ${child.stderr}`);
+  } finally {
+    rmSync(dataRoot, { recursive: true, force: true });
+  }
 }
 
 for (const s of sockets) s.destroy();

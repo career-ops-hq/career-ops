@@ -16,16 +16,34 @@ try {
 
   // normalizeSpeedrunJob — full mapping.
   const full = normalizeSpeedrunJob(
-    { title: '  Founding Engineer  ', url: 'https://speedrun-talent-network.com/jobs/founding-engineer-light-abc123', company: '  Light  ', location: '  New York, NY  ', remote: false, published_at: '2026-07-01T12:00:00.000Z' },
+    { id: 'job-abc123', title: '  Founding Engineer  ', url: 'https://speedrun-talent-network.com/jobs/founding-engineer-light-abc123', company: '  Light  ', location: '  New York, NY  ', remote: false, published_at: '2026-07-01T12:00:00.000Z' },
     'Fallback',
   );
   if (full && full.title === 'Founding Engineer'
       && full.url === 'https://speedrun-talent-network.com/jobs/founding-engineer-light-abc123'
       && full.company === 'Light' && full.location === 'New York, NY'
-      && full.postedAt === Date.parse('2026-07-01T12:00:00.000Z')) {
-    pass('normalizeSpeedrunJob maps title/url/company/location + published_at → postedAt');
+      && full.postedAt === Date.parse('2026-07-01T12:00:00.000Z')
+      && full.externalId === 'job-abc123') {
+    pass('normalizeSpeedrunJob maps title/url/company/location + published_at → postedAt + id → externalId');
   } else {
     fail(`normalizeSpeedrunJob full row = ${JSON.stringify(full)}`);
+  }
+
+  // workplaceType comes from workplace_type (any case).
+  const speedrunUrl = 'https://speedrun-talent-network.com/jobs/w';
+  const wtJob = (extra) => normalizeSpeedrunJob({ title: 'W', url: speedrunUrl, ...extra });
+  const wt = (extra) => wtJob(extra)?.workplaceType;
+  if (wt({ workplace_type: 'Remote', remote: true }) === 'remote' && wt({ workplace_type: 'Hybrid', remote: false }) === 'hybrid'
+      && wt({ workplace_type: 'OnSite' }) === 'onsite' && wt({ workplace_type: 'Onsite' }) === 'onsite') {
+    pass('normalizeSpeedrunJob sets workplaceType from workplace_type');
+  } else {
+    fail(`normalizeSpeedrunJob workplace_type = ${JSON.stringify(['Remote', 'Hybrid', 'OnSite', 'Onsite'].map((v) => wt({ workplace_type: v })))}`);
+  }
+  const unset = [{ workplace_type: null, remote: true }, { remote: true }, { workplace_type: 'Unspecified' }].map(wtJob);
+  if (unset.every((j) => j && !('workplaceType' in j))) {
+    pass('normalizeSpeedrunJob leaves workplaceType unset for a null, absent or unknown workplace_type');
+  } else {
+    fail('normalizeSpeedrunJob should read workplaceType only from workplace_type');
   }
 
   // "Remote" appended when remote is true; location may be null.
@@ -45,6 +63,16 @@ try {
     pass('normalizeSpeedrunJob falls back company → entry name → "a16z speedrun talent network"');
   } else {
     fail(`normalizeSpeedrunJob company fallbacks = ${JSON.stringify({ a: coEntry?.company, b: coDefault?.company, c: coBlank?.company })}`);
+  }
+
+  // externalId omitted when the feed carries no usable id (absent / blank / non-string).
+  const noId = normalizeSpeedrunJob({ title: 'T', url: 'https://speedrun-talent-network.com/jobs/ni' });
+  const blankId = normalizeSpeedrunJob({ title: 'T', url: 'https://speedrun-talent-network.com/jobs/bi', id: '   ' });
+  const objId = normalizeSpeedrunJob({ title: 'T', url: 'https://speedrun-talent-network.com/jobs/oi', id: {} });
+  if (noId && !('externalId' in noId) && blankId && !('externalId' in blankId) && objId && !('externalId' in objId)) {
+    pass('normalizeSpeedrunJob omits externalId when id is absent / blank / non-string');
+  } else {
+    fail(`normalizeSpeedrunJob externalId presence = ${JSON.stringify({ noId, blankId, objId })}`);
   }
 
   // postedAt omitted when published_at absent/unparseable.
@@ -82,7 +110,7 @@ try {
   }
 
   // fetch(): 0-based pagination with source tag, stop on short page; q passthrough.
-  const mk = (i) => ({ title: `Role ${i}`, url: `https://speedrun-talent-network.com/jobs/x${i}`, company: `Co ${i}`, location: 'New York, NY', remote: false, published_at: '2026-07-01T00:00:00.000Z' });
+  const mk = (i) => ({ id: `job-${i}`, title: `Role ${i}`, url: `https://speedrun-talent-network.com/jobs/x${i}`, company: `Co ${i}`, location: 'New York, NY', remote: false, published_at: '2026-07-01T00:00:00.000Z' });
   const page0 = { jobs: Array.from({ length: 50 }, (_, i) => mk(i)), total: 53, page: 0, page_size: 50, total_pages: 2 };
   const page1 = { jobs: [mk(50), mk(51), { title: '', url: 'https://speedrun-talent-network.com/jobs/bad' }], total: 53, page: 1, page_size: 50, total_pages: 2 };
   const calls = [];
@@ -104,6 +132,13 @@ try {
     pass('fetch() paginates 0-based with source=career-ops + q passthrough, stops after total_pages, drops invalid rows');
   } else {
     fail(`fetch() = ${JSON.stringify({ calls, count: jobs.length })}`);
+  }
+
+  // fetch() carries the feed id through to externalId on every returned row.
+  if (jobs[0].externalId === 'job-0' && jobs[51].externalId === 'job-51') {
+    pass('fetch() carries the feed id through as externalId');
+  } else {
+    fail(`fetch() externalId = ${JSON.stringify({ first: jobs[0]?.externalId, last: jobs[51]?.externalId })}`);
   }
 
   // fetch(): max_pages caps ahead of total_pages.
@@ -140,6 +175,30 @@ try {
   else fail(`live-shape pagination = ${JSON.stringify({ calls: liveShapeCalls, jobs: liveShape?.length })}`);
   if (liveWarnings.some((w) => w.includes('truncated at max_pages=2'))) pass('fetch() warns when max_pages truncates the live-shape feed');
   else fail(`live-shape truncation warning missing; captured = ${JSON.stringify(liveWarnings)}`);
+  // The warned cut is also marked, so scan.mjs logs the board partial, not reachable.
+  if (liveShape.truncated?.reason === 'page-cap' && liveShape.truncated.fetched === 100) pass('fetch() marks the board page-cap when max_pages truncates the feed');
+  else fail(`live-shape cut: truncated = ${JSON.stringify(liveShape.truncated)}`);
+
+  // The health probe (ctx.maxPages: 1) reads one page of a long feed, and is
+  // never warned about or marked as a max_pages cut, including on a max_pages: 1
+  // entry, where the probe's page is also the entry's last (#7180).
+  for (const probeEntry of [{}, { max_pages: 1 }]) {
+    const probeCalls = [];
+    const probeWarnings = [];
+    let probed;
+    try {
+      console.error = (...args) => probeWarnings.push(args.join(' '));
+      probed = await provider.fetch(probeEntry, {
+        maxPages: 1,
+        fetchJson: async (url) => { probeCalls.push(url); return { jobs: Array.from({ length: 50 }, (_, i) => mk(i)), total: 16830, page_size: 50, total_pages: 337 }; },
+      });
+    } finally {
+      console.error = liveRealConsoleError;
+    }
+    const label = JSON.stringify(probeEntry);
+    if (probeCalls.length === 1 && probed.length === 50 && probeWarnings.length === 0 && probed.truncated === undefined) pass(`fetch() reads one page under a ctx.maxPages: 1 probe and reports no cut (entry ${label})`);
+    else fail(`probe on entry ${label} = ${JSON.stringify({ calls: probeCalls.length, jobs: probed?.length, warnings: probeWarnings, truncated: probed?.truncated })}`);
+  }
 
   // #2547: total_pages outranks the short-page break. On a board that rotates
   // while a sweep runs, a page can legitimately come back 49/50 because a
@@ -175,6 +234,8 @@ try {
   // truncated: no false "raise max_pages" warning on a board read in full.
   if (rotWarnings.length === 0) pass('fetch() does not warn when max_pages exactly covers total_pages');
   else fail(`unexpected warning on a complete sweep = ${JSON.stringify(rotWarnings)}`);
+  if (rotated.truncated === undefined) pass('fetch() leaves a sweep that exactly covers total_pages unmarked');
+  else fail(`complete sweep was marked: ${JSON.stringify(rotated.truncated)}`);
 
   // Trusting total_pages is only safe because an empty page ends iteration
   // unconditionally: an OVER-reporting feed stops at the first empty response
@@ -488,6 +549,196 @@ try {
     if (fastFailed && attempts === 1) pass('fetch() does not retry a non-retryable 4xx (#2506)');
     else fail(`4xx retry behaviour wrong: threw=${fastFailed}, attempts=${attempts}`);
   }
+
+  // ── Feed filters ──────────────────────────────────────────────────────────
+  // `a16z_speedrun_talent.filters` is passed to the feed's query on every page,
+  // for documented parameters only; a typo or an invalid value throws before any
+  // request, so the scan does not quietly read the whole board.
+  const srUrl = (i) => `https://speedrun-talent-network.com/jobs/f${i}`;
+  const oneJob = (extra = {}) => ({ id: 'f-1', title: 'T', url: srUrl(1), ...extra });
+  const recordCtx = (calls, body = { jobs: [oneJob()], total_pages: 1 }) => ({ fetchJson: async (url) => { calls.push(url); return body; } });
+  const filterCalls = [];
+  await provider.fetch({
+    name: 'sr', q: 'engineer',
+    a16z_speedrun_talent: { filters: {
+      scope: 'everywhere', fn: 'engineering', wp: 'remote', sen: ['senior', 'staff', '_'], posted: '7d', sort: 'new',
+      comp: 150000, remote: true, ai: 1, founding: false, loc: 'remote, berlin', stealth: 'hide', fn_unknown_blank: '', cohort: null,
+    } },
+  }, recordCtx(filterCalls)).catch(() => {});
+  const q0 = filterCalls[0] ? new URL(filterCalls[0]).searchParams : null;
+  const got = q0 ? Object.fromEntries(q0) : null;
+  if (got && JSON.stringify(got) === JSON.stringify({
+    page: '0', source: 'career-ops', q: 'engineer', scope: 'everywhere', fn: 'engineering', wp: 'remote', sen: 'senior,staff,_', posted: '7d',
+    sort: 'new', comp: '150000', remote: '1', ai: '1', loc: 'remote,berlin', stealth: 'hide',
+  })) pass('fetch() passes documented filters to the feed query: lists joined, flags as 1, blank and false skipped, page, source and q kept');
+  else fail(`filters query = ${JSON.stringify(got)}`);
+
+  const locForms = [['San Francisco', 'New York'], 'San Francisco, New York', ["Saint-Denis", "O'Fallon", 'St. Louis', 'Zürich']];
+  const locGot = [];
+  for (const loc of locForms) {
+    const c = [];
+    await provider.fetch({ name: 'sr', a16z_speedrun_talent: { filters: { loc } } }, recordCtx(c));
+    locGot.push(c[0] ? new URL(c[0]).searchParams.get('loc') : null);
+  }
+  if (JSON.stringify(locGot) === JSON.stringify(['San Francisco,New York', 'San Francisco,New York', "Saint-Denis,O'Fallon,St. Louis,Zürich"]))
+    pass('fetch() takes multiword city names in loc, as a list or a string, keeping internal spaces');
+  else fail(`loc forms = ${JSON.stringify(locGot)}`);
+
+  const plainCalls = [];
+  await provider.fetch({ name: 'sr' }, recordCtx(plainCalls));
+  if (plainCalls.length === 1 && [...new URL(plainCalls[0]).searchParams.keys()].join() === 'page,source') pass('fetch() sends only page and source when the entry has no filters');
+  else fail(`default query = ${JSON.stringify(plainCalls)}`);
+
+  const badFilters = [
+    { bogus: 'x' }, { page: 3 }, { source: 'x' }, { q: 'x' },
+    { posted: '1y' }, { scope: 'galaxy' }, { sort: 'oldest' }, { stealth: 'maybe' },
+    { comp: -1 }, { comp: '150000' }, { comp: 1.5 }, { remote: 'yes' }, { ai: 2 },
+    { sen: ['senior', false] }, { sen: ['senior', 7] }, { loc: 'San Francisco, a\nb' }, { loc: ['x;y'] }, { fn: ['San Francisco'] }, { fn: 'a&page=3' }, { fn: [' ', ''] }, { fn: ['ok', 'bad value'] }, { fn: {} }, { sen: false }, { wp: 7 }, { loc: true },
+    { metro: 'sf,nyc,la,sv,dc,chi' }, { company: 5 }, { company: 'x'.repeat(121) },
+  ];
+  let refused = 0;
+  const refusedCalls = [];
+  for (const filters of badFilters) {
+    try { await provider.fetch({ name: 'sr', a16z_speedrun_talent: { filters } }, recordCtx(refusedCalls)); } catch (e) { if (/a16z-speedrun-talent: sr — /.test(e.message)) refused++; }
+  }
+  for (const filters of ['fn=engineering', ['fn'], 7]) {
+    try { await provider.fetch({ name: 'sr', a16z_speedrun_talent: { filters } }, recordCtx(refusedCalls)); } catch (e) { if (/filters must be a map/.test(e.message)) refused++; }
+  }
+  const badSettings = ['x', ['filters'], { fetchDetails: 'true' }, { fetchDetails: 1 }, { detailLimit: 0 }, { detailLimit: '50' }, { detailLimit: 2.5 }, { fetchDetail: true }, { detail_limit: 50 }];
+  let refusedSettings = 0;
+  for (const settings of badSettings) {
+    try { await provider.fetch({ name: 'sr', a16z_speedrun_talent: settings }, recordCtx(refusedCalls)); } catch (e) { if (/a16z-speedrun-talent: sr — /.test(e.message)) refusedSettings++; }
+  }
+  if (refusedSettings === badSettings.length && refusedCalls.length === 0) pass('fetch() throws on settings that are not a map, a fetchDetails that is not a boolean or a detailLimit that is not a positive integer, before any request');
+  else fail(`bad settings refused ${refusedSettings} of ${badSettings.length}, requests made: ${refusedCalls.length}`);
+  if (refused === badFilters.length + 3 && refusedCalls.length === 0) pass('fetch() throws on an unknown filter, an invalid value or a filters that is not a map, before any request');
+  else fail(`bad filters refused ${refused} of ${badFilters.length + 3}, requests made: ${refusedCalls.length}`);
+
+  // ── Detail reads ──────────────────────────────────────────────────────────
+  // Off by default. When on: the employer's own posting becomes the job url, and
+  // description_text the description. Bounded by detailLimit, five at a time.
+  const detailJobs = Array.from({ length: 12 }, (_, i) => ({ id: `d-${i}`, title: `D${i}`, url: srUrl(i), company: 'Co' }));
+  const detailFor = (id) => {
+    const i = Number(id.slice(2));
+    if (i === 0) return { status: 'open', description_text: '  Build things.  ', apply: { kind: 'external', url: 'https://boards.greenhouse.io/acme/jobs/1' } };
+    if (i === 1) return { status: 'open', description_text: 'Onsite apply.', apply: { kind: 'onsite', url: srUrl(1) } };
+    if (i === 2) return { status: 'open', description_text: 'Hands off to speedrun.', apply: { kind: 'external', url: 'https://speedrun-talent-network.com/go/2' } };
+    if (i === 3) return { status: 'open', description_text: 'Insecure.', apply: { kind: 'external', url: 'http://jobs.acme.example/3' } };
+    if (i === 4) return { status: 'closed', description_text: null, apply: null };
+    if (i === 5) return { status: 'open', description_text: '   ', apply: { kind: 'external', url: 'not a url' } };
+    return { status: 'open', description_text: `Text ${i}`, apply: { kind: 'external', url: `https://jobs.acme.example/${i}` } };
+  };
+  const detailRun = async (entryExtra, { failId, probe } = {}) => {
+    const calls = [];
+    let inFlight = 0;
+    let peak = 0;
+    const warnings = [];
+    const realError = console.error;
+    console.error = (...args) => { warnings.push(args.join(' ')); };
+    let rows;
+    try {
+      rows = await provider.fetch({ name: 'sr', ...entryExtra }, {
+        ...(probe ? { maxPages: 1 } : {}),
+        sleep: async () => {},
+        fetchJson: async (url) => {
+          calls.push(url);
+          if (!new URL(url).pathname.startsWith('/api/v1/jobs/')) return { jobs: detailJobs, total_pages: 1 };
+          inFlight++;
+          peak = Math.max(peak, inFlight);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          inFlight--;
+          const id = decodeURIComponent(new URL(url).pathname.split('/').pop());
+          if (id === failId) { const e = new Error('HTTP 404'); e.status = 404; throw e; }
+          return { job: detailFor(id) };
+        },
+      });
+    } finally {
+      console.error = realError;
+    }
+    return { rows, detailCalls: calls.filter((u) => new URL(u).pathname.startsWith('/api/v1/jobs/')), peak, warnings };
+  };
+
+  const noDetails = await detailRun({});
+  if (noDetails.detailCalls.length === 0 && noDetails.rows.every((r) => !('description' in r) && r.url.startsWith('https://speedrun-talent-network.com/jobs/')))
+    pass('fetch() reads no job detail unless fetchDetails is true');
+  else fail(`default detail calls = ${noDetails.detailCalls.length}`);
+
+  // Detail batches are paced: one pause before each batch after the first.
+  const pauses = [];
+  await provider.fetch({ name: 'sr', a16z_speedrun_talent: { fetchDetails: true, detailLimit: 12 } }, {
+    sleep: async (ms) => { pauses.push(ms); },
+    fetchJson: async (url) => (new URL(url).pathname === '/api/v1/jobs' ? { jobs: detailJobs, total_pages: 1 } : { job: { status: 'open' } }),
+  });
+  if (pauses.length === 2 && pauses.every((ms) => ms > 0)) pass('fetch() pauses between detail batches, not before the first');
+  else fail(`detail pauses = ${JSON.stringify(pauses)}`);
+
+  const withDetails = await detailRun({ a16z_speedrun_talent: { fetchDetails: true, detailLimit: 8 } }, { failId: 'd-6' });
+  const byTitle = Object.fromEntries(withDetails.rows.map((r) => [r.title, r]));
+  if (byTitle.D0.url === 'https://boards.greenhouse.io/acme/jobs/1' && byTitle.D0.description === 'Build things.' && byTitle.D0.externalId === 'd-0')
+    pass('fetch() with fetchDetails sets url to the employer apply url and description to description_text, keeping externalId');
+  else fail(`detail row = ${JSON.stringify(byTitle.D0)}`);
+  if ([1, 2, 3, 4, 5].every((i) => byTitle[`D${i}`].url === srUrl(i)))
+    pass('fetch() keeps the feed url for an onsite apply, a speedrun-host apply, an http apply, a closed role and an invalid apply url');
+  else fail(`kept urls = ${JSON.stringify([1, 2, 3, 4, 5].map((i) => byTitle[`D${i}`].url))}`);
+  if (byTitle.D1.description === 'Onsite apply.' && !('description' in byTitle.D4) && !('description' in byTitle.D5))
+    pass('fetch() sets no description for a closed role or a blank description_text');
+  else fail(`descriptions = ${JSON.stringify([byTitle.D1.description, byTitle.D4.description, byTitle.D5.description])}`);
+  if (withDetails.detailCalls.length === 8 && !('description' in byTitle.D8) && byTitle.D8.url === srUrl(8)
+      && withDetails.detailCalls.every((u) => new URL(u).searchParams.get('source') === 'career-ops' && new URL(u).origin === 'https://speedrun-talent-network.com'))
+    pass('fetch() reads at most detailLimit details, with source=career-ops, on the feed host');
+  else fail(`detailLimit calls = ${withDetails.detailCalls.length}`);
+  if (withDetails.peak === 5 && withDetails.rows.length === 12) pass('fetch() reads details five at a time');
+  else fail(`detail concurrency peak = ${withDetails.peak}`);
+  if (byTitle.D6.url === srUrl(6) && !('description' in byTitle.D6) && byTitle.D7.url === 'https://jobs.acme.example/7'
+      && withDetails.warnings.length === 1 && withDetails.warnings[0].includes('1 of 8 job details not read'))
+    pass('fetch() keeps a job as listed and warns once when its detail fails, and still reads the others');
+  else fail(`failed detail = ${JSON.stringify({ d6: byTitle.D6, d7: byTitle.D7.url, warnings: withDetails.warnings })}`);
+
+  const defaultLimit = await detailRun({ a16z_speedrun_talent: { fetchDetails: true } });
+  const bigLimit = await detailRun({ a16z_speedrun_talent: { fetchDetails: true, detailLimit: 5000 } });
+  if (defaultLimit.detailCalls.length === 12 && bigLimit.detailCalls.length === 12)
+    pass('fetch() accepts a missing or oversized detailLimit and reads at most the jobs listed');
+  else fail(`detailLimit variants = ${JSON.stringify([defaultLimit, bigLimit].map((r) => r.detailCalls.length))}`);
+
+  const manyJobs = Array.from({ length: 150 }, (_, i) => ({ id: `m-${i}`, title: `M${i}`, url: srUrl(1000 + i) }));
+  const limitCalls = [];
+  await provider.fetch({ name: 'sr', a16z_speedrun_talent: { fetchDetails: true, detailLimit: 5000 } }, {
+    sleep: async () => {},
+    fetchJson: async (url) => { limitCalls.push(url); return new URL(url).pathname === '/api/v1/jobs' ? { jobs: manyJobs, total_pages: 1 } : { job: { status: 'open' } }; },
+  });
+  if (limitCalls.length === 1 + 100) pass('fetch() caps detailLimit at 100');
+  else fail(`detailLimit cap = ${limitCalls.length - 1} detail calls`);
+
+  const oddIdCalls = [];
+  const oddIdRows = await provider.fetch({ name: 'sr', a16z_speedrun_talent: { fetchDetails: true } }, {
+    fetchJson: async (url) => { oddIdCalls.push(url); return new URL(url).pathname === '/api/v1/jobs' ? { jobs: [{ id: 'bad-\uD800', title: 'Odd', url: srUrl(77) }], total_pages: 1 } : { job: { status: 'open' } }; },
+  });
+  if (oddIdCalls.length === 1 && oddIdRows.length === 1 && oddIdRows[0].url === srUrl(77)) pass('fetch() skips the detail read for an id with a lone surrogate and keeps the job');
+  else fail(`lone-surrogate id = ${JSON.stringify({ calls: oddIdCalls.length, rows: oddIdRows.length })}`);
+
+  const probed = await detailRun({ a16z_speedrun_talent: { fetchDetails: true } }, { probe: true });
+  if (probed.detailCalls.length === 0) pass('fetch() reads no details under a ctx.maxPages probe');
+  else fail(`probe detail calls = ${probed.detailCalls.length}`);
+
+  // ── Salary ────────────────────────────────────────────────────────────────
+  // An annual band (comp_period "year", or null, which the feed defines as annual)
+  // sets salary; other periods, no numbers or invalid bounds set none.
+  const comp = (comp_min, comp_max, comp_currency = 'USD', comp_period = null) => normalizeSpeedrunJob({ title: 'T', url: srUrl(9), comp_min, comp_max, comp_currency, comp_period });
+  const band = comp(150000, 200000);
+  if (JSON.stringify(band?.salary) === JSON.stringify({ min: 150000, max: 200000, currency: 'USD', period: 'year', posted: { min: 150000, max: 200000 } })
+      && JSON.stringify(comp(90000, 120000, 'eur', 'year')?.salary) === JSON.stringify({ min: 90000, max: 120000, currency: 'EUR', period: 'year', posted: { min: 90000, max: 120000 } }))
+    pass('normalizeSpeedrunJob maps an annual comp band (comp_period null or year) with its upper-cased currency');
+  else fail(`annual salary = ${JSON.stringify([band?.salary, comp(90000, 120000, 'eur', 'year')?.salary])}`);
+  if (JSON.stringify(comp(100000, null)?.salary) === JSON.stringify({ min: 100000, max: 100000, currency: 'USD', period: 'year', posted: { min: 100000 } })
+      && JSON.stringify(comp(null, 100000, null)?.salary) === JSON.stringify({ min: 100000, max: 100000, period: 'year', posted: { max: 100000 } }))
+    pass('normalizeSpeedrunJob fills a one-sided band, keeps the posted bound as given, and leaves currency out when the feed gives none');
+  else fail(`one-sided salary = ${JSON.stringify([comp(100000, null)?.salary, comp(null, 100000, null)?.salary])}`);
+  const noPay = [comp(50, 80, 'USD', 'hour'), comp(5000, 6000, 'USD', 'month'), comp(1, 2, 'USD', 'week'), comp(1, 2, 'USD', 'day'), comp(null, null), comp(0, 0), comp('150000', '200000'), comp(NaN, Infinity), comp(-5, -1)];
+  if (noPay.every((j) => j && !('salary' in j))) pass('normalizeSpeedrunJob sets no salary for a non-annual band, no numbers, zero, text, non-finite or negative bounds');
+  else fail(`no-salary cases = ${JSON.stringify(noPay.map((j) => j?.salary))}`);
+  const viaFetch = await provider.fetch({ name: 'sr' }, recordCtx([], { jobs: [oneJob({ comp_min: 120000, comp_max: 160000, comp_currency: 'USD', comp_period: null })], total_pages: 1 }));
+  if (viaFetch[0]?.salary?.min === 120000 && viaFetch[0].salary.max === 160000) pass('fetch() carries the feed comp band through as salary');
+  else fail(`fetch() salary = ${JSON.stringify(viaFetch[0]?.salary)}`);
 } catch (e) {
   fail(`a16z-speedrun-talent provider test crashed: ${e?.stack || e}`);
 }

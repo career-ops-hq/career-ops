@@ -4,10 +4,33 @@ import { readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { tryAcquireDirLockSync, releaseOrWarn } from './lib/dir-lock.mjs';
+import { JD_HEADING_RE } from './lib/jd-archive-section.mjs';
 
 export const APPLICATION_ANSWERS_HEADING = '## Application Answers';
 
 const VALID_STATES = new Set(['filled', 'submitted']);
+// A level-1/2 Markdown heading closes this section, including tabs, up to
+// three leading spaces, and empty headings. Level-3 groups stay inside it.
+const ANSWERS_SECTION_END_RE = /^ {0,3}#{1,2}(?:[ \t]+|$)/;
+
+function findUnfencedHeading(text, pattern) {
+  let fence = null;
+  for (const line of text.matchAll(/^.*$/gm)) {
+    if (fence) {
+      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line[0]);
+      if (close && close[1][0] === fence[0] && close[1].length >= fence.length) fence = null;
+      continue;
+    }
+    const open = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line[0]);
+    if (open && !(open[1][0] === '`' && open[2].includes('`'))) {
+      fence = open[1];
+      continue;
+    }
+    if (pattern.test(line[0])) return line;
+  }
+  return null;
+}
 
 function inline(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -290,11 +313,11 @@ export function parseApplicationAnswersSection(reportText, { strict = false } = 
   const skipped = [];
   const onSkip = strict ? (line) => skipped.push(line.trim()) : undefined;
   const report = String(reportText ?? '').replace(/\r\n/g, '\n');
-  const heading = /^## Application Answers\s*$/m.exec(report);
+  const heading = findUnfencedHeading(report, /^## Application Answers[ \t]*$/);
   if (!heading) return null;
 
   const afterHeading = heading.index + heading[0].length;
-  const nextHeading = /^## .+$/m.exec(report.slice(afterHeading));
+  const nextHeading = findUnfencedHeading(report.slice(afterHeading), ANSWERS_SECTION_END_RE);
   const body = report.slice(
     afterHeading,
     nextHeading ? afterHeading + nextHeading.index : report.length,
@@ -329,10 +352,11 @@ export function parseApplicationAnswersSection(reportText, { strict = false } = 
  * NEITHER the letter NOR the name identifies this block. Both move with the
  * locale: of the 19 evaluation modes, 3 write the English name under `H)`
  * (canonical, `ar`, `ja`), 5 write a translated name under `H)`
- * (`es ru tr zh zh-TW`), and 11 write a translated name under `G)`
- * (`da de fr hi id it ko nl pl pt ua`). Matching one exact heading found the
- * block in 3 of 19, so in sixteen languages `modes/apply.md` silently
- * regenerated every answer the evaluation had already drafted and paid for.
+ * (`es ru tr zh zh-TW`), and 11 wrote a translated name under `G)`
+ * (`da de fr hi id it ko nl pl pt ua`) until #5843 moved it to `H)`. Matching
+ * one exact heading found the block in 3 of 19, so in sixteen languages
+ * `modes/apply.md` silently regenerated every answer the evaluation had
+ * already drafted and paid for.
  *
  * A trailing parenthetical marker is the signal instead, which is the
  * convention `web/src/lib/report-sections.mjs` already established for the
@@ -379,12 +403,13 @@ function findDraftAnswersHeading(report) {
     h[1].replace(DRAFT_ANSWERS_MARKER_RE, '').replace(HEADING_PREFIX_RE, '').trim(),
   ));
   if (named) return named;
-  // Last resort, and the only path that reads a TRANSLATED heading (#4400).
-  // Neither rule above fires on one today: no mode emits the `(draft)` marker
-  // (`git grep '(draft)' -- 'modes/*'` is empty), and the name rule is the
-  // English words, which five shipped modes translate — modes/es, modes/ru,
-  // modes/tr, modes/zh and modes/zh-TW. For those the block silently returned
-  // null, which is indistinguishable from a report that has no Block H.
+  // Last resort, and the only path that reads a TRANSLATED heading written
+  // before the modes emitted the `(draft)` marker (#4272), which covers every
+  // report already on disk (#4400). The name rule above is the English words,
+  // which sixteen shipped modes translate (modes/es, modes/ru,
+  // modes/tr, modes/zh, modes/zh-TW, and since #5843 the eleven that used to
+  // write it under `G)`). For those the block silently returned null, which is
+  // indistinguishable from a report that has no Block H.
   //
   // The letter is the structural part every mode keeps: `modes/oferta.md`
   // defines `H)` as the draft-answers block and each translation renders the
@@ -392,6 +417,29 @@ function findDraftAnswersHeading(report) {
   // authoritative where they apply, and it requires a non-empty title so a bare
   // `## H)` does not qualify.
   return headings.find(h => Boolean(DRAFT_ANSWERS_LETTER_RE.exec(h[1])?.[1]?.trim())) ?? null;
+}
+
+/**
+ * The report above its archived posting. `## Job Description (archived
+ * verbatim)` holds the posting's own text (#2789), which is untrusted: it can
+ * carry a `## ... (draft)` or `## H) ...` heading of its own, and
+ * modes/apply.md adapts what --read-draft returns into a real application.
+ * Every evaluation mode writes Block H above that section, so nothing from its
+ * heading down is searched. The heading pattern is the one check-jd-archive.mjs
+ * reads the section by, tested one line at a time, since its `\s+` also matches
+ * a newline: a bare `##` above a line starting "Job Description" in an answer
+ * would otherwise end the answer there (#7805 review). Fenced lines are not
+ * skipped: an unclosed fence above the archive would turn this bound off,
+ * where a fenced heading above Block H only makes the read come back empty.
+ *
+ * @param {string} report Report markdown, newlines already normalized.
+ * @returns {string}
+ */
+function beforeJdArchive(report) {
+  for (const line of report.matchAll(/^.*$/gm)) {
+    if (JD_HEADING_RE.test(line[0])) return report.slice(0, line.index);
+  }
+  return report;
 }
 
 /**
@@ -420,10 +468,11 @@ function findDraftAnswersHeading(report) {
  * The heading's title may be in any language; only the `## H)` marker is
  * required. A heading with a marker and no title is not Block H.
  *
- * @returns {{freeText: object[]} | null} `null` when the report has no Block H.
+ * @returns {{freeText: object[]} | null} `null` when the report has no Block H
+ * above its archived posting.
  */
 export function parseDraftAnswersBlockH(reportText) {
-  const report = String(reportText ?? '').replace(/\r\n/g, '\n');
+  const report = beforeJdArchive(String(reportText ?? '').replace(/\r\n/g, '\n'));
   const heading = findDraftAnswersHeading(report);
   if (!heading) return null;
 
@@ -461,7 +510,7 @@ export function parseDraftAnswersBlockH(reportText) {
 export function upsertApplicationAnswersSection(reportText, snapshot = {}) {
   const report = String(reportText ?? '').replace(/\r\n/g, '\n');
   const section = formatApplicationAnswersSection(snapshot).trimEnd();
-  const heading = /^## Application Answers\s*$/m.exec(report);
+  const heading = findUnfencedHeading(report, /^## Application Answers[ \t]*$/);
 
   if (!heading) {
     return `${report.trimEnd()}\n\n${section}\n`;
@@ -469,18 +518,28 @@ export function upsertApplicationAnswersSection(reportText, snapshot = {}) {
 
   const start = heading.index;
   const afterHeading = start + heading[0].length;
-  const nextHeading = /^## .+$/m.exec(report.slice(afterHeading));
+  const nextHeading = findUnfencedHeading(report.slice(afterHeading), ANSWERS_SECTION_END_RE);
   const end = nextHeading ? afterHeading + nextHeading.index : report.length;
   const before = report.slice(0, start).trimEnd();
-  const after = report.slice(end).trimStart();
+  const after = report.slice(end);
 
-  return [before, section, after].filter(Boolean).join('\n\n') + '\n';
+  const updated = [before, section, after].filter(Boolean).join('\n\n');
+  return updated.endsWith('\n') ? updated : `${updated}\n`;
 }
+
+const ANSWER_FLAGS = new Set([
+  '--help', '-h', '--read', '--read-draft', '--strict',
+  '--report', '--input', '--state', '--date',
+]);
 
 function parseArgs(argv) {
   const args = {};
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
+    if (arg.startsWith('-')) {
+      const name = arg.split('=')[0];
+      if (!ANSWER_FLAGS.has(name)) throw new Error(`Unrecognized flag: ${name}`);
+    }
     if (arg === '--help' || arg === '-h') args.help = true;
     else if (arg === '--read') args.read = true;
     else if (arg === '--read-draft') args.readDraft = true;
@@ -588,8 +647,14 @@ async function main() {
     state: args.state || input.state,
   };
   const reportPath = resolve(args.report);
-  const updated = upsertApplicationAnswersSection(readFileSync(reportPath, 'utf-8'), snapshot);
-  writeFileSync(reportPath, updated, 'utf-8');
+  const lock = tryAcquireDirLockSync(`${reportPath}.lock`, { staleMs: 30_000 });
+  if (!lock) throw new Error(`report is busy: ${reportPath}; retry saving the answers`);
+  try {
+    const updated = upsertApplicationAnswersSection(readFileSync(reportPath, 'utf-8'), snapshot);
+    writeFileSync(reportPath, updated, 'utf-8');
+  } finally {
+    releaseOrWarn(lock);
+  }
 
   const normalized = normalizeApplicationAnswersSnapshot(snapshot);
   console.log(JSON.stringify({ report: reportPath, date: normalized.date, state: normalized.state }, null, 2));

@@ -1,9 +1,12 @@
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
-import type { Page, Frame, ElementHandle } from "playwright-core";
+import type { Page, Frame } from "playwright-core";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { dropNewTabs } from "./diagnose";
 import { isSubmitControl, snapshotLabel } from "./submit-guard.mjs";
+import { executeAction, factsOf, listedFieldLabel, snapshotChoiceLine } from "./drive-action.mjs";
+import { listedDriveClick, listedDriveText } from "./blank-unknown.mjs";
+import { driveGoalText } from "./drive-goal.mjs";
 import type { DriveStep } from "./issue";
 import { CAPS } from "../worker-capabilities.mjs";
 import { scopeFrom } from "../claude-invocation.mjs";
@@ -27,69 +30,9 @@ export type { DriveStep };
 // to deterministic fill+verify. FULL = keep driving (fill the fields too).
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type DriveResult = { reached: boolean; turns: number; reason: string; steps: DriveStep[] };
-
-/** What the guard decides on, read from the live DOM. See submit-guard.mjs. */
-type ElementFacts = {
-  ref: string;
-  tag: string;
-  type: string;
-  role: string;
-  inForm: boolean;
-  aria: string;
-  placeholder: string;
-  text: string;
-  value: string;
-  name: string;
-  title: string;
-  alt: string;
-};
-
-/** Read one element's facts, in the page. Defined once, at the top level, and
- *  handed to Playwright as the pageFunction for both call sites: the snapshot
- *  that decides which elements the planner may address, and the re-check the
- *  action path runs on the handle it is about to act on. Two extractors would
- *  eventually disagree, and the disagreement is the bug.
- *
- *  Playwright serialises it by source and runs it in the page, so it closes over
- *  nothing here — everything it needs is the element and its ref. */
-const factsOf = (el: Element, ref: string | null): ElementFacts => {
-  const field = el as HTMLInputElement;
-  const tag = el.tagName.toLowerCase();
-  const flat = (s: string | null) => (s || "").replace(/\s+/g, " ").trim();
-  // The accessible name, not just the attribute: a control named through
-  // aria-labelledby has no aria-label at all, and reading only the attribute
-  // would leave the guard classifying an empty string.
-  let aria = flat(el.getAttribute("aria-label"));
-  if (!aria) {
-    const ids = flat(el.getAttribute("aria-labelledby")).split(" ").filter(Boolean);
-    aria = flat(ids.map((id) => document.getElementById(id)?.textContent || "").join(" ")).slice(0, 200);
-  }
-  return {
-    ref: ref || el.getAttribute("data-co-ref") || "",
-    tag,
-    type: flat(el.getAttribute("type")).toLowerCase(),
-    role: flat(el.getAttribute("role")).toLowerCase() || (tag === "a" ? "link" : tag),
-    // `.form` also covers a control placed outside its form by form="id".
-    inForm: Boolean(field.form) || el.closest("form") !== null,
-    aria,
-    placeholder: field.placeholder || "",
-    // Capped here, not in Node: a [role="button"] can wrap a whole section, and
-    // 70 of those would cross the wire in full every turn. Well above the 80
-    // chars the snapshot line keeps, but still a cap ahead of classification:
-    // a submit phrase past character 200 of an unusually large clickable is
-    // invisible to isSubmitControl. Accepted: the alternative is unbounded text
-    // per element every turn, or classifying inside the page.
-    text: flat(el.textContent).slice(0, 200),
-    value: field.value || "",
-    name: field.name || "",
-    // Classification only (see submit-guard.mjs): they name an icon-only
-    // control that carries nothing else, and never reach the snapshot line.
-    // Same 200-char cap and the same caveat as `text` above.
-    title: flat(el.getAttribute("title")).slice(0, 200),
-    alt: flat(el.getAttribute("alt")).slice(0, 200),
-  };
-};
+// unsupported: the page moved onto a refused host (Workday, iCIMS, UKG or
+// apply.handoff_hosts); the drive stopped there and its window is closed.
+export type DriveResult = { reached: boolean; turns: number; reason: string; steps: DriveStep[]; unsupported?: { vendor: string; label: string; postingUrl: string } };
 
 /** Controls tagged per turn. The planner reads every one of them. */
 const MAX_REFS = 70;
@@ -99,7 +42,7 @@ const MAX_REFS = 70;
  *  A submit control is listed WITHOUT a ref: the planner can see that it exists
  *  and stop, but it has no name for it, so no action can address it. `actionable`
  *  is the set of refs it may use, which every ref-bearing action is held to. */
-async function snapshot(frame: Frame): Promise<{ text: string; actionable: Set<string> }> {
+async function snapshot(frame: Frame): Promise<{ text: string; actionable: Set<string>; controls: Map<string, { kind: string; label: string; group: string; question: string; option: string; identity: string }> }> {
   // A fresh prefix per snapshot. The guarantee is structural, not statistical:
   // every existing `data-co-ref` is stripped before this turn's are written, so
   // only the current epoch's refs exist on the page, and `actionable` is built
@@ -125,7 +68,8 @@ async function snapshot(frame: Frame): Promise<{ text: string; actionable: Set<s
   );
   const lines: string[] = [];
   const actionable = new Set<string>();
-  if (!tagged) return { text: "", actionable };
+  const controls = new Map<string, { kind: string; label: string; group: string; question: string; option: string; identity: string }>();
+  if (!tagged) return { text: "", actionable, controls };
   // One handle per candidate, read through the same extractor the action path
   // uses. Handles rather than one `$$eval` so there is a single copy of the
   // rule; the reads are issued together and the handles released straight after.
@@ -142,9 +86,10 @@ async function snapshot(frame: Frame): Promise<{ text: string; actionable: Set<s
     }
     actionable.add(el.ref);
     const kind = el.tag === "input" ? el.type || "text" : el.tag === "a" ? "link" : el.tag === "select" ? "select" : el.tag === "textarea" ? "textarea" : el.role;
-    lines.push(`[${el.ref}] ${kind} "${label}"`);
+    controls.set(el.ref, { kind, label, group: el.group || "", question: el.question || "", option: el.option || "", identity: listedFieldLabel(el) });
+    lines.push(snapshotChoiceLine(el.ref, kind, label, el.option || ""));
   }
-  return { text: lines.join("\n"), actionable };
+  return { text: lines.join("\n"), actionable, controls };
 }
 
 // The narrowest scope in the app. scopeFrom("") grants nothing, so every
@@ -204,7 +149,15 @@ function plannerTurn(binPath: string, prompt: string, resumeId: string | null): 
   });
 }
 
-type Action = { action: string; ref?: string; text?: string; value?: string; reason?: string };
+type Action = {
+  action: string;
+  ref?: string;
+  text?: string;
+  value?: string;
+  reason?: string;
+  expected?: { label: string; group: string; question: string; option: string; identity: string };
+  ensureChecked?: boolean;
+};
 
 function parseAction(out: string): Action | null {
   const m = out.match(/\{[\s\S]*?\}/);
@@ -227,9 +180,18 @@ export async function driveSession(
   emit: (s: DriveStep) => void,
   budget = 10,
   answers?: { label: string; value: string }[],
+  refused?: () => Promise<{ vendor: string; label: string; postingUrl: string } | null>,
 ): Promise<DriveResult> {
-  const resolved = resolveCli(cliId);
   const steps: DriveStep[] = [];
+  // A page on a refused host is never driven: checked before the first step,
+  // before each later one (the last action may have navigated), and at the end.
+  const stopIfRefused = async (turns: number): Promise<DriveResult | null> => {
+    const hit = await refused?.();
+    return hit ? { reached: false, turns, reason: "unsupported", steps, unsupported: hit } : null;
+  };
+  const refusedAtStart = await stopIfRefused(0);
+  if (refusedAtStart) return refusedAtStart;
+  const resolved = resolveCli(cliId);
   if (!resolved || cliId !== "claude") {
     return { reached: false, turns: 0, reason: "Agentic drive currently needs Claude Code (browser-driving CLI).", steps };
   }
@@ -240,21 +202,19 @@ export async function driveSession(
       return undefined;
     }
   };
-  const answersBlock = (answers ?? []).filter((a) => a.value?.trim()).map((a) => `- "${a.label}": ${a.value.replace(/\s+/g, " ").slice(0, 300)}`).join("\n");
-  const goalText =
-    goal === "reach"
-      ? `Your goal: navigate to the actual fillable JOB APPLICATION form (click 'Apply', pass any interstitial/pre-screen, reach the page with the Name/Email/Resume fields). Do NOT fill anything yet. Reply {"action":"reached_form"} once the form with those fields is visible.`
-      : `Your goal: FILL this job application with the candidate's answers below, matching each answer to its field by label, across all pages (click 'Next'/'Continue' between pages). Skip any field already correctly filled, and skip file-uploads (handled separately). NEVER submit — when everything is filled and you're on the final page, reply {"action":"done"}.
-ANSWERS (match by the field's label):
-${answersBlock || "(no answers provided — just reach/observe)"}`;
+  const goalText = driveGoalText(goal, answers);
   let resumeId: string | null = null;
 
   const stopVerb = goal === "reach" ? '{"action":"reached_form"}            STOP — the fillable application form is now visible' : '{"action":"done"}                    STOP — every answer is filled (you NEVER submit; the human does)';
   for (let turn = 1; turn <= budget; turn++) {
+    if (turn > 1) {
+      const refusedNow = await stopIfRefused(turn - 1);
+      if (refusedNow) return refusedNow;
+    }
     if (goal === "reach" && (await isFormReady().catch(() => false))) return { reached: true, turns: turn - 1, reason: "form-reached", steps };
     await dropNewTabs(page); // any "Apply" link/popup navigates in OUR tab, not a new one
     const frame = page.mainFrame();
-    const snap = await snapshot(frame).catch(() => ({ text: "", actionable: new Set<string>() }));
+    const snap = await snapshot(frame).catch(() => ({ text: "", actionable: new Set<string>(), controls: new Map() }));
     const prompt =
       turn === 1
         ? `You are an agent driving a real web browser for a job seeker (we execute your actions; the human submits at the end). ${goalText}
@@ -278,6 +238,10 @@ ${snap.text}
 Reply ONE action JSON.`;
 
     const { out, sessionId } = await plannerTurn(resolved.binPath, prompt, resumeId);
+    // The page can move while the planner thinks: check it before acting on
+    // the reply, or before a "stuck" or "done" reply ends the drive.
+    const refusedAfterPlanning = await stopIfRefused(turn - 1);
+    if (refusedAfterPlanning) return refusedAfterPlanning;
     if (sessionId) resumeId = sessionId;
     const act = parseAction(out);
     if (!act) {
@@ -296,76 +260,44 @@ Reply ONE action JSON.`;
       return { reached: false, turns: turn, reason: act.reason || "stuck", steps };
     }
 
-    // execute the action on OUR session — NEVER submit.
-    let detail = "";
-    let note = "";
-    let refusal: DriveStep["refusal"];
-    let handle: ElementHandle<SVGElement | HTMLElement> | null = null;
-    try {
-      // Every action naming a ref is cleared before anything is done to it, not
-      // just click: `fill()` on a button throws into a fallback that clicks. The
-      // check and the action are bound to ONE element handle, because resolving
-      // the selector again after the check lets the DOM hand the action a
-      // different node than the one that was cleared. The element is re-read
-      // here because the page can change between the snapshot and now, and being
-      // unreadable counts as refused: an element we cannot describe is one we
-      // cannot clear.
-      const ref = act.ref !== undefined && snap.actionable.has(act.ref) ? act.ref : null;
-      handle = ref !== null ? await frame.$(`[data-co-ref="${ref}"]`).catch(() => null) : null;
-      const now = handle ? await handle.evaluate(factsOf, ref).catch(() => null) : null;
-      const label = now ? snapshotLabel(now) : "";
-      const target = now && !isSubmitControl(now) ? handle : null;
-      if (act.ref !== undefined && !target) {
-        // Three different refusals, told apart: only one of them is the guard
-        // doing its job, and a UI that calls a vanished element a submit button
-        // teaches the user to distrust the message that matters.
-        const named = String(act.ref).slice(0, 24);
-        if (ref === null) {
-          refusal = "not-offered";
-          note = "not offered this turn";
-          detail = `blocked ref ${named} (not offered this turn)`;
-        } else if (!now) {
-          refusal = "gone";
-          note = "element gone";
-          detail = `blocked ref ${named} (gone)`;
-        } else {
-          refusal = "submit-control";
-          note = "refused to click a submit control (the human submits)";
-          detail = `blocked submit "${label.slice(0, 40)}"`;
-        }
-      } else if (act.action === "click" && target) {
-        detail = `click "${label.slice(0, 40)}"`;
-        await target.scrollIntoViewIfNeeded().catch(() => {});
-        await Promise.all([page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {}), target.click({ timeout: 6000 })]);
-      } else if (act.action === "type" && target) {
-        detail = `type into ${label.slice(0, 40) || ref}`;
-        // Same explicit 6s as the click branch above, for a predictable bound
-        // on this fallback's own click: session.ts sets an 8s context default
-        // (`context.setDefaultTimeout(8000)`), so this was already bounded,
-        // just two seconds looser than the action this loop otherwise treats
-        // as its click budget.
-        await target.fill(act.text || "").catch(async () => {
-          await target.click({ timeout: 6000 });
-          await page.keyboard.type(act.text || "");
-        });
-      } else if (act.action === "select" && target) {
-        detail = `select "${act.value}"`;
-        await target.selectOption({ label: act.value || "" }, { timeout: 6000 }).catch(() => target.selectOption(act.value || "", { timeout: 6000 }));
-      } else if (act.action === "scroll") {
-        detail = "scroll";
-        await page.evaluate(() => window.scrollBy(0, 700)).catch(() => {});
-      } else {
-        detail = `unknown action ${act.action}`;
-      }
-    } catch (e) {
-      detail = `${act.action} failed: ${e instanceof Error ? e.message.slice(0, 50) : "err"}`;
-    } finally {
-      await handle?.dispose().catch(() => {});
+    // A prompt line does not stop the model. On a full fill, type and select may
+    // enter only the answer listed for that field. Empty text clears a field.
+    // A radio or checkbox click has to be that field's listed option. A button
+    // or a link stays a click, so Next and Continue still work.
+    const control = act.ref ? snap.controls.get(act.ref) : undefined;
+    const fieldLabel = control?.kind === "radio" || control?.kind === "checkbox" ? control.group : control?.identity || control?.label;
+    const optionLabel = control?.kind === "radio" || control?.kind === "checkbox" ? control.option || control.label : control?.label;
+    const entered = act.action === "type" ? act.text : act.action === "select" ? act.value : undefined;
+    const blockedClick = goal === "full" && act.action === "click" && !listedDriveClick(control?.kind, optionLabel, control?.group, answers);
+    if (blockedClick || (goal === "full" && entered !== undefined && !listedDriveText(entered, answers, fieldLabel))) {
+      const s: DriveStep = {
+        turn,
+        action: act.action,
+        detail: "blocked an answer that was not listed",
+        thumb: await shot(),
+        note: "left blank",
+      };
+      steps.push(s);
+      emit(s);
+      continue;
     }
+
+    // execute the action on OUR session — NEVER submit. The executor, and the
+    // guard it applies to every action naming a ref, live in drive-action.mjs so
+    // a test can drive them: nothing here acts on an element directly.
+    if (control) act.expected = { label: control.label, group: control.group, question: control.question, option: control.option, identity: control.identity };
+    // A click toggles a checkbox. A listed choice is checked instead, so a box
+    // that is already on stays on. A button or a link stays a click.
+    if (goal === "full" && act.action === "click" && (control?.kind === "radio" || control?.kind === "checkbox")) {
+      act.ensureChecked = true;
+    }
+    const { detail, note, refusal } = await executeAction(page, frame, act, snap.actionable);
     await page.waitForTimeout(700);
     const s: DriveStep = { turn, action: act.action, detail, thumb: await shot(), note: note || undefined, refusal };
     steps.push(s);
     emit(s);
   }
+  const refusedAtEnd = await stopIfRefused(budget);
+  if (refusedAtEnd) return refusedAtEnd;
   return { reached: await isFormReady().catch(() => false), turns: budget, reason: "budget-exhausted", steps };
 }

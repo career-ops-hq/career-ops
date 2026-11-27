@@ -58,7 +58,7 @@ function runMergeDetailed(additions, opts = {}) {
     let exitCode = 0;
     let killedBy = null;
     try {
-      output = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
+      output = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--allow-headerless'], {
         encoding: 'utf-8',
         timeout: 30000,
         // Capture stderr instead of letting execFileSync echo it: the
@@ -776,7 +776,7 @@ try {
     writeFileSync(join(work, 'output', '1.pdf'), '%PDF-1.4\n');
     
     // Normal run should trigger sync and flip the PDF flag
-    const result = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
+    const result = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--allow-headerless'], {
       encoding: 'utf-8',
       env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: addsDir, CAREER_OPS_PDF_INDEX: pdfIndex },
     });
@@ -809,7 +809,7 @@ try {
     // Create a pending addition so the merge has something to "dry-run"
     writeFileSync(join(addsDir, '2-globex.tsv'), '2\t2026-01-02\tGlobex\tEng\tEvaluated\t4.0/5\t❌\t[2](reports/2.md)\t\n');
     
-    execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--dry-run'], {
+    execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--allow-headerless', '--dry-run'], {
       encoding: 'utf-8',
       env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: addsDir, CAREER_OPS_PDF_INDEX: pdfIndex },
     });
@@ -834,7 +834,7 @@ try {
     const row = trackerText.split('\n').find((l) => l.startsWith(rowPrefix)) || '';
     return { row: row.trim(), pdf: (row.split('|')[7] || '').trim() };
   };
-  const runManifestMerge = ({ rows, manifest, additions = {}, pdfs = [] }) => {
+  const runManifestMerge = ({ rows, manifest, additions = {}, pdfs = [], dryRun = false }) => {
     const workGone = mkdtempSync(join(tmpdir(), 'cops-merge-pdf-gone-'));
     try {
       const tracker = join(workGone, 'applications.md');
@@ -846,11 +846,14 @@ try {
       writeFileSync(pdfIndex, '# report\tpdf\thtml\tformat\tdate\n' + manifest);
       for (const [name, line] of Object.entries(additions)) writeFileSync(join(addsDir, name), line);
       for (const pdf of pdfs) writeFileSync(join(workGone, 'output', pdf), '%PDF-1.4\n');
-      execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
+      execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--allow-headerless', ...(dryRun ? ['--dry-run'] : [])], {
         encoding: 'utf-8',
         env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: addsDir, CAREER_OPS_PDF_INDEX: pdfIndex, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(addsDir) },
       });
-      return readFileSync(tracker, 'utf-8');
+      return {
+        tracker: readFileSync(tracker, 'utf-8'),
+        index: readFileSync(pdfIndex, 'utf-8'),
+      };
     } finally {
       rmSync(workGone, { recursive: true, force: true });
     }
@@ -861,8 +864,8 @@ try {
     rows: '| 7 | 2026-01-04 | Acme | Engineer | 4.2/5 | Evaluated | ❌ | [12](reports/012-acme-2026-01-04.md) | ok |\n',
     manifest: '012\toutput/cv-acme.pdf\toutput/cv-acme.html\tletter\t2026-01-04\n',
   };
-  const goneRowPresent = pdfCellOf(runManifestMerge({ ...goneRow, pdfs: ['cv-acme.pdf'] }), '| 7 ');
-  const goneRowAbsent = pdfCellOf(runManifestMerge(goneRow), '| 7 ');
+  const goneRowPresent = pdfCellOf(runManifestMerge({ ...goneRow, pdfs: ['cv-acme.pdf'] }).tracker, '| 7 ');
+  const goneRowAbsent = pdfCellOf(runManifestMerge(goneRow).tracker, '| 7 ');
   if (goneRowPresent.pdf === '✅' && goneRowAbsent.pdf === '❌') {
     pass('merge-tracker leaves a corrected ❌ alone when the manifest row\'s PDF is gone (#4777)');
   } else {
@@ -875,28 +878,52 @@ try {
     manifest: '041\toutput/cv-umbrella.pdf\toutput/cv-umbrella.html\tletter\t2026-01-07\n',
     additions: { '001-umbrella.tsv': '1\t2026-01-07\tUmbrella\tEngineer\t4.1/5\tEvaluated\t❌\t[41](reports/041-umbrella-2026-01-07.md)\tok\n' },
   };
-  const goneAdditionPresent = pdfCellOf(runManifestMerge({ ...goneAddition, pdfs: ['cv-umbrella.pdf'] }), '| 1 ');
-  const goneAdditionAbsent = pdfCellOf(runManifestMerge(goneAddition), '| 1 ');
+  const goneAdditionPresent = pdfCellOf(runManifestMerge({ ...goneAddition, pdfs: ['cv-umbrella.pdf'] }).tracker, '| 1 ');
+  const goneAdditionAbsent = pdfCellOf(runManifestMerge(goneAddition).tracker, '| 1 ');
   if (goneAdditionPresent.pdf === '✅' && goneAdditionAbsent.pdf === '❌') {
     pass('a newly merged row stays ❌ when its manifest row\'s PDF is gone (#4777)');
   } else {
     fail(`new-row merge ignored the PDF on disk: with file "${goneAdditionPresent.row}", without "${goneAdditionAbsent.row}"`);
   }
 
-  // Reader 3: the duplicate-update path, where a re-eval replaces the report
-  // link and the flag has to describe the new report (#2594).
+  const INDEX_HEADER = '# report\tpdf\thtml\tformat\tdate\n';
   const goneReeval = {
     rows: '| 3 | 2026-01-04 | Acme | Backend Engineer, Payments | 4.5/5 | Evaluated | ✅ | [1](reports/001-acme-2026-01-04.md) | first |\n',
     manifest: '1\toutput/acme-1.pdf\t\t\t2026-01-04\n2\toutput/acme-2.pdf\t\t\t2026-02-01\n',
     additions: { '002-acme.tsv': '2\t2026-02-01\tAcme\tBackend Engineer, Payments\tEvaluated\t3.9/5\t❌\t[2](reports/002-acme-2026-02-01.md)\tre-eval\n' },
   };
-  const goneReevalPresent = pdfCellOf(runManifestMerge({ ...goneReeval, pdfs: ['acme-1.pdf', 'acme-2.pdf'] }), '| 3 ');
-  const goneReevalAbsent = pdfCellOf(runManifestMerge({ ...goneReeval, pdfs: ['acme-1.pdf'] }), '| 3 ');
-  if (/\[2\]/.test(goneReevalPresent.row) && goneReevalPresent.pdf === '✅'
-    && /\[2\]/.test(goneReevalAbsent.row) && goneReevalAbsent.pdf === '❌') {
-    pass('a re-eval does not take ✅ from a manifest row whose new report PDF is gone (#4777)');
+  const reportCell = (row) => (row.split('|')[8] || '').trim();
+  const priorOnly = runManifestMerge({ ...goneReeval, pdfs: ['acme-1.pdf'] });
+  const priorOnlyCell = pdfCellOf(priorOnly.tracker, '| 3 ');
+  const priorOnlyIndex = INDEX_HEADER + '2\toutput/acme-1.pdf\t\t\t2026-01-04\tcv\n';
+  if (/^\[2\]/.test(reportCell(priorOnlyCell.row)) && priorOnlyCell.pdf === '✅' && priorOnly.index === priorOnlyIndex) {
+    pass('a re-eval with only the prior PDF on disk links report 2, checks the cell, and keys that PDF under report 2');
   } else {
-    fail(`re-eval ignored the new report's PDF on disk: with file "${goneReevalPresent.row}", without "${goneReevalAbsent.row}"`);
+    fail(`prior-only re-eval did not re-key the live PDF: row "${priorOnlyCell.row}", index ${JSON.stringify(priorOnly.index)}`);
+  }
+
+  const neither = runManifestMerge({ ...goneReeval, pdfs: [] });
+  const neitherCell = pdfCellOf(neither.tracker, '| 3 ');
+  if (/^\[2\]/.test(reportCell(neitherCell.row)) && neitherCell.pdf === '❌' && neither.index === INDEX_HEADER + goneReeval.manifest) {
+    pass('a re-eval with neither PDF on disk sets a cross and leaves the index unchanged (#2594)');
+  } else {
+    fail(`neither-PDF re-eval inherited a stale check: row "${neitherCell.row}", index ${JSON.stringify(neither.index)}`);
+  }
+
+  const both = runManifestMerge({ ...goneReeval, pdfs: ['acme-1.pdf', 'acme-2.pdf'] });
+  const bothCell = pdfCellOf(both.tracker, '| 3 ');
+  if (/^\[2\]/.test(reportCell(bothCell.row)) && bothCell.pdf === '✅' && both.index === INDEX_HEADER + goneReeval.manifest) {
+    pass('a re-eval with the new report PDF on disk checks the cell from that report');
+  } else {
+    fail(`new-report PDF re-eval did not keep report 2's own file: row "${bothCell.row}", index ${JSON.stringify(both.index)}`);
+  }
+
+  const dry = runManifestMerge({ ...goneReeval, pdfs: ['acme-1.pdf'], dryRun: true });
+  const dryCell = pdfCellOf(dry.tracker, '| 3 ');
+  if (/^\[1\]/.test(reportCell(dryCell.row)) && dry.index === INDEX_HEADER + goneReeval.manifest) {
+    pass('a dry-run re-eval does not rewrite pdf-index.tsv');
+  } else {
+    fail(`dry-run re-eval wrote the PDF index: row "${dryCell.row}", index ${JSON.stringify(dry.index)}`);
   }
 } catch (e) {
   fail(`merge-tracker PDF-flag sync tests crashed: ${e.message}`);

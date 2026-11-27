@@ -20,7 +20,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pickNextUpcoming, isDue, selectDueFollowups } from '../../src/lib/core/followup-view.mjs';
+import { pickNextUpcoming, isDue, selectDueFollowups, selectUpcomingFollowups } from '../../src/lib/core/followup-view.mjs';
 
 test('isDue: keyed on urgency, not the tracker status field — a conflicting status must not override it', () => {
   // status is the tracker status (applied/responded/interview...), never
@@ -78,4 +78,21 @@ test('pickNextUpcoming: an unparseable nextFollowupDate sorts after a valid one'
 test('pickNextUpcoming: returns null when nothing is upcoming', () => {
   assert.equal(pickNextUpcoming([]), null);
   assert.equal(pickNextUpcoming([{ urgency: 'overdue', nextFollowupDate: '2026-01-01' }]), null);
+});
+
+test('selectUpcomingFollowups: keeps not-yet-due entries that have a date, soonest first', () => {
+  const overdue = { urgency: 'overdue', company: 'Due Co', nextFollowupDate: '2026-01-01' };
+  const later = { urgency: 'waiting', company: 'Later', nextFollowupDate: '2026-04-01' };
+  const sooner = { urgency: 'cold', company: 'Sooner', nextFollowupDate: '2026-03-01' };
+  const undated = { urgency: 'waiting', company: 'No date', nextFollowupDate: '' };
+  const result = selectUpcomingFollowups([overdue, later, undated, sooner]);
+  assert.deepEqual(result.map((entry) => entry.company), ['Sooner', 'Later']);
+});
+
+test('selectUpcomingFollowups: an unparseable date sorts last, and limit slices the soonest', () => {
+  const invalid = { urgency: 'waiting', company: 'Bad', nextFollowupDate: 'not-a-date' };
+  const near = { urgency: 'waiting', company: 'Near', nextFollowupDate: '2026-03-01' };
+  const far = { urgency: 'cold', company: 'Far', nextFollowupDate: '2026-09-01' };
+  assert.deepEqual(selectUpcomingFollowups([invalid, far, near]).map((entry) => entry.company), ['Near', 'Far', 'Bad']);
+  assert.deepEqual(selectUpcomingFollowups([invalid, far, near], 1).map((entry) => entry.company), ['Near']);
 });

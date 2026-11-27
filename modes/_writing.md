@@ -99,7 +99,7 @@ These rules apply to ALL generated text that ends up in candidate-facing documen
 For recruiter-side risk mapping, six-second clarity, business-value bullets, and ATS reality checks, read `modes/heuristics/recruiter-side.md`.
 
 ### Avoid cliché phrases
-_If `voice-dna.md` exists, its §3 Banned List is the canonical, fuller version of this list and takes precedence. The list below is the fallback for users without that file._
+_The lines below are writing guidance. `cv-voice.mjs` blocks its fixed list, `BANNED_PHRASES`. A word that appears only in §3 or §4 of `voice-dna.md` is not treated as the candidate's wording, and it is not blocked unless it is also in that fixed list._
 - "passionate about" / "results-oriented" / "proven track record"
 - "leveraged" (use "used" or name the tool)
 - "spearheaded" (use "led" or "ran")
@@ -107,6 +107,8 @@ _If `voice-dna.md` exists, its §3 Banned List is the canonical, fuller version 
 - "synergies" / "robust" / "seamless" / "cutting-edge" / "innovative"
 - "in today's fast-paced world"
 - "demonstrated ability to" / "best practices" (name the practice)
+
+PDF render, LaTeX compile, and CV Studio reject a phrase from the fixed list in `cv-voice.mjs` when it is not already in your CV, in `voice-dna.md` outside its banned list and its patterns-to-avoid section, or in the allow lists of `config/cv-facts.json`. That file is the check. A long dash is a warning. The PDF path normalizes it. LaTeX and CV Studio leave it in the text.
 
 ### Unicode normalization for ATS
 `generate-pdf.mjs` automatically normalizes em-dashes, smart quotes, and zero-width characters to ASCII equivalents for maximum ATS compatibility. But avoid generating them in the first place.

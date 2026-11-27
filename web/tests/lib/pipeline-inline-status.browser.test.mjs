@@ -9,11 +9,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { liveServerSkip } from "../helpers/live-server.mjs";
 
 const url = process.env.PIPELINE_STATUS_TEST_URL;
 const root = process.env.PIPELINE_STATUS_TEST_ROOT;
 
-test("inline Pipeline status browser flow (disposable data only)", { skip: !url || !root, timeout: 120_000 }, async (t) => {
+test("inline Pipeline status browser flow (disposable data only)", { skip: liveServerSkip("PIPELINE_STATUS_TEST_URL", "PIPELINE_STATUS_TEST_ROOT"), timeout: 120_000 }, async (t) => {
   const origin = new URL(url);
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
   const relative = path.relative(os.tmpdir(), fs.realpathSync(root));
@@ -37,7 +38,11 @@ test("inline Pipeline status browser flow (disposable data only)", { skip: !url 
   page.on("request", (request) => {
     if (request.url().endsWith("/api/status") && request.method() === "POST") posts.push(request.postDataJSON());
   });
-  const row = (n) => page.locator("tbody tr").filter({ has: page.getByRole("link", { name: `#${n}`, exact: true }) });
+  // On a slow runner the page can hold a second, hidden copy of the table for a
+  // moment: rows and edit buttons are matched only where they are visible.
+  const visibleRows = page.locator("tbody tr").filter({ visible: true });
+  const editButtons = page.getByRole("button", { name: /^Edit status/ }).filter({ visible: true });
+  const row = (n) => visibleRows.filter({ has: page.getByRole("link", { name: `#${n}`, exact: true }) });
   const tab = (name) => page.getByRole("button", { name: new RegExp(`^${name} \\d+$`) });
   const edit = (n) => row(n).getByRole("button", { name: /^Edit status/ });
   const select = (n) => row(n).getByRole("combobox");
@@ -51,14 +56,16 @@ test("inline Pipeline status browser flow (disposable data only)", { skip: !url 
 
   await page.goto(`${origin.origin}/pipeline?tab=ALL`);
   await edit(11).waitFor();
-  assert.equal(await page.locator("tbody tr").count(), 3);
-  assert.equal(await page.getByRole("button", { name: /^Edit status/ }).count(), 3);
+  await until(async () => await visibleRows.count() === 3);
+  assert.equal(await visibleRows.count(), 3);
+  assert.equal(await editButtons.count(), 3);
 
   await t.test("pencil, Cancel, Escape and same-value selection do not write", async () => {
     await edit(11).focus();
     await page.keyboard.press("Enter");
     assert.equal(await select(11).evaluate((element) => document.activeElement === element), true);
-    assert.equal(await page.getByRole("combobox").count(), 1);
+    // One editor open in the table. The score-floor menu above it is a combobox too.
+    assert.equal(await page.locator("tbody").getByRole("combobox").count(), 1);
     await select(11).selectOption("Evaluated");
     await row(11).getByRole("button", { name: /^Cancel editing/ }).click();
     await edit(11).waitFor();
@@ -88,6 +95,7 @@ test("inline Pipeline status browser flow (disposable data only)", { skip: !url 
     });
     await edit(11).click();
     await select(11).selectOption("Applied");
+    await row(11).getByRole("button", { name: "Yes, mark applied" }).click();
     assert.equal(await select(11).isDisabled(), true);
     assert.equal(await row(11).getByRole("button", { name: /^Cancel editing/ }).isDisabled(), true);
     assert.equal(await edit(12).isEnabled(), true);
@@ -117,6 +125,7 @@ test("inline Pipeline status browser flow (disposable data only)", { skip: !url 
     });
     await edit(11).click();
     await select(11).selectOption("Applied");
+    await row(11).getByRole("button", { name: "Yes, mark applied" }).click();
     await until(() => row(11).count().then((count) => count === 0));
     await until(() => tab("EVALUATED").innerText().then((text) => /^EVALUATED\s+1$/.test(text)));
     assert.match(await tab("APPLIED").innerText(), /^APPLIED\s+2$/);
@@ -143,7 +152,9 @@ test("inline Pipeline status browser flow (disposable data only)", { skip: !url 
     await select(13).selectOption("Interview");
     const search = page.getByPlaceholder("Search company or role…");
     await search.fill("Fixture Beta");
-    assert.equal(await row(13).count(), 0);
+    // The table filters on a deferred copy of the search (#5504), so the row
+    // leaves on a later render, not on the keystroke.
+    await until(() => row(13).count().then((count) => count === 0));
     release();
     await until(() => fs.readFileSync(tracker, "utf8").includes("3.6/5 | Interview"));
     await page.unroute("**/api/status");
@@ -167,7 +178,12 @@ test("inline Pipeline status browser flow (disposable data only)", { skip: !url 
     await until(() => row(13).innerText().then((text) => text.includes("Rejected")));
     assert.equal(await select(12).isDisabled(), true);
     release();
-    await until(() => fs.readFileSync(tracker, "utf8").includes("3.8/5 | Offer"));
+    // Both writes, not just the gated one: a reload while #13's save is still
+    // in flight drops it, and the row then reads its old status.
+    await until(() => {
+      const text = fs.readFileSync(tracker, "utf8");
+      return text.includes("3.8/5 | Offer") && text.includes("3.6/5 | Rejected");
+    });
     await page.unrouteAll({ behavior: "wait" });
     await page.reload();
     assert.match(await row(12).innerText(), /Offer/);
@@ -196,7 +212,8 @@ test("inline Pipeline status browser flow (disposable data only)", { skip: !url 
     await select(11).press("Escape");
     await tab("INBOX").click();
     await page.waitForURL((value) => !value.searchParams.has("tab"));
-    assert.equal(await page.getByRole("button", { name: /^Edit status/ }).count(), 0);
+    await until(async () => await editButtons.count() === 0);
+    assert.equal(await editButtons.count(), 0);
   });
   assert.deepEqual(errors, []);
 });

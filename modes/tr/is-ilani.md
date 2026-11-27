@@ -114,10 +114,10 @@ Bloklar A-F tamamlandıktan sonra **HER ZAMAN** şunları yap:
 
 ### 1. Rapor .md Kaydet
 
-Değerlendirmenin tamamını `reports/{###}-{sirket-slug}-{YYYY-MM-DD}.md` olarak kaydet.
+Değerlendirmenin tamamını `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` olarak kaydet.
 
 - `{###}` = sıradaki numara (3 haneli, sıfır dolgulu). Bu numarayı atomik olarak atamak ve yarış durumlarını (race condition) önlemek için, numarayı rezerve etmek üzere `node reserve-report-num.mjs` komutunu çalıştırmalısınız (standart çıktı `{###}` değerini döndürür), raporu yazmalı ve ardından sentineli serbest bırakmak için `node reserve-report-num.mjs --release {###}` komutunu çalıştırmalısınız.
-- `{sirket-slug}` = şirket adı küçük harfle, boşluksuz (tire kullan)
+- `{company-slug}` = şirket adının yalnızca küçük ASCII harf, rakam ve tireden oluşan biçimi: küçük harfe çevir, aksanları ve Türkçe harfleri ASCII karşılıklarına indir (`ç` → `c`, `ğ` → `g`, `ı` → `i`, `ö` → `o`, `ş` → `s`, `ü` → `u`, `é` → `e`), diğer karakterlerin (boşluk, `&`, `.`, tırnak, `/`) her dizisini tek bir `-` ile değiştir ve baştaki ve sondaki `-` işaretlerini kırp. Sonuç `^[a-z0-9-]+$` ile eşleşmelidir; aşağıdaki arşiv ve anahtar kelime komutları başka bir değeri reddeder. Latin harf ya da rakam içermeyen bir addan geriye hiçbir şey kalmaz: harf çevirisi tahmin etmek yerine şirketin ilandaki kendi Latin harfli adını (kariyer sitesinin alan adı ya da ATS pano adı) kullan.
 - `{YYYY-MM-DD}` = bugünün tarihi
 
 **Rapor formatı:**
@@ -125,8 +125,8 @@ Değerlendirmenin tamamını `reports/{###}-{sirket-slug}-{YYYY-MM-DD}.md` olara
 ```markdown
 # Değerlendirme: {Şirket} — {Rol}
 
-**Tarih:** {YYYY-MM-DD}
-**Arketip:** {tespit edilen}
+**Date:** {YYYY-MM-DD}
+**Archetype:** {tespit edilen}
 <!-- Rol kullanıcının hedeflerinden biriyle eşleşiyorsa onun adını yaz. Hiçbiriyle
      eşleşmiyorsa bu alan boş BIRAKILMAZ ve muğlak geçilmez — boş bir alan aracın
      çalışmadığı gibi okunur, "muhtemelen X ile Y'nin hibriti" ise burada önlenmek
@@ -136,10 +136,13 @@ Değerlendirmenin tamamını `reports/{###}-{sirket-slug}-{YYYY-MM-DD}.md` olara
      Varsayılan satırı adlandırmak okuyucunun rolü konumlandırmasına yine yardım
      eder; yapmaması gereken, kullanıcının gerçekten sahip olduğu bir hedefin yerine
      geçmektir. -->
-**Puan:** {X.X}/5
+**Score:** {X/5}
+**Karar:** {Başvur | Değerlendir | Önce araştır | Geç}
 **URL:** {ilan URL'si}
 **PDF:** ✅/❌
-**Meşruiyet:** {Güvenilir | Dikkatli İlerle | Şüpheli}
+**Legitimacy:** {Güvenilir | Dikkatli İlerle | Şüpheli}
+
+{`## Karar (lead)` cümlesi, kelimesi kelimesine}
 
 ---
 
@@ -170,22 +173,70 @@ Değerlendirmenin tamamını `reports/{###}-{sirket-slug}-{YYYY-MM-DD}.md` olara
 ## Risk Summary
 (her risk sinyali için bir satır, sabit sıra — yukarıdaki Risk Summary bölümüne bakın)
 
-## H) Başvuru Formu Taslak Yanıtları
+## H) Başvuru Formu Taslak Yanıtları (draft)
 (yalnızca puan >= 4,5 ise — form alanları için taslak yanıtlar)
 
 ---
 
 ## Çıkarılan Anahtar Kelimeler
 (ATS optimizasyonu için ilandan 15-20 anahtar kelime)
+
+## Keyword Coverage
+(`keyword-match.mjs` (1b) tarafından üretilir — kapsam %, present, missing)
+
+## Job Description (archived verbatim)
+(the posting's full text, pasted verbatim — see requirement below)
+
+## Machine Summary
+(sonraki betikler için YAML bloğu — aşağıdaki gereksinime bakın)
+```
+
+**Machine Summary (zorunlu):** raporun sonunda, `## Job Description (archived verbatim)` bölümünden sonra gelen bir YAML bloğu. Betikler onu konumuyla değil başlığıyla bulur; bu yüzden okuyucu ile Blok A arasına girmemesi için en sona konur. Şema, alan adlarının tam yazımı ve kurallar `batch/batch-prompt.md` içindedir (kaynak orasıdır; burada tekrarlamayın). `## Machine Summary` başlığı ve alan adları İngilizce kalır. `advertised_comp` (ilandaki maaş rakamı olduğu gibi, yoksa `null`), `risk_summary` (Risk Summary bloğunun eşlem hali) ve `requirement_importance` (Blok B satır satır; ilan kullanılabilir bir gereksinim listesi vermiyorsa `[]`) alanlarını içerir.
+
+**JD arşivi (zorunlu, #2789):** Her rapor, ilanın tam metnini olduğu gibi içeren bir `## Job Description (archived verbatim)` bölümü taşır; metin asla özetlenmez, asla başka sözcüklerle yeniden yazılmaz. Başlık İngilizce kalır, çünkü `check-jd-archive.mjs` bölümü adıyla arar. `**URL:**` alanı bir arşiv değildir: ilan kapandığında bağlantı çalışmaz olur ve özgün gereksinimleri geri getirmenin bir yolu kalmaz. Bölümün ilk satırı, kaynakta göründüğü haliyle yayın tarihidir (`Posted: {tarih ya da göründüğü gibi göreli ifade}`, gerçekten görünmüyorsa `Posted: not visible in source`); bu satır asla rapor dosyasının tarihiyle doldurulmaz. İlan çok uzunsa ya da tamamı alıntılanamıyorsa, `archive-posting.mjs` (aşağıdaki komut) ile kaydedin ve bölüme başka hiçbir metin eklemeden **tam olarak** şu cümleyi yazın: `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` Metnin yerine başka sözcüklerle yazılmış bir özet konmaz; kuralın tamamı `modes/oferta.md` içinde (**JD archival**).
+
+**Komut argümanları (#5853):** ilanın URL'sini, şirket slug'ını ya da rapor yolunu asla bir komut satırına yazmayın, tırnak içinde bile. Değerleri dosya aracınızla bir JSON dosyasına yazın (`{"url": "…", "company": "{company-slug}", "report": "{num}"}`) ve aşağıdaki komutu çalıştırın: her değeri denetler (slug `^[a-z0-9-]+$` ile eşleşmelidir) ve her birini betiğe shell olmadan ayrı bir argüman olarak verir. Denetimden geçemeyen bir değer çalıştırmayı durdurur: değeri düzeltin, denetimi asla. Kuralın tamamı `modes/oferta.md` içinde (**Command arguments**).
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("archive-posting: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.url !== "string" || !/^https?:\/\//i.test(p.url)) fail("url must be an http(s) URL");
+const args = ["archive-posting.mjs", p.url];
+if (p.company != null) { if (typeof p.company !== "string" || !/^[a-z0-9-]+$/.test(p.company)) fail("company must match ^[a-z0-9-]+$"); args.push("--company=" + p.company); }
+if (p.report != null) { if (!/^[0-9]+$/.test(String(p.report))) fail("report must be a report number"); args.push("--report=" + p.report); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
+
+Raporu kaydettikten sonra `keyword-match.mjs` (aşağıdaki komut) komutunu çalıştırın ve çıktıdaki `## Keyword Coverage` bloğunu çıkarılan anahtar kelimelerin hemen altına, `## Job Description (archived verbatim)` bölümünden önce yapıştırın. Başlık İngilizce kalır. Yalnızca tanı amaçlıdır: bir anahtar kelimeyi CV'ye ancak gerçek bir deneyime karşılık geliyorsa ekleyin.
+
+Bunun için `{"report": "reports/{###}-{company-slug}-{YYYY-MM-DD}.md"}` değerini bir JSON dosyasına yazın (yukarıdaki **Komut argümanları** bölümüne bakın) ve çalıştırın:
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("keyword-match: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.report !== "string" || !/^reports\/[0-9]{3,}-[a-z0-9-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$/.test(p.report)) fail("report must be reports/{###}-{company-slug}-{YYYY-MM-DD}.md");
+const args = ["keyword-match.mjs", p.report];
+if (p.cv != null) { if (typeof p.cv !== "string" || p.cv === "" || p.cv.startsWith("-")) fail("cv must be a file path"); args.push("--cv", p.cv); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
 ```
 
 ### 2. Takipçiye Kaydet
 
-**Yeni** kayıt için `data/applications.md`'yi doğrudan düzenleme. Bunun yerine `batch/tracker-additions/{num}-{sirket-slug}.tsv` dosyasına sekmeyle ayrılmış **iki** satır yaz: önce **sütun adları** satırı, hemen altına tam olarak bir veri satırı.
+**Yeni** kayıt için `data/applications.md`'yi doğrudan düzenleme. Bunun yerine `{DATA_ROOT}/batch/tracker-additions/{num}-{company-slug}.tsv` dosyasına sekmeyle ayrılmış **iki** satır yaz: önce **sütun adları** satırı, hemen altına tam olarak bir veri satırı.
 
 ```tsv
 num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
-{num}\t{date}\t{company}\t{role}\t{status}\t{score}\t{pdf_emoji}\t[{num}](reports/{num}-{slug}-{date}.md)\t{note}\t{url}
+{num}\t{date}\t{company}\t{role}\t{status}\t{score}\t{pdf_emoji}\t[{num}](reports/{num}-{company-slug}-{date}.md)\t{note}\t{url}
 ```
 
 Her iki satırı da **tam olarak yukarıdaki gibi** yaz: sütun adları İngilizce, değerler ise **üstlerindeki adlarla aynı sırada**. `merge-tracker.mjs` alanları ADA göre çözer; tam da bu yüzden adların altlarındaki satırı tarif etmesi gerekir — satırlardan yalnızca birini yeniden sıralarsan `company` ile `role` sessizce yer değiştirir (ikisi de serbest metin olduğu için içerik kontrolü bunu yakalayamaz).
@@ -262,7 +313,7 @@ Ardından `node merge-tracker.mjs` çalıştır.
 - **Üst düzey / niş roller:** Staff+, VP, Direktör veya yüksek uzmanlaşma gerektiren roller meşru olarak aylarca açık kalabilir.
 - **Erken aşama startup:** Rol henüz tam şekillenmemiş olduğundan ilanın muğlak yazılmış olması normaldir. İçerik belirsizliğine daha az ağırlık ver.
 - **Tarih bilgisi yok:** Yayın tarihi belirlenemiyorsa ve başka endişe verici sinyal yoksa varsayılan olarak "Dikkatli İlerle" kullan. Kanıt olmaksızın asla "Şüpheli" deme.
-- **Recruiter kaynağı (kamuya açık ilan yok):** Tazelik sinyali alınamaz. Aktif recruiter temasının kendisinin olumlu bir meşruiyet sinyali olduğunu not et.
+- **Recruiter kaynağı (ilan linki gönderen recruiter teması dahil):** Tazelik sinyali sadece ilanın snapshot'ı yoksa alınamaz; recruiter'ın gönderdiği ilan kontrol edildiyse tarih ve Apply butonu bulguları korunur. Recruiter teması tek başına Nötr'dür, olumlu bir meşruiyet sinyali değildir. Seviye vermeden önce recruiter'ın kimliğini doğrula: (a) şirketin kendi kariyer sayfası veya herkese açık ATS board'u bu rolü listeliyor mu; (b) bilinen bir markaya eklenmiş tanıdık olmayan bir isim ayrı bir kurum olarak kontrol edilir; (c) recruiter'ın email domain'i veya bağımsız bir kaynak onu şirkete bağlıyor mu; (d) tek bir arama: `"{isim}" scam OR "fake recruiter" OR "fake job"`; (e) gönderdiği kodu klonlamanı, kurmanı veya çalıştırmanı, bu kod açıkken ekran paylaşmanı, Telegram/WhatsApp/Discord'a geçmeni ya da herhangi bir ödeme yapmanı istiyor mu. (a) tek bir sorgu, (d) tek bir arama kullanır; (b), (c) ve (e) yeni arama yapmaz, sadece yapıştırılan metni, (a) ve (d)'nin sonuçlarını ve zaten yapılmış araştırmayı kullanır. Kanıt yoksa kontrol Bilinmiyor (Nötr) kalır, asla Endişe Verici sayılmaz. (a) veya (d) Endişe Verici ve bir kontrol daha Endişe Verici ise "Şüpheli". Bu doğrulama yüzünden seviye "Şüpheli" olursa kısa ve suçlamayan bir not ekle: hangi kontroller Endişe Verici çıktı ve kaynakları ne, rolü şirketin kendi domain'indeki bir email adresinden teyit etmesi ve recruiter'ın gönderdiği kodu çalıştırmaması. Recruiter'ın gönderdiği repo, arşiv veya linki asla klonlama, kurma, açma ya da çalıştırma.
 
 ---
 
@@ -292,7 +343,7 @@ Rapor gövdesini, Blok G'yi izleyen `## Karar (lead)` bloğunun hemen ardından,
 
 **Yalnızca toplama, sıfır yeni yargı.** Her satır, kaynak sinyalin zaten ürettiği kararı alıntılar veya ona bağlanır. Özet asla yeniden puanlamaz, yeniden ağırlıklandırmaz veya kararı geçersiz kılmaz — bir satır yanlış görünüyorsa düzeltme buraya değil, kaynak sinyale aittir.
 
-Satır başına üç durum: `✅ {net karar}` / `⚠️ {bulgu}` / `— not evaluated`. **`— not evaluated` birinci sınıf bir durumdur:** bir sinyal çalıştırılamadıysa satırı atlamak yerine bunu açıkça belirtin; ancak o zaman tamamı ✅ olan bir özete güvenilebilir. **Adlandırılmış istisna:** Mülakat kırmızı bayrakları satırı, değerlendirilmemiş durumunu `— no interview sessions yet` olarak yazar — aynı "değerlendirilmedi" kavramının o satıra özgü, daha belirgin ifadesi (çapraz kontrol çalıştı, yalnızca redflags dosyası bulunamadı); dördüncü bir durum değildir.
+Satır başına üç durum: `✅ {net karar}` / `⚠️ {bulgu}` / `— not evaluated`. **`— not evaluated` birinci sınıf bir durumdur:** bir sinyal çalıştırılamadıysa satırı atlamak yerine bunu açıkça belirtin; ancak o zaman tamamı ✅ olan bir özete güvenilebilir. **Adlandırılmış istisna:** Mülakat kırmızı bayrakları satırı, değerlendirilmemiş durumunu `— no interview sessions yet` olarak yazar — aynı "değerlendirilmedi" kavramının o satıra özgü, daha belirgin ifadesi (çapraz kontrol çalıştı, yalnızca redflags dosyası bulunamadı); dördüncü bir durum değildir. Doğrulanmamış olarak işaretlenmiş bir redflags dosyası bu istisna değil, olağan `— not evaluated` durumudur: dosya vardır, bu yüzden satır oturum olmadığını söylememelidir.
 
 Satır etiketleri, `| Signal | Status |` başlıkları ve durum sözcükleri sabit literaldir, çevrilmez: Machine Summary'deki `risk_summary` alanı bunlara dayanır.
 
@@ -301,7 +352,7 @@ Satır etiketleri, `| Signal | Status |` başlıkları ve durum sözcükleri sab
 | Posting legitimacy | Blok G değerlendirme kademesi | `✅ High Confidence`; Proceed with Caution / Suspicious için `⚠️ {tier} — {tek cümlelik gerekçe}` |
 | Employment classification | Blok G içindeki çalışma biçimi sinyali | Kontrol çalıştı ve bir şey bulunmadıysa `✅ clear`; bayrak tetiklendiyse `⚠️ contractor-style language: "{alıntı ifade}"`; kontrol çalışamadıysa `— not evaluated` |
 | Culture screen | Blok A'daki kültür taraması alanı | `✅ pass` veya `⚠️ caution — {kanıt}` / `⚠️ fail — {kanıt}`; tarama yapılmadıysa `— not evaluated` |
-| Interview red flags | `interview-prep/{company-slug}-redflags.md` (`interview-redflag` modundan) | **Kopya değil, çapraz referans:** dosya varsa mevcut uyarı düzeyini ve göreli bağlantısını yazın — `[{level}](../interview-prep/{company-slug}-redflags.md)` (`reports/` klasörüne göre); yoksa `— no interview sessions yet` |
+| Interview red flags | `interview-prep/{company-slug}-redflags.md` (`interview-redflag` modundan) | **Kopya değil, çapraz referans:** dosya varsa mevcut uyarı düzeyini ve göreli bağlantısını yazın — `[{level}](../interview-prep/{company-slug}-redflags.md)` (`reports/` klasörüne göre); yoksa `— no interview sessions yet`. **Doğrulanmamış dosya:** dosya `<!-- career-ops:redflags-unverified -->` işaretini içeriyorsa (`interview-redflag` modu dosyayı arkasında gerçek bir mülakat oturumu olmadan tuttu), uyarı düzeyini asla yazmayın: `— not evaluated: [unverified analysis](../interview-prep/{company-slug}-redflags.md)` yazın; `risk_summary.interview_redflags` değeri `not_evaluated` olur. Notun metnine değil işarete bakın: not, kullanıcının çıktı dilinde yazılır. |
 | AI claims vs. infrastructure | Blok G'deki AI/altyapı tutarlılık kontrolü (varsa) | Bu rapor kontrolü içeriyorsa kararını yansıtın (`✅ consistent` / `⚠️ {bulgu}`); aksi halde `— not evaluated`. Kontrol var olduğunda satır kendiliğinden etkinleşir, sıralama bağımlılığı yoktur |
 
 Blok biçimi:

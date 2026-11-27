@@ -9,8 +9,10 @@ import {
   MACOS_BROWSER_LIKE_USER_AGENT,
 } from '../user-agent.mjs';
 import { providerFetchContext, isBlockedAddress, blockedAddressError } from './_ip-guard.mjs';
-import { currentConnectionScope } from './_connection-scope.mjs';
-import { normalizeUrl } from '../url-key.mjs';
+import { currentConnectionScope, currentAbortSignal } from './_connection-scope.mjs';
+import { directConnect } from './_tls-connect.mjs';
+import { cachedText } from './_http-cache.mjs';
+import { normalizeUrl, aggregatorPostingId } from '../url-key.mjs';
 
 /** @typedef {import('./_types.js').Context} Context */
 /** @typedef {import('./_types.js').FetchOptions} FetchOptions */
@@ -26,10 +28,63 @@ import { normalizeUrl } from '../url-key.mjs';
 
 export { BROWSER_LIKE_USER_AGENT, MACOS_BROWSER_LIKE_USER_AGENT };
 
-/** Per-request abort deadline; override per call with `opts.timeoutMs`. */
-const DEFAULT_TIMEOUT_MS = 10_000;
+const MAX_TIMER_MS = 2_147_483_647; // setTimeout rewrites anything above this to 1ms
+
+/**
+ * Resolve the default per-request timeout from the environment.
+ *
+ * 10s suits almost every board, but a provider that returns its whole catalogue
+ * in one response can legitimately need longer, and when it does the abort
+ * surfaces as an unreachable portal rather than as a timeout — so the board
+ * reads as broken instead of slow. Raising the budget is a deployment concern
+ * rather than a code change, so it is read from the environment.
+ *
+ * Unusable values fall back to the default rather than failing a scan at
+ * request time: a typo in an env var should not take the scanner down.
+ *
+ * "Unusable" includes anything outside setTimeout's honored range, not just
+ * values that fail to parse. A delay below 1ms or above 2_147_483_647ms is
+ * silently rewritten to 1ms, so accepting one would abort every request almost
+ * immediately — the failure this variable exists to prevent, arrived at by a
+ * typo instead of a slow board. Falling back is the quieter outcome: a scan at
+ * the 10s default beats a scan where every portal reads as unreachable.
+ *
+ * @param {unknown} raw - Raw env value (CAREER_OPS_HTTP_TIMEOUT_MS).
+ * @param {number} [fallback=10_000] - Value used when `raw` is unusable.
+ * @returns {number} Milliseconds.
+ */
+export function resolveDefaultTimeoutMs(raw, fallback = 10_000) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > MAX_TIMER_MS) return fallback;
+  return parsed;
+}
+
 let proxyAgent;
 let proxySignature;
+
+const INITIAL_GLOBAL_FETCH = globalThis.fetch;
+let directTransportPromise = null;
+
+// Preserve test stubs installed either before module load (--import/--require)
+// or after load (globalThis.fetch = ...), while routing unstubbed native
+// Node fetch through an undici Agent that omits ALPNProtocols (#7785).
+function isNativeFetch(fn) {
+  if (typeof fn !== 'function' || fn !== INITIAL_GLOBAL_FETCH) return false;
+  return Function.prototype.toString.call(fn).includes('internal/deps/undici/undici');
+}
+
+async function getDirectTransport() {
+  if (directTransportPromise === null) {
+    directTransportPromise = import('undici')
+      .then((mod) => {
+        if (typeof mod.Agent !== 'function' || typeof mod.fetch !== 'function') return null;
+        return { agent: new mod.Agent({ connect: directConnect }), fetch: mod.fetch };
+      })
+      .catch(() => null);
+  }
+  return directTransportPromise;
+}
 
 async function proxyFor(url) {
   if (process.env.CAREER_OPS_TRUST_PROXY_EGRESS !== '1') return { dispatcher: undefined, proxyHost: undefined };
@@ -42,7 +97,9 @@ async function proxyFor(url) {
   for (const configuredProxy of [httpProxy, httpsProxy]) {
     if (!configuredProxy) continue;
     const parsed = new URL(configuredProxy);
-    if ((parsed.username || parsed.password) && parsed.protocol !== 'https:') {
+    const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    const isLoopback = host === 'localhost' || host === '::1' || (isIP(host) === 4 && host.startsWith('127.'));
+    if ((parsed.username || parsed.password) && parsed.protocol !== 'https:' && !isLoopback) {
       throw new Error('Proxy URLs containing credentials must use HTTPS to protect proxy authentication.');
     }
   }
@@ -58,7 +115,11 @@ async function proxyFor(url) {
     throw new Error('Trusted proxy egress requires undici; run npm install in the career-ops directory, then retry.', { cause });
   });
   if (signature !== proxySignature) {
-    proxyAgent = new EnvHttpProxyAgent({ httpProxy, httpsProxy, noProxy });
+    // proxyTunnel: true keeps every request, http:// included, on a CONNECT
+    // tunnel through the proxy. That is the default in undici 6 and 7. From
+    // undici 8 an http:// target is forwarded as an absolute-form request
+    // instead, which is what turned tests/providers/proxy-egress.test.mjs red.
+    proxyAgent = new EnvHttpProxyAgent({ httpProxy, httpsProxy, noProxy, proxyTunnel: true, connect: directConnect });
     proxySignature = signature;
   }
   return { dispatcher: proxyAgent, proxyHost, fetchImpl: undiciFetch };
@@ -104,6 +165,10 @@ async function fetchWithTimeout(url, opts = {}, consume, allowManualRedirectResp
 // server-side redirect could point the request at a private address after the
 // ip guard already passed the original host (#4079). Callers that really need
 // to follow redirects opt in explicitly.
+//
+// The default timeout is read on each request, not when this module loads: an
+// entry script such as scan.mjs imports this file statically, so the module is
+// evaluated before that script loads the data root's .env.
 /**
  * @param {string} url
  * @param {FetchOptions} [opts]
@@ -113,7 +178,7 @@ async function fetchWithTimeout(url, opts = {}, consume, allowManualRedirectResp
  * @param {typeof fetch} [fetchImpl] undici's fetch when a proxy dispatcher is used; global fetch otherwise.
  * @returns {Promise<any>}
  */
-async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'error', onResponse } = {}, consume, dispatcher, allowManualRedirectResponse = false, fetchImpl = fetch) {
+async function fetchInContext(url, { timeoutMs = resolveDefaultTimeoutMs(process.env.CAREER_OPS_HTTP_TIMEOUT_MS), headers = {}, method = 'GET', body = null, redirect = 'error', onResponse, acceptNotModified = false } = {}, consume, dispatcher, allowManualRedirectResponse = false, fetchImpl = fetch) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -136,15 +201,33 @@ async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {
     // A trusted-proxy dispatcher, when configured, still takes precedence,
     // together with the fetchImpl proxyFor() paired it with.
     const scope = dispatcher ? undefined : currentConnectionScope();
+    let requestDispatcher = dispatcher ?? scope?.agent;
+    let requestFetch = scope?.fetch ?? fetchImpl;
+    if (!requestDispatcher && requestFetch === globalThis.fetch && isNativeFetch(globalThis.fetch)) {
+      const direct = await getDirectTransport();
+      if (direct) {
+        requestDispatcher = direct.agent;
+        requestFetch = direct.fetch;
+      }
+    }
+    // A sweep's per-company watchdog aborts the board's signal when it times
+    // out; fold it into this request's own timeout so an abandoned board stops
+    // mid-flight instead of running on in the background (#5570). Read straight
+    // from the store so it also applies on the trusted-proxy path, where the
+    // pool `scope` is left undefined.
+    const boardSignal = currentAbortSignal();
+    const requestSignal = boardSignal
+      ? AbortSignal.any([controller.signal, boardSignal])
+      : controller.signal;
     let res;
     try {
-      res = await (scope ? scope.fetch : fetchImpl)(url, {
+      res = await requestFetch(url, {
         method,
         headers: requestHeaders,
         body,
         redirect,
-        signal: controller.signal,
-        dispatcher: dispatcher ?? scope?.agent,
+        signal: requestSignal,
+        dispatcher: requestDispatcher,
       });
     } catch (err) {
       if (!dispatcher && ['ENOTFOUND', 'EAI_AGAIN'].includes(err?.cause?.code)
@@ -153,22 +236,44 @@ async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {
       }
       throw err;
     }
+    // 304 is the answer to If-None-Match, not a failed board. Count it as a
+    // success and let the caller reuse the body it saved.
+    if (acceptNotModified && res.status === 304) {
+      try { await res.body?.cancel(); } catch {}
+      onResponse?.({ status: 200, headers: res.headers });
+      return await consume(res);
+    }
     onResponse?.(res);
     const isInspectableManualRedirect = allowManualRedirectResponse
       && redirect === 'manual'
       && res.status >= 300
       && res.status < 400;
     if (!res.ok && !isInspectableManualRedirect) {
-      const responseText = await res.text().catch(() => '');
+      // The error body is diagnostic text, so it is read UNDER A CAP instead of
+      // being buffered whole: a broken or hostile endpoint can serve a huge
+      // (or endless) error page, and the abort timer limits the DURATION of
+      // that read, not the number of bytes it buffers. Truncated at the cap,
+      // never thrown over: the HTTP error is the one the caller must see.
+      const responseText = await readBodyCapped(res, MAX_ERROR_BODY_BYTES, { truncate: true }).catch(() => '');
       // WAF/CDN challenge pages (seen live: Workday 429s) carry no actionable
       // text — HTML markup or a generic interstitial message, not worth
       // parsing or displaying. The status code and its standard reason
       // phrase are what a log line needs; the raw body is still attached as
       // err.body for callers that want to inspect it.
-      const err = new Error(`HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`);
+      //
+      // A Cloudflare challenge is the one case the status alone misreads: a
+      // managed challenge served as 429 reads as a rate limit (#7182), and no
+      // retry clears it. Cloudflare marks it with `cf-mitigated: challenge`,
+      // so the message names it and err.cfMitigated carries the header.
+      const cfMitigated = res.headers.get('cf-mitigated');
+      const challenge = CF_CHALLENGE_RE.test(cfMitigated ?? '')
+        ? ` (Cloudflare challenge, cf-mitigated: ${cfMitigated})`
+        : '';
+      const err = new Error(`HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}${challenge}`);
       err.status = res.status;
       err.body = responseText;
       err.retryAfter = res.headers.get('retry-after');
+      err.cfMitigated = cfMitigated;
       // Only ever populated under redirect:'manual', where the 3xx arrives as a
       // non-ok response instead of being followed or thrown. Attached so a
       // caller can tell WHICH redirect it hit without gaining the ability to
@@ -184,21 +289,202 @@ async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {
     // (this froze full-directory sweeps silently — 20 workers all stuck on
     // stalled reads with the abort timer already cleared).
     return await consume(res);
+  } catch (err) {
+    // The per-request timer already fired. A retry spends that same budget
+    // again on a board that is still hung (measured: one Ashby board, 30s
+    // timeout, 2 retries, about 94s). A board-watchdog abort is a different
+    // signal, and withRetry already stops when that signal is aborted, so
+    // leave it untagged. A fast reset or DNS failure never trips this timer.
+    if (controller.signal.aborted && !currentAbortSignal()?.aborted
+      && err !== null && (typeof err === 'object' || typeof err === 'function')) {
+      err.timedOut = true;
+    }
+    throw err;
   } finally {
     clearTimeout(timer);
   }
 }
 
 /**
+ * Default ceiling for a full response body, applied by fetchJson/fetchText.
+ *
+ * Real board JSON is legitimately megabyte-sized (a 500-job Greenhouse board
+ * runs into single-digit MBs), so the default is generous; the point is that
+ * one hostile or broken endpoint can no longer pin the scanner's memory with
+ * a single endless response. Per-call override: `opts.maxBytes`. The head
+ * reader below keeps its own small default — it never wanted the whole body.
+ */
+export const DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Ceiling for the body attached to a non-2xx error.
+ *
+ * An error body is diagnostic text — a WAF interstitial, a maintenance page,
+ * an API error payload — never the data the caller asked for. It is capped
+ * well below the default body ceiling so a sweep that meets a dozen failing
+ * boards cannot turn their error pages into a memory problem. Every consumer
+ * of `err.body` in this repo treats it as a snippet: providers/glints.mjs
+ * parses it and falls back to its first 200 characters, providers/workday.mjs
+ * looks for a marker inside it.
+ */
+export const MAX_ERROR_BODY_BYTES = 256 * 1024;
+
+function bodyTooLarge(size, maxBytes) {
+  const err = new Error(`HTTP body exceeded maxBytes of ${maxBytes}${size != null ? ` (content-length ${size})` : ''}`);
+  err.code = 'response_too_large';
+  err.maxBytes = maxBytes;
+  return err;
+}
+
+/**
+ * Resolve the body ceiling for one call.
+ *
+ * An explicit `maxBytes` must be a positive finite number. A NaN, a
+ * negative value or a non-numeric string would silently DISABLE the cap
+ * (`total > NaN` is never true), which is exactly the hole the cap exists to
+ * close — so a bad value is refused rather than ignored.
+ *
+ * @param {number|undefined|null} value - The caller's ceiling, if any.
+ * @returns {number} The ceiling in bytes.
+ */
+function resolveMaxBytes(value) {
+  if (value === undefined || value === null) return DEFAULT_MAX_BODY_BYTES;
+  const bytes = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(bytes)) {
+    throw new TypeError(`maxBytes must be a positive finite number, got ${JSON.stringify(value)}`);
+  }
+  // The floor is the value that actually applies, so THAT is what has to be
+  // positive: 0.5 would floor to a zero-byte cap, and every non-empty body
+  // would then be refused with a size error nobody asked for.
+  const floored = Math.floor(bytes);
+  if (floored <= 0) {
+    throw new TypeError(`maxBytes must be a positive finite number, got ${JSON.stringify(value)}`);
+  }
+  return floored;
+}
+
+/**
+ * Read a response body as text, refusing to buffer more than `maxBytes`.
+ *
+ * Same streaming shape as fetchTextHead's cap (read, count, cancel), but this
+ * THROWS instead of truncating: a cut-off JSON document or half-rendered HTML
+ * must never masquerade as the board's answer. A declared content-length over
+ * the cap is refused before a single body byte is read. Stays inside the
+ * caller's timer window, like every other body consumption here.
+ *
+ * `truncate` flips that one decision for the error path, where the HTTP
+ * status is the answer the caller needs and the body is only a snippet: the
+ * read stops at the cap and returns what it has instead of throwing. The body
+ * is cancelled either way, so the connection is released.
+ *
+ * @param {Response} res
+ * @param {number} maxBytes
+ * @param {{truncate?: boolean}} [opts]
+ * @returns {Promise<string>} The body, decoded as UTF-8.
+ */
+async function readBodyCapped(res, maxBytes, { truncate = false } = {}) {
+  const declared = Number(res.headers.get('content-length'));
+  if (!truncate && Number.isFinite(declared) && declared > maxBytes) {
+    // Cancel before refusing: an unread body keeps its socket alive, and a
+    // provider sweep holds many of them at once. The size error is the one
+    // that matters, so a failed cancel must not replace it.
+    try {
+      await res.body?.cancel?.();
+    } catch {
+      /* preserve the size error when cancellation fails */
+    }
+    throw bodyTooLarge(declared, maxBytes);
+  }
+  const reader = res.body?.getReader?.();
+  if (!reader) {
+    // No stream to count (a mocked or exotic response): the whole body is
+    // already in memory here, so the cap can only shorten what is kept.
+    const text = await res.text();
+    const bytes = Buffer.byteLength(text, 'utf8');
+    if (bytes > maxBytes) {
+      if (!truncate) throw bodyTooLarge(bytes, maxBytes);
+      return Buffer.from(text, 'utf8').subarray(0, maxBytes).toString('utf8');
+    }
+    return text;
+  }
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.length;
+      if (total > maxBytes) {
+        if (!truncate) throw bodyTooLarge(null, maxBytes);
+        // Keep the part of this chunk that still fits: a diagnostic marker
+        // (providers/workday.mjs looks for one) can sit right at the ceiling,
+        // and dropping the whole chunk would throw it away.
+        const keep = maxBytes - (total - value.length);
+        if (keep > 0) chunks.push(Buffer.from(value).subarray(0, keep));
+        break; // the finally cancels the body
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      /* body already closed */
+    }
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+function boardText(text) {
+  return String(text).replace(/^\uFEFF/, '');
+}
+
+async function readBoardText(url, opts, maxBytes, conditional) {
+  const headers = new Headers(opts.headers || {});
+  if (conditional?.ifNoneMatch && !headers.has('if-none-match')) {
+    headers.set('if-none-match', conditional.ifNoneMatch);
+  }
+  const acceptNotModified = headers.has('if-none-match');
+  return fetchWithTimeout(url, { ...opts, headers, acceptNotModified }, async (res) => {
+    if (acceptNotModified && res.status === 304) return { notModified: true };
+    const text = await readBodyCapped(res, maxBytes);
+    const cacheControl = res.headers.get('cache-control') || '';
+    return {
+      body: text,
+      etag: res.headers.get('etag'),
+      noStore: cacheControl.toLowerCase().includes('no-store'),
+    };
+  });
+}
+
+function fetchCachedBody(url, opts, maxBytes, json) {
+  return cachedText(url, opts, async (requestUrl, requestOpts, conditional) => {
+    const loaded = await readBoardText(requestUrl, requestOpts, maxBytes, conditional);
+    // A body that does not parse is not a board we should serve again.
+    if (json && !loaded.notModified) JSON.parse(boardText(loaded.body));
+    return loaded;
+  });
+}
+
+/**
  * Fetch and parse a JSON response, with the shared timeout and non-2xx guard.
+ *
+ * The body is read through the capped reader (see DEFAULT_MAX_BODY_BYTES); JSON
+ * here is board data, always UTF-8, so a text decode + parse is equivalent to
+ * res.json() for every board this repo talks to.
  *
  * @param {string} url
  * @param {FetchOptions} [opts]
  * @returns {Promise<any>} Parsed JSON.
  * @throws {HttpError} On a non-2xx response.
+ * @throws {Error} `code: 'response_too_large'` when the body exceeds `opts.maxBytes` (default DEFAULT_MAX_BODY_BYTES).
  */
 export async function fetchJson(url, opts = {}) {
-  return fetchWithTimeout(url, opts, (res) => res.json());
+  const text = await fetchCachedBody(url, opts, resolveMaxBytes(opts.maxBytes), true);
+  // res.json() stripped a leading UTF-8 BOM (the spec's UTF-8 decode does);
+  // decoding the body as text and parsing it by hand does not, so a
+  // BOM-prefixed board answer would stop parsing here.
+  return JSON.parse(boardText(text));
 }
 
 /**
@@ -243,13 +529,82 @@ export async function fetchTextHead(url, opts = {}) {
 /**
  * Fetch a response body as text, with the shared timeout and non-2xx guard.
  *
+ * The body is read through the capped reader (see DEFAULT_MAX_BODY_BYTES).
+ *
  * @param {string} url
  * @param {FetchOptions} [opts]
  * @returns {Promise<string>}
  * @throws {HttpError} On a non-2xx response.
+ * @throws {Error} `code: 'response_too_large'` when the body exceeds `opts.maxBytes` (default DEFAULT_MAX_BODY_BYTES).
  */
 export async function fetchText(url, opts = {}) {
-  return fetchWithTimeout(url, opts, (res) => res.text());
+  return fetchCachedBody(url, opts, resolveMaxBytes(opts.maxBytes), false);
+}
+
+/**
+ * Hand a response body to `onText` piece by piece instead of buffering it.
+ *
+ * For a source that publishes one document far over DEFAULT_MAX_BODY_BYTES
+ * (Workable's job feed is about 870 MB of XML, 140 MB as brotli). The request
+ * goes through the same transport as fetchText: the IP guard, `redirect:
+ * 'error'` by default, the board signal and the negotiated compression, which
+ * the runtime decodes. What changes is the body: it is decoded as UTF-8 chunk
+ * by chunk and never held whole, and it is not stored in the HTTP cache.
+ *
+ * `opts.timeoutMs` bounds the WHOLE transfer, headers and body, so a caller
+ * passes a deadline that fits the document. `opts.maxBytes` bounds the decoded
+ * body; over it the read stops and throws `response_too_large`. `onText`
+ * returning `false` (or a promise of it) stops the read early; the body is
+ * cancelled either way, so the connection is released.
+ *
+ * A conditional request passes its validator in `opts.headers`
+ * (`If-Modified-Since`) together with `opts.acceptNotModified: true`; a 304
+ * then resolves with `notModified: true` and `onText` is never called. The
+ * response's `Last-Modified` comes back as `lastModified` (null when absent),
+ * so the caller can make the next request conditional.
+ *
+ * @param {string} url
+ * @param {FetchOptions} opts
+ * @param {(text: string) => (boolean | void | Promise<boolean | void>)} onText
+ * @returns {Promise<{ bytes: number, complete: boolean, notModified: boolean, lastModified: string | null }>} decoded bytes read, whether the body was read to its end, whether the server answered 304, and its Last-Modified
+ * @throws {HttpError} On a non-2xx response.
+ * @throws {Error} `code: 'response_too_large'` when the body exceeds `opts.maxBytes` (default DEFAULT_MAX_BODY_BYTES).
+ */
+export async function fetchTextStream(url, opts, onText) {
+  if (typeof onText !== 'function') throw new TypeError('fetchTextStream needs an onText callback');
+  const maxBytes = resolveMaxBytes(opts?.maxBytes);
+  return fetchWithTimeout(url, opts ?? {}, async (res) => {
+    const lastModified = res.headers.get('last-modified');
+    if (res.status === 304) return { bytes: 0, complete: true, notModified: true, lastModified };
+    const reader = res.body?.getReader?.();
+    if (!reader) {
+      const text = await res.text();
+      const bytes = Buffer.byteLength(text, 'utf8');
+      if (bytes > maxBytes) throw bodyTooLarge(bytes, maxBytes);
+      if (text) await onText(text);
+      return { bytes, complete: true, notModified: false, lastModified };
+    }
+    const decoder = new TextDecoder('utf-8');
+    let bytes = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.length;
+        if (bytes > maxBytes) throw bodyTooLarge(null, maxBytes);
+        if (await onText(decoder.decode(value, { stream: true })) === false) return { bytes, complete: false, notModified: false, lastModified };
+      }
+      const tail = decoder.decode();
+      if (tail) await onText(tail);
+      return { bytes, complete: true, notModified: false, lastModified };
+    } finally {
+      try {
+        await reader.cancel();
+      } catch {
+        /* body already closed */
+      }
+    }
+  });
 }
 
 // Returns a Response (after the timeout + non-2xx guard) so providers that need
@@ -282,8 +637,22 @@ const NULL_BODY_STATUSES = new Set([204, 205, 304]);
  * @throws {HttpError} On a non-2xx response.
  */
 export async function fetchResponse(url, opts = {}) {
+  const maxBytes = resolveMaxBytes(opts.maxBytes);
   return await fetchWithTimeout(url, opts, async (res) => {
-    const body = NULL_BODY_STATUSES.has(res.status) ? null : await res.text();
+    // Read under the same ceiling as the other fetchers: this is the last
+    // unbounded body read in the transport, and a provider that only wanted a
+    // header should not be handed a whole hostile page.
+    let body;
+    try {
+      body = NULL_BODY_STATUSES.has(res.status) ? null : await readBodyCapped(res, maxBytes);
+    } catch (err) {
+      // The headers are the point of this call — csod.mjs reads Set-Cookie,
+      // peoplesoft.mjs reads Set-Cookie and Location — so a body that was too
+      // big must not take them away with it. They travel on the error, and the
+      // caller can still read them.
+      if (err?.code === 'response_too_large') err.headers = res.headers;
+      throw err;
+    }
     return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
   }, true);
 }
@@ -313,6 +682,10 @@ const RETRY_DEFAULTS = { retries: 2, baseDelayMs: 500, maxDelayMs: 8_000 };
  */
 const REDIRECT_REFUSAL_CAUSE_MESSAGE = 'unexpected redirect';
 
+// Cloudflare's `cf-mitigated` value for a challenge (seen live on Workday and
+// The Muse: `challenge`).
+const CF_CHALLENGE_RE = /\bchallenge\b/i;
+
 /**
  * Awaitable sleep that honours a ctx-supplied clock, so tests never wall-clock
  * wait. `ctx` is the SECOND argument — a swapped `sleep(ctx, ms)` hands an
@@ -326,6 +699,32 @@ const REDIRECT_REFUSAL_CAUSE_MESSAGE = 'unexpected redirect';
 export function sleep(ms, ctx) {
   if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * sleep(), but resolves at once if `signal` aborts partway — a retry backoff
+ * must not keep a board the watchdog has already given up on pending for its
+ * full delay (#5570).
+ *
+ * @param {number} ms
+ * @param {{ sleep?: (ms: number) => Promise<void> }} [ctx]
+ * @param {AbortSignal | null} [signal]
+ * @returns {Promise<void>}
+ */
+export function abortableSleep(ms, ctx, signal) {
+  if (!signal) return sleep(ms, ctx);
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const onAbort = () => { cleanup(); resolve(); };
+    const cleanup = () => signal.removeEventListener('abort', onAbort);
+    signal.addEventListener('abort', onAbort, { once: true });
+    // Settle with the sleep's own result so a rejecting clock propagates
+    // instead of hanging the promise and surfacing as an unhandled rejection.
+    Promise.resolve(sleep(ms, ctx)).then(
+      (value) => { cleanup(); resolve(value); },
+      (err) => { cleanup(); reject(err); },
+    );
+  });
 }
 
 /**
@@ -366,24 +765,66 @@ export function isRefusedRedirectError(err) {
 }
 
 /**
+ * Whether a failed request was a Cloudflare challenge, read from the
+ * `cf-mitigated` header fetchInContext keeps on the error.
+ *
+ * @param {any} err
+ * @returns {boolean}
+ */
+export function isCloudflareChallenge(err) {
+  return typeof err?.cfMitigated === 'string' && CF_CHALLENGE_RE.test(err.cfMitigated);
+}
+
+/**
  * Whether a failed request is worth retrying: 429, any 5xx, or a transport
- * error (no status — timeout/abort/DNS). A 4xx other than 429 is the server
- * telling us the request itself is wrong, and retrying it just burns time.
+ * error (no status — DNS, connection reset, or an abort that did not spend
+ * this request's own timer). A 4xx other than 429 is the server telling us
+ * the request itself is wrong, and retrying it just burns time.
+ *
+ * A timeout that already ran for the full `timeoutMs` is tagged `timedOut`
+ * by fetchInContext. Retrying it waits that long again and gets the same
+ * abort. Fast transport errors are not tagged, so they still retry.
  *
  * A refused redirect (redirect:'error' meeting a 3xx) surfaces as a bare
  * TypeError with no .status — the same shape as a transient network error —
  * but it's deterministic and will never succeed on retry. See
  * isRefusedRedirectError() above for how it's distinguished.
  *
+ * A Cloudflare challenge (`cf-mitigated: challenge`, kept as err.cfMitigated
+ * by fetchInContext) is not retried either, even as a 429 or 503: the client
+ * is being challenged, not throttled, and the same request is challenged
+ * again (#7182).
+ *
  * @param {any} err - A thrown value: an Error with an optional `.status`, or anything else.
  * @returns {boolean}
  */
 export function isRetryableError(err) {
   const status = err?.status;
+  if (isCloudflareChallenge(err)) return false;
   if (status === 429) return true;
   if (typeof status === 'number' && status >= 500) return true;
   if (isRefusedRedirectError(err)) return false;
-  return status === undefined; // network error / timeout / abort — no status set
+  // A body over the cap is not a transient failure: the same response would be
+  // refused again, so retrying only downloads the oversize body a second and
+  // third time. The size error carries no status, so without this it would
+  // fall through to the network-error case below.
+  if (err?.code === 'response_too_large') return false;
+  // A blocked address is a verdict about the host, not a transient failure: the
+  // same lookup resolves to the same private address next time. It carries no
+  // status, so without this it falls through to the network-error case and every
+  // blocked host costs three attempts and ~1.7 s of backoff per sweep.
+  //
+  // The code arrives on the error itself for a literal address, and on `cause`
+  // when the blocked lookup was what the request failed on: the guarded resolver
+  // hands the refusal to the connector, and fetch rejects with its own error whose
+  // cause is the verdict. Reading only the top level left the hostname path, which
+  // is the common one, still retrying.
+  if (err?.code === 'ECAREEROPS_BLOCKED_ADDRESS' || err?.cause?.code === 'ECAREEROPS_BLOCKED_ADDRESS') {
+    return false;
+  }
+  // Checked after 429 / 5xx so a status the server actually sent still wins.
+  if (err?.timedOut === true) return false;
+  return status === undefined; // network error / abort that did not spend the timer
 }
 
 /**
@@ -428,7 +869,10 @@ async function withRetry(request, ctx, policy = {}) {
       // which would replace the real rejection with an unrelated TypeError
       // right here in the catch, before any caller sees it.
       if (err !== null && (typeof err === 'object' || typeof err === 'function')) err.attempts = attempt + 1;
-      if (attempt === retries || !isRetryableError(err)) throw err;
+      // A board whose watchdog has already fired must not keep retrying: that is
+      // the 4-attempts-per-slice storm a timed-out Workday board left running in
+      // the background (#5570). The abort is terminal, not a transient failure.
+      if (attempt === retries || !isRetryableError(err) || currentAbortSignal()?.aborted) throw err;
       // Cap the backoff at maxDelayMs MINUS the jitter, so the jittered total
       // still honours the policy limit. Clamping the sum instead would erase
       // the jitter exactly at the cap — where every retry has converged on the
@@ -444,7 +888,11 @@ async function withRetry(request, ctx, policy = {}) {
       const delayMs = retryAfterMs !== null
         ? Math.min(retryAfterMs, maxDelayMs * 4)
         : backoff + Math.random() * jitterMs;
-      await sleep(delayMs, ctx);
+      // Interruptible: if the board's watchdog fires during the backoff, stop
+      // waiting and give up rather than sleeping out the delay and then issuing
+      // a doomed attempt (#5570).
+      await abortableSleep(delayMs, ctx, currentAbortSignal());
+      if (currentAbortSignal()?.aborted) throw lastErr;
     }
   }
   throw lastErr;
@@ -522,6 +970,10 @@ export function makeHttpCtx(observer) {
     // so a standalone provider receives the same function the core calls rather
     // than importing the file or copying its body (#4218).
     normalizePostingUrl: normalizeUrl,
+    // The requisition id an aggregator URL carries, for the same reason: a
+    // provider that reads LinkedIn or Indeed links gets the extractor the
+    // tracker's merge uses, not a regex of its own that drifts from it.
+    aggregatorPostingId,
   };
   if (!observer) return ctx;
   for (const method of ['fetchJson', 'fetchText', 'fetchResponse']) {

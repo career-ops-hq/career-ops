@@ -1,6 +1,9 @@
+import { coreProfileEnv } from "@/lib/core/profile-path.mjs";
 import { execFile } from "node:child_process";
 import fs from "node:fs";
-import { careerOpsRoot, rootScript, findReportFile } from "@/lib/career-ops";
+import { careerOpsRoot, rootScript, findReportFile, pdfPathStatusForReport } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
+import { tailoredCvForKeywordMatch } from "@/lib/keyword-match-cv.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,11 +28,18 @@ export async function GET(req: Request) {
   const script = rootScript("keyword-match");
   if (!fs.existsSync(script)) return Response.json({ available: false, reason: "no-script", result: null });
 
+  const indexed = await pdfPathStatusForReport(id);
+  const cvPath = indexed.status === "found" ? tailoredCvForKeywordMatch(indexed.path) : null;
+  const args = [script, file, "--json"];
+  if (cvPath) args.push("--cv", cvPath);
+
   const { stdout, stderr, failed } = await new Promise<{ stdout: string; stderr: string; failed: boolean }>((resolve) => {
+    // process.execPath + windowsHide: see api/doctor/route.ts. A stale inherited
+    // console kills every child with 0xC0000142 on Windows. Never inherit one.
     execFile(
-      "node",
-      [script, file, "--json"],
-      { cwd: careerOpsRoot(), timeout: 20_000, maxBuffer: 4 << 20 },
+      process.execPath,
+      args,
+      { cwd: resolveCodeRoot(process.cwd(), process.env), env: coreProfileEnv(careerOpsRoot()), timeout: 20_000, maxBuffer: 4 << 20, windowsHide: true },
       (err, out, errOut) => resolve({ stdout: out || "", stderr: errOut || "", failed: Boolean(err) }),
     );
   });

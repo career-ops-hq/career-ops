@@ -2,7 +2,7 @@
 import { pass, fail, run, NODE, ROOT, lastRunFailure } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import assert from 'node:assert/strict';
 
@@ -269,6 +269,22 @@ try {
     fail(`computeFollowupStats wrong output: ${JSON.stringify(fu)}`);
   }
 
+  // Legacy bullets count as well, as they already do for the live/cold split
+  // in the same run (analyzeFromContent). A bullet with no #N is unattributable.
+  const bulletsMd = [
+    '# Follow-ups',
+    '- 2026-06-10 · #2 Beta — emailed the recruiter',
+    '- 2026-06-17 · #2 Beta — second nudge',
+    '- 2026-06-18 · Beta — no row number',
+  ].join('\n');
+  const fuBullets = stats.computeFollowupStats(bulletsMd, trackerByNum);
+  if (fuBullets.totalFollowups === 2 && fuBullets.appsWithFollowups === 1
+      && fuBullets.appliedWithoutFollowup === 1 && fuBullets.avgPerApp === 2) {
+    pass('computeFollowupStats counts legacy bullet follow-ups');
+  } else {
+    fail(`computeFollowupStats skipped legacy bullets: ${JSON.stringify(fuBullets)}`);
+  }
+
   // CLI smoke — must emit the full contract with null sections in a checkout
   // with no user data (exactly the CI environment).
   const cliOut = run(NODE, [join(ROOT, 'stats.mjs')]);
@@ -312,30 +328,27 @@ try {
     fail(`stats.mjs --bogus did not fail as expected: exit=${bogusFailure?.status ?? 'null'} output=${bogusOutput.trim()}`);
   }
 
-  // --summary cold-classification integration (#2123): the CLI reads its
-  // fixed data/ paths, so exercise it against real (temporary) tracker +
-  // follow-ups files at those exact paths, then restore whatever was there.
-  const liveAppsFile = join(ROOT, 'data', 'applications.md');
-  const liveFupsFile = join(ROOT, 'data', 'follow-ups.md');
-  const { existsSync, readFileSync: readFileSyncNode, mkdirSync } = await import('fs');
-  const dataDirExisted = existsSync(join(ROOT, 'data'));
-  const appsExisted = existsSync(liveAppsFile);
-  const fupsExisted = existsSync(liveFupsFile);
-  const appsBackup = appsExisted ? readFileSyncNode(liveAppsFile, 'utf-8') : null;
-  const fupsBackup = fupsExisted ? readFileSyncNode(liveFupsFile, 'utf-8') : null;
+  // --summary cold-classification integration (#2123): the CLI resolves its
+  // tracker and follow-ups through the data root, so give it a root of its own.
+  // This used to overwrite the checkout's live data/applications.md and
+  // data/follow-ups.md and put them back from a variable in `finally` — which
+  // an interrupted run never reaches, leaving the fixture where the tracker
+  // was, in a directory git does not track (#5113).
+  const coldRoot = mkdtempSync(join(tmpdir(), 'co-stats-cold-'));
   try {
-    if (!dataDirExisted) mkdirSync(join(ROOT, 'data'), { recursive: true });
-    writeFileSync(liveAppsFile, coldTrackerMd);
-    writeFileSync(liveFupsFile, coldFollowupsMd);
-    const coldSummaryOut = run(NODE, [join(ROOT, 'stats.mjs'), '--summary']);
+    mkdirSync(join(coldRoot, 'data'));
+    writeFileSync(join(coldRoot, 'data', 'applications.md'), coldTrackerMd);
+    writeFileSync(join(coldRoot, 'data', 'follow-ups.md'), coldFollowupsMd);
+    const coldSummaryOut = run(NODE, [join(ROOT, 'stats.mjs'), '--summary'], {
+      env: { ...process.env, CAREER_OPS_ROOT: coldRoot, CAREER_OPS_DATA_DIR: '' },
+    });
     if (coldSummaryOut && coldSummaryOut.includes('3 active (2 live, 1 cold)')) {
       pass('stats.mjs --summary integrates live/cold counts into the existing Tracker line');
     } else {
       fail(`stats.mjs --summary missing live/cold breakdown: ${coldSummaryOut}`);
     }
   } finally {
-    if (appsBackup !== null) writeFileSync(liveAppsFile, appsBackup); else if (!appsExisted) rmSync(liveAppsFile, { force: true });
-    if (fupsBackup !== null) writeFileSync(liveFupsFile, fupsBackup); else if (!fupsExisted) rmSync(liveFupsFile, { force: true });
+    rmSync(coldRoot, { recursive: true, force: true });
   }
 } catch (e) {
   fail(`stats.mjs tests crashed: ${e.message}`);

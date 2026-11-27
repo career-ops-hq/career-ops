@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { statsModel } from "@/lib/analytics/view-model.mjs";
 import type { StatsModel, BreakdownSection, ThresholdSection, VendorSection } from "@/lib/analytics/view-model.mjs";
+import { sentRateLabel, sentRateTitle } from "@/lib/analytics/sent-rate-label.mjs";
 
 // The "Insights" view: analyze-patterns.mjs, rendered.
 //
@@ -129,18 +130,21 @@ function Breakdown({ section }: { section: BreakdownSection }) {
         {section.rows.map((row, i) => {
           const label = String(row[section.dimension] ?? "—");
           const total = Number(row.total) || 0;
-          const conv = Number(row.conversionRate);
+          // `Number(null)` is 0, so the absent rate the model sends for a bucket
+          // nothing was submitted from would render as "0%" — the vendor rows'
+          // guard, below.
+          const conv = row.conversionRate == null ? null : Number(row.conversionRate);
           return (
             <div key={`${label}-${i}`} className="flex items-center gap-3">
-              <span className="w-32 shrink-0 truncate text-sm text-muted" title={label}>
+              <span className="w-24 shrink-0 truncate text-sm text-muted sm:w-32" title={label}>
                 {label}
               </span>
               <div className="h-3.5 flex-1 overflow-hidden rounded-full bg-surface">
                 <div className="h-full rounded-full bg-brand/60" style={{ width: `${(total / top) * 100}%` }} />
               </div>
               <span className="w-10 shrink-0 text-right text-sm tabular-nums">{total}</span>
-              <span className="w-12 shrink-0 text-right text-xs tabular-nums text-faint">
-                {Number.isFinite(conv) ? `${conv}%` : "—"}
+              <span className="w-24 shrink-0 text-right text-xs tabular-nums text-faint" title={sentRateTitle(conv)}>
+                {sentRateLabel(conv)}
               </span>
             </div>
           );
@@ -170,7 +174,10 @@ function Vendor({ section }: { section: VendorSection }) {
         {section.rows.map((row, i) => {
           const label = String(row.vendor ?? "—");
           const n = Number(row.submitted ?? row.total) || 0;
-          const rate = Number(row.advanceRate);
+          // `Number(null)` is 0, and 0 is finite, so a nulled rate would have
+          // rendered as a confident "0%" — the opposite of absent.
+          const rate = row.advanceRate == null ? null : Number(row.advanceRate);
+          const provisional = row.provisional === true;
           return (
             <div key={`${label}-${i}`} className="flex items-center gap-3">
               <span className="w-32 shrink-0 truncate text-sm text-muted">{label}</span>
@@ -178,8 +185,13 @@ function Vendor({ section }: { section: VendorSection }) {
                 <div className="h-full rounded-full bg-brand/60" style={{ width: `${(n / top) * 100}%` }} />
               </div>
               <span className="w-10 shrink-0 text-right text-sm tabular-nums">{n}</span>
-              <span className="w-12 shrink-0 text-right text-xs tabular-nums text-faint">
-                {Number.isFinite(rate) ? `${rate}%` : "—"}
+              <span
+                className="w-12 shrink-0 text-right text-xs tabular-nums text-faint"
+                title={provisional && section.minSampleForClaim
+                  ? `Fewer than ${section.minSampleForClaim} applications through this vendor, so no rate is claimed yet`
+                  : undefined}
+              >
+                {rate !== null && Number.isFinite(rate) ? `${rate}%` : "—"}
               </span>
             </div>
           );

@@ -1,9 +1,10 @@
 // @ts-check
 // plugins/_lock.mjs — integrity pinning for plugins (the rug-pull / OWASP-MCP04
-// defense). Pure, side-effect-free import (node:crypto + node:fs only, NO
-// child_process so it stays loadable under plugins/). plugins.lock is a USER-
-// layer file (gitignored) recording, per enabled plugin, the sha256 of EVERY
-// file in its directory + the consented capability surface.
+// defense). Pure, side-effect-free import (node:crypto, node:fs and the
+// dependency-free lib/rename-retry.mjs; NO child_process so it stays loadable
+// under plugins/). plugins.lock is a USER-layer file (gitignored) recording,
+// per enabled plugin, the sha256 of EVERY file in its directory + the
+// consented capability surface.
 //
 // Honest scope: the lock is tamper-EVIDENCE, not containment. A local attacker
 // with write access to plugins.local/ also has write access to plugins.lock and
@@ -11,9 +12,10 @@
 // mutation, and a community plugin whose files changed since you trusted it
 // WITHOUT a version bump (the postmark-mcp class). Stated plainly in README.
 
-import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync, readdirSync, lstatSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, writeFileSync, readdirSync, lstatSync, rmSync } from 'node:fs';
 import path from 'node:path';
+import { renameSyncWithRetry } from '../lib/rename-retry.mjs';
 
 const LOCK_VERSION = 1;
 
@@ -29,13 +31,17 @@ function sha256(buf) {
  * Hash EVERY regular file in a plugin directory tree, recursively. NOT a curated
  * subset — the entry can `import('./anything.mjs')`, so a partial hash would let
  * a rug-pull mutate an un-hashed file. Rejects symlinks (a symlinked file would
- * pass the hash while pointing elsewhere). Excludes node_modules + .git.
+ * pass the hash while pointing elsewhere). Excludes .git, which git refuses to
+ * check out below a clone's root, and node_modules, which a developer's linked
+ * checkout fills with dependencies and symlinks. A community plugin cannot pin
+ * one: install runs plugin-audit.mjs, which fails any tree containing
+ * node_modules. `files` has no prototype, so a file named `__proto__` is kept.
  *
  * @param {string} dir absolute plugin directory
  * @returns {{ files: Record<string,string>, integrity: string }}
  */
 export function hashPluginTree(dir) {
-  const files = {};
+  const files = Object.create(null);
   const walk = (abs, rel) => {
     let entries;
     try { entries = readdirSync(abs, { withFileTypes: true }); }
@@ -71,17 +77,48 @@ export function readLock(root) {
   }
 }
 
+// A torn file is not an empty lock. Reading it as empty and writing it back
+// would drop every other pin.
+export function readLockForUpdate(root) {
+  const file = lockPath(root);
+  if (!existsSync(file)) return { lockfileVersion: LOCK_VERSION, plugins: {} };
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    throw new Error(`plugins.lock at ${file} is not valid JSON, so it was left unchanged.`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !parsed.plugins || typeof parsed.plugins !== 'object' || Array.isArray(parsed.plugins)) {
+    throw new Error(`plugins.lock at ${file} has no plugins map, so it was left unchanged.`);
+  }
+  return parsed;
+}
+
+function saveLock(root, lock) {
+  const file = lockPath(root);
+  const tmp = path.join(root, `.plugins.lock.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    writeFileSync(tmp, JSON.stringify(lock, null, 2) + '\n', 'utf8');
+    renameSyncWithRetry(tmp, file);
+  } catch (err) {
+    try { rmSync(tmp, { force: true }); } catch { /* the temp file may not exist */ }
+    throw err;
+  }
+}
+
 /** Merge a single entry into plugins.lock (never clobber other plugins' entries). */
 export function writeLockEntry(root, id, entry) {
-  const lock = readLock(root);
+  const lock = readLockForUpdate(root);
   lock.lockfileVersion = LOCK_VERSION;
   lock.plugins[id] = entry;
-  writeFileSync(lockPath(root), JSON.stringify(lock, null, 2) + '\n', 'utf8');
+  saveLock(root, lock);
 }
 
 export function removeLockEntry(root, id) {
-  const lock = readLock(root);
-  if (lock.plugins[id]) { delete lock.plugins[id]; writeFileSync(lockPath(root), JSON.stringify(lock, null, 2) + '\n', 'utf8'); }
+  const lock = readLockForUpdate(root);
+  if (!lock.plugins[id]) return;
+  delete lock.plugins[id];
+  saveLock(root, lock);
 }
 
 /**

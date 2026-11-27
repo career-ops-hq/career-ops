@@ -1,0 +1,50 @@
+name: HOL Plugin Scanner
+
+# Scores the repository with the HOL AI Plugin Scanner, using the scanner,
+# version and threshold the awesome-ai-plugins catalog applies to its listing
+# (hashgraph-online/awesome-ai-plugins#230). Adapted from the catalog's
+# template, templates/hol-plugin-scanner.yml; guide:
+# https://github.com/hashgraph-online/awesome-ai-plugins/blob/main/SCANNER_GUIDE.md
+#
+# Informative, like web-ci.yml: it is not a required check and does not run in
+# the merge queue, so a red here never blocks a merge. fail_on_severity: none
+# keeps the findings advisory; the job is red only while the score is below
+# the catalog's minimum of 75.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Lets a maintainer start a run on main to link from the catalog listing.
+  workflow_dispatch:
+
+# Read-only token and no secrets: the scanner only reads the checkout.
+permissions:
+  contents: read
+
+# A new push supersedes the running scan.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: HOL Plugin Scanner
+    runs-on: ubuntu-latest
+    # The template's limit. The scan itself takes under a minute here.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The scan runs no PR code, but the checkout should not leave a token behind.
+          persist-credentials: false
+      # The commit the catalog's centralized scan uses (v1.2.806, which pins
+      # plugin-scanner 3.57.0), so a run here reproduces the catalog's score.
+      # The action installs the scanner wheel only after checking it against a
+      # committed SHA-256 and its PyPI provenance. Move this pin with the
+      # catalog's, not ahead of it: a newer scanner can score differently.
+      - uses: hashgraph-online/ai-plugin-scanner-action@c96833de5070fab4e564010b5ab6e3c3d7e07a3e # v1.2.806
+        with:
+          plugin_dir: "."
+          min_score: 75
+          fail_on_severity: none

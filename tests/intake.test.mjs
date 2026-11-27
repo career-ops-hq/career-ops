@@ -5,7 +5,7 @@
 // scan/--commit round-trip on an isolated temp documents/ dir, and the
 // three-place registration contract (DATA_CONTRACT / .gitignore /
 // update-system manifest — same cross-check pattern as offer-prep).
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
@@ -164,6 +164,124 @@ const intake = await import(pathToFileURL(join(ROOT, 'intake.mjs')).href);
   }
 }
 
+// ── snapshots + --diff (#5779) ───────────────────────────────────────────
+// --commit keeps each recorded source's extracted text beside the ledger, and
+// --diff shows a changed source as the lines that moved. Every fixture here is
+// fictional.
+{
+  const tmp = mkdtempSync(join(tmpdir(), 'intake-diff-'));
+  const docsDir = join(tmp, 'documents');
+  const dataDir = join(tmp, 'data');
+  const stateFile = join(dataDir, 'intake-state.json');
+  const snapDir = join(dataDir, 'intake-snapshots');
+  mkdirSync(join(docsDir, 'cv'), { recursive: true });
+  const v1 = '# Avery Quinn\n\n## Experience\n\n### Example Co\n\n- Built a metric layer\n- Ran SQL reviews\n- Mentored two analysts\n';
+  const v2 = '# Avery Quinn\n\n## Experience\n\n### Example Co\n\n- Built a metric layer\n- Led SQL reviews\n- Mentored two analysts\n- Shipped alerting\n';
+  writeFileSync(join(docsDir, 'cv', 'master.md'), v1);
+  // A data root of its own, so the "never under the data root" check below
+  // neither reads the developer's checkout nor inherits their CAREER_OPS_ROOT.
+  const otherRoot = join(tmp, 'other-root');
+  mkdirSync(otherRoot, { recursive: true });
+  const env = { ...process.env, CAREER_OPS_ROOT: otherRoot, CAREER_OPS_DOCUMENTS_DIR: docsDir, CAREER_OPS_INTAKE_STATE: stateFile };
+  const snapFor = (rel) => join(snapDir, intake.snapshotFileName(rel));
+
+  try {
+    // Never committed: no snapshot, and --diff says so before the full text.
+    const fresh = run(NODE, ['intake.mjs', '--diff', 'cv/master.md'], { env });
+    if (fresh && /^intake: no snapshot to diff cv\/master\.md against \(it has never been committed\); full text follows\.\n/.test(fresh)
+      && fresh.includes('Ran SQL reviews')) {
+      pass('--diff on a never-committed source says so and prints the full text');
+    } else fail(`--diff before any commit: ${JSON.stringify(fresh)}`);
+
+    // A scan alone writes nothing; only --commit does.
+    run(NODE, ['intake.mjs'], { env });
+    if (!existsSync(snapDir)) pass('a scan without --commit writes no snapshot');
+    else fail('scan wrote data/intake-snapshots/ without --commit');
+
+    run(NODE, ['intake.mjs', '--commit', 'cv/master.md'], { env });
+    const snap = existsSync(snapFor('cv/master.md')) ? readFileSync(snapFor('cv/master.md'), 'utf-8') : null;
+    if (snap === v1) pass('--commit writes the extracted text to data/intake-snapshots/ beside the ledger');
+    else fail(`snapshot after commit: ${JSON.stringify(snap)}`);
+
+    const scanJson = run(NODE, ['intake.mjs'], { env }) || '';
+    if (!scanJson.includes('"text"')) pass('the scan JSON still carries a preview, not the full text');
+    else fail('scan JSON grew a full-text field');
+
+    const same = run(NODE, ['intake.mjs', '--diff', 'cv/master.md'], { env });
+    if (same && /^intake: cv\/master\.md is unchanged since it was last committed/.test(same)) {
+      pass('--diff on an unchanged source says there is nothing new');
+    } else fail(`--diff unchanged: ${JSON.stringify(same)}`);
+
+    writeFileSync(join(docsDir, 'cv', 'master.md'), v2);
+    const diff = run(NODE, ['intake.mjs', '--diff', './cv/master.md'], { env }) || '';
+    const lines = diff.split('\n');
+    if (
+      lines[0] === '--- cv/master.md (committed ' + JSON.parse(readFileSync(stateFile, 'utf-8')).ingested['cv/master.md'].ingestedAt + ')'
+      && lines[1] === '+++ cv/master.md (current)'
+      && lines.includes('-- Ran SQL reviews')
+      && lines.includes('+- Led SQL reviews')
+      && lines.includes('+- Shipped alerting')
+      && !lines.some((l) => /^[-+]- Built a metric layer/.test(l))
+      && lines.some((l) => /^@@ -\d+,\d+ \+\d+,\d+ @@ ### Example Co$/.test(l))
+    ) {
+      pass('--diff prints removed and added lines, with the enclosing heading on the hunk');
+    } else fail(`--diff after edit: ${JSON.stringify(diff)}`);
+
+    // Re-saved with CRLF and no final newline: a new hash, but no line changed.
+    writeFileSync(join(docsDir, 'cv', 'master.md'), v1.replace(/\n/g, '\r\n').replace(/\r\n$/, ''));
+    const resaved = run(NODE, ['intake.mjs', '--diff', 'cv/master.md'], { env }) || '';
+    if (resaved === 'intake: cv/master.md differs from its snapshot only in line endings or the final newline; nothing to propose.') {
+      pass('--diff names a line-ending-only change instead of printing empty diff headers');
+    } else fail(`--diff after a line-ending-only change: ${JSON.stringify(resaved)}`);
+    writeFileSync(join(docsDir, 'cv', 'master.md'), v2);
+
+    // A snapshot that no longer hashes to the ledger is not a baseline.
+    writeFileSync(snapFor('cv/master.md'), 'tampered\n');
+    const tampered = run(NODE, ['intake.mjs', '--diff', 'cv/master.md'], { env }) || '';
+    if (/^intake: no snapshot to diff cv\/master\.md against \(the snapshot does not match the recorded fingerprint\)/.test(tampered)
+      && tampered.includes('Shipped alerting')) {
+      pass('--diff ignores a snapshot that does not match the ledger and prints the full text');
+    } else fail(`--diff with a mismatched snapshot: ${JSON.stringify(tampered)}`);
+
+    // Every user's first run after upgrading: ledger entry, no snapshot.
+    rmSync(snapDir, { recursive: true, force: true });
+    const upgraded = run(NODE, ['intake.mjs', '--diff', 'cv/master.md'], { env }) || '';
+    if (/^intake: no snapshot to diff cv\/master\.md against \(it was committed before intake kept snapshots\); full text follows\.\n/.test(upgraded)
+      && upgraded.endsWith(v2.trimEnd())) {
+      pass('--diff with a ledger entry but no snapshot falls back to the full text');
+    } else fail(`--diff with no snapshot: ${JSON.stringify(upgraded)}`);
+
+    const escaped = run(NODE, ['intake.mjs', '--diff', '../data/intake-state.json'], { env });
+    const escErr = (lastRunFailure() || {}).stderr || '';
+    if (escaped === null && escErr.includes('Path escapes documents/')) pass('--diff refuses paths that resolve outside documents/');
+    else fail(`--diff followed a path outside documents/: ${JSON.stringify(escaped)}`);
+
+    // Path-name safety: paths a slug would merge, and a name with PII in it,
+    // all get distinct, opaque, hash-named files.
+    const tricky = ['cv/a-b.md', 'cv/a/b.md', 'cv/Jane Doe CV.md'];
+    mkdirSync(join(docsDir, 'cv', 'a'), { recursive: true });
+    tricky.forEach((rel, i) => writeFileSync(join(docsDir, rel), `# Fictional source ${i}\n`));
+    run(NODE, ['intake.mjs', '--commit', ...tricky], { env });
+    const names = existsSync(snapDir) ? readdirSync(snapDir) : [];
+    const contents = tricky.map((rel) => (existsSync(snapFor(rel)) ? readFileSync(snapFor(rel), 'utf-8') : null));
+    if (
+      names.length === tricky.length
+      && names.every((n) => /^[0-9a-f]{64}\.txt$/.test(n))
+      && contents.every((c, i) => c === `# Fictional source ${i}\n`)
+    ) {
+      pass('snapshot filenames are collision-free hashes that never echo the source name');
+    } else fail(`snapshot names: ${JSON.stringify(names)} contents: ${JSON.stringify(contents)}`);
+    if (intake.snapshotFileName('cv/CV.md').toLowerCase() !== intake.snapshotFileName('cv/cv.md').toLowerCase()) {
+      pass('case-variant source paths get different snapshot files on a case-insensitive disk');
+    } else fail('case-variant paths share a snapshot name');
+
+    if (!existsSync(join(otherRoot, 'data', 'intake-snapshots'))) pass('snapshots follow the overridden ledger, never the data root');
+    else fail('snapshots were written under the data root instead of beside the overridden ledger');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 // ── symlink handling ─────────────────────────────────────────────────────
 // Symlinks are followed on purpose (a symlinked master CV is a natural
 // setup), which makes two behaviours worth pinning: a link cycle must not
@@ -314,17 +432,20 @@ if (process.platform !== 'win32' && process.getuid?.() !== 0) {
   const dataContractDoc = readFileSync(join(ROOT, 'DATA_CONTRACT.md'), 'utf-8');
   const gitignoreDoc = readFileSync(join(ROOT, '.gitignore'), 'utf-8');
   const updaterSrc = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8');
+  const manifestSrc = readFileSync(join(ROOT, 'lib', 'update-manifest.mjs'), 'utf-8');
   const agentsDoc = readFileSync(join(ROOT, 'AGENTS.md'), 'utf-8');
   if (
     dataContractDoc.includes('documents/*')
     && dataContractDoc.includes('data/intake-state.json')
+    && dataContractDoc.includes('data/intake-snapshots/')
+    && gitignoreDoc.includes('data/intake-snapshots/')
     && gitignoreDoc.includes('documents/*')
     && gitignoreDoc.includes('!documents/.gitkeep')
     && gitignoreDoc.includes('!documents/README.md')
     && gitignoreDoc.includes('data/intake-state.json')
     && updaterSrc.includes("'documents/'")
-    && updaterSrc.includes("'modes/intake.md'")
-    && updaterSrc.includes("'intake.mjs'")
+    && manifestSrc.includes("'modes/intake.md'")
+    && manifestSrc.includes("'intake.mjs'")
     && agentsDoc.includes('`intake`')
   ) {
     pass('intake registered in data contract, gitignore, updater manifest, and AGENTS.md routing');

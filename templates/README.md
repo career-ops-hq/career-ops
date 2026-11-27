@@ -8,17 +8,25 @@ System-layer template files used by career-ops scripts and modes. These files ar
 |------|---------|---------|
 | `cv-template.html` | `generate-pdf.mjs` | HTML/CSS template for ATS-optimized CV PDFs |
 | `cv-template.{compact,executive,jake,leadership,modern}.html` | `generate-pdf.mjs`, `build-cv-html.mjs` (via `cv-templates.mjs`) | Named CV variants selectable per CV or as a `cv.template` default. Same placeholder tokens and ATS rules as `cv-template.html`. See detailed section below. |
-| `resume-template.html` | `generate-pdf.mjs` (via `--template`) | Resume-branded variant of `cv-template.html`. Same layout and placeholder tokens; differs in: `<title>` reads "Resume" instead of "CV", omits Certifications section (but keeps Awards & Honors), targets 1–2 page US/industry format. See detailed section below. |
+| `resume-template.html` | `build-cv-html.mjs` (template path as its optional third argument) | Resume-branded variant of `cv-template.html`. Same layout and placeholder tokens; differs in: `<title>` reads "Resume" instead of "CV", omits Certifications section (but keeps Awards & Honors), targets 1–2 page US/industry format. See detailed section below. |
 | `cv-template.tex` | `generate-latex.mjs` | LaTeX/Overleaf template for ATS-optimized CV PDFs |
 | `cv-template.cjk.tex` | `build-cv-latex.mjs --template=cjk`, `generate-latex.mjs` | CJK (Chinese/Japanese/Korean) variant of `cv-template.tex` — loads `fontspec`+`xeCJK`. Requires the `tectonic` engine (XeTeX backend); pdflatex still cannot render CJK. See "CJK variant" below and `modes/latex.md`. |
 | `portals.example.yml` | Onboarding | Example portal scanner configuration (copy to `portals.yml` to activate) |
 | `states.yml` | `verify-pipeline.mjs`, `normalize-statuses.mjs`, `merge-tracker.mjs` | Canonical application states and their aliases |
-| `ats-rules.yml` | `cv-templates.mjs` (`atsLint`), `modes/pdf.md` | The ATS rules from `modes/pdf.md` as data: per rule an `id`, the `source` bullet it enforces quoted verbatim, a `severity`, a `detect` name (or `null` for a rule with no detector yet), and a **`must_not_flag`** contract saying what a check for it must stay quiet about. Plus `cannot_catch` — the two measured classes a static HTML check cannot see, which need a rendered PDF and `pdftotext -layout`. Rules are quoted, never cited by line number: the citations in #3109 were written as line numbers and one inserted bullet moved five of seven. `tests/ats-lint.test.mjs` fails when a quote no longer appears in `modes/pdf.md`, and `tests/ats-lint-shipped-templates.test.mjs` runs the lint over every shipped template on each PR. Contribution rule: no rule without a verbatim `modes/pdf.md` quote and a `must_not_flag` clause; a rule the shipped templates violate is a rule the project does not hold, so fix the template or change the rule — never silence the detector. |
+| `ats-rules.yml` | `cv-templates.mjs` (`atsLint`), `modes/pdf.md` | The ATS rules from `modes/pdf.md` as data: per rule an `id`, the `source` bullet it enforces quoted verbatim, a `severity`, a `scope` (`structural` rules can be judged on an unrendered template; `content` rules need rendered output and are reported as skipped on a template, never as passed), a `detect` name (or `null` for a rule with no detector yet), and a **`must_not_flag`** contract saying what a check for it must stay quiet about. Plus `cannot_catch` — the two measured classes a static HTML check cannot see, which need a rendered PDF and `pdftotext -layout`. Rules are quoted, never cited by line number: the citations in #3109 were written as line numbers and one inserted bullet moved five of seven. `tests/ats-lint.test.mjs` fails when a quote no longer appears in `modes/pdf.md`, and `tests/ats-lint-shipped-templates.test.mjs` runs the lint over every shipped template on each PR. Contribution rule: no rule without a verbatim `modes/pdf.md` quote and a `must_not_flag` clause; a rule the shipped templates violate is a rule the project does not hold, so fix the template or change the rule — never silence the detector. |
+| _(no file)_ | `cv-templates.mjs` (`renderLint`), `generate-pdf.mjs` | Not data: seven rules in code for what the renderer silently drops (`<script>`, embedded content, `on*` handlers, `javascript:` URLs, meta refresh, remote subresources, an iframe `srcdoc` nested too deep to inspect). Run `node cv-templates.mjs lint cv <name> --render`. Advisory, never blocks a render. `tests/render-lint.test.mjs` runs it over every shipped template. |
 | `restrictive-covenants.yml` | `modes/offer-prep.md` (statutory-context notes) | Jurisdiction-keyed table of restrictive-covenant statutory rules, per covenant type (v1: non-compete only — seeds US-CA B&P §16600/§16600.5 and Ontario ESA s.67.2). Status spectrum: `prohibited` / `allowed_with_mandatory_compensation` / `allowed_with_limits` / `common_law_reasonableness`. Prompt-level data reference — no script reads it; local lookup, never online research. Feeds statutory-context notes and targeted lawyer questions; never a verdict about the candidate's clause. Contribution rule: no entry without a citable legal source, an effective date, and an `as_of` verification date; covenant types are never conflated. |
-| `protected-grounds.yml` | `modes/interview-redflag.md` (Step 2c — protected-grounds question detection) | Jurisdiction-keyed table of protected grounds / do-not-ask topics in hiring (seeds: CA-ON — Ontario Human Rights Code s.5(1), 16 grounds; JP — MHLW 公正な採用選考 fair-hiring 14-item do-not-ask list, bilingual Japanese terms + English glosses). Prompt-level data reference — no script reads it; local lookup over local transcripts, nothing leaves the machine. Feeds topic-match observations weighed by the mode's existing evidence tiers; per-ground `legitimate_contexts` (BFOR, accommodation, post-offer) prevent false flags. Never a legal verdict — "touches {ground}, protected under {legal basis}", never "this was illegal". Contribution rule: no entry without a citable legal source (regulator/ministry guidance preferred) and an `as_of` verification date. |
+| `protected-grounds.yml` | `modes/interview-redflag.md` (Step 2c — protected-grounds question detection) | Jurisdiction-keyed table of protected grounds / do-not-ask topics in hiring (seeds: CA-ON — Ontario Human Rights Code s.5(1), 16 grounds; JP — MHLW 公正な採用選考 fair-hiring 14-item do-not-ask list, bilingual Japanese terms + English glosses; DE — AGG (Allgemeines Gleichbehandlungsgesetz) §1 grounds plus nationality, German terms + English glosses). Prompt-level data reference — no script reads it; local lookup over local transcripts, nothing leaves the machine. Feeds topic-match observations weighed by the mode's existing evidence tiers; per-ground `legitimate_contexts` (BFOR, accommodation, post-offer) prevent false flags. Never a legal verdict — "touches {ground}, protected under {legal basis}", never "this was illegal". Contribution rule: no entry without a citable legal source (regulator/ministry guidance preferred) and an `as_of` verification date. |
 | `agency-licensing.yml` | `modes/oferta.md` (Block G signal 10) | Jurisdiction-keyed table of agency/recruiter licensing regimes with official public registry lookups (e.g. Ontario THA/recruiter licensing mandatory since 2024-07-01, ministry status checker on ontario.ca). Prompt-level data reference — no script reads it, nothing ever fetches or scrapes a registry URL. Contribution rule: no entry without a regulator-grade source, an effective date, an `as_of` verification date, and an official government registry URL (never a third-party mirror). |
 | `immigration-status-requirements.yml` | `modes/oferta.md` (Block G immigration-status signal), `modes/apply.md` (Step 5d) | Jurisdiction-keyed table of immigration-status requirements employers may not demand (e.g. "US citizens only" under 8 U.S.C. §1324b, the *Haseeb* permanence proxy under Ontario's Human Rights Code). Every row carries a mandatory `lawful_screening_contrast` — authorization/sponsorship questions are lawful and never flagged. Prompt-level data reference, agent-judged matching — no script reads it. Contribution rule: no entry without a citable legal source, `as_of` date, and non-empty `lawful_screening_contrast`. |
 | `jurisdiction-ai-screening-disclosure.yml` | `modes/oferta.md` (Block G signal 15) | Jurisdiction-keyed table of AI-hiring-screening disclosure obligations (e.g. NYC Local Law 144 AEDT bias-audit + candidate-notice, keyed `US-NY-NYC` and split into `job_location_condition` / `candidate_residency_condition` since the two duties trigger on different facts; Illinois AI Video Interview Act pre-interview consent; EU AI Act Article 26 high-risk-recruitment-AI notice, effective 2027-12-02 per a provisional May 2026 Digital Omnibus deferral from the original 2026-08-02 date — see the row's `enforcement_notes` for the pending-adoption caveat). Presence-based half (posting names AI/automated screening) can fire standalone; absence half is corroborating-only per the umbrella's evidence-strength rule — a posting's silence is never proof no disclosure happens later in the process (e.g. Illinois' law attaches to the interview step, not the ad). Prompt-level data reference, agent-judged matching — no script reads it. Contribution rule: no entry without a regulator-grade source, an effective date, an `as_of` verification date, and an official government/regulator `official_source.url`. |
+
+| `jurisdiction-vacancy-disclosure.yml` | `modes/oferta.md` (Block G signal 19) | Jurisdiction-keyed table of vacancy-status disclosure obligations for public job postings (seed: Ontario ESA s. 8.5 and O. Reg. 476/24, postings made on or after 2026-01-01; New York S8877 and other bills are commented candidates only, not law in force). Presence half (posting states an existing vacancy, or states there is none) fires standalone; silence half is corroborating-only because employer size, posting type and exclusions cannot be verified from a JD. Prompt-level data reference, zero-fetch, no script reads it. Contribution rule: no entry without a regulator-grade source, an in-force effective date, an `as_of` verification date, and an official `official_source.url`. |
+
+| `jurisdiction-unpaid-placement.yml` | `modes/oferta.md` (Block G signal 20) | Jurisdiction-keyed table of unpaid-placement rules (seed: Ontario ESA s. 1 (1) "employee" clause (c), s. 3 (5) paras. 1, 2 and 2.1, and O. Reg. 285/01 s. 2 (1) (e); UK, US, Australia and France are commented candidates only, not verified). Presence-based and warn-only: a posting stating the role is unpaid gets a factual note naming the rule and its carve-outs; a posting silent about pay gets nothing. Prompt-level data reference, zero-fetch, no script reads it. Contribution rule: no entry without a regulator-grade source, an effective date, an `as_of` verification date, and an official `official_source.url`. |
+| `jurisdiction-accommodation-notice.yml` | `modes/oferta.md` (Block G signal 22) | Jurisdiction-keyed table of recruitment accommodation-notice duties (seed: Ontario O. Reg. 191/11 ss. 20-24, consolidation from 2026-03-30; Manitoba, US Section 503 and others are commented candidates only, not verified). Presence fires standalone; silence is corroborating-only because applicability depends on employer type and size, which a posting does not show; an assessment-stage hint appears only when the user says they were invited to one. Warn-only, prompt-level data reference, zero-fetch, no script reads it. Contribution rule: no entry without a regulator-grade source, an effective date, an `as_of` verification date, and an official `official_source.url`. |
+
+| `jurisdiction-candidate-fees.yml` | `modes/oferta.md` (Block G signal 21) | Jurisdiction-keyed table of rules on fees charged to job candidates (rows: Ontario, Employment Protection for Foreign Nationals Act, 2009 ss. 1 (1), 7, 7.1, 8 and 9, which protect foreign nationals, i.e. not Canadian citizens or permanent residents, and Employment Standards Act, 2000 s. 74.8 (1) paras. 1, 2, 3 and 5 for temporary-help-agency assignment employees; and Great Britain (`UK`), Employment Agencies Act 1973 s. 6 and Conduct Regulations 2003 reg. 26, which protect every work-seeker in England, Wales and Scotland, not Northern Ireland; Australia, Singapore, US and ILO C181 are commented candidates only, not verified). Presence-based and warn-only: a posting or message asking the candidate to pay gets a factual note on whom the rule covers plus a scam-pattern note; a posting silent about fees gets nothing. Prompt-level data reference, zero-fetch, no script reads it. Contribution rule: no entry without a regulator-grade source, an effective date, an `as_of` verification date, and an official `official_source.url`. |
 
 | `jurisdiction-prohibited-content.yml` | `modes/oferta.md` (Block G signal 10), `modes/apply.md` (Step 5c) | Jurisdiction-keyed table of content employers are legally prohibited from requiring/asking for (e.g. "Canadian experience" in Ontario postings, salary-history questions in California). Prompt-level data reference, agent-judged matching — no script reads it. Contribution rule: no entry without a citable legal source and effective date. |
 | `jurisdiction-relocation-tax.yml` | `salary-gap.mjs` (`loadRelocationTable`/`matchJurisdiction`/`computeRelocationAdjustment`), `modes/oferta.md` (Block G signal 16) | Jurisdiction-keyed table of federal + provincial/state marginal tax brackets (v1 seeds: CRA federal + Ontario, Nova Scotia, Alberta, British Columbia — 2026 rates). Script-driven, unlike most tables here: `salary-gap.mjs` reads it to compute a transparent, bracket-only relocation purchasing-power comparison when a posting's `posting_location` differs from the candidate's home province/state. Deliberately simplified (no basic personal amount, credits, CPP/EI, surtaxes, or cost-of-living index — the last scoped out as a v1 limitation, see the file's own header) and explicitly not financial/tax advice. Contribution rule: no entry without a regulator-grade source, an explicit `tax_year`, an `as_of` verification date, and an official tax-authority `official_source.url`. |
@@ -33,11 +41,13 @@ The HTML template rendered by Playwright into PDF. Uses placeholder tokens (`{{N
 
 **Opt-in footer slots:** `{{PHOTO}}` (DACH/European markets, #264) and `{{CONSENT}}` (GDPR/RODO consent text) are both off by default — empty/absent renders no visible element, so existing CVs are byte-identical to a pre-slot layout.
 
-**Optional sections:** Core Competencies, Work Experience, Projects, Education, Certifications, Awards & Honors, and Skills are dropped in full — section header included — when the payload carries no entries for them (see `cv-sections-core.mjs`). Their markers (`<!-- WORK EXPERIENCE -->`, `<!-- PROJECTS -->`, `<!-- AWARDS -->`, …) are what the strip matches on, so renaming or removing a marker disables the strip for that section. Note that Work Experience being *strippable* does not make `{{EXPERIENCE}}` optional in a custom template — `cv-templates.mjs` still requires the placeholder; it is the payload's `experience` array that may be empty.
+**Optional sections:** Professional Summary, Core Competencies, Work Experience, Projects, Education, Certifications, Awards & Honors, and Skills are dropped in full — section header included — when the payload carries no entries for them (see `cv-sections-core.mjs`). The summary is text, so it is dropped when that text is empty or whitespace-only. Their markers (`<!-- PROFESSIONAL SUMMARY -->`, `<!-- WORK EXPERIENCE -->`, `<!-- PROJECTS -->`, …) are what the strip matches on, so renaming or removing a marker disables the strip for that section. Note that Work Experience being *strippable* does not make `{{EXPERIENCE}}` optional in a custom template — `cv-templates.mjs` still requires the placeholder; it is the payload's `experience` array that may be empty.
 
 **The `<!-- END -->` sentinel (custom templates, read this):** Skills is the last section in the shipped templates, so it has no following section marker for the strip to stop at. A template that renders a Skills section must therefore place a literal `<!-- END -->` comment immediately after it (`%%%%  END  %%%%` in the LaTeX template) — that sentinel is what bounds the strip.
 
 Getting this wrong is safe, by design. If the sentinel is missing, the empty-Skills strip simply does not run: the template is left byte-for-byte untouched and the Skills section renders as a bare header. That is a cosmetic bug, deliberately chosen over the alternative — without the sentinel *and* without this fail-safe, the strip would run to end-of-file and delete the closing `</div></body></html>` (`\end{document}`), producing a truncated document. Custom templates are validated only for `{{NAME}}`, `{{EXPERIENCE}}`, and `{{EDUCATION}}` (see `cv-templates.mjs`); the sentinel is not required, precisely because its absence degrades gracefully.
+
+The summary strip follows the same rule. It stops at the next section marker, so a template with no marker after its summary keeps the bare header instead of losing everything below it.
 
 ### Named CV templates
 
@@ -84,6 +94,55 @@ sections: all
 
 `sections: all` claims every section; `sections: experience, education` claims a subset. A declared section must exist (checked when the template resolves by name) and must parse with a non-empty `<!--ENTRY-->` zone (checked when the CV renders), or the build fails naming the file — it never falls back. Undeclared sections keep the silent fallback, so a pack written before this key exists behaves exactly as it did; a pack that declares nothing is simply a pack that has not made the claim. Prefer `sections: all` for a pack whose point is its DOM, as the ATS pack does: the alternative is being correct by a coincidence the pack never stated, which the next change to a built-in builder can end without any test noticing.
 
+### Distributable template packs (`pack.json`)
+
+A template pack you publish on its own is a directory with a `pack.json` at its root and the templates it declares. `validate-template-pack.mjs` is the structural gate for it. It reads the files as text and executes nothing.
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `packVersion` | yes | Manifest format version. The only supported value is the number `1`; anything else fails. |
+| `id` | yes | Lowercase letters, digits and hyphens, starting with a letter or digit (`^[a-z0-9][a-z0-9-]*$`). |
+| `name` | yes | Must equal `career-ops-template-` plus `id`. |
+| `displayName`, `description`, `author`, `license`, `version` | yes | Non-empty strings. |
+| `templates` | yes | Non-empty array of template entries (below). |
+
+Each entry in `templates`:
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `id` | yes | Same format as the pack `id`. Unique within the pack. |
+| `displayName` | yes | Non-empty string. |
+| `kind` | yes | `cv`, `cover` or `both`. |
+| `ats` | yes | Boolean. When `true`, the ATS rules in `ats-rules.yml` run on the template and any finding fails the pack. |
+| `atsRisk` | yes | `none` or `design-forward`. |
+| `atsRiskNote` | when `atsRisk` is `design-forward` | Non-empty string saying what the risk is. |
+| `files.cv`, `files.cover` | one per kind (`both` needs both) | Path inside the pack. The filename must be `cv-template.<id>.html` or `cover-letter-template.<id>.html`, and the file must exist. |
+| `previews.cv`, `previews.cover` | one per kind | Path inside the pack to an existing preview file. |
+
+Declared paths must name their file directly. An absolute path, a path that leaves the pack, a `..` segment and a symlink that resolves outside the pack all fail. Fields not listed here are not checked.
+
+Every declared template must carry the placeholders `validateTemplate` requires, and must pass `renderLint`: a script, remote asset or other construct the renderer drops fails the pack, with no advisory tier.
+
+The validator lives in career-ops and imports `./cv-templates.mjs` and `./lib/is-main-module.mjs`, so a pack checkout does not contain it. Run it from a career-ops checkout, after `npm install --ignore-scripts` there, and pass the pack directory:
+
+```bash
+node <career-ops-checkout>/validate-template-pack.mjs <pack-dir>
+```
+
+It exits 0 and prints `✓ template pack is valid` when the pack passes. It exits 1 with one `✗` line per problem on stderr, and 2 when no directory is given. `--help` prints the usage. Fix every line, then run it again.
+
+To check a pack in its own CI, have the job check out career-ops next to the pack and run that same command. For example, in GitHub Actions:
+
+```yaml
+- uses: actions/checkout@v4
+- uses: actions/checkout@v4
+  with:
+    repository: career-ops-hq/career-ops
+    path: career-ops
+- run: npm install --ignore-scripts --prefix career-ops
+- run: node career-ops/validate-template-pack.mjs .
+```
+
 ### resume-template.html
 
 Resume-branded variant of `cv-template.html` for US/industry job applications. Key differences from the CV template:
@@ -94,6 +153,12 @@ Resume-branded variant of `cv-template.html` for US/industry job applications. K
 - **Awards & Honors is kept** — unlike Certifications. A contest medal or dean's list is a competitive signal rather than academic filler, and it is the strongest line an early-career candidate has when the experience section is thin. It costs nothing when unused: no entries means no section.
 
 Otherwise uses the same placeholder tokens (`{{NAME}}`, `{{SUMMARY_TEXT}}`, etc.) and is fully compatible with the existing PDF pipeline.
+
+**Usage:** `cv-templates.mjs` only discovers files named `cv-template*`, so this template is not selectable by name or through `cv.template`. Pass its path to `build-cv-html.mjs` instead, then render the HTML with `generate-pdf.mjs` as usual:
+
+```bash
+node build-cv-html.mjs payload.json output/resume.html templates/resume-template.html
+```
 
 **Keep in sync:** When updating `cv-template.html`, apply matching changes to `resume-template.html` (preserving the differences noted above).
 
@@ -130,6 +195,10 @@ Pre-configured portal scanner with 45+ tracked companies and search queries. Con
 
 ### states.yml
 
-Defines the 10 canonical application states (`Evaluated`, `Applied`, `Responded`, `Assessment`, `Interview`, `Offer`, `Hired`, `Rejected`, `Discarded`, `SKIP`) with aliases for common variants. All pipeline scripts validate statuses against this file.
+Defines the 11 canonical application states (`Evaluated`, `Speculative`, `Applied`, `Responded`, `Assessment`, `Interview`, `Offer`, `Hired`, `Rejected`, `Discarded`, `SKIP`) with aliases for common variants. All pipeline scripts validate statuses against this file.
 
 **Do not rename states** -- the dashboard and all scripts depend on these exact IDs. You can add aliases if you encounter new variants that should map to an existing state.
+
+## Your own templates
+
+A template you make or customize belongs in `data/templates/` under your data root, not in this directory. `cv-templates.mjs` searches both, uses the same filenames (`cv-template.<name>.html`, `cover-letter-template.<name>.html`, or a pack subdirectory), and a name found in both resolves to your file in `data/templates/`. Updates replace this directory and never touch yours.
