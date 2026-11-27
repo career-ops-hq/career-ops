@@ -88,6 +88,44 @@ test('styleHidden treats U+00A0 as part of a CSS token, not whitespace', () => {
   assert.ok(!clean.includes('Hidden payload'));
 });
 
+test('styleHidden accepts two-keyword overflow values before applying the cascade', () => {
+  const html = '<p>Role</p><div style="height:0;overflow:hidden hidden">Hidden payload</div>';
+  const { clean, findings } = guard(html, 'html');
+  assert.ok(
+    findings.hidden_blocks.some((b) => b.reason === 'zero-box + overflow:hidden'),
+    `two-keyword overflow must still hide: ${JSON.stringify(findings.hidden_blocks)}`,
+  );
+  assert.ok(!clean.includes('Hidden payload'));
+});
+
+test('styleHidden validates opacity overrides before applying the cascade', () => {
+  const invalid = guard(
+    '<p>Role</p><div style="opacity:0;opacity:bogus">Hidden payload</div>',
+    'html',
+  );
+  assert.ok(
+    invalid.findings.hidden_blocks.some((b) => b.reason === 'opacity:0'),
+    `invalid opacity must not replace 0: ${JSON.stringify(invalid.findings.hidden_blocks)}`,
+  );
+  assert.ok(!invalid.clean.includes('Hidden payload'));
+
+  const valid = guard(
+    '<div style="opacity:0;opacity:0.5"><p>Visible after override</p></div>',
+    'html',
+  );
+  assert.equal(valid.findings.hidden_blocks.length, 0);
+});
+
+test('styleHidden does not count escaped parentheses as nesting', () => {
+  const html = '<p>Role</p><div style="background-image:url(foo\\();display:none">Hidden payload</div>';
+  const { clean, findings } = guard(html, 'html');
+  assert.ok(
+    findings.hidden_blocks.some((b) => b.reason === 'display:none'),
+    `escaped ( must not absorb the next declaration: ${JSON.stringify(findings.hidden_blocks)}`,
+  );
+  assert.ok(!clean.includes('Hidden payload'));
+});
+
 test('styleHidden respects CSS cascade overrides and non-zero numeric values', () => {
   const overridden = guard(
     '<div style="display: none; display: block"><p>Visible after override</p></div>',

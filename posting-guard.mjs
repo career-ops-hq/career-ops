@@ -109,17 +109,34 @@ const OFF_CANVAS_RE = /^-\d{3,}px$/;
 const OVERFLOW_HIDDEN_RE = /^hidden(?:\s+hidden)?$/;
 const CSS_WS_TRIM = /^[\t\n\f\r ]+|[\t\n\f\r ]+$/g;
 const CSS_IMPORTANT_RE = /[\t\n\f\r ]*![\t\n\f\r ]*important$/;
-const CSS_ENUM_VALUES = {
-  display: ['none', 'block', 'inline', 'inline-block', 'flex', 'inline-flex',
-    'grid', 'inline-grid', 'table', 'table-cell', 'table-row', 'list-item',
-    'contents', 'flow-root', 'inherit', 'initial', 'unset', 'revert'],
-  visibility: ['visible', 'hidden', 'collapse', 'inherit', 'initial', 'unset', 'revert'],
-  overflow: ['visible', 'hidden', 'clip', 'scroll', 'auto', 'inherit', 'initial', 'unset', 'revert'],
+const CSS_KEYWORDS = 'inherit|initial|unset|revert';
+const CSS_NUM = '[+-]?(?:\\d+\\.?\\d*|\\.\\d+)';
+const OVERFLOW_KEYWORDS = new Set(['visible', 'hidden', 'clip', 'scroll', 'auto']);
+const CSS_VALUE_VALIDATORS = {
+  display: new RegExp(`^(?:none|block|inline|inline-block|flex|inline-flex|grid|inline-grid|table|table-cell|table-row|list-item|contents|flow-root|${CSS_KEYWORDS})$`),
+  visibility: new RegExp(`^(?:visible|hidden|collapse|${CSS_KEYWORDS})$`),
+  overflow: (v) => {
+    const parts = v.split(/[\t\n\f\r ]+/);
+    return parts.length <= 2 && parts.every((p) => OVERFLOW_KEYWORDS.has(p)
+      || ['inherit', 'initial', 'unset', 'revert'].includes(p));
+  },
+  opacity: new RegExp(`^(?:${CSS_NUM}%?|${CSS_KEYWORDS})$`),
+  'font-size': new RegExp(`^(?:${CSS_NUM}(?:px|pt|em|rem|%|vw|vh|ch|ex)?|(?:xx-|x-)?small|medium|(?:xx-|x-)?large|larger|smaller|${CSS_KEYWORDS})$`),
+  color: new RegExp(`^(?:transparent|[a-z]+|#[0-9a-f]{3,8}|rgba?\\([^)]*\\)|hsla?\\([^)]*\\)|${CSS_KEYWORDS})$`),
+  clip: new RegExp(`^(?:auto|rect\\([^)]*\\)|inset\\([^)]*\\)|${CSS_KEYWORDS})$`),
+  'clip-path': new RegExp(`^(?:none|inset\\([^)]*\\)|circle\\([^)]*\\)|polygon\\([^)]*\\)|url\\([^)]*\\)|${CSS_KEYWORDS})$`),
+  left: new RegExp(`^(?:auto|${CSS_NUM}(?:px|pt|em|rem|%)?|${CSS_KEYWORDS})$`),
+  'text-indent': new RegExp(`^(?:${CSS_NUM}(?:px|pt|em|rem|%)?|${CSS_KEYWORDS})$`),
+  height: new RegExp(`^(?:auto|${CSS_NUM}(?:px|pt|em|rem|%|vw|vh)?|${CSS_KEYWORDS})$`),
+  width: new RegExp(`^(?:auto|${CSS_NUM}(?:px|pt|em|rem|%|vw|vh)?|${CSS_KEYWORDS})$`),
+  'line-height': new RegExp(`^(?:normal|${CSS_NUM}(?:px|pt|em|rem|%)?|${CSS_KEYWORDS})$`),
 };
 const validDeclaration = (prop, val) =>
-  !Object.hasOwn(CSS_ENUM_VALUES, prop)
-  || CSS_ENUM_VALUES[prop].includes(val)
-  || /^var\(/i.test(val);
+  !Object.hasOwn(CSS_VALUE_VALIDATORS, prop)
+  || /^var\(/i.test(val)
+  || (typeof CSS_VALUE_VALIDATORS[prop] === 'function'
+    ? CSS_VALUE_VALIDATORS[prop](val)
+    : CSS_VALUE_VALIDATORS[prop].test(val));
 
 function parseStyleDeclarations(style) {
   const s = decodeEntities(style).toLowerCase();
@@ -145,6 +162,10 @@ function parseStyleDeclarations(style) {
     if (ch === '"' || ch === "'") {
       quote = ch;
       buf += ch;
+      continue;
+    }
+    if (ch === '\\' && i + 1 < s.length) {
+      buf += ch + s[++i];
       continue;
     }
     if (ch === '(') depth += 1;
