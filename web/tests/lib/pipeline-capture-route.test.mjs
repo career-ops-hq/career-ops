@@ -20,8 +20,6 @@ import { captureWriterResult, MAX_CAPTURE_TEXT_BYTES, parseCaptureRequest } from
 const WEB = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const CODE_ROOT = dirname(WEB);
 const dataRoot = mkdtempSync(join(tmpdir(), "co-capture-route-data-"));
-const ENV_KEYS = ["CAREER_OPS_CODE_ROOT", "CAREER_OPS_ROOT", "CAREER_OPS_DATA_DIR", "CAREER_OPS_TRACKER"];
-const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
 let POST;
 
 before(async () => {
@@ -32,11 +30,11 @@ before(async () => {
   ({ POST } = await import("../../src/app/api/pipeline/capture/route.ts"));
 });
 
+// The environment is deliberately not restored. This file has its own process,
+// and a test node:test has already failed can still be running (an uncaught
+// EPIPE ends the test, not its loop): putting the shell's data root back would
+// send its next capture into the user's real data.
 after(() => {
-  for (const [k, v] of Object.entries(savedEnv)) {
-    if (v === undefined) delete process.env[k];
-    else process.env[k] = v;
-  }
   rmSync(dataRoot, { recursive: true, force: true });
 });
 
