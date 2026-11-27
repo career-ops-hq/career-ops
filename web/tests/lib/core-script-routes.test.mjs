@@ -243,6 +243,46 @@ test("doctor still relays a real verdict, including that onboarding is needed", 
 });
 
 // ---------------------------------------------------------------------------
+// followups: a cadence run that failed is a 500 with its reason, not "missing".
+// ---------------------------------------------------------------------------
+
+/** Run the followups handler; return its status and JSON body. */
+async function followupsGet() {
+  const { GET } = await route("followups");
+  const res = await GET(new Request("http://localhost/api/followups?full=1"));
+  return { status: res.status, body: await res.json() };
+}
+
+test("followups relays the cadence script's own JSON error with a 500", async () => {
+  // Given followup-cadence.mjs prints its {error} and exits 1, as it does on a
+  // tracker it cannot read
+  standIn("followup-cadence", 'console.log(JSON.stringify({ error: "tracker unreadable: EACCES" })); process.exit(1);');
+  // Then the route answers with that reason, not available:false
+  assert.deepEqual(await followupsGet(), { status: 500, body: { error: "tracker unreadable: EACCES" } });
+});
+
+test("followups names a crash from stderr when there is no JSON error", async () => {
+  // Given the script dies at import: Node prints the error, a stack, and ends
+  // stderr with its version banner
+  standIn("followup-cadence", 'import "career-ops-dependency-that-is-not-installed";');
+  const { status, body } = await followupsGet();
+  assert.equal(status, 500);
+  assert.match(body.error, /^followup-cadence\.mjs exit code 1: Error \[ERR_MODULE_NOT_FOUND\]: Cannot find package 'career-ops-dependency/);
+});
+
+test("followups reports a silent failed run as a 500 with its exit code", async () => {
+  standIn("followup-cadence", "process.exit(1);");
+  assert.deepEqual(await followupsGet(), { status: 500, body: { error: "followup-cadence.mjs exit code 1" } });
+});
+
+test("followups answers available:false only when the script is missing", async () => {
+  rmSync(join(codeRoot, "followup-cadence.mjs"));
+  const { status, body } = await followupsGet();
+  assert.equal(status, 200);
+  assert.equal(body.available, false);
+});
+
+// ---------------------------------------------------------------------------
 // portals/verify: a sweep that did not finish is a failure, not "0 broken".
 // ---------------------------------------------------------------------------
 
