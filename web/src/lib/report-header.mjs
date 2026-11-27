@@ -90,11 +90,19 @@ const DECISION_LABELS = {
   决定: "Decision",
 };
 
-function fieldName(raw) {
-  const key = raw.trim().toLowerCase();
+function lookup(key) {
   if (Object.hasOwn(DECISION_LABELS, key)) return DECISION_LABELS[key];
   if (Object.hasOwn(FIELD_KEYS, key)) return FIELD_KEYS[key];
   return undefined;
+}
+
+function fieldName(raw) {
+  const trimmed = raw.trim();
+  // A Turkish report written in capitals (`**MEŞRUİYET:**`) lowercases its
+  // dotted İ to `i` plus a combining dot under the default locale, which no key
+  // matches. The Turkish-aware fallback only runs when the plain lookup misses,
+  // so English labels keep the default rules (`TITLE` stays `title`, not `tıtle`).
+  return lookup(trimmed.toLowerCase()) ?? lookup(trimmed.toLocaleLowerCase("tr"));
 }
 
 function normalizeNewlines(text) {
@@ -132,7 +140,9 @@ export function readReport(md) {
   for (const l of headerLines) {
     const h = l.match(/^#\s+(.+)/);
     if (h) {
-      title = h[1].replace(/^Evalua[tc]i[oó]n:?\s*/i, "").trim();
+      // The prefix needs its delimiter (`Evaluation:`, `Evaluation :`,
+      // `Evaluation — `), or `# Evaluation Engineer` would lose half its title.
+      title = h[1].replace(/^Evalua[tc]i[oó]n(?:\s*:|\s+(?:—|–|--?)(?=\s))\s*/i, "").trim();
       continue;
     }
     const m = l.match(/^\s*\*\*(.+?):\*\*\s*(.*)$/);

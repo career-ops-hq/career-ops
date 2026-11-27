@@ -83,7 +83,7 @@ test("a label with no value is dropped, not rendered empty", () => {
 test("the Spanish title prefix is stripped: Evaluación, not only Evaluation", () => {
   // `Evaluat?i[oó]n` could not match `Evaluación` (a c, not a t, before the i),
   // so `# Evaluación: Acme` kept its prefix as the page title.
-  for (const heading of ["# Evaluation: Acme", "# Evaluación: Acme", "# Evaluacion: Acme"]) {
+  for (const heading of ["# Evaluation: Acme", "# Evaluación: Acme", "# Evaluacion: Acme", "# Evaluation : Acme", "# Evaluation — Acme"]) {
     assert.equal(parseReport([heading, "**Date:** 2026-01-01", "", "---", "", "## A) x", "y"].join("\n")).title, "Acme", heading);
   }
 });
@@ -91,4 +91,22 @@ test("the Spanish title prefix is stripped: Evaluación, not only Evaluation", (
 test("Decision reaches the header fields", () => {
   const meta = parseReport(report({ Decision: "Apply" }));
   assert.deepEqual(meta.fields, [{ label: "Decision", value: "Apply" }]);
+});
+
+test("a title that starts with the word Evaluation keeps it when no delimiter follows", () => {
+  for (const heading of ["# Evaluation Engineer", "# Evaluation Scientist — Acme"]) {
+    const expected = heading.slice(2);
+    assert.equal(parseReport([heading, "**Date:** 2026-01-01", "", "---", "", "## A) x", "y"].join("\n")).title, expected, heading);
+  }
+});
+
+test("a Turkish label in capitals still resolves: MEŞRUİYET, ARKETİP, TARİH", () => {
+  const meta = parseReport(report({ "MEŞRUİYET": "High Confidence", "ARKETİP": "AI Engineer", "TARİH": "2026-01-01" }));
+  assert.equal(meta.legitimacy, "High Confidence");
+  assert.deepEqual(meta.fields.map((f) => f.label), ["Legitimacy", "Archetype", "Date"]);
+});
+
+test("English labels in capitals keep the default lowercasing", () => {
+  const meta = parseReport(report({ ARCHETYPE: "AI Engineer", SCORE: "4.2/5" }));
+  assert.deepEqual(meta.fields.map((f) => f.label), ["Archetype", "Score"]);
 });
