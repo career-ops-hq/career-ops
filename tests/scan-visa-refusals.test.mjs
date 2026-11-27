@@ -47,6 +47,11 @@ const REFUSALS = [
   'Applicants must be legally authorized to work in the United States without requiring visa sponsorship now or in the future.',
   'Applicants must be authorized to work without the need for visa sponsorship by the start date.',
   'Must be legally eligible to work in Canada without requiring company sponsorship.',
+  // Past the old 4,000-character Greenhouse cut (2026-11-26).
+  'This position does not include visa sponsorship.',
+  'You must be work authorized in the United States without the need for new visa sponsorship.',
+  'As a result, visa sponsorship and relocation support are not available for this position.',
+  'Visa Sponsorship is not offer for this position.',
 ];
 
 // Postings that do offer sponsorship. Each must still pass strict mode, so no
@@ -63,6 +68,16 @@ const OFFERS = [
   'This role is eligible for sponsorship.',
   'We can support visa sponsorship for candidates outside the EU, including the EU Blue Card.',
   'We sponsor H-1B transfers.',
+  // An offer that hedges. "aren't able to successfully sponsor" must not read
+  // as a refusal.
+  "Visa sponsorship: We do sponsor visas! However, we aren't able to successfully sponsor visas for every role and every candidate.",
+  // Welcome text next to an offer. Only the measured requirement "work
+  // authorized in the United States without the need for new visa
+  // sponsorship" is a refusal.
+  'We sponsor visas and welcome candidates who can work without needing new visa sponsorship.',
+  'We sponsor visas and welcome candidates who can work without the need for new visa sponsorship.',
+  // "include" refuses only visa sponsorship, not other kinds.
+  'We offer visa sponsorship. The benefits package does not include sponsorship for conferences.',
   'Not sure whether you qualify? We provide visa sponsorship for every hire.',
 ];
 
