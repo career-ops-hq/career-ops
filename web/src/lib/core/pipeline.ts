@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { careerOpsRoot, portalsConfigPath, rootScript } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import type { DiscoveredOffer } from "./scan";
 import { pipelineWriterResult } from "./pipeline-writer-result.mjs";
@@ -67,8 +67,6 @@ export function addOffersToPipeline(offers: DiscoveredOffer[]): Promise<AddResul
 import { appendToPipeline, appendToScanHistory } from ${JSON.stringify(scanUrl)};
 import { localToday } from ${JSON.stringify(localTodayUrl)};
 import { readFileSync } from "node:fs";
-import path from "node:path";
-import { getCareerOpsRoot } from ${JSON.stringify(new URL("path-resolver.mjs", scanUrl).href)};
 import { loadYaml } from ${JSON.stringify(new URL("lib/yaml-document.mjs", scanUrl).href)};
 import { buildWorkplacePolicy, workplacePolicyFromConfig } from ${JSON.stringify(new URL("providers/_country.mjs", scanUrl).href)};
 let input = "";
@@ -78,7 +76,7 @@ process.stdin.on("end", async () => {
   try {
     const requested = JSON.parse(input);
     let config = {};
-    try { config = loadYaml(readFileSync(path.join(getCareerOpsRoot(), "portals.yml"), "utf8")); }
+    try { config = loadYaml(readFileSync(${JSON.stringify(portalsConfigPath(careerOpsRoot()))}, "utf8")); }
     catch (e) { if (e.code !== "ENOENT") throw e; }
     const policy = buildWorkplacePolicy(workplacePolicyFromConfig(config));
     const offers = requested.filter(o => policy(o.location, o.title, o).eligible);

@@ -6,6 +6,7 @@ import * as yaml from "js-yaml";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { resolveDataRoot } from "@/lib/core/data-root.mjs";
 import { getProfilePath } from "@/lib/core/profile-path.mjs";
+import { portalsConfigPath } from "@/lib/portals-config.mjs";
 import { readTrackerFile, resolveTrackerPath, trackerLinkDirs } from "@/lib/core/tracker-files.mjs";
 import { cachedFileValue } from "@/lib/stat-file-cache.mjs";
 import { resolveCodeRoot, resolveRootScript } from "@/lib/core/code-root.mjs";
@@ -449,6 +450,7 @@ export async function pdfPathForReport(n: string): Promise<string | null> {
  * the CV takeover; in-between (CV but no profile) → gentle nudges; established.
  */
 export type LifecyclePhase = "first-run" | "in-between" | "established";
+export { portalsConfigPath };
 /**
  * Server-side lifecycle, mirroring the core doctor.mjs prerequisite list with the
  * same missing-file and empty-YAML checks. The 4 user-layer prereqs: cv.md, config/profile.yml,
@@ -459,12 +461,6 @@ export type LifecyclePhase = "first-run" | "in-between" | "established";
  *   - in-between → has cv/data but setup incomplete: dashboard + the nudge banner.
  *   - established → all 4 prereqs present and both YAML files contain settings.
  */
-/** Absolute portals.yml path: CAREER_OPS_PORTALS when set, else <root>/portals.yml. */
-export function portalsConfigPath(root = careerOpsRoot(), env: NodeJS.ProcessEnv = process.env): string {
-  const override = env.CAREER_OPS_PORTALS?.trim();
-  return override ? path.resolve(override) : path.join(root, "portals.yml");
-}
-
 export function doctorState(snapshot?: Pick<PipelineSummary, "applications" | "inbox">): {
   phase: LifecyclePhase;
   onboardingNeeded: boolean;
