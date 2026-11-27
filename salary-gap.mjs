@@ -547,7 +547,7 @@ export function computeRelocationAdjustment({ grossAnnual, homeCode, destCode, j
 export function relocationForApplication(a, { jurisdictions, homeLocation }) {
   const postingLocation = a?.advertised?.postingLocation;
   if (!jurisdictions || !homeLocation || !postingLocation || !a?.advertised) return null;
-  if (a.advertised.period !== 'annual') return null;
+  if (a.advertised.period && a.advertised.period !== 'annual') return null;
   const homeCode = matchJurisdiction(homeLocation, jurisdictions);
   const destCode = matchJurisdiction(postingLocation, jurisdictions);
   return computeRelocationAdjustment({
