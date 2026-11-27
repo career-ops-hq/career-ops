@@ -30,7 +30,7 @@
  * Run: node invite-match.mjs < invite.txt          (JSON to stdout)
  *      node invite-match.mjs --file invite.txt
  *      echo "..." | node invite-match.mjs --summary
- *      node invite-match.mjs --apply [--id N]      (rejection-classified matches only; advances status to Rejected)
+ *      node invite-match.mjs --apply [--id N]      (advances a matched application to Interview or Rejected)
  *      node invite-match.mjs --no-clarification-draft   (omit the pre-interview clarification draft)
  *      node invite-match.mjs --self-test
  *
@@ -73,7 +73,7 @@ const USAGE = `Usage:
   node invite-match.mjs < invite.txt          # JSON to stdout
   node invite-match.mjs --file invite.txt     # read invite text from a file
   node invite-match.mjs --summary             # human-readable summary instead of JSON
-  node invite-match.mjs --apply [--id N]      # rejection-classified matches only; advances status to Rejected
+  node invite-match.mjs --apply [--id N]      # advances a matched application to Interview or Rejected
   node invite-match.mjs --no-clarification-draft  # invites only: omit the pre-interview clarification email draft
   node invite-match.mjs --self-test           # run the built-in self-test suite
   node invite-match.mjs --help                # print this usage block and exit
@@ -124,10 +124,7 @@ if (isMainModule(import.meta.url)) {
   }
   filePathArg = fileIdx !== -1 ? args[fileIdx + 1] : null;
 
-  // --apply advances a matched tracker row's status to Rejected — scoped to
-  // that transition only (see issue #2098). It is deliberately NOT the general
-  // #1960 "advance to Interview" flag: that issue is unclaimed and unimplemented
-  // here, so an invite-classified match is never auto-applied by this flag.
+  // Both transitions use the same matching and write path.
   applyMode = args.includes('--apply');
   const idIdx = args.indexOf('--id');
   if (idIdx !== -1 && (args[idIdx + 1] === undefined || args[idIdx + 1].startsWith('--'))) {
@@ -336,6 +333,82 @@ export function extractDate(text) {
     if (parseDate(date)) return date;
   }
   return null;
+}
+
+const SCHEDULE_DATE_PATTERNS = [
+  /(?:interview|round|screen|session|call|chat|meeting)\s+(?:scheduled\s+)?(?:for|on|at|is\s+on)\s+([^\n\r;]{1,60})/i,
+  /scheduled\s+(?:our\s+)?(?:interview|call|conversation|meeting|chat\s+)?(?:for|on)\s+([^\n\r;]{1,60})/i,
+  /see\s+you\s+(?:on\s+)?([^\n\r;]{1,60})/i,
+  /(?:speaking|meeting|chatting)\s+(?:with\s+[^\n,;]+\s+)?(?:on\s+)([^\n\r;]{1,60})/i,
+  /confirmed\s+for\s+([^\n\r;]{1,60})/i,
+  /(?:interview|appointment)\s+date\s*[:\-]\s*([^\n\r;]{1,60})/i,
+  /(?:date\s+(?:and|&)\s+time|time\s+(?:and|&)\s+date)\s*[:\-]\s*([^\n\r;]{1,60})/i,
+  /(?:taking\s+place|holding)\s+on\s+([^\n\r;]{1,60})/i,
+  /look(?:ing)?\s+forward\s+to\s+(?:meeting|speaking|interviewing|seeing\s+you)\s+(?:on\s+)?([^\n\r;]{1,60})/i,
+];
+
+// Keep the general date signal used for matching separate from the date
+// written to the tracker, which must be tied to the interview schedule.
+export function extractInterviewDate(text) {
+  const body = String(text ?? '').replace(/^(?:sent|date|received|from|to|subject|cc|bcc)[ \t]*:[^\r\n]*/gim, '');
+  for (const pattern of SCHEDULE_DATE_PATTERNS) {
+    const match = body.match(pattern);
+    const date = extractDate(match?.[1]);
+    if (date) return date;
+  }
+  return null;
+}
+
+const INTERVIEWER_PATTERNS = [
+  /(?:^|\n)\s*interviewers?(?:\(s\))?\s*[:\-]\s*([^\n\r;]+)/i,
+  /(?:^|\n)\s*(?:speaking|meeting|chatting)\s+with\s*[:\-]\s*([^\n\r;]+)/i,
+  /\b(?:you(?:'ll| will)? be )?(?:speaking|meeting|chatting)\s+with\s+([\p{Lu}\p{Lo}][\p{L}\p{M}' -]{1,40}?)(?:[.,\n\r]|\s+(?:from|at|on|via|regarding|about|to)\s|$)/iu,
+  /\binterview(?:ing)?\s+with\s+([\p{Lu}\p{Lo}][\p{L}\p{M}' -]{1,40}?)\s+(?:at|from)\s+[\p{Lu}\p{Lo}]/iu,
+];
+
+const NON_INTERVIEWER_WORDS = new Set([
+  'us', 'me', 'our team', 'the team', 'the hiring team', 'the interview panel',
+  'the recruiter', 'a recruiter', 'someone', 'everyone', 'hr', 'talent acquisition',
+]);
+
+/**
+ * Best-effort extraction of an interviewer name from raw invite email text (#1960).
+ * Only returns plausible person names; returns null if nothing plausible is found.
+ *
+ * @param {string} text - Raw pasted invite email text.
+ * @param {string|null} [company] - Extracted company name to prevent false matches.
+ * @returns {string|null}
+ */
+export function extractInterviewer(text, company = null) {
+  if (!text) return null;
+  const compNorm = company ? company.toLowerCase().trim() : null;
+  for (const pattern of INTERVIEWER_PATTERNS) {
+    const m = text.match(pattern);
+    if (m && m[1]) {
+      const candidate = m[1].trim().replace(/[.,;:]+$/, '');
+      if (candidate.length >= 2 && candidate.length <= 50) {
+        const lower = candidate.toLowerCase();
+        if (NON_INTERVIEWER_WORDS.has(lower)) continue;
+        if (compNorm && (lower === compNorm || lower.includes(compNorm))) continue;
+        return candidate;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Format the note text to record in the tracker row for an Interview transition (#1960).
+ *
+ * @param {{date?: string|null, interviewer?: string|null}} [signals]
+ * @returns {string}
+ */
+export function formatInviteNote(signals = {}) {
+  const { date, interviewer } = signals;
+  if (date && interviewer) return `Interview: ${date} with ${interviewer}`;
+  if (date) return `Interview: ${date}`;
+  if (interviewer) return `Interview with ${interviewer}`;
+  return 'Interview scheduled';
 }
 
 // The req branch's optional `id` carries its own leading `\s*` INSIDE the
@@ -607,20 +680,25 @@ const REJECTION_PHRASES_WEAK = [
   'unable to offer you',
 ];
 
-// Phrasings that suggest an interview invite. Mirrors the rejection phrase
-// lists above for
-// the opposite case; extractCompany's own patterns already do the real work
-// of the invite path, so this list exists purely for classification.
-const INVITE_PHRASES = [
+// Strong-tier interview invite phrasings: unambiguous ATS or recruiter
+// invite language that clearly indicates an interview invitation.
+const INVITE_PHRASES_STRONG = [
   'schedule your phone screen',
   'schedule your interview',
-  'phone screen',
-  'interviewing with',
-  'interview with',
-  'would like to invite you',
   'invite you to interview',
+  'invite you to a phone screen',
+  'invitation to interview',
+  'your interview is scheduled',
+];
+
+const INVITE_PHRASES_WEAK = [
+  'would like to invite you',
+  'invite you to schedule',
   'next steps in the interview process',
   'move you forward to the next round',
+  'interviewing with',
+  'interview with',
+  'phone screen',
   'like to set up a time',
   'like to set up a call',
   'book a time',
@@ -629,8 +707,7 @@ const INVITE_PHRASES = [
 /**
  * Classify pasted email text as `invite`, `rejection`, or `unknown`, and
  * report which phrase(s) drove the call — so a human/agent can sanity-check
- * a `rejection` classification before `--apply` performs its irreversible
- * tracker write (#2098, CodeRabbit review on PR #2100).
+ * a classification before `--apply` performs its tracker write (#2098, #1960).
  *
  * Rejection requires either a strong phrase (unambiguous on its own) or two
  * distinct corroborating-only phrases together — a single corroborating-only
@@ -642,13 +719,13 @@ const INVITE_PHRASES = [
  * (e.g. a rejection that references an earlier phone screen: "Thank you for
  * interviewing with us. Unfortunately, we regret to inform you...") is
  * classified `rejection`: that language is the more decisive signal of the
- * two, and it is also the only classification the --apply path acts on.
+ * two.
  *
- * `phraseStrength` reports whether a `rejection` classification was driven by
- * a strong (unambiguous-on-its-own) phrase or only by weak corroborating
- * phrases — the `--apply` confidence gate on a sole fuzzy-matched candidate
- * requires `'strong'` before auto-writing Rejected (#2100 CodeRabbit review,
- * see selectApplyTarget()). `null` for non-`rejection` classifications.
+ * `phraseStrength` reports whether a `rejection` or `invite` classification was
+ * driven by a strong (unambiguous-on-its-own) phrase or only by weak
+ * corroborating phrases — the `--apply` confidence gate on a sole candidate
+ * requires `'strong'` before auto-writing (#2100 CodeRabbit review, see
+ * selectApplyTarget()). `null` for `unknown` classifications.
  *
  * @param {string} text - Raw pasted email text.
  * @returns {{classification: 'invite'|'rejection'|'unknown', matchedPhrases: string[], phraseStrength: 'strong'|'weak'|null}}
@@ -668,8 +745,17 @@ export function classifyEmail(text) {
     };
   }
 
-  const inviteMatches = INVITE_PHRASES.filter(p => lower.includes(p));
-  if (inviteMatches.length > 0) return { classification: 'invite', matchedPhrases: inviteMatches, phraseStrength: null };
+  const strongInviteMatches = INVITE_PHRASES_STRONG.filter(p => new RegExp(`\\b${p}\\b`, 'i').test(text));
+  const weakInviteMatches = INVITE_PHRASES_WEAK.filter(p => new RegExp(`\\b${p}\\b`, 'i').test(text));
+  const isStrongInvite = strongInviteMatches.length > 0;
+  const isInvite = isStrongInvite || weakInviteMatches.length > 0;
+  if (isInvite) {
+    return {
+      classification: 'invite',
+      matchedPhrases: [...strongInviteMatches, ...weakInviteMatches],
+      phraseStrength: isStrongInvite ? 'strong' : 'weak',
+    };
+  }
 
   return { classification: 'unknown', matchedPhrases: [], phraseStrength: null };
 }
@@ -995,8 +1081,9 @@ export function buildClarificationDraft(analysis, text, options = {}) {
  * @returns {{signals: object, classification: 'invite'|'rejection'|'unknown', matchedPhrases: string[], phraseStrength: 'strong'|'weak'|null, candidates: Array<object>, constraints: Array<{key: string, tag: string, detail?: string}>, clarificationDraft: object|null}}
  */
 export function analyzeInvite(text, trackerRows = null, options = {}) {
+  const company = extractCompany(text);
   const signals = {
-    company: extractCompany(text),
+    company,
     date: extractDate(text),
     reqId: extractReqId(text),
     platform: extractPlatform(text),
@@ -1004,6 +1091,7 @@ export function analyzeInvite(text, trackerRows = null, options = {}) {
     // key above, so existing callers reading `signals.platform` etc. are
     // unaffected.
     isAIInterviewer: isAIInterviewerPlatform(text),
+    interviewer: extractInterviewer(text, company),
   };
   const rows = trackerRows ?? loadTracker();
   const candidates = matchInvite(signals, rows);
@@ -1040,24 +1128,29 @@ export function analyzeInvite(text, trackerRows = null, options = {}) {
 }
 
 /**
- * Advance a single tracker row's status to Rejected, reusing set-status.mjs
- * as a subprocess — the canonical, locked, atomic write path (#2098) — rather
- * than duplicating its row-rewrite/locking logic here. set-status.mjs already
- * imports its atomic-write and locking primitives from tracker-utils.mjs.
+ * Advance a single tracker row's status via set-status.mjs as a subprocess
+ * — the canonical, locked, atomic write path (#2098, #1960).
  *
  * Never call this on an ambiguous match — the CLI layer below is responsible
  * for confirming a single confident candidate (or an explicit --id) before
  * reaching this function.
  *
  * @param {number} appNumber - Tracker # to update (must be unambiguous).
- * @param {{appsFile?: string}} [options] - appsFile overrides CAREER_OPS_TRACKER for the child process (tests only).
+ * @param {string} newStatus - Target status ('Rejected', 'Interview', etc.).
+ * @param {{appsFile?: string, note?: string}} [options] - appsFile overrides CAREER_OPS_TRACKER for the child process (tests only).
  * @returns {object} set-status.mjs's own --json result (or its structured error).
  */
-export function applyRejectionStatus(appNumber, options = {}) {
+export function applyStatusUpdate(appNumber, newStatus, options = {}) {
   const scriptPath = join(CAREER_OPS_CODE_ROOT, 'set-status.mjs');
   const env = options.appsFile ? { ...process.env, CAREER_OPS_TRACKER: options.appsFile } : process.env;
+  const cmdArgs = [scriptPath, String(appNumber), newStatus];
+  if (options.note !== undefined && options.note !== null && options.note !== '') {
+    cmdArgs.push('--note', options.note);
+  }
+  cmdArgs.push('--json');
+
   try {
-    const out = execFileSync(process.execPath, [scriptPath, String(appNumber), 'Rejected', '--json'], {
+    const out = execFileSync(process.execPath, cmdArgs, {
       encoding: 'utf-8', env,
       // Capture the child's stderr instead of letting execFileSync's default
       // inherit it. set-status.mjs's failWith writes the machine payload to
@@ -1087,25 +1180,53 @@ export function applyRejectionStatus(appNumber, options = {}) {
 }
 
 /**
+ * Advance a single tracker row's status to Rejected, reusing set-status.mjs
+ * via applyStatusUpdate() — the canonical, locked, atomic write path (#2098).
+ *
+ * @param {number} appNumber - Tracker # to update (must be unambiguous).
+ * @param {{appsFile?: string}} [options] - appsFile overrides CAREER_OPS_TRACKER for the child process (tests only).
+ * @returns {object} set-status.mjs's own --json result (or its structured error).
+ */
+export function applyRejectionStatus(appNumber, options = {}) {
+  return applyStatusUpdate(appNumber, 'Rejected', options);
+}
+
+/**
+ * Advance a single tracker row's status to Interview, recording the interview
+ * date and interviewer in the notes column via applyStatusUpdate() (#2098, #1960).
+ *
+ * @param {number} appNumber - Tracker # to update (must be unambiguous).
+ * @param {object} [signals] - Extracted signals {date, interviewer, ...}.
+ * @param {{appsFile?: string, note?: string}} [options] - appsFile overrides CAREER_OPS_TRACKER for the child process (tests only).
+ * @returns {object} set-status.mjs's own --json result (or its structured error).
+ */
+export function applyInviteStatus(appNumber, signals = {}, options = {}) {
+  const note = options.note !== undefined ? options.note : formatInviteNote(signals);
+  return applyStatusUpdate(appNumber, 'Interview', { ...options, note });
+}
+
+const CLOSED_STATUSES = new Set(['rejected', 'discarded', 'skip']);
+
+/**
  * Decide which (if any) candidate `--apply` should act on, given an
  * `analyzeInvite()` result and an optional `--id` override. Pure decision
  * logic, no I/O — pulled out of the CLI block so tests can drive every
  * branch directly (#2100 CodeRabbit review nitpick: this branch logic had no
  * direct test coverage).
  *
- * The single-candidate auto-select branch additionally requires a confidence
- * gate: the sole candidate is only auto-applied when it is an exact/confirmed
- * company-name match (`nameScore === 1`) AND the classification is backed by
- * a strong rejection phrase (`phraseStrength === 'strong'`), not just a weak
- * corroborating one. `matchInvite`'s fuzzy token-overlap scoring can return a
- * single low-confidence candidate for a loosely-worded company name — a
- * false auto-apply off a match that weak is the unsafe direction, since
- * `--apply` performs an irreversible tracker write (#2100 CodeRabbit review,
- * major finding on the old line 768-769 unconditional sole-candidate
- * selection). A sole candidate that clears "one row matched" but not this
- * confidence bar falls back to requiring an explicit `--id`.
+ * The single-candidate auto-select branch additionally requires confidence
+ * and safety gates:
+ *   - For rejection: requires exact company match (`nameScore === 1`) AND strong
+ *     rejection phrase (`phraseStrength === 'strong'`).
+ *   - For invite: requires exact company match (`nameScore === 1`) AND strong
+ *     invite phrase (`phraseStrength === 'strong'`) AND an actionable (non-closed)
+ *     status — closed rows (`Rejected`, `Discarded`, `Skip`) must not be reopened
+ *     automatically, requiring an explicit `--id` override (#5016).
  *
- * @param {{candidates: Array<object>, phraseStrength: 'strong'|'weak'|null}} result - analyzeInvite() output.
+ * A sole candidate that clears "one row matched" but not these confidence bars
+ * falls back to requiring an explicit `--id`.
+ *
+ * @param {{candidates: Array<object>, phraseStrength: 'strong'|'weak'|null, classification?: string}} result - analyzeInvite() output.
  * @param {number|null} idArg - Parsed --id value, or null if not passed.
  * @returns {{target: object}|{error: string, code: number, candidate?: object, candidates?: Array<object>}}
  */
@@ -1128,6 +1249,21 @@ export function selectApplyTarget(result, idArg) {
   if (result.candidates.length === 1) {
     const sole = result.candidates[0];
     const isExactCompanyMatch = sole.nameScore === 1;
+    if (result.classification === 'invite') {
+      const isStrongInvite = result.phraseStrength === 'strong';
+      const status = normalizeStatusKey(sole.status);
+      const isActionable = Boolean(status && !CLOSED_STATUSES.has(status));
+      if (isExactCompanyMatch && isStrongInvite && isActionable) {
+        return { target: sole };
+      }
+      return {
+        error: `invite-match: sole candidate #${sole.appNumber} did not meet the confidence bar for auto-apply `
+          + `(exact company match: ${isExactCompanyMatch}, strong invite phrase: ${isStrongInvite}, actionable status: ${isActionable}) — `
+          + `re-run with --id ${sole.appNumber} to confirm explicitly.`,
+        code: 2,
+        candidate: sole,
+      };
+    }
     const isStrongRejection = result.phraseStrength === 'strong';
     if (isExactCompanyMatch && isStrongRejection) {
       return { target: sole };
@@ -1258,11 +1394,8 @@ if (isMainModule(import.meta.url)) {
     const result = analyzeInvite(text, null, { clarificationDraft: !noClarificationDraft });
 
     if (applyMode) {
-      // Scoped strictly to the Rejected transition (#2098) — never applies
-      // for an invite/unknown classification, and never for an ambiguous
-      // match unless the caller disambiguates with --id.
-      if (result.classification !== 'rejection') {
-        console.error(`invite-match: --apply only applies the Rejected transition, but this text classified as "${result.classification}" — not applying.`);
+      if (result.classification !== 'rejection' && result.classification !== 'invite') {
+        console.error(`invite-match: --apply requires an interview invite or rejection, but this text classified as "${result.classification}" — not applying.`);
         if (summaryMode) printSummary(result); else console.log(JSON.stringify(result, null, 2));
         process.exit(1);
       }
@@ -1287,7 +1420,9 @@ if (isMainModule(import.meta.url)) {
       }
       const target = selection.target;
 
-      const applyResult = applyRejectionStatus(target.appNumber);
+      const applyResult = result.classification === 'invite'
+        ? applyInviteStatus(target.appNumber, { ...result.signals, date: extractInterviewDate(text) })
+        : applyRejectionStatus(target.appNumber);
       const output = { ...result, applied: applyResult };
       if (summaryMode) {
         printSummary(result);
