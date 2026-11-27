@@ -1,9 +1,5 @@
 # career-ops: open-source AI job search agent
 
-## Origin
-
-[santifer](https://santifer.io) built career-ops for his own job search: 740 listings evaluated, 68 applied, 12 interviews, 1 offer, a Head of Applied AI role. The archetypes, scoring and negotiation scripts reflect that search. You (AI Agent) make it the user's: when they say "change the archetypes to data engineering roles", edit their files.
-
 ## Data Contract (CRITICAL)
 
 Two layers (full list in `DATA_CONTRACT.md`):
@@ -15,13 +11,7 @@ Two layers (full list in `DATA_CONTRACT.md`):
 
 **Read `modes/_custom.md` (if it exists) after `modes/_profile.md` and honor its house rules in every mode, every language and every batch item.** It can override workflow, style and procedural defaults, but it never introduces factual claims about the candidate.
 
-**Path Resolution Override & Precedence:** the User Layer lives under the data root, resolved in this order:
-1. **Environment Variables:** `CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR` (a relative path resolves against the repository root). An override, here or in the marker file, inside a Claude Code plugin install copy is refused: `getCareerOpsRoot()` throws `UnsafeDataRootError`.
-2. **Marker File:** a `.career-ops-data` file in the repository root holding an absolute or relative path to the user data directory.
-3. **Plugin Install Default:** `~/career-ops-data` when the code runs from a Claude Code plugin install copy (inside `~/.claude/plugins/cache/`, `marketplaces/` or `synced/`), which every plugin update replaces. See `docs/CLAUDE_PLUGIN.md`.
-4. **Repository Default:** otherwise, the repository root itself.
-
-**Tracker Path & Canonical Writes:** `CAREER_OPS_TRACKER` overrides the tracker file path (a relative path resolves against the repository root). Without it, reads use `{DATA_ROOT}/data/applications.md` and fall back to `{DATA_ROOT}/applications.md`. A write goes to the tracker a read finds; only when none exists does first-run creation target `{DATA_ROOT}/data/applications.md` or the override. A new script resolves both paths through `path-resolver.mjs`, never `__dirname`: see `modes/_files.md` → "Data root in scripts".
+**Data root:** the User Layer lives under the data root, which `node doctor.mjs --json` reports as `data_root`. `DATA_CONTRACT.md` → "Custom Data Directory" has how it resolves (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR`, the `.career-ops-data` marker, the plugin-install default) and where the tracker is read and written (`{DATA_ROOT}/data/applications.md`, or `CAREER_OPS_TRACKER`). A new script resolves both through `path-resolver.mjs`, never `__dirname`: see `modes/_files.md` → "Data root in scripts".
 
 ## Source-of-Truth Boundary (CRITICAL)
 
@@ -119,13 +109,13 @@ Output: `{"onboardingNeeded": <bool>, "data_root": "<path>", "project_root": "<p
 
 **`dataRootError` is a hard stop.** Doctor exits non-zero and reports it (`{code, source, root}`, with `data_root` null and the refusal in `warnings[0]`) when the data root sits inside a Claude Code plugin install, where the next plugin update deletes every write. Do not onboard on this state: no `--init-templates`, no `cv.md`, no tracker. Show the user the refusal from `warnings[0]`, wait for them to point `dataRootError.source` at a folder outside `~/.claude/plugins` (or remove it to use the default data root), then run doctor again. `modes/_onboarding.md` → "When the data root is refused" says when that fix needs a session restart.
 
-**Act on `unpersonalized` even when `onboardingNeeded` is false.** Entries are `{path, reason, impact}` for a personalization file that still carries template content, or a `config/profile.yml` or `portals.yml` that holds only comments. An unedited `_profile.md` scores every A-F evaluation against the **template author's** archetypes and North Star; an unedited `_brief.md` hands triage literal `{placeholders}`. An empty or comments-only YAML prerequisite also sets `onboardingNeeded` to true; an unpersonalized Markdown template stays a warning. Before running `scan`, `pipeline`, or `batch` with a non-empty `unpersonalized`, tell the user which files it lists, with each entry's `impact`, and offer to personalize them from their CV first. For `modes/_profile.md`, say that every score changes. Doctor never reports `modes/_custom.md`: unedited house rules are a valid end state.
+**Act on `unpersonalized` even when `onboardingNeeded` is false.** Entries are `{path, reason, impact}` for a personalization file that still carries template content, or a `config/profile.yml` or `portals.yml` that holds only comments. An empty or comments-only YAML prerequisite also sets `onboardingNeeded` to true; an unpersonalized Markdown template stays a warning. Before running `scan`, `pipeline`, or `batch` with a non-empty `unpersonalized`, tell the user which files it lists, with each entry's `impact`, and offer to personalize them from their CV first. For `modes/_profile.md`, say that every score changes. Doctor never reports `modes/_custom.md`: unedited house rules are a valid end state.
 
 **If `onboardingNeeded` is true and `dataRootError` is absent, enter onboarding mode** before an evaluation, scan, or application draft, or when the user asks to set up their profile: read `modes/_onboarding.md` and follow its steps. It initializes missing personalization files with `node doctor.mjs --json --init-templates`, then walks the user through the CV, the profile, the portals and the tracker. For read-only diagnosis, report the missing prerequisites from `node doctor.mjs --json` and create no user-layer files.
 
 ### Personalization
 
-When the user asks, edit their files directly:
+[santifer](https://santifer.io) built career-ops for his own job search: 740 listings evaluated, 68 applied, 12 interviews, 1 offer, a Head of Applied AI role. The shipped archetypes, scoring and negotiation scripts reflect that search; make them the user's. When the user asks (for example "change the archetypes to data engineering roles"), edit their files directly:
 
 - Archetypes / targeting → `modes/_profile.md` or `config/profile.yml`
 - Output language → `language.output` in `config/profile.yml`; market vocabulary → `language.modes_dir` (see Output Language vs Market Modes). A mode set for a new language is a contribution under `modes/{lang}/`: the files in `modes/` are system files, and an update overwrites edits to them
@@ -153,12 +143,7 @@ language:
 
 > Write all human-facing output in `{language.output}` regardless of the language of these instructions or the job description. Keep market-specific terms from `language.modes_dir` when they are relevant, but explain them in the output language when needed.
 
-**Market mode sets.** `modes/` holds the English default. `modes/_markets.md` lists the market sets with their evaluation and apply mode names. When `language.modes_dir` is a list (a candidate running campaigns in several markets at once), read the multi-market section of `modes/_markets.md` before selecting an evaluation mode. A set is used when the user targets postings in that language or market, lives in that market, or asks for it. Any of these selects it:
-1. User says "use {market} modes" → layer that dir on the English `modes/` canon: read each mode-loaded English file first, then that dir's version when it provides one, and English workflow rules win conflicts
-2. User sets `language.modes_dir: modes/de` (or their market's dir) in `config/profile.yml` → always use that dir
-3. You detect a JD written in that language → *suggest* switching (the set's directory is in `modes/_markets.md`)
-
-**When NOT to switch market modes:** For English-language roles, even at companies from those markets, use the default English market modes, *unless* the user has explicitly requested another market mode in this conversation or `language.modes_dir` is set in `config/profile.yml` (the explicit user preference always wins over JD-language detection). Prose still follows `language.output`.
+**Market mode sets.** `modes/` holds the English default, and `modes/_markets.md` lists the market sets. Read it when `config/profile.yml` sets one (`language.modes_dir: modes/de`), when the user asks for a market's modes, or when a JD is written in another language: it says when to select a set and when not to, and how a `modes_dir` list for several markets works. Detecting a JD's language only lets you *suggest* a set; the user's explicit choice always wins.
 
 ### Skill Modes
 
@@ -287,7 +272,7 @@ When the user records a `hired` or `accepted` outcome, celebrate first, then off
 
 - Node.js (`.mjs`), Playwright (PDF + scraping), YAML (config), HTML/CSS (template), Markdown (data), Canva MCP (optional visual CV)
 - Output in `output/` (gitignored) · Reports in `reports/` · JDs in `jds/` (referenced as `local:jds/{file}` in pipeline.md) · Batch in `batch/` (gitignored except scripts and prompt)
-- Report numbering: sequential 3-digit zero-padded. Claim each number with `node reserve-report-num.mjs` (it prints the number and holds it until `--release`); never compute max existing + 1 yourself
+- Report numbering: claim each number with `node reserve-report-num.mjs` (it prints the number and holds it until `--release`); never compute max existing + 1 yourself
 
 **JD archival is REQUIRED (#2789).** A report's `**URL:**` header rots once a posting closes, so every report `oferta`/`pdf` writes MUST carry the JD's verbatim text in a `## Job Description (archived verbatim)` section. A `jds/` capture named with `--report=N` is an accepted alternative for a very long JD or a standalone `jd-skill-gap.mjs` run. `check-jd-archive.mjs` checks that every `reports/*.md` has one or the other.
 
@@ -300,14 +285,11 @@ A new tracker row is one TSV file per evaluation at `{DATA_ROOT}/batch/tracker-a
 1. **NEVER edit applications.md to ADD new entries.** Write a TSV in `{DATA_ROOT}/batch/tracker-additions/` and run `node merge-tracker.mjs` after each batch of evaluations. If company+role already exists, update that entry; never add a second one.
 2. **UPDATE status/notes of existing entries via `node set-status.mjs --report <report#> <State> [--note]`** (or `<tracker#|company>` in place of `--report`: a bare number is the tracker `#`, not the report number). It is the canonical (locked, validated, atomic) write path. Do not hand-edit the table.
 3. All reports MUST include `**URL:**` in the header (between Score and PDF), and `**Legitimacy:** {tier}` (see Block G in `modes/oferta.md`).
-4. All statuses MUST be canonical (see `templates/states.yml`).
-5. Health check: `node verify-pipeline.mjs` · Normalize statuses: `node normalize-statuses.mjs` · Dedup: `node dedup-tracker.mjs` · Repair dead report links: `node fix-report-links.mjs --dry-run`, then without `--dry-run`
-6. **Portal health has two axes.** `node verify-portals.mjs` checks that each board answers; `node audit-portals.mjs` checks whose postings it carries, since a board can belong to the wrong entity. Run the audit after adding companies, with an earlier `--json` run as `--baseline` to catch ATS migrations. `verify-pipeline.mjs` check 15 flags enabled entries no provider claims.
+4. Health check: `node verify-pipeline.mjs` · Normalize statuses: `node normalize-statuses.mjs` · Dedup: `node dedup-tracker.mjs` · Repair dead report links: `node fix-report-links.mjs --dry-run`, then without `--dry-run`
+5. **Portal health has two axes.** `node verify-portals.mjs` checks that each board answers; `node audit-portals.mjs` checks whose postings it carries, since a board can belong to the wrong entity. Run the audit after adding companies, with an earlier `--json` run as `--baseline` to catch ATS migrations. `verify-pipeline.mjs` check 15 flags enabled entries no provider claims.
 
 ### Canonical States (applications.md)
 
-**Source of truth:** `templates/states.yml`, which describes each state.
+**Source of truth:** `templates/states.yml`, which describes each state. `set-status.mjs` accepts only these, and `verify-pipeline.mjs` flags a status that is not one of them, including one with bold, a date or a note attached:
 
 `Evaluated`, `Speculative` (a create-a-role gambit pitch in flight, no posting yet), `Applied`, `Responded`, `Assessment`, `Interview`, `Offer`, `Hired`, `Rejected`, `Discarded` (by the candidate, or the offer closed), `SKIP` (doesn't fit, don't apply).
-
-The status field holds the state alone: no markdown bold (`**`), no dates (use the date column), no extra text (use the notes column).

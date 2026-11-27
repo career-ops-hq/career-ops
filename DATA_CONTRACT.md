@@ -229,4 +229,4 @@ When resolved, all User Layer files/directories (e.g. `cv.md`, `config/profile.y
 - **`CAREER_OPS_TRACKER`** can be set to override the applications tracker file path directly (relative paths are resolved relative to the repository root).
 - **`CAREER_OPS_BLACKLIST`** overrides the `data/blacklist.md` path read by `discover-new-companies.mjs` and `discover-ats.mjs` (the same pattern as their `CAREER_OPS_PORTALS` / `CAREER_OPS_SCAN_HISTORY` overrides); unset, they read `{DATA_ROOT}/data/blacklist.md`.
 - **Read Resolution:** If no tracker override is set, reading resolves to `{DATA_ROOT}/data/applications.md` if it exists; otherwise falls back to `{DATA_ROOT}/applications.md`.
-- **Write Resolution:** All writes (including merge operations and first-run creation) target the canonical location `{DATA_ROOT}/data/applications.md`.
+- **Write Resolution:** Writes, merges included, go to the tracker that read resolution finds. Only when that file does not exist is it created: at the `CAREER_OPS_TRACKER` path when that is set, otherwise at `{DATA_ROOT}/data/applications.md`.
