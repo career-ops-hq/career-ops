@@ -107,12 +107,26 @@ const ZERO_LENGTH_RE = /^(?:0(?:\.0+)?|\.0+)\s*(?:px|pt|em|rem|%)?$/;
 const CLIP_HIDDEN_RE = /^(?:inset\(\s*100|circle\(\s*0|rect\(\s*0)/;
 const OFF_CANVAS_RE = /^-\d{3,}px$/;
 const OVERFLOW_HIDDEN_RE = /^hidden(?:\s+hidden)?$/;
+const CSS_WS_TRIM = /^[\t\n\f\r ]+|[\t\n\f\r ]+$/g;
+const CSS_IMPORTANT_RE = /[\t\n\f\r ]*![\t\n\f\r ]*important$/;
+const CSS_ENUM_VALUES = {
+  display: ['none', 'block', 'inline', 'inline-block', 'flex', 'inline-flex',
+    'grid', 'inline-grid', 'table', 'table-cell', 'table-row', 'list-item',
+    'contents', 'flow-root', 'inherit', 'initial', 'unset', 'revert'],
+  visibility: ['visible', 'hidden', 'collapse', 'inherit', 'initial', 'unset', 'revert'],
+  overflow: ['visible', 'hidden', 'clip', 'scroll', 'auto', 'inherit', 'initial', 'unset', 'revert'],
+};
+const validDeclaration = (prop, val) =>
+  !Object.hasOwn(CSS_ENUM_VALUES, prop)
+  || CSS_ENUM_VALUES[prop].includes(val)
+  || /^var\(/i.test(val);
 
 function parseStyleDeclarations(style) {
   const s = decodeEntities(style).toLowerCase();
   const decls = new Map();
   let buf = '';
   let quote = null;
+  let depth = 0;
   for (let i = 0; i <= s.length; i++) {
     const ch = s[i];
     if (quote) {
@@ -133,19 +147,23 @@ function parseStyleDeclarations(style) {
       buf += ch;
       continue;
     }
-    if (ch !== ';' && i !== s.length) {
+    if (ch === '(') depth += 1;
+    else if (ch === ')') depth = Math.max(0, depth - 1);
+    if ((ch !== ';' || depth > 0) && i !== s.length) {
       buf += ch;
       continue;
     }
     const colon = buf.indexOf(':');
     if (colon > 0) {
-      const prop = buf.slice(0, colon).trim();
-      const rawVal = buf.slice(colon + 1).trim();
+      const prop = buf.slice(0, colon).replace(CSS_WS_TRIM, '');
+      const rawVal = buf.slice(colon + 1).replace(CSS_WS_TRIM, '');
       if (prop && rawVal) {
-        const important = /\s*!\s*important$/.test(rawVal);
-        const val = rawVal.replace(/\s*!\s*important$/, '').trim();
-        const prev = decls.get(prop);
-        if (!prev || important || !prev.important) decls.set(prop, { val, important });
+        const important = CSS_IMPORTANT_RE.test(rawVal);
+        const val = rawVal.replace(CSS_IMPORTANT_RE, '').replace(CSS_WS_TRIM, '');
+        if (val && validDeclaration(prop, val)) {
+          const prev = decls.get(prop);
+          if (!prev || important || !prev.important) decls.set(prop, { val, important });
+        }
       }
     }
     buf = '';

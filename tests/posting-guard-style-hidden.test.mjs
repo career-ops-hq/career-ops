@@ -52,6 +52,42 @@ test('styleHidden catches !important, spacing, and CSS comment variants of hidde
   }
 });
 
+test('styleHidden ignores invalid CSS overrides when applying the cascade', () => {
+  const html = '<p>Role</p><div style="display:none;display:bogus">Hidden payload</div>';
+  const { clean, findings } = guard(html, 'html');
+  assert.ok(
+    findings.hidden_blocks.some((b) => b.reason === 'display:none'),
+    `invalid override must not hide the finding: ${JSON.stringify(findings.hidden_blocks)}`,
+  );
+  assert.ok(!clean.includes('Hidden payload'));
+
+  const valid = guard(
+    '<div style="display: none; display: block"><p>Visible after override</p></div>',
+    'html',
+  );
+  assert.equal(valid.findings.hidden_blocks.length, 0);
+});
+
+test('styleHidden does not split declarations inside parenthesized CSS values', () => {
+  const html = '<div style="background-image:url(https://example.test/a;display:none;v=1)"><p>Visible posting text</p></div>';
+  const { clean, findings } = guard(html, 'html');
+  assert.equal(
+    findings.hidden_blocks.length, 0,
+    `semicolons inside a URL must not create a declaration: ${JSON.stringify(findings.hidden_blocks)}`,
+  );
+  assert.ok(clean.includes('Visible posting text'));
+});
+
+test('styleHidden treats U+00A0 as part of a CSS token, not whitespace', () => {
+  const html = '<p>Role</p><div style="display:none;display\u00A0:block">Hidden payload</div>';
+  const { clean, findings } = guard(html, 'html');
+  assert.ok(
+    findings.hidden_blocks.some((b) => b.reason === 'display:none'),
+    `NBSP must not turn the property into display: ${JSON.stringify(findings.hidden_blocks)}`,
+  );
+  assert.ok(!clean.includes('Hidden payload'));
+});
+
 test('styleHidden respects CSS cascade overrides and non-zero numeric values', () => {
   const overridden = guard(
     '<div style="display: none; display: block"><p>Visible after override</p></div>',
