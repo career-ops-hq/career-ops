@@ -130,11 +130,19 @@ export function leverDescription(j) {
 
 // Annualization multipliers for Lever's salaryRange.interval values
 // (lever/postings-api: salaryRange is { currency, interval, min, max }).
-// Observed live on real boards: 'per-year-salary', 'per-hour-wage'. The
-// rest follow Lever's per-{period}-{salary|wage} naming; an interval not
-// in this table leaves salary off rather than guessing (same rule as
-// ashby.mjs's INTERVAL_MULTIPLIERS lookup). Same annualization basis as
+// Observed live on real boards: 'per-year-salary', 'per-hour-wage',
+// 'per-month-salary', 'per-day-wage'. The rest follow Lever's
+// per-{period}-{salary|wage} naming; an interval not in this table leaves
+// salary off rather than guessing (same rule as ashby.mjs's
+// INTERVAL_MULTIPLIERS lookup). Same annualization basis as
 // Ashby: 40 h/week, 52 weeks/year, 5 days/week.
+//
+// Also seen on public boards (576-board sample, 2026-11-24) but left out on
+// purpose: 'per-week-salary', 'bi-week-salary', 'semi-month-salary',
+// 'bi-month-salary' and 'one-time'. They are rare, and many of their figures
+// are in another unit (an hourly 16-20 under 'per-week-salary', a yearly
+// 290000-322000 under 'bi-week-salary'). Annualized, those would turn into
+// salaries that salary_filter wrongly rejects or accepts.
 const LEVER_INTERVAL_MULTIPLIERS = {
   'per-hour-wage': 2080,
   'per-day-wage': 260,
@@ -149,7 +157,7 @@ const LEVER_INTERVAL_MULTIPLIERS = {
  * carries no usable range. Follows parseCompensation() in ashby.mjs:
  * only a real number counts, a one-sided range fills the missing bound
  * from the other, bounds are ordered, and an unrecognised interval
- * leaves salary off.
+ * leaves salary off. A range with no bound above 0 is no salary.
  *
  * Exported for tests.
  *
@@ -170,7 +178,11 @@ export function leverSalary(j) {
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
   const minValue = num(range.min);
   const maxValue = num(range.max);
-  if (minValue === undefined && maxValue === undefined) return undefined;
+  // No usable bound, or no bound above 0. A { min: 0, max: 0 } range (seen
+  // live) is a placeholder, not a salary: kept as salary { min: 0, max: 0 },
+  // any salary_filter min would reject it and drop the job. A 0 floor under
+  // a real maximum ("up to 150000") still counts.
+  if ((minValue ?? 0) <= 0 && (maxValue ?? 0) <= 0) return undefined;
   const annualizedMin = minValue !== undefined ? minValue * multiplier : undefined;
   const annualizedMax = maxValue !== undefined ? maxValue * multiplier : undefined;
   const resolvedMin = /** @type {number} */ (annualizedMin ?? annualizedMax);
