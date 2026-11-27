@@ -4,9 +4,9 @@
 // is pinned to web/), so this runs the REAL core doctor against the same data
 // root and environment as the web function and compares the two answers.
 //
-// The core side honors CAREER_OPS_PROFILE once the core helper has landed
-// (path-resolver.mjs exports getProfilePath). Until then the core doctor has no
-// override to agree with, and the test is reported as skipped rather than passed.
+// The core doctor honors CAREER_OPS_PROFILE through path-resolver.mjs's
+// getProfilePath. The import below is static so a core without that helper
+// fails this file instead of skipping it.
 //
 // Run:  node --experimental-strip-types --test tests/lib/profile-path-doctor-parity.test.mjs
 
@@ -16,15 +16,14 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import "../helpers/web-ts-alias-loader.mjs";
+// Unused on purpose: see the header.
+import { getProfilePath } from "../../../path-resolver.mjs";
 
 const { doctorState } = await import("../../src/lib/career-ops.ts");
 
 const checkout = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-const coreResolver = await import(pathToFileURL(path.join(checkout, "path-resolver.mjs")).href);
-const coreHonorsOverride = typeof coreResolver.getProfilePath === "function";
-const skip = coreHonorsOverride ? false : "core path-resolver.mjs has no getProfilePath yet (Part 1 of #5026)";
 
 /** A data root with every prerequisite but the profile, then the profile on request. */
 function fixture({ dataRootProfile, overrideProfile, envFileOnly }) {
@@ -72,7 +71,7 @@ const cases = [
 ];
 
 for (const [label, files, shell, want] of cases) {
-  test(`doctorState and core doctor --json agree: ${label}`, { skip }, () => {
+  test(`doctorState and core doctor --json agree: ${label}`, () => {
     const fx = fixture(files);
     try {
       const { web, core } = bothSides(fx, shell);
