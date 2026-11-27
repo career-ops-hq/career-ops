@@ -157,7 +157,7 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { flagValue, hasFlag } from './lib/cli-flags.mjs';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { splitStoryBlocks, isValidStory, getField, STORY_FIELDS } from './lib/story-bank.mjs';
@@ -958,21 +958,13 @@ const USAGE = `Usage:
   --help, -h   print this and exit`;
 
 if (isMainModule(import.meta.url)) {
-  // BEFORE any work. Unhandled, `--help` fell through to the analysis: this
-  // script printed a full report for it, which is not what the flag asks for
-  // and hides that it was never recognised.
-  if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
-    console.log(USAGE);
-    process.exit(0);
-  }
-  // A bare `--cv` or `--cv=` names no file. Falling back to the default would
-  // check a file the caller did not ask for and report it as the result.
-  for (const flag of ['--story-bank', '--cv']) {
-    if (hasFlag(args, flag) && !flagValue(args, flag)) {
-      console.error(`Error: ${flag} requires a path.`);
-      process.exit(1);
-    }
-  }
+  // BEFORE any work. Unhandled, `--help` fell through to the analysis and
+  // printed a full report. A bare or option-followed `--cv` / `--story-bank`
+  // fell back to the default file and reported on a file nobody asked for.
+  validateFlags(args, ['--summary', '--self-test', '--story-bank', '--cv', '--help', '-h'], USAGE, {
+    valueFlags: ['--story-bank', '--cv'],
+    requireOperand: true,
+  });
   if (selfTestMode) {
     runSelfTest();
   } else {
