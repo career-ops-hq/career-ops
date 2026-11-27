@@ -112,8 +112,18 @@ const CSS_IMPORTANT_RE = /[\t\n\f\r ]*![\t\n\f\r ]*important$/;
 const CSS_KEYWORDS = 'inherit|initial|unset|revert';
 const CSS_NUM = '[+-]?(?:\\d+\\.?\\d*|\\.\\d+)';
 const OVERFLOW_KEYWORDS = new Set(['visible', 'hidden', 'clip', 'scroll', 'auto']);
+const DISPLAY_KEYWORDS = new Set([
+  'none', 'block', 'inline', 'inline-block', 'inline-table', 'inline-flex',
+  'inline-grid', 'run-in', 'flow', 'flow-root', 'flex', 'grid', 'ruby',
+  'table', 'table-row', 'table-cell', 'table-row-group', 'table-header-group',
+  'table-footer-group', 'table-column', 'table-column-group', 'table-caption',
+  'list-item', 'contents', 'inherit', 'initial', 'unset', 'revert',
+]);
 const CSS_VALUE_VALIDATORS = {
-  display: new RegExp(`^(?:none|block|inline|inline-block|flex|inline-flex|grid|inline-grid|table|table-cell|table-row|list-item|contents|flow-root|${CSS_KEYWORDS})$`),
+  display: (v) => {
+    const parts = v.split(/[\t\n\f\r ]+/);
+    return parts.length <= 2 && parts.every((p) => DISPLAY_KEYWORDS.has(p));
+  },
   visibility: new RegExp(`^(?:visible|hidden|collapse|${CSS_KEYWORDS})$`),
   overflow: (v) => {
     const parts = v.split(/[\t\n\f\r ]+/);
@@ -182,8 +192,11 @@ function parseStyleDeclarations(style) {
         const important = CSS_IMPORTANT_RE.test(rawVal);
         const val = rawVal.replace(CSS_IMPORTANT_RE, '').replace(CSS_WS_TRIM, '');
         if (val && validDeclaration(prop, val)) {
+          const normalized = prop === 'opacity' && val.endsWith('%')
+            ? String(Number.parseFloat(val) / 100)
+            : val;
           const prev = decls.get(prop);
-          if (!prev || important || !prev.important) decls.set(prop, { val, important });
+          if (!prev || important || !prev.important) decls.set(prop, { val: normalized, important });
         }
       }
     }

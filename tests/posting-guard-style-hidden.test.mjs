@@ -88,6 +88,25 @@ test('styleHidden treats U+00A0 as part of a CSS token, not whitespace', () => {
   assert.ok(!clean.includes('Hidden payload'));
 });
 
+test('styleHidden accepts standard display overrides before applying the cascade', () => {
+  for (const override of ['inline-table', 'inline flex']) {
+    const html = `<div style="display:none;display:${override}"><p>Visible after override</p></div>`;
+    const { clean, findings } = guard(html, 'html');
+    assert.equal(findings.hidden_blocks.length, 0, `${override} must be a valid override`);
+    assert.ok(clean.includes('Visible after override'));
+  }
+});
+
+test('styleHidden interprets percentage opacity numerically', () => {
+  const html = '<p>Role</p><div style="opacity:0;opacity:0%">Hidden payload</div>';
+  const { clean, findings } = guard(html, 'html');
+  assert.ok(
+    findings.hidden_blocks.some((b) => b.reason === 'opacity:0'),
+    `0% is zero opacity: ${JSON.stringify(findings.hidden_blocks)}`,
+  );
+  assert.ok(!clean.includes('Hidden payload'));
+});
+
 test('styleHidden accepts two-keyword overflow values before applying the cascade', () => {
   const html = '<p>Role</p><div style="height:0;overflow:hidden hidden">Hidden payload</div>';
   const { clean, findings } = guard(html, 'html');
