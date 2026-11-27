@@ -135,6 +135,16 @@ test('styleHidden validates opacity overrides before applying the cascade', () =
   assert.equal(valid.findings.hidden_blocks.length, 0);
 });
 
+test('styleHidden closes a quoted value at an unescaped newline', () => {
+  const html = `<p>Role</p><div style="content:'broken&#10;;display:none">Hidden payload</div>`;
+  const { clean, findings } = guard(html, 'html');
+  assert.ok(
+    findings.hidden_blocks.some((b) => b.reason === 'display:none'),
+    `an unclosed quote must not swallow display:none: ${JSON.stringify(findings.hidden_blocks)}`,
+  );
+  assert.ok(!clean.includes('Hidden payload'));
+});
+
 test('styleHidden does not count escaped parentheses as nesting', () => {
   const html = '<p>Role</p><div style="background-image:url(foo\\();display:none">Hidden payload</div>';
   const { clean, findings } = guard(html, 'html');

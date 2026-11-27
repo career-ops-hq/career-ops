@@ -160,7 +160,7 @@ function parseStyleDeclarations(style) {
       if (i === s.length) break;
       buf += ch;
       if (ch === '\\' && i + 1 < s.length) buf += s[++i];
-      else if (ch === quote) quote = null;
+      else if (ch === quote || ch === '\n' || ch === '\r' || ch === '\f') quote = null;
       continue;
     }
     if (ch === '/' && s[i + 1] === '*') {
