@@ -310,14 +310,9 @@ export function promoteKnownFragmentIdentity(url) {
   if (!jobId) return;
   if (match[2]) {
     const frag = new URLSearchParams(match[2]);
-    const copied = new Set();
-    for (const [name, value] of frag) {
-      const lower = name.toLowerCase();
-      if (!LANGUAGE_PARAMS.includes(lower) || copied.has(lower) || !value) continue;
-      copied.add(lower);
-      if (![...url.searchParams.keys()].some((k) => k.toLowerCase() === lower)) {
-        url.searchParams.append(lower, value);
-      }
+    for (const name of LANGUAGE_PARAMS) {
+      const value = frag.get(name);
+      if (value && !url.searchParams.has(name)) url.searchParams.append(name, value);
     }
   }
   if (url.hostname.toLowerCase() === 'app.mokahr.com') {
