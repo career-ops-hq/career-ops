@@ -67,7 +67,7 @@ Alle filer i brukerlaget (som `cv.md`, `config/profile.yml`, `modes/_profile.md`
 ### Rekkefølge for trackerens sti:
 * **Eksplisitt overstyring**: Er miljøvariabelen `CAREER_OPS_TRACKER` satt, er den stien til trackerfilen (relativt til repository-roten hvis stien er relativ).
 * **Standard**: Ellers `{DATA_ROOT}/data/applications.md` hvis den finnes, og ellers `{DATA_ROOT}/applications.md`.
-* **Skriving**: Alle nye skrivinger går til `{DATA_ROOT}/data/applications.md`.
+* **Skriving**: Skriv til trackeren som reglene over finner. Bare når ingen av filene finnes, opprett `{DATA_ROOT}/data/applications.md` (eller stien i `CAREER_OPS_TRACKER`). `DATA_CONTRACT.md` → «Tracker Path & Writes» er kilden for denne regelen.
 
 ---
 
