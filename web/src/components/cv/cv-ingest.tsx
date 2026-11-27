@@ -330,7 +330,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
           (cliMissing && err === cliMissing ? (
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-[13px] text-amber-800 dark:text-amber-300">
               <AlertTriangle className="size-3.5 shrink-0" />
-              <span>{err} Paste or drop .md / .txt to start without one.</span>
+              <span>{err} Drop a .md or .txt file to start without one.</span>
               <Link href="/config" className="ml-auto inline-flex items-center gap-1 rounded-md bg-amber-500/20 px-2.5 py-1 font-medium text-amber-800 transition hover:bg-amber-500/30 dark:text-amber-200">
                 Connect your AI CLI <ArrowRight className="size-3.5" />
               </Link>
