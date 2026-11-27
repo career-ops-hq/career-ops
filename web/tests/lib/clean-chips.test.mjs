@@ -9,12 +9,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import * as yaml from "js-yaml";
 import { cleanChips, CHIP_CAP } from "../../src/lib/clean-chips.mjs";
+import { splitChipText } from "../../src/lib/chip-text.mjs";
 
-/** Split a raw input string the same way filter-builder's commit() does —
+/** Split a raw input string with the splitter filter-builder's commit() uses —
  *  on unambiguous item separators only (never bare spaces). */
-function split(text) {
-  return text.split(/[,\n;\t\r]+/);
-}
+const split = splitChipText;
 
 test("comma-separated → 3 chips", () => {
   const parts = split("Afghanistan, Albania, Algeria");

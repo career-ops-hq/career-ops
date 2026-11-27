@@ -18,7 +18,7 @@
 
 import path from 'path';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, writeFileSync, rmSync, mkdirSync, renameSync, statSync } from 'fs';
+import { chmodSync, existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, writeFileSync, rmSync, mkdirSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { hasYamlContent, loadYaml } from './lib/yaml-document.mjs';
@@ -39,6 +39,7 @@ import { canonicalJobKey } from './url-key.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { resolveColumns, parseTrackerRow, isHeaderRow, isSeparatorRow } from './tracker-parse.mjs';
+import { renameSyncWithRetry } from './lib/rename-retry.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -153,7 +154,7 @@ export function newPipelineJobs(found, pipelineUrls) {
  * interview events titled "Interview with Acme") would lose every row to a
  * title filter written for job titles, so they skip those filters.
  *
- * @param {Array<object>} found - Sanitized hook results.
+ * @param {Array<object>} found - Hook results, validated before admission.
  * @param {object} options
  * @param {string} options.id - Plugin id, recorded as the posting's source.
  * @param {boolean} [options.jobPostings] - The manifest's jobPostings flag.
@@ -162,6 +163,7 @@ export function newPipelineJobs(found, pipelineUrls) {
  * @param {object} [options.gateOptions] - Overrides for createAdmissionGate (tests).
  */
 export function admitPluginJobs(found, { id, jobPostings = false, pipelineUrls = new Set(), config = {}, gateOptions = {} }) {
+  found = found.map(sanitizeJob).filter(Boolean);
   const discoveryFilters = jobPostings
     ? { config }
     : { titleFilter: () => true, locationFilter: () => true, blacklist: new Map() };
@@ -271,7 +273,16 @@ async function cmdRun(args) {
   if (hook === 'ingest' || hook === 'search') {
     const payload = hook === 'search' ? positional.slice(hookArgStart).join(' ') : undefined;
     if (hook === 'search' && !payload) { console.error(`search needs a query: node plugins.mjs run ${id} search "<query>"`); process.exit(1); }
-    const results = filterResultsForId(await runHook(hook, payload, { root: ROOT, dataRoot: DATA_ROOT, dryRun, pluginId: id }), id);
+    const admissionOptions = {
+      id,
+      jobPostings: manifest.jobPostings,
+      pipelineUrls: existingPipelineUrls(),
+      config: manifest.jobPostings ? loadPortalsConfig() : {},
+    };
+    const results = filterResultsForId(await runHook(hook, payload, {
+      root: ROOT, dataRoot: DATA_ROOT, dryRun, pluginId: id,
+      admitJobs: jobs => admitPluginJobs(jobs, admissionOptions).jobs,
+    }), id);
     exitIfPluginDidNotRun(results, id, hook);
     const failed = results.filter(r => !r.ok);
     if (failed.length) {
@@ -285,12 +296,7 @@ async function cmdRun(args) {
       process.exit(1);
     }
     const found = results.filter(r => r.ok && Array.isArray(r.result)).flatMap(r => r.result).map(sanitizeJob).filter(Boolean);
-    const { jobs, counts } = admitPluginJobs(found, {
-      id,
-      jobPostings: manifest.jobPostings,
-      pipelineUrls: existingPipelineUrls(),
-      config: manifest.jobPostings ? loadPortalsConfig() : {},
-    });
+    const { jobs, counts } = admitPluginJobs(found, admissionOptions);
     const skipped = formatSkipCounts(counts);
     console.log(`${id} ${hook}: ${found.length} found, ${jobs.length} new${skipped ? ` (skipped: ${skipped})` : ''}.`);
     if (dryRun) { jobs.slice(0, 20).forEach(j => console.log(`  • ${j.title} — ${j.url}`)); console.log('(--dry-run: pipeline not written)'); return; }
@@ -496,7 +502,7 @@ export function setPluginEnabled(root, id, on, settings) {
   try {
     writeFileSync(tmp, text, mode == null ? 'utf8' : { encoding: 'utf8', mode });
     if (mode != null) chmodSync(tmp, mode);
-    renameSync(tmp, dest);
+    renameSyncWithRetry(tmp, dest);
   } catch (err) {
     try { rmSync(tmp, { force: true }); } catch {}
     throw err;

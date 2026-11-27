@@ -3,7 +3,7 @@ name: career-ops
 description: "Open-source AI job search agent -- evaluate offers, generate CVs, scan portals, track applications. Use when the user pastes a job URL or JD, asks to scan portals, generate a CV/PDF, track applications, prepare for interviews, draft outreach/emails, or run any career-ops mode."
 arguments: mode
 user-invocable: true
-argument-hint: "[scan | discover | deep | pdf | ats | text | latex | latex-tex | cover | email | add | expand | eu-swe | oferta | ofertas | apply | triage | batch | tracker | agent-inbox | pipeline | contacto | gambit | training | project | interview-prep | interview | master-profile | intake | retro | interview/plan | interview/practice | interview/debrief | interview-redflag | patterns | calibrate | offer-prep | titles | upskill | followup | reply-watch | outcome | update]"
+argument-hint: "[scan | discover | deep | pdf | ats | text | latex | latex-tex | cover | email | proposal | add | expand | eu-swe | oferta | ofertas | apply | capture | triage | batch | tracker | agent-inbox | pipeline | contacto | gambit | training | project | interview-prep | interview | master-profile | intake | retro | interview/plan | interview/practice | interview/debrief | interview-redflag | patterns | calibrate | offer-prep | titles | upskill | followup | reply-watch | outcome | update]"
 license: MIT
 ---
 
@@ -78,6 +78,7 @@ Determine the mode from `$mode`:
 | `latex` | `latex` |
 | `latex-tex` | `latex-tex` |
 | `email` | `email` |
+| `proposal` | `proposal` |
 | `add` | `add` |
 | `expand` | `expand` |
 | `training` | `training` |
@@ -86,6 +87,7 @@ Determine the mode from `$mode`:
 | `agent-inbox` | `agent-inbox` |
 | `inbox` | `agent-inbox` |
 | `pipeline` | `pipeline` |
+| `capture` | `capture` |
 | `apply` | `apply` |
 | `scan` | `scan` |
 | `discover` | `discover` |
@@ -191,6 +193,7 @@ Available commands:
   /career-ops latex-tex → Tailor your own resume.tex in place (opt-in; cv.md stays default)
   /career-ops cover     → Cover letter: standalone JD paste or /career-ops cover {slug}
   /career-ops email     → Formal application email draft (draft-only; never sends, submits, or clicks)
+  /career-ops proposal  → Draft a job/Upwork proposal as markdown (draft-only; never submits)
   /career-ops add       → Add a project/paper/role to your CV (fetch + preview + confirm)
   /career-ops expand    → Auto-discover and add missing competencies from profile links
   /career-ops training  → Evaluate course/cert against North Star
@@ -200,6 +203,7 @@ Available commands:
   /career-ops apply     → Live application assistant (Playwright from this checkout, does not submit)
   /career-ops scan      → Scan portals and discover new offers
   /career-ops discover  → Resolve a company list to scannable ATS boards + append to portals.yml (zero-token)
+  /career-ops capture   → Record a posting in the inbox, no evaluation (URL + optional JD text)
   /career-ops triage    → Fast first-pass go/no-go score from modes/_brief.md (writes no files)
   /career-ops batch     → Batch processing with parallel workers
   /career-ops patterns  → Analyze rejection patterns and improve targeting
@@ -222,6 +226,8 @@ Or paste a JD directly to run the full pipeline.
 
 After determining the mode, load the necessary files before executing:
 
+**First run.** Before a mode that needs the user's profile (an evaluation, a scan, an application draft, a tracker write), if `node doctor.mjs --json` reports `dataRootError`, stop: onboarding writes nothing to that root, as AGENTS.md → "First Run — Onboarding" sets out. Otherwise, if it reports `onboardingNeeded`, read `modes/_onboarding.md` and complete onboarding first.
+
 If `modes/_custom.md` exists, read it after `modes/_profile.md` and before the selected mode file. It contains user house rules and procedural preferences. It may override workflow/style defaults, but it never adds factual claims about the candidate.
 
 Resolve `language.modes_dir` before applying the path shorthand below. With no setting, use `modes`. With a scalar directory, the English files are the canon and the market files layer on top instead of swapping them in: for every file the mode's section below loads, always read the English version first (the English `modes/_shared.md` and the English `modes/{mode}.md`, when the mode loads them), then read that directory's version of the same file when it provides one. The localized files refine wording, examples and market-specific rules; every English rule the market set does not restate still applies, and when a localized file contradicts an English workflow rule (for example the inbox selection in `modes/pipeline.md`), the English rule wins. This never adds a file the mode's section does not load: `triage` still loads only its mode file. Never run a mode from the localized `_shared.md` alone or improvise its steps. With a list, use only the FIRST entry's evaluation-mode file for Blocks A-F; later entries contribute context, never a competing evaluation file. For every other file the mode's section below loads, read the English version first, then each declared directory's version, every distinct directory exactly once: a declared entry that resolves to the English `modes` directory is already covered by the English read, so never read it twice. A mode whose section loads no `_shared.md` (such as `triage`) still loads only its mode file. User-layer `_profile.md` and `_custom.md` remain under `modes/` in `DATA_ROOT`.
@@ -238,13 +244,17 @@ Run `gambit` here, in the interactive session, never in a worker, even though it
 
 Read `modes/_profile.md` (if exists) + `modes/_custom.md` (if exists) + `modes/{mode}.md`
 
-Applies to: `tracker`, `agent-inbox`, `deep`, `interview-prep`, `interview`, `master-profile`, `regional/eu-swe`, `interview/plan`, `interview/practice`, `interview/debrief`, `latex`, `latex-tex`, `training`, `project`, `patterns`, `titles`, `upskill`, `followup`, `reply-watch`, `outcome`, `cover`, `email`, `add`, `offer-prep`, `discover`, `intake`, `ats`, `calibrate`, `retro`, `expand`, `interview-redflag`, `update`
+Applies to: `tracker`, `agent-inbox`, `deep`, `interview-prep`, `interview`, `master-profile`, `regional/eu-swe`, `interview/plan`, `interview/practice`, `interview/debrief`, `latex`, `latex-tex`, `training`, `project`, `patterns`, `titles`, `upskill`, `followup`, `reply-watch`, `outcome`, `cover`, `email`, `proposal`, `add`, `offer-prep`, `discover`, `intake`, `ats`, `calibrate`, `retro`, `expand`, `interview-redflag`, `update`
 
 ### Modes that load only their mode file
 
 Read `modes/{mode}.md` only. Do not preload `_shared.md`, `_profile.md` or `_custom.md`: the mode file names the one context file it reads and the ones it must not. Values it takes from `config/profile.yml` (`language.output`, `pipeline.triage_threshold`) are resolved here and injected; the mode never reads that file itself.
 
-Applies to: `triage`
+Applies to: `triage`, `capture`
+
+`capture` is deliberately in this group: it records a posting and stops, so
+loading the evaluation context (`oferta.md` alone is ~80 KB) would cost more than
+the whole capture and buy nothing.
 
 ### Modes delegated to subagent
 

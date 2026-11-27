@@ -712,3 +712,113 @@ if (process.platform === 'win32') {
     rmSync(work, { recursive: true, force: true });
   }
 }
+
+// ── --prune --write holds the manifest lock ───────────────────────────────────
+//
+// generate-pdf.mjs records each render with a read-supersede-write of
+// data/pdf-index.tsv under withPipelineLock. Prune read, filtered and rewrote
+// the same file with no lock, so a render that wrote its row between prune's
+// read and its write lost that row. Holding the lock here plays the render:
+// prune must wait for it, give up with exit 4 when it is held too long, and
+// keep the row the "render" wrote while it waited.
+
+{
+  const { acquirePipelineLock } = await import('../pipeline-lock.mjs');
+  const { spawn } = await import('child_process');
+
+  const setup = (prefix) => {
+    const work = mkdtempSync(join(tmpdir(), prefix));
+    const tracker = join(work, 'applications.md');
+    const pdfIndex = join(work, 'pdf-index.tsv');
+    mkdirSync(join(work, 'output'), { recursive: true });
+    writeFileSync(join(work, 'output', '1-acme-cv.pdf'), 'pdf-content');
+    writeFileSync(join(work, 'output', '5-new-cv.pdf'), 'pdf-content');
+    writeFileSync(tracker, TRACKER_HEADER);
+    const manifest = [
+      '# report\tpdf\thtml\tformat\tdate',
+      '1\toutput/1-acme-cv.pdf\toutput/1-acme.html\ta4\t2026-01-01',
+      '2\toutput/2-gone-cv.pdf\toutput/2-gone.html\ta4\t2026-01-02',
+      '',
+    ].join('\n');
+    writeFileSync(pdfIndex, manifest);
+    return { work, tracker, pdfIndex, manifest };
+  };
+
+  // Held past the timeout: exit 4, lock-timeout JSON, manifest untouched.
+  {
+    const { work, tracker, pdfIndex, manifest } = setup('cops-prune-lock-timeout-');
+    const lock = await acquirePipelineLock(pdfIndex);
+    try {
+      const code = await new Promise((resolveExit) => {
+        const child = spawn(NODE, [join(ROOT, 'sync-pdf-flags.mjs'), '--prune', '--write', '--json'], {
+          env: {
+            ...process.env,
+            CAREER_OPS_TRACKER: tracker,
+            CAREER_OPS_PDF_INDEX: pdfIndex,
+            CAREER_OPS_PIPELINE_LOCK_TIMEOUT_MS: '400',
+            CAREER_OPS_PIPELINE_LOCK_MAX_WAIT_MS: '400',
+          },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        let stdout = '';
+        child.stdout.on('data', (d) => { stdout += d; });
+        // close, not exit: stdout can still be open when exit fires.
+        child.on('close', (c) => resolveExit({ c, stdout }));
+      });
+      const json = (() => { try { return JSON.parse(code.stdout); } catch { return null; } })();
+      if (code.c === 4 && json?.code === 'lock-timeout' && readFileSync(pdfIndex, 'utf-8') === manifest) {
+        pass('sync-pdf-flags --prune --write exits 4 with lock-timeout while the manifest lock is held');
+      } else {
+        fail(`--prune --write ignored a held manifest lock: status=${code.c}, stdout=${code.stdout.trim()}`);
+      }
+    } finally {
+      lock.release();
+      rmSync(work, { recursive: true, force: true });
+    }
+  }
+
+  // Released in time: prune waits, then keeps the row written while it waited.
+  {
+    const { work, tracker, pdfIndex, manifest } = setup('cops-prune-lock-wait-');
+    const lock = await acquirePipelineLock(pdfIndex);
+    let exited = false;
+    let released = false;
+    try {
+      const child = spawn(NODE, [join(ROOT, 'sync-pdf-flags.mjs'), '--prune', '--write', '--json'], {
+        env: {
+          ...process.env,
+          CAREER_OPS_TRACKER: tracker,
+          CAREER_OPS_PDF_INDEX: pdfIndex,
+          CAREER_OPS_PIPELINE_LOCK_TIMEOUT_MS: '20000',
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let stdout = '';
+      child.stdout.on('data', (d) => { stdout += d; });
+      child.on('exit', () => { exited = true; });
+      // close, not exit: stdout can still be open when exit fires.
+      const done = new Promise((resolveExit) => child.on('close', resolveExit));
+
+      // Long enough for an unlocked prune to start, read and write.
+      await new Promise((r) => setTimeout(r, 1500));
+      const finishedEarly = exited;
+      // The "render" records its row while it holds the lock.
+      writeFileSync(pdfIndex, `${manifest}5\toutput/5-new-cv.pdf\toutput/5-new.html\ta4\t2026-01-05\n`);
+      lock.release();
+      released = true;
+      const status = await done;
+
+      const after = readFileSync(pdfIndex, 'utf-8');
+      const json = (() => { try { return JSON.parse(stdout); } catch { return null; } })();
+      if (!finishedEarly && status === 0 && json?.pruned === 1 && json?.kept === 2
+        && after.includes('5-new-cv.pdf') && after.includes('1-acme-cv.pdf') && !after.includes('2-gone-cv.pdf')) {
+        pass('sync-pdf-flags --prune --write waits for the manifest lock and keeps a row written meanwhile');
+      } else {
+        fail(`--prune --write raced the manifest writer: finishedEarly=${finishedEarly}, status=${status}, stdout=${stdout.trim()}, manifest=\n${after}`);
+      }
+    } finally {
+      if (!released) lock.release();
+      rmSync(work, { recursive: true, force: true });
+    }
+  }
+}

@@ -7,14 +7,9 @@ import { instrumentSerif } from "@/lib/fonts";
 import { ATS_LABEL, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
 import { CHINA_SOURCES, EMPLOYER_LABEL } from "@/lib/employer-preset.mjs";
 import { evaluationGateForJob } from "@/lib/job-gate.mjs";
+import { postedAgo } from "@/lib/inbox";
 import { useJobs } from "@/components/jobs/job-store";
 import { useExplore } from "./explore-provider";
-
-function freshness(postedAt: string): string {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(postedAt)) return "";
-  const days = Math.max(0, Math.round((Date.now() - new Date(postedAt + "T00:00:00Z").getTime()) / 86_400_000));
-  return days === 0 ? "today" : days === 1 ? "1d ago" : `${days}d ago`;
-}
 
 // Real company logo (favicon) via the localhost proxy, cached on disk FOREVER per
 // company — so once it resolves it's instant for this card AND every other card,
@@ -72,7 +67,7 @@ export function DiscoveryCard({
   const isAdding = adding.has(offer.url);
   const unverified = offer.verification === "unconfirmed";
   const employer = CHINA_SOURCES.includes(offer.source);
-  const fresh = freshness(offer.postedAt) || offer.postedHint || "";
+  const fresh = postedAgo(offer.postedAt, Date.now()) || offer.postedHint || "";
 
   const evaluate = () => {
     addToPipeline([offer]); // evaluating implies it's in the pipeline — record it
@@ -169,6 +164,7 @@ export function DiscoveryCard({
               type="button"
               disabled={isAdded || isAdding}
               onClick={() => addToPipeline([offer])}
+              title={isAdded ? "Already in your Inbox." : "Saves the posting to your Inbox. No evaluation, no tokens."}
               className={cn(
                 "inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
                 isAdded ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-400" : "bg-surface-hover text-foreground hover:bg-brand-soft hover:text-brand-text",

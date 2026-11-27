@@ -708,6 +708,16 @@ if (isMainModule(import.meta.url)) {
     today = parsed;
   }
 
+  // An explicit --file or --tracker names the data to report on, so a path
+  // that does not exist is an error. Only the default paths may be absent.
+  for (const flag of ['--file', '--tracker']) {
+    const path = argValue(flag);
+    if (path && !existsSync(path)) {
+      console.error(`rejection-latency: file not found: ${path}`);
+      process.exit(1);
+    }
+  }
+
   const interviewRows = parseActiveInterviews(readNormalized(ACTIVE_INTERVIEWS_PATH));
   const trackerMd = readNormalized(TRACKER_PATH);
   const trackerByCompany = parseTrackerInterviewRows(trackerMd);

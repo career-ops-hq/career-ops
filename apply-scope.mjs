@@ -109,10 +109,14 @@ export function locateApplyReport(dataRoot, ref, io) {
     if (!io.exists(file)) return { ok: false, reason: 'missing' };
     return { ok: true, path: file };
   }
-  const num = ref.trim().padStart(3, '0');
+  const wanted = Number(ref.trim());
+  if (!Number.isInteger(wanted) || wanted < 0) return { ok: false, reason: 'missing' };
   const reportsDir = resolveInsideProject(dataRoot, 'reports');
   const names = io.list(reportsDir);
-  const match = names.find((name) => name.startsWith(num));
+  const match = names.find((name) => {
+    const parsed = /^(\d+)-/.exec(name);
+    return parsed != null && Number(parsed[1]) === wanted;
+  });
   if (!match) return { ok: false, reason: 'missing' };
   return { ok: true, path: resolveInsideProject(dataRoot, join('reports', match)) };
 }

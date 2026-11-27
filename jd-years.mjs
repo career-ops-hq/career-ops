@@ -50,13 +50,14 @@
 import {
   jdHtmlToText,
   fetchJdViaKnownApi,
+  resolveJdApi,
   normalizeAshbyJob,
   normalizeGreenhouseJob,
   normalizeLeverJob,
   normalizeSmartRecruitersJob,
   normalizeWorkdayJob,
 } from './browser-extract.mjs';
-import { resolveAtsApi, JD_TEXT_API_ATS, throttleProviderRequest } from './liveness-api.mjs';
+import { JD_TEXT_API_ATS, throttleProviderRequest } from './liveness-api.mjs';
 import { fetchJsonWithRetry, makeHttpCtx } from './providers/_http.mjs';
 
 /**
@@ -281,6 +282,15 @@ function headingKind(line, item) {
 }
 
 /**
+ * The line states a figure: a digit, or a spelled-out count of years ("five
+ * years"). A short line holding either is a requirement, not a heading.
+ * @param {string} text
+ */
+function hasFigure(text) {
+  return /\d/.test(text) || text.search(MENTION_RE) !== -1;
+}
+
+/**
  * @param {string} line
  * @param {boolean} item the line was a list item
  */
@@ -290,8 +300,8 @@ function latinHeadingKind(line, item) {
   const bare = line.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
   // A lead-in line that introduces a preferred list, however long ("It would
   // be great if you also have the following things").
-  if (bare.length <= 120 && !/\d/.test(bare) && PREFERRED_HEADING.test(bare) && /(?::|\bfollowing\b[\w\s]*)$/i.test(bare)) return 'preferred';
-  if (bare.length > 60 || /\d/.test(bare)) return null;
+  if (bare.length <= 120 && !hasFigure(bare) && PREFERRED_HEADING.test(bare) && /(?::|\bfollowing\b[\w\s]*)$/i.test(bare)) return 'preferred';
+  if (bare.length > 60 || hasFigure(bare)) return null;
   const words = bare.split(/\s+/).length;
   if (!/:$/.test(bare) && (words > 6 || /[.!?]$/.test(bare))) return null;
   // A digit only inside a parenthetical is allowed for a heading that names
@@ -299,7 +309,7 @@ function latinHeadingKind(line, item) {
   const known = PREFERRED_HEADING.test(bare) ? 'preferred'
     // "Additional Qualifications" may be required or preferred: unclear.
     : REQUIRED_HEADING.test(bare) && !/^additional\b/i.test(bare) ? 'required' : null;
-  if (/\d/.test(line) && !known) return null;
+  if (hasFigure(line) && !known) return null;
   // "Excellent communication skills" and "Experience in fintech" are items that
   // happen to hold a heading word. Read as Required, one under Preferred
   // Qualifications turned the bars after it into a confident drop. A colon
@@ -647,7 +657,7 @@ const JD_RETRY_POLICY = { retries: 2 };
  * @returns {Promise<string|null>}
  */
 export async function fetchJdText(url, { boardCache, ctx = makeHttpCtx() } = {}) {
-  const resolved = resolveAtsApi(url);
+  const resolved = resolveJdApi(url);
   if (!resolved || !JD_TEXT_API_ATS.has(resolved.ats)) return null;
   const normalize = JSON_JD[resolved.ats];
   if (!normalize) {

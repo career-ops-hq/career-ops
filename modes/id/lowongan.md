@@ -244,7 +244,7 @@ Nama field di header (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`) 
 (daftar 15-20 kata kunci dari lowongan untuk optimasi ATS)
 
 ## Keyword Coverage
-(dihasilkan oleh `keyword-match.mjs` (1b) -- cakupan dalam %, present, thin, missing)
+(dihasilkan oleh `keyword-match.mjs` (1b) -- cakupan dalam %, present, missing)
 
 ## Job Description (archived verbatim)
 (teks lengkap lowongan, ditempel kata per kata -- lihat ketentuan di bawah)

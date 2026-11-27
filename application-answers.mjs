@@ -4,6 +4,8 @@ import { readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { tryAcquireDirLockSync, releaseOrWarn } from './lib/dir-lock.mjs';
+import { JD_HEADING_RE } from './lib/jd-archive-section.mjs';
 
 export const APPLICATION_ANSWERS_HEADING = '## Application Answers';
 
@@ -418,6 +420,29 @@ function findDraftAnswersHeading(report) {
 }
 
 /**
+ * The report above its archived posting. `## Job Description (archived
+ * verbatim)` holds the posting's own text (#2789), which is untrusted: it can
+ * carry a `## ... (draft)` or `## H) ...` heading of its own, and
+ * modes/apply.md adapts what --read-draft returns into a real application.
+ * Every evaluation mode writes Block H above that section, so nothing from its
+ * heading down is searched. The heading pattern is the one check-jd-archive.mjs
+ * reads the section by, tested one line at a time, since its `\s+` also matches
+ * a newline: a bare `##` above a line starting "Job Description" in an answer
+ * would otherwise end the answer there (#7805 review). Fenced lines are not
+ * skipped: an unclosed fence above the archive would turn this bound off,
+ * where a fenced heading above Block H only makes the read come back empty.
+ *
+ * @param {string} report Report markdown, newlines already normalized.
+ * @returns {string}
+ */
+function beforeJdArchive(report) {
+  for (const line of report.matchAll(/^.*$/gm)) {
+    if (JD_HEADING_RE.test(line[0])) return report.slice(0, line.index);
+  }
+  return report;
+}
+
+/**
  * Read the evaluation mode's `## H) Draft Application Answers (draft)` block.
  *
  * A DIFFERENT producer and a different format from the section above.
@@ -443,10 +468,11 @@ function findDraftAnswersHeading(report) {
  * The heading's title may be in any language; only the `## H)` marker is
  * required. A heading with a marker and no title is not Block H.
  *
- * @returns {{freeText: object[]} | null} `null` when the report has no Block H.
+ * @returns {{freeText: object[]} | null} `null` when the report has no Block H
+ * above its archived posting.
  */
 export function parseDraftAnswersBlockH(reportText) {
-  const report = String(reportText ?? '').replace(/\r\n/g, '\n');
+  const report = beforeJdArchive(String(reportText ?? '').replace(/\r\n/g, '\n'));
   const heading = findDraftAnswersHeading(report);
   if (!heading) return null;
 
@@ -501,10 +527,19 @@ export function upsertApplicationAnswersSection(reportText, snapshot = {}) {
   return updated.endsWith('\n') ? updated : `${updated}\n`;
 }
 
+const ANSWER_FLAGS = new Set([
+  '--help', '-h', '--read', '--read-draft', '--strict',
+  '--report', '--input', '--state', '--date',
+]);
+
 function parseArgs(argv) {
   const args = {};
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
+    if (arg.startsWith('-')) {
+      const name = arg.split('=')[0];
+      if (!ANSWER_FLAGS.has(name)) throw new Error(`Unrecognized flag: ${name}`);
+    }
     if (arg === '--help' || arg === '-h') args.help = true;
     else if (arg === '--read') args.read = true;
     else if (arg === '--read-draft') args.readDraft = true;
@@ -612,8 +647,14 @@ async function main() {
     state: args.state || input.state,
   };
   const reportPath = resolve(args.report);
-  const updated = upsertApplicationAnswersSection(readFileSync(reportPath, 'utf-8'), snapshot);
-  writeFileSync(reportPath, updated, 'utf-8');
+  const lock = tryAcquireDirLockSync(`${reportPath}.lock`, { staleMs: 30_000 });
+  if (!lock) throw new Error(`report is busy: ${reportPath}; retry saving the answers`);
+  try {
+    const updated = upsertApplicationAnswersSection(readFileSync(reportPath, 'utf-8'), snapshot);
+    writeFileSync(reportPath, updated, 'utf-8');
+  } finally {
+    releaseOrWarn(lock);
+  }
 
   const normalized = normalizeApplicationAnswersSnapshot(snapshot);
   console.log(JSON.stringify({ report: reportPath, date: normalized.date, state: normalized.state }, null, 2));

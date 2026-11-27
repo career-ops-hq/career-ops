@@ -37,13 +37,13 @@ Put a parser you do not intend to contribute in `local/`:
 
 Use `scripts/parsers/` only for a parser you plan to open a PR for. `career-ops` does not bundle company-specific parser scripts, so in practice that is rare.
 
+In a Claude Code plugin install, the repository root is the plugin cache, which Claude Code replaces on every plugin update (see [CLAUDE_PLUGIN.md](CLAUDE_PLUGIN.md)). Claude Code deletes a parser in that copy's `local/` on the next update, and the provider refuses a script in `~/career-ops-data` because it sits outside the root. For now, run custom local parsers from a git checkout. [#7152](https://github.com/career-ops-hq/career-ops/issues/7152) tracks running a parser from the data root.
+
 ## Token savings
 
 `scan.mjs` uses **0 LLM tokens** for discovery: parsers run locally and only normalized job rows enter the pipeline.
 
-In agent scan mode (`/career-ops scan`), Playwright and API niveles send large page or JSON payloads into the model. When Nivel 0 succeeds, `modes/scan.md` requires skipping those niveles for the same company (`local_parser_ok`).
-
-Measured benchmarks (Cohere + Mobileye fixtures, `tiktoken` `cl100k_base`, Playwright vs parser vs API) live on branch `feature/local-parser-integration-tests` with `npm run test:scan-tokens` and full tables in that branch's copy of this cookbook.
+In agent scan mode (`/career-ops scan`), Playwright and API levels send large page or JSON payloads into the model. When Level 0 succeeds, `modes/scan.md` requires skipping those levels for the same company (`local_parser_ok`).
 
 ## Stdout Contract
 
@@ -71,7 +71,9 @@ The parser must print one of these JSON shapes to stdout:
 }
 ```
 
-`title` and `url` are required. `company` is optional; when omitted, the scanner uses the `tracked_companies` entry name. `location` is optional. `postedAt` is optional — an epoch-milliseconds number or a `Date.parse`-able string (`"2026-09-08"`, an ISO timestamp); `posted_at` / `publishedAt` / `published_at` / `published_date` / `datePosted` / `date_posted` are accepted as aliases (the last is what a page's JSON-LD `JobPosting` block calls it). It feeds `--posted-after` / `--since` and the scan output's posting-date column; an unparseable value is dropped and the row is still kept. Relative URLs are resolved against `careers_url`.
+`title` and `url` are required. A parser may send `name` instead of `title`, and `jobUrl`, `job_url`, `applyUrl` or `apply_url` instead of `url`; the scanner takes the first one set, in that order. `company` is optional; when omitted, the scanner uses the `tracked_companies` entry name. `location` is optional, and `locations` works as an alias. Either one can be a string, an array, or objects with a `name` or `text` field; the scanner joins a list with `, `. `postedAt` is optional — an epoch-milliseconds number or a `Date.parse`-able string (`"2026-09-08"`, an ISO timestamp); `posted_at` / `publishedAt` / `published_at` / `published_date` / `datePosted` / `date_posted` are accepted as aliases (the last is what a page's JSON-LD `JobPosting` block calls it). It feeds `--posted-after` / `--since` and the scan output's posting-date column; an unparseable value is dropped and the row is still kept. Relative URLs are resolved against `careers_url`.
+
+The scanner keeps any other key a parser prints, such as a department, a requisition id or an occupation code, and passes it through unchanged on the job row ([#4697](https://github.com/career-ops-hq/career-ops/pull/4697)).
 
 ## Artifact Storage
 
@@ -89,8 +91,10 @@ bypasses the site's interactive challenge.
 
 ## Failure Handling
 
-Local parsers run before ATS API detection. If a local parser fails and the company has a detectable Greenhouse, Ashby, or Lever API source, `scan.mjs` records the parser failure and falls back to the API path for that company instead of dropping it from the scan.
+Local parsers run before ATS API detection. If a local parser fails, `scan.mjs` looks for another provider that detects the company: a built-in ATS API such as Greenhouse, Ashby or Lever, any other provider in `providers/`, or a provider plugin. When it finds one, it scans the company through that provider and records `local parser failed, used API fallback: <error>` instead of dropping the company from the scan.
+
+A parser the provider can't run safely (an unknown command, a missing script, or a path outside the repository root) never starts. The scanner treats the company as if it had no `parser:` block: it uses whichever other provider detects the company, or skips it.
 
 ## Agent scan (`/career-ops scan`)
 
-`scan.mjs` already uses one provider per company (local parser only, no duplicate API pass). In full agent scan mode (`modes/scan.md`), when Nivel 0 succeeds for a company, the agent must **skip** Playwright (Nivel 1) and API (Nivel 2) for that company, and filter Nivel 3 WebSearch hits that match the same company. General portal queries (`site:jobs.ashbyhq.com`, role keywords) still run for discovery of other employers.
+`scan.mjs` already uses one provider per company (local parser only, no duplicate API pass). In full agent scan mode (`modes/scan.md`), when Level 0 succeeds for a company, the agent must **skip** Playwright (Level 1) and API (Level 2) for that company, and filter Level 3 WebSearch hits that match the same company. General portal queries (`site:jobs.ashbyhq.com`, role keywords) still run for discovery of other employers.

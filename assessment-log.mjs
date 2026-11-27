@@ -157,7 +157,7 @@ export function summarize(rows, malformed = []) {
 }
 
 // --- Append (`add` subcommand) ---
-export function buildRow(fields, today) {
+export function buildRow(fields, today, { existingDeadline } = {}) {
   const req = (name) => {
     const v = String(fields[name] ?? '').trim();
     if (!v) throw new Error(`--${name} is required`);
@@ -188,7 +188,8 @@ export function buildRow(fields, today) {
     }
     return base.join('\t'); // byte-identical to the pre-#5733 format
   }
-  if (tail[0] !== '-' && !isOffsetDateTime(tail[0])) {
+  // submit may carry a deadline accepted by an older writer, but cannot replace it.
+  if (tail[0] !== '-' && tail[0] !== existingDeadline && !isOffsetDateTime(tail[0])) {
     throw new Error(`--deadline must be an ISO date-time with the sender's UTC offset or Z (e.g. 2026-11-02T17:00:00-08:00), got "${tail[0]}"`);
   }
   if (tail[1] !== '-' && !DELIVERABLES.includes(tail[1])) {
@@ -204,7 +205,7 @@ export function buildRow(fields, today) {
 // Strict calendar and clock validation: Date.parse accepts or silently rolls over
 // values such as 2026-02-30 and offsets like +99:99, so check the fields explicitly.
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
-const OFFSET_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(Z|([+-])(\d{2}):?(\d{2}))$/;
+const OFFSET_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|([+-])(\d{2}):?(\d{2}))$/;
 const LOCAL_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?$/;
 
 function validCalendarDate(y, m, d) {
@@ -332,6 +333,7 @@ function addEntry(args, mode = 'add') {
   // for anyone west of Greenwich (#3070).
   const today = localToday();
   let row;
+  let existingDeadline;
   try {
     if (mode === 'submit') {
       // Append-only: record a submission as a NEW row for an existing take-home,
@@ -344,11 +346,12 @@ function addEntry(args, mode = 'add') {
       if (!prior) throw new Error('no logged take-home matches --company/--report/--subject (add it first with --kind take-home)');
       fields.kind = 'take-home';
       fields.platform = prior.platform;
-      fields.deadline = prior.deadline ?? '';
+      existingDeadline = prior.deadline ?? '';
+      fields.deadline = existingDeadline;
       fields.deliverable = prior.deliverable ?? '';
       fields['requirements-url'] = prior.requirementsUrl ?? '';
     }
-    row = buildRow(fields, today);
+    row = buildRow(fields, today, { existingDeadline });
   } catch (e) {
     console.error(`assessment-log: ${e.message}`);
     console.error(USAGE);

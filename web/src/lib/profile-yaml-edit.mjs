@@ -214,6 +214,46 @@ export function patchProfileText(source, patch, expected) {
   }
 }
 
+/**
+ * Set or remove one top-level `key: "value"` line in profile.yml text, keeping
+ * every other line. patchProfileText places keys one level under a section; a
+ * setting that sits at the top of the file, such as `page_format`, needs this.
+ *
+ * Same contract as patchProfileText: the edited text must parse to exactly
+ * `expected`, otherwise this returns null and the caller writes
+ * `yaml.dump(expected)`. A key whose value is not a single-line scalar, or one
+ * written as a quoted key, never matches that check, so it falls back too.
+ *
+ * @param {string} source the profile text the route parsed
+ * @param {string} key
+ * @param {string | undefined} value the new scalar; undefined removes the key
+ * @param {unknown} expected
+ * @returns {string | null}
+ */
+export function patchTopLevelKey(source, key, value, expected) {
+  const eol = source.includes("\r\n") ? "\r\n" : "\n";
+  const lines = source.split(/\r?\n/);
+  const at = lines.findIndex((line) => line.startsWith(`${key}:`));
+  if (at === -1) {
+    if (value !== undefined) {
+      if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+      if (lines.length > 0 && lines[lines.length - 1].trim() !== "") lines.push("");
+      lines.push(`${key}: ${q(value)}`);
+    }
+  } else if (value === undefined) {
+    lines.splice(at, 1);
+  } else {
+    lines[at] = `${key}: ${q(value)}${trailingComment(lines[at].slice(key.length + 1))}`;
+  }
+  if (lines[lines.length - 1] !== "") lines.push("");
+  const text = lines.join(eol);
+  try {
+    return isDeepStrictEqual(yaml.load(text), expected) ? text : null;
+  } catch {
+    return null;
+  }
+}
+
 // What config/profile.example.yml says about the person it describes, by section.
 // Every other key there is a setting with a default of its own.
 const EXAMPLE_PERSON = {

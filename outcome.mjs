@@ -23,7 +23,7 @@ import { join, dirname, resolve, extname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
-import { parseTrackerRow, resolveColumns, extractTrackerReportNumbers, linkedReportNumbers } from './tracker-parse.mjs';
+import { parseTrackerRow, resolveColumns, extractTrackerReportNumbers, linkedReportNumbers, trackerRowIdentity } from './tracker-parse.mjs';
 // The vocabulary this CLI accepts is also READ by calibrate.mjs, which cannot
 // import this file (top-level CLI, exits on load). Shared so the two cannot
 // drift — they already had (#3315 shipped a 7-entry copy of these 14).
@@ -36,6 +36,7 @@ import {
   resolvePdfIndexPath,
   resolveTrackerPath,
   resolveWorkspaceRoot,
+  writeFileAtomic,
 } from './tracker-utils.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -93,7 +94,7 @@ const USAGE = `Usage: node outcome.mjs <tracker#|company> <outcome_type> [option
   --note "..."       Custom note to append to tracker
   --role "..."       Disambiguate company match
   --cv "..."         Path to submitted CV (relative to the tracker workspace; defaults to cv.md)
-  --cover "..."      Path to submitted cover letter
+  --cover "..."      Path to submitted cover letter (relative to the tracker workspace)
   --url "..."        Job posting URL (overrides auto-detection from tracker notes)
   --clean-output     Remove the tailored PDF/HTML from output/ once archived to data/outcomes/
   --dry-run          Preview outcome logging without writing
@@ -269,20 +270,27 @@ let cvResolvedPath = null;
 let isPdf = false;
 let explicitCvBytes = null;
 
+// The bytes of a file the user named on the command line, read once. Throws
+// when it is not a regular, non-empty file.
+function readSelectedFile(path) {
+  if (!statSync(path).isFile()) throw new Error('not a file');
+  // A regular file may become a FIFO after stat; do not block before fstat.
+  const fd = openSync(path, process.platform === 'win32' ? 'r' : constants.O_RDONLY | constants.O_NONBLOCK);
+  try {
+    if (!fstatSync(fd).isFile()) throw new Error('not a file');
+    const bytes = readFileSync(fd);
+    if (bytes.length === 0) throw new Error('empty file');
+    return bytes;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 // Case A: A custom CV path is explicitly passed via CLI options.
 if (flags.cv !== null) {
   const selectedCv = resolve(repoRoot, flags.cv);
   try {
-    if (!statSync(selectedCv).isFile()) throw new Error('not a file');
-    // A regular file may become a FIFO after stat; do not block before fstat.
-    const fd = openSync(selectedCv, process.platform === 'win32' ? 'r' : constants.O_RDONLY | constants.O_NONBLOCK);
-    try {
-      if (!fstatSync(fd).isFile()) throw new Error('not a file');
-      explicitCvBytes = readFileSync(fd);
-      if (explicitCvBytes.length === 0) throw new Error('empty file');
-    } finally {
-      closeSync(fd);
-    }
+    explicitCvBytes = readSelectedFile(selectedCv);
   } catch (err) {
     failExit(`Selected CV is not a readable file: ${flags.cv} (${err.message})`, 'invalid-cv', 1);
   }
@@ -365,6 +373,20 @@ if (isPdf && resolvedCvAbs && pathIsInsideCanonical(resolvedCvAbs, outputDir)) {
     } catch (err) {
       // Fallback gracefully on parsing issues
     }
+  }
+}
+
+// An explicit --cover gets the same treatment as --cv, before the dry run and
+// before anything is written. It was copied only when existsSync() said yes,
+// from a path resolved against the process cwd: a cover letter that was not
+// found was dropped without a word while the run reported success, and a
+// directory reached copyFileSync() and crashed with a stack trace.
+let explicitCoverBytes = null;
+if (flags.cover !== null) {
+  try {
+    explicitCoverBytes = readSelectedFile(resolve(repoRoot, flags.cover));
+  } catch (err) {
+    failExit(`Selected cover letter is not a readable file: ${flags.cover} (${err.message})`, 'invalid-cover', 1);
   }
 }
 
@@ -481,10 +503,10 @@ if (flags.cleanOutput && htmlResolvedPath && existsSync(htmlResolvedPath)) {
 }
 
 // 2. Snapshot submitted cover letter if provided, preserving existing files instead of overwriting.
-if (flags.cover && existsSync(flags.cover)) {
+if (explicitCoverBytes) {
   const coverDestPath = join(outcomeDir, 'submitted_cover_letter.md');
   if (!existsSync(coverDestPath)) {
-    copyFileSync(flags.cover, coverDestPath);
+    writeFileSync(coverDestPath, explicitCoverBytes);
   }
 }
 
@@ -610,28 +632,66 @@ if (matchedRow.role) {
 }
 
 let setStatusResult = null;
+// Serialize the tracker transition with its journal entry, so concurrent
+// confirmations cannot lose feedback or publish in the opposite order.
+let journalLock;
 try {
-  const statusOutput = execFileSync(NODE, setStatusArgs, { cwd: CODE_ROOT, env: process.env, encoding: 'utf-8' });
-  setStatusResult = JSON.parse(statusOutput);
+  journalLock = await acquireDirLock(`${outcomeLogPath}.lock`, {
+    timeoutMs: 60_000, retryMs: 75, staleMs: 10 * 60_000, maxWaitMs: 60_000,
+  });
 } catch (err) {
-  failExit(`Tracker update via set-status.mjs failed: ${err.message}`, 'tracker-update-failed', 1);
+  failExit(`Outcome journal lock unavailable (${err.message})`, 'journal-locked', 1);
 }
-
-// Publish the committed journal only after set-status confirms the transition.
+const releaseJournal = () => releaseOrWarn(journalLock);
+// failExit exits synchronously; its error paths must release the lock too.
+process.once('exit', releaseJournal);
 try {
-  if (existsSync(outcomeLogPath)) {
-    const existingLog = readFileSync(outcomeLogPath, 'utf-8');
-    if (!existingLog.includes(newEntry.trim())) {
-      writeFileSync(outcomeLogPath, existingLog.endsWith('\n') ? existingLog + '\n' + newEntry : existingLog + '\n\n' + newEntry);
-    }
-  } else {
-    const initialLog = `# Application Outcome Log — ${matchedRow.company} — ${matchedRow.role} (#${matchedRow.num})
+  // Another recorded outcome can append notes and change status while this
+  // one waits for the journal lock. Accept that append on the same application,
+  // then guard the complete refreshed row under set-status's own tracker lock.
+  const currentLines = readFileSync(appsFile, 'utf-8').split('\n');
+  const currentColumns = resolveColumns(currentLines);
+  let currentMatches = currentLines
+    .map(line => parseTrackerRow(line, currentColumns))
+    .filter(row => row?.num === matchedRow.num);
+  if (currentMatches.length > 1 && flags.role) {
+    currentMatches = currentMatches.filter(row => roleFuzzyMatch(row.role, flags.role));
+  }
+  const [currentRow] = currentMatches;
+  const previousNotes = matchedRow.notes;
+  const notesMatch = currentRow && (currentRow.notes === previousNotes
+    || ['', '-', '—'].includes(previousNotes) || currentRow.notes.startsWith(`${previousNotes}; `));
+  if (currentMatches.length !== 1 || !notesMatch
+    || trackerRowIdentity({ ...currentRow, notes: null }) !== trackerRowIdentity({ ...matchedRow, notes: null })) {
+    failExit(`Tracker #${matchedRow.num} changed while recording the outcome. Review the row before retrying.`, 'row-changed', EXIT_AMBIGUOUS);
+  }
+  setStatusArgs.push('--expect-row', trackerRowIdentity(currentRow));
+  try {
+    const statusOutput = execFileSync(NODE, setStatusArgs, { cwd: CODE_ROOT, env: process.env, encoding: 'utf-8' });
+    setStatusResult = JSON.parse(statusOutput);
+  } catch (err) {
+    failExit(`Tracker update via set-status.mjs failed: ${err.message}`, 'tracker-update-failed', 1);
+  }
+
+  // Publish the committed journal only after set-status confirms the transition.
+  try {
+    if (existsSync(outcomeLogPath)) {
+      const existingLog = readFileSync(outcomeLogPath, 'utf-8');
+      if (!existingLog.includes(newEntry.trim())) {
+        writeFileAtomic(outcomeLogPath, existingLog.endsWith('\n') ? existingLog + '\n' + newEntry : existingLog + '\n\n' + newEntry, { mode: statSync(outcomeLogPath).mode & 0o777 });
+      }
+    } else {
+      const initialLog = `# Application Outcome Log — ${matchedRow.company} — ${matchedRow.role} (#${matchedRow.num})
 
 ${newEntry}`;
-    writeFileSync(outcomeLogPath, initialLog);
+      writeFileAtomic(outcomeLogPath, initialLog);
+    }
+  } catch (err) {
+    failExit(`Tracker updated, but outcome journal could not be saved: ${err.message}`, 'journal-write-failed', 1);
   }
-} catch (err) {
-  failExit(`Tracker updated, but outcome journal could not be saved: ${err.message}`, 'journal-write-failed', 1);
+} finally {
+  releaseJournal();
+  process.off('exit', releaseJournal);
 }
 
 // 6. Clean up output/ — only ever removes a file whose archived copy in

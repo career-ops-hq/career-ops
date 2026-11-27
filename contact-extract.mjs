@@ -59,7 +59,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
-import { resolveTrackerPath, writeFileAtomic } from './tracker-utils.mjs';
+import { resolveTrackerPath, writeFileAtomic, normalizeCompany, companiesMatchIgnoringCorporateForm } from './tracker-utils.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -300,7 +300,8 @@ async function main() {
       process.exitCode = 1;
       return;
     }
-    if (companyOverride && companyOverride.trim().toLowerCase() !== trackerRow.company.trim().toLowerCase()) {
+    if (companyOverride && normalizeCompany(companyOverride) !== normalizeCompany(trackerRow.company)
+      && !companiesMatchIgnoringCorporateForm(companyOverride, trackerRow.company)) {
       console.error(`Error: --company "${companyOverride}" does not match tracker #${trackerNumber}'s company "${trackerRow.company}"`);
       process.exitCode = 1;
       return;
@@ -308,8 +309,11 @@ async function main() {
     trackerNum = String(trackerNumber);
     company = trackerRow.company;
   } else if (companyOverride) {
-    const normalizedCompany = companyOverride.trim().toLowerCase();
-    const companyApps = apps.filter((app) => app.company.trim().toLowerCase() === normalizedCompany);
+    // Exact key first, then the corporate-form variant, the order set-status
+    // and outcome resolve a company in: "Acme" finds the row stored as "Acme Inc.".
+    const key = normalizeCompany(companyOverride);
+    let companyApps = key ? apps.filter((app) => normalizeCompany(app.company) === key) : [];
+    if (!companyApps.length) companyApps = apps.filter((app) => companiesMatchIgnoringCorporateForm(companyOverride, app.company));
     if (!companyApps.length) {
       console.error(`Error: --company must name a company in the tracker; got "${companyOverride}"`);
       process.exitCode = 1;

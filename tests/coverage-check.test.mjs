@@ -16,8 +16,16 @@ const cases = [
   ['https://jobs.eu.lever.co/kraken/abc', 'lever', 'kraken'],
   ['https://jobs.ashbyhq.com/Solana%20Foundation/abc', 'ashby', 'solana foundation'],
   ['https://wf.wd1.myworkdayjobs.com/en-US/WellsFargoJobs/job/NC/X_R1', 'workday', 'wf|wd1|wellsfargojobs'],
+  ['https://wf.wd1.myworkdayjobs.com/wday/cxs/wf/WellsFargoJobs/jobs', 'workday', 'wf|wd1|wellsfargojobs'],
+  ['https://wd5.myworkdaysite.com/recruiting/guidewire/external/job/Foster-City/X_R1', 'workday', 'guidewire|wd5|external'],
+  ['https://wd5.myworkdaysite.com/en-US/recruiting/guidewire/external/job/Foster-City/X_R1', 'workday', 'guidewire|wd5|external'],
   ['https://careers-acme.icims.com/jobs/1/job', 'icims', 'acme'],
   ['https://apply.workable.com/anza/j/ABC/', 'workable', 'anza'],
+  ['https://apply.workable.com/api/v1/widget/accounts/Anza?details=true', 'workable', 'anza'],
+  ['https://boards-api.greenhouse.io/v1/boards/Anthropic/jobs', 'greenhouse', 'anthropic'],
+  ['https://api.lever.co/v0/postings/Mistral', 'lever', 'mistral'],
+  ['https://api.eu.lever.co/v0/postings/Kraken', 'lever', 'kraken'],
+  ['https://api.ashbyhq.com/posting-api/job-board/Andela?includeCompensation=true', 'ashby', 'andela'],
 ];
 for (const [url, ats, slug] of cases) {
   const got = atsFromUrl(url);
@@ -25,8 +33,23 @@ for (const [url, ats, slug] of cases) {
 }
 const custom = atsFromUrl('https://acme.com/careers?gh_jid=42');
 check(custom.ats === 'greenhouse' && custom.slug === null, 'atsFromUrl: gh_jid on a custom domain is Greenhouse with an unknown board token');
+const workableShare = atsFromUrl('https://apply.workable.com/j/ABC123');
+check(workableShare.ats === 'workable' && workableShare.slug === null, 'atsFromUrl: Workable /j/<shortcode> share link has no account slug');
+check(careersUrlFor(workableShare) === null, 'careersUrlFor: Workable share link with unknown account slug yields null, not /j');
+for (const incomplete of [
+  'https://boards-api.greenhouse.io/v1/boards',
+  'https://api.lever.co/v0/postings',
+  'https://api.ashbyhq.com/posting-api/job-board',
+  'https://apply.workable.com/api/v1/widget/accounts',
+  'https://wf.wd1.myworkdayjobs.com/wday/cxs/wf',
+]) {
+  check(atsFromUrl(incomplete).ats === null, `atsFromUrl: incomplete API path ${incomplete} has no ATS match`);
+}
 check(atsFromUrl('https://acme.notion.site/Role').ats === null, 'atsFromUrl: unknown host has no ATS');
 check(careersUrlFor({ ats: 'workday', slug: 'wf|wd1|wellsfargojobs' }) === 'https://wf.wd1.myworkdayjobs.com/wellsfargojobs', 'careersUrlFor rebuilds a Workday board');
+check(careersUrlFor(atsFromUrl('https://wd5.myworkdaysite.com/recruiting/guidewire/external/job/X_R1')) === 'https://wd5.myworkdaysite.com/recruiting/guidewire/external',
+  'careersUrlFor rebuilds a myworkdaysite board on its own host');
+check(atsFromUrl('https://wd5.myworkdaysite.com/recruiting/guidewire').ats === null, 'atsFromUrl: a myworkdaysite path without a site has no ATS match');
 
 // 2. Tracked-entry lookup: by board slug, or by name with the parenthetical note dropped
 const entries = [
@@ -82,6 +105,40 @@ const moved = diagnose({ url: 'https://jobs.ashbyhq.com/coinbase/9', company: 'C
 check(moved.evidence.includes('posting is on ashby:coinbase, entry reads greenhouse:coinbase'), 'name-only match: evidence names both boards');
 check(moved.gap === 'tracked-not-seen' && moved.fix.includes('https://jobs.ashbyhq.com/coinbase'), 'name-only match: the fix points at the posting\'s board');
 
+// Corporate careers_url + explicit ATS api: URL (35+ shipped portals.example.yml entries)
+const apiPinnedEntries = [
+  { name: 'Anthropic', careers_url: 'https://www.anthropic.com/careers/jobs', api: 'https://boards-api.greenhouse.io/v1/boards/anthropic/jobs' },
+  { name: 'Andela', careers_url: 'https://www.andela.com/careers', api: 'https://api.ashbyhq.com/posting-api/job-board/andela' },
+  { name: 'Anza', careers_url: 'https://apply.workable.com/anza' },
+];
+const apiPinnedProviders = new Map([
+  ['greenhouse', { id: 'greenhouse', fetch() {}, detect: e => /greenhouse\.io/.test(e.api || e.careers_url || '') }],
+  ['ashby', { id: 'ashby', fetch() {}, detect: e => /ashbyhq\.com/.test(e.api || e.careers_url || '') }],
+  ['workable', { id: 'workable', fetch() {}, detect: e => /apply\.workable\.com\/(?!j\/)/.test(e.api || e.careers_url || '') }],
+]);
+check(findTrackedEntry(apiPinnedEntries, { ats: 'greenhouse', slug: 'anthropic', company: 'Anthropic PBC' })?.name === 'Anthropic',
+  'findTrackedEntry matches on board slug derived from entry.api');
+const anthropicDiag = diagnose(
+  { url: 'https://job-boards.greenhouse.io/anthropic/jobs/99', company: 'Anthropic', title: 'Rust Engineer', location: '' },
+  ctx({ entries: apiPinnedEntries, providers: apiPinnedProviders }),
+);
+check(!anthropicDiag.evidence.some(e => e.startsWith('posting is on')) && anthropicDiag.fix.startsWith('none: newer than the last scan'),
+  'diagnose: corporate careers_url with matching entry.api does not report a false board mismatch');
+const workableShareTracked = diagnose(
+  { url: 'https://apply.workable.com/j/ABC123', company: 'Anza', title: 'Rust Engineer', location: '' },
+  ctx({ entries: apiPinnedEntries, providers: apiPinnedProviders }),
+);
+check(!workableShareTracked.evidence.some(e => e.startsWith('posting is on')) && !workableShareTracked.fix.includes('apply.workable.com/j'),
+  'diagnose: a Workable /j/ share link for a tracked Workable company does not report workable:j or propose /j');
+const workableShareUntracked = diagnose(
+  { url: 'https://apply.workable.com/j/ABC123', company: 'NewWorkableCo', title: 'Rust Engineer', location: '' },
+  ctx({ entries: apiPinnedEntries, providers: apiPinnedProviders }),
+);
+check(workableShareUntracked.gap === 'untracked-unsupported-ats'
+  && workableShareUntracked.evidence.includes('workable share link, account slug not in URL')
+  && !workableShareUntracked.fix.includes('apply.workable.com/j'),
+'diagnose: an untracked Workable /j/ share link explains the missing account slug instead of proposing https://apply.workable.com/j');
+
 const untracked = diagnose({ url: 'https://jobs.ashbyhq.com/zeta/2', company: 'Zeta', title: 'Rust Engineer', location: '' }, ctx());
 check(untracked.gap === 'untracked', 'untracked company on a known ATS');
 check(untracked.fix.includes('careers_url: https://jobs.ashbyhq.com/zeta'), 'untracked: proposes the careers_url');
@@ -89,6 +146,12 @@ check(untracked.evidence.some(e => e.includes('in the reverse-sweep company list
 check(untracked.evidence.includes('title_filter_full drops this title in the reverse sweep'), 'untracked: reports the full-sweep title verdict');
 check(diagnose({ url: 'https://jobs.ashbyhq.com/zeta/3', company: 'Zeta', title: 'Head of Sales', location: '' }, ctx()).fix.startsWith('add the company only with a title keyword'), 'untracked: a title the filter drops is not proposed as a plain add');
 check(gap({ url: 'https://zeta.notion.site/Role', company: 'Zeta', title: 'Rust Engineer' }) === 'untracked-unsupported-ats', 'untracked company on an unknown site');
+const wdSite = diagnose({ url: 'https://wd5.myworkdaysite.com/recruiting/guidewire/external/job/X_R1', company: 'Guidewire', title: 'Rust Engineer', location: '' }, ctx());
+check(wdSite.gap === 'untracked' && wdSite.fix.includes('careers_url: https://wd5.myworkdaysite.com/recruiting/guidewire/external'),
+  'untracked: a myworkdaysite posting is on a known ATS, and the fix proposes its board');
+check(findTrackedEntry([{ name: 'Guidewire Software', careers_url: 'https://wd5.myworkdaysite.com/recruiting/guidewire/external' }],
+  { ...atsFromUrl('https://wd5.myworkdaysite.com/en-US/recruiting/guidewire/external/job/X_R1'), company: 'Guidewire' })?.name === 'Guidewire Software',
+'findTrackedEntry matches a myworkdaysite entry on its board');
 
 // 3b. A site no provider reads: count the host, and lead with the platform when other companies post there
 const ON_HOST = 'https://app.tenantats.example/apply/Zeta/1';

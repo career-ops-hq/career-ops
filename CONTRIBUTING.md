@@ -37,7 +37,7 @@ The review process you'll experience here is documented end-to-end in [Agentic m
 
 - Repo docs and governance: `README*.md`, `CONTRIBUTING.md`, `GOVERNANCE.md`, `MAINTAINERS.md`, `ARCHITECTURE.md`, `.github/CODEOWNERS`
 - Coding-agent configuration: `.github/copilot-instructions.md`, `.github/agents/`
-- Agent instructions and the skill router: `CLAUDE.md`, `AGENTS.md`, `CODEX.md`, `OPENCODE.md`, `GEMINI.md`, `KIMI.md`, `.agents/skills/career-ops/SKILL.md`
+- Agent instructions and the skill router: `CLAUDE.md`, `AGENTS.md`, `CODEX.md`, `OPENCODE.md`, `GEMINI.md`, `KIMI.md`, `.agents/skills/career-ops/SKILL.md`, `modes/_community-asks.md`, `modes/_files.md`, `modes/_headless.md`, `modes/_markets.md`, `modes/_onboarding.md`, `modes/_tracker-tsv.md`
 - Scoring and the data contract: `modes/_shared.md`, `DATA_CONTRACT.md`
 - The self-updater: `update-system.mjs`, `lib/update-manifest.mjs`, `updater-migration-tests.mjs`
 - Plugin governance: `plugins-registry/`, `validate-plugin-registry.mjs`, `plugin-install.mjs`, `plugin-audit.mjs`, `plugins/_engine.mjs`, `plugins/_lock.mjs`, `plugins/_net.mjs`, `plugins/_registry.mjs`, `.github/workflows/`, `docs/PLUGIN_REVIEW.md`
@@ -184,6 +184,7 @@ To propose a source (yours or anyone's): [open a source proposal](https://github
 - Dashboard changes require a build (`npm run build:dashboard`) — test with real data before submitting
 - Changes to `dashboard/` or `templates/states.yml` need `go test ./...` run from `dashboard/`: CI runs it on every pull request, and it is the only check that the dashboard accepts every state in `templates/states.yml`; `node test-all.mjs` does not run it
 - Don't commit personal data (cv.md, profile.yml, applications.md, reports/)
+- An English doc change and its mechanical updates to the languages that already have that file go in the same PR, not one PR per language. A new language or market mode stays its own PR, since it usually brings prompts and core changes of its own.
 
 ## What we do NOT accept
 

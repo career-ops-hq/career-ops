@@ -291,6 +291,82 @@ try {
     fail('parseOracleResponse should be empty-safe on malformed bodies');
   }
 
+  // ── secondaryLocations: every place a requisition is open in ────────
+  // buildApiUrl() expands requisitionList.secondaryLocations, where a
+  // requisition open in several places lists the ones besides its
+  // PrimaryLocation, each with its own Name (seen on JPMorgan Chase and Uber
+  // boards). Reading PrimaryLocation alone dropped them, so a location_filter
+  // that names only a secondary place rejected the posting.
+  const multiSample = {
+    items: [{
+      requisitionList: [
+        {
+          Id: '1001',
+          Title: 'Machine Learning Engineer',
+          PrimaryLocation: 'Sunnyvale, CA, United States',
+          secondaryLocations: [
+            { Name: 'San Francisco, CA, United States', CountryCode: 'US' },
+            { Name: 'Seattle, WA, United States', CountryCode: 'US' },
+            { Name: 'Sunnyvale, CA, United States', CountryCode: 'US' },
+            { Name: ' ', CountryCode: 'US' },
+            { CountryCode: 'US' },
+            null,
+          ],
+        },
+        {
+          Id: '1002',
+          Title: 'Operations Manager',
+          PrimaryLocation: 'Paris, Ile-de-France, France',
+          WorkplaceTypeCode: 'ORA_HYBRID',
+          secondaryLocations: [{ Name: 'Madrid, Spain', CountryCode: 'ES' }],
+        },
+        { Id: '1003', Title: 'Client Associate', PrimaryLocation: 'Newark, DE, United States', secondaryLocations: [] },
+        {
+          Id: '1004',
+          Title: 'Support Engineer',
+          PrimaryLocation: 'Austin, TX, United States',
+          secondaryLocations: [{ Name: 'Remote', CountryCode: 'US' }],
+        },
+      ],
+    }],
+  };
+  const [multi, hybrid, single, workModel] = parseOracleResponse(multiSample, site, 'Acme');
+
+  if (multi?.location === 'Sunnyvale, CA, United States · San Francisco, CA, United States · Seattle, WA, United States'
+      && JSON.stringify(multi?.locations) === JSON.stringify(['Sunnyvale, CA, United States', 'San Francisco, CA, United States', 'Seattle, WA, United States'])) {
+    pass('parseOracleResponse adds each secondary location once, after the primary one');
+  } else {
+    fail(`multi-location row = location: ${JSON.stringify(multi?.location)}, locations: ${JSON.stringify(multi?.locations)}`);
+  }
+
+  if (hybrid?.location === 'Paris, Ile-de-France, France · Madrid, Spain · Hybrid'
+      && JSON.stringify(hybrid?.locations) === JSON.stringify(['Paris, Ile-de-France, France', 'Madrid, Spain'])) {
+    pass('parseOracleResponse puts the work-model hint after every place and leaves it out of locations');
+  } else {
+    fail(`hybrid row = location: ${JSON.stringify(hybrid?.location)}, locations: ${JSON.stringify(hybrid?.locations)}`);
+  }
+
+  if (single?.location === 'Newark, DE, United States'
+      && JSON.stringify(single?.locations) === JSON.stringify(['Newark, DE, United States'])) {
+    pass('parseOracleResponse keeps the location of a requisition with no secondary locations');
+  } else {
+    fail(`single-location row = location: ${JSON.stringify(single?.location)}, locations: ${JSON.stringify(single?.locations)}`);
+  }
+
+  if (workModel?.location === 'Austin, TX, United States · Remote'
+      && JSON.stringify(workModel?.locations) === JSON.stringify(['Austin, TX, United States'])) {
+    pass('parseOracleResponse keeps a work-model-only secondary name out of locations');
+  } else {
+    fail(`work-model row = location: ${JSON.stringify(workModel?.location)}, locations: ${JSON.stringify(workModel?.locations)}`);
+  }
+
+  const { buildLocationFilter } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  if (buildLocationFilter({ allow: ['Seattle'] })(multi?.location, multi?.url, multi?.title)) {
+    pass('location_filter allow: [Seattle] keeps a requisition whose secondary location is Seattle');
+  } else {
+    fail(`location_filter allow: [Seattle] rejected ${JSON.stringify(multi?.location)}`);
+  }
+
   // ── fetch: normalization + redirect:error + trusted host ────────────
   let capturedUrl = null;
   let capturedOpts = null;
@@ -700,6 +776,48 @@ try {
     pass('oraclecloud.resolveMaxPages() defaults to 25, honours a positive integer, caps at HARD_MAX_PAGES');
   } else {
     fail('resolveMaxPages mapping wrong');
+  }
+
+  // ── oracle_host: an exact, opt-in branded host (Dell) ──────────────
+  {
+    const dell = {
+      name: 'Dell',
+      api: 'https://enterpriseplatform.dell.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs',
+      oracle_host: 'EnterprisePlatform.dell.com',
+    };
+    const site = resolveSite(dell);
+    site?.host === 'enterpriseplatform.dell.com' && site?.siteNumber === 'CX_1001'
+      ? pass('oraclecloud resolves a branded host named by oracle_host')
+      : fail(`oracle_host resolve: ${JSON.stringify(site)}`);
+
+    oc.detect(dell)?.url?.startsWith('https://enterpriseplatform.dell.com/hcmRestApi/')
+      && oc.detect({ name: 'Dell', api: dell.api }) === null
+      ? pass('oraclecloud.detect() claims a branded host only when oracle_host names it')
+      : fail(`oracle_host detect: ${JSON.stringify(oc.detect(dell))}`);
+
+    resolveSite({ name: 'Dell', api: dell.api }) === null
+      ? pass('oraclecloud still refuses a branded host without oracle_host')
+      : fail('branded host accepted without oracle_host');
+
+    resolveSite({ ...dell, oracle_host: 'other.dell.com' }) === null
+      ? pass('oraclecloud trusts only the exact oracle_host, not a sibling host')
+      : fail('oracle_host matched a different host');
+
+    resolveSite({ ...dell, oracle_host: '*.dell.com' }) === null
+      && resolveSite({ ...dell, oracle_host: 'https://enterpriseplatform.dell.com' }) === null
+      ? pass('oraclecloud rejects an oracle_host that is not one bare hostname')
+      : fail('malformed oracle_host accepted');
+
+    const calls = [];
+    const jobs = await oc.fetch(dell, {
+      fetchJson: async (url) => {
+        calls.push(url);
+        return { items: [{ TotalJobsCount: 1, requisitionList: [{ Id: '1', Title: 'Corporate Strategy Manager', PrimaryLocation: 'Round Rock, TX' }] }] };
+      },
+    });
+    jobs.length === 1 && calls.every((u) => hostOf(u) === 'enterpriseplatform.dell.com')
+      ? pass('oraclecloud fetches only from the pinned branded host')
+      : fail(`branded fetch: ${jobs.length} jobs, hosts=${calls.map(hostOf).join(',')}`);
   }
 
 } catch (e) {

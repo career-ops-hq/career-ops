@@ -169,9 +169,81 @@ export async function writeMigrated(target, snapshot, text, lockOptions = {}) {
     // The backup is written from the snapshot already in memory, so the live
     // file is not read again between the check above and the replace below.
     writeFileSync(`${target}.bak`, snapshot, 'utf-8');
-    atomicWriteFile(target, text);
+    try {
+      atomicWriteFile(target, text);
+    } catch (err) {
+      // atomicWriteFile renames before it fsyncs the directory, so it can throw
+      // with the migrated text already in place. Record which side of the
+      // rename it failed on; the lock is still held, so nothing else wrote.
+      err.written = readFileSync(target, 'utf-8') === text;
+      throw err;
+    }
     return { written: true, reason: null };
   }, lockOptions);
+}
+
+/**
+ * Migrate the text read from `target`, print the summary, and with `apply`
+ * write the result. Returns the process exit code: 0; 2 when the write was
+ * refused because the file changed after it was read; 1 when the write threw
+ * (the pipeline lock timed out, or the filesystem failed). A throw after the
+ * rename still reports `applied: true`, since the migrated file is in place.
+ *
+ * The --json summary prints after the write, so `applied` reports what
+ * happened rather than what was attempted, and it prints when the write
+ * throws too. A refused write used to print `applied: true` and then exit 2.
+ *
+ * @param {string} target - Path to scan-runs.tsv.
+ * @param {string} before - Text the migration is computed from.
+ * @param {{apply?: boolean, asJson?: boolean, lockOptions?: object,
+ *   log?: (line: string) => void, error?: (line: string) => void}} [options]
+ * @returns {Promise<number>}
+ */
+export async function runMigration(target, before, {
+  apply = false, asJson = false, lockOptions = {}, log = console.log, error = console.error,
+} = {}) {
+  const result = migrateScanRuns(before);
+
+  if (!asJson) {
+    if (result.refused) {
+      log(`Refused: ${result.refused} (${target})`);
+    } else if (!result.changed) {
+      log(`Already on the current schema: ${target}`);
+    } else {
+      log(`${target}`);
+      log(`  header migrated: ${result.headerMigrated}`);
+      log(`  rows migrated:   ${result.migratedRows}`);
+      log(`  rows passed through (unrecognized width): ${result.passedThrough}`);
+      log(apply ? `  applying — original saved to ${target}.bak` : '  dry run — nothing written. Re-run with --apply to write.');
+    }
+  }
+
+  let applied = false;
+  let code = 0;
+  if (apply && result.changed) {
+    let outcome;
+    try {
+      outcome = await writeMigrated(target, before, result.text, lockOptions);
+    } catch (err) {
+      applied = err.written === true;
+      error(applied
+        ? `Migrated ${target}, but the write did not complete cleanly: ${err.message}`
+        : `Could not write ${target}: ${err.message}`);
+      code = 1;
+    }
+    if (outcome?.written) {
+      applied = true;
+    } else if (outcome) {
+      error(`Refused to write ${target}: ${outcome.reason}. A scan most likely appended a run `
+        + 'while this was migrating. Nothing was changed — re-run the command.');
+      code = 2;
+    }
+  }
+
+  if (asJson) {
+    log(JSON.stringify({ file: target, applied, ...result, text: undefined }, null, 2));
+  }
+  return code;
 }
 
 if (isMainModule(import.meta.url)) {
@@ -207,29 +279,7 @@ Options:
     process.exit(1);
   }
 
-  const before = readFileSync(target, 'utf-8');
-  const result = migrateScanRuns(before);
-
-  if (asJson) {
-    console.log(JSON.stringify({ file: target, applied: apply && result.changed, ...result, text: undefined }, null, 2));
-  } else if (result.refused) {
-    console.log(`Refused: ${result.refused} (${target})`);
-  } else if (!result.changed) {
-    console.log(`Already on the current schema: ${target}`);
-  } else {
-    console.log(`${target}`);
-    console.log(`  header migrated: ${result.headerMigrated}`);
-    console.log(`  rows migrated:   ${result.migratedRows}`);
-    console.log(`  rows passed through (unrecognized width): ${result.passedThrough}`);
-    console.log(apply ? `  applying — original saved to ${target}.bak` : '  dry run — nothing written. Re-run with --apply to write.');
-  }
-
-  if (apply && result.changed) {
-    const { written, reason } = await writeMigrated(target, before, result.text);
-    if (!written) {
-      console.error(`Refused to write ${target}: ${reason}. A scan most likely appended a run `
-        + 'while this was migrating. Nothing was changed — re-run the command.');
-      process.exit(2);
-    }
-  }
+  // exitCode, not exit(): a forced exit can cut off the JSON summary while it
+  // is still draining to a pipe.
+  process.exitCode = await runMigration(target, readFileSync(target, 'utf-8'), { apply, asJson });
 }

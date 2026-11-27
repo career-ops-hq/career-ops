@@ -44,6 +44,10 @@ The scan exits 2 when every target it tried failed (no network, for example), an
 when at least one board was read, so a scheduler that alerts on a non-zero exit
 reports an outage without flagging every run that hit one dead board.
 
+The standalone scanners (`scan-topdev.mjs`, `scan-interamt.mjs`, `scan-dayforce.mjs`,
+`scan-seek.mjs`) follow the same rule: exit 2 when every search or board they tried
+failed, 0 when at least one was read.
+
 Replace `/path/to/career-ops` with your checkout path, and make sure `node` is on
 the `PATH` the scheduler uses (schedulers often run with a minimal environment — use
 an absolute path to `node` if in doubt, e.g. `which node`).
@@ -251,7 +255,7 @@ that already cleared a free title/location filter.
 Unlike the scan (deterministic, zero-token), a follow-up sweep needs an LLM to
 read `data/applications.md`, decide what's overdue, and draft each email —
 so this piece runs `claude -p` (or your CLI's headless equivalent, see
-`AGENTS.md` → Headless / Batch Mode) instead of a plain Node script.
+`modes/_headless.md`) instead of a plain Node script.
 
 `scripts/followup-sweep.sh` wraps that call. It:
 

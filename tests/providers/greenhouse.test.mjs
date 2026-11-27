@@ -291,15 +291,16 @@ try {
     pass('greenhouse.fetch() does not leak the raw content field into the normalized job');
   else fail('greenhouse.fetch() leaked raw content');
 
-  // Cap: a full JD body is ~10 KB of HTML; the stripped text is sliced so scan
-  // payloads stay sane (same rationale as alibaba's 4000-char cap).
+  // No cap. The visa line usually closes a JD, and most Greenhouse bodies run
+  // past 4,000 characters, so a cut there hid it from visa_filter.
+  const visaLine = 'Visa sponsorship is not offered for this role.';
   const longBody = await greenhouse.fetch(
     { name: 'Acme', careers_url: 'https://job-boards.greenhouse.io/acme' },
-    { fetchJson: async () => ({ jobs: [{ id: 9, title: 'Long', absolute_url: 'https://job-boards.greenhouse.io/acme/jobs/9', content: '&lt;p&gt;' + 'x'.repeat(5000) + '&lt;/p&gt;' }] }) },
+    { fetchJson: async () => ({ jobs: [{ id: 9, title: 'Long', absolute_url: 'https://job-boards.greenhouse.io/acme/jobs/9', content: '&lt;p&gt;' + 'x'.repeat(5000) + '&lt;/p&gt;&lt;p&gt;' + visaLine + '&lt;/p&gt;' }] }) },
   );
-  if (longBody[0]?.description?.length === 4000 && /^x+$/.test(longBody[0].description))
-    pass('greenhouse.fetch() caps the stripped description at 4000 chars');
-  else fail(`greenhouse.fetch() capped length = ${longBody[0]?.description?.length}`);
+  if (longBody[0]?.description?.length > 5000 && longBody[0].description.endsWith(visaLine))
+    pass('greenhouse.fetch() keeps the whole stripped description, including a visa line past 4000 chars');
+  else fail(`greenhouse.fetch() description length = ${longBody[0]?.description?.length}, ends with visa line = ${longBody[0]?.description?.endsWith(visaLine)}`);
 
   // Unit: contentToText contract on the shapes the API can produce.
   if (contentToText(null) === '' && contentToText(undefined) === '' && contentToText(42) === '' && contentToText('') === '')

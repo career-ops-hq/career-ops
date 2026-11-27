@@ -35,6 +35,7 @@ import { createAdmissionGate } from './lib/admission-gate.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
+import { exitIfEveryTargetFailed } from './lib/scan-exit.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { scanHistoryDataLines } from './lib/scan-history-columns.mjs';
@@ -82,7 +83,9 @@ const USAGE = `Usage:
   node scan-interamt.mjs --all            # skip date filter (use for first scan)
   node scan-interamt.mjs --keyword "Softwareentwickler"
   node scan-interamt.mjs --debug          # save a screenshot and the page HTML to output/
-  node scan-interamt.mjs --help|-h        # print this usage block and exit`;
+  node scan-interamt.mjs --help|-h        # print this usage block and exit
+
+Exit status: 0 when the scan ran, 1 on a configuration or fatal error, 2 when every search failed.`;
 
 const args = process.argv.slice(2);
 const DRY_RUN    = args.includes('--dry-run');
@@ -295,6 +298,7 @@ async function main() {
   }
 
   let totalFound = 0;
+  let keywordsRead = 0;
   const newOffers = [];
   const titleSkipped = [];
   const locationSkipped = [];
@@ -311,16 +315,22 @@ async function main() {
     { headless: true },
     { projectRoot: SCAN_DATA_ROOT, processEnv: BROWSER_PROCESS_ENV },
   ));
-  const context = await browser.newContext({ locale: 'de-DE', timezoneId: 'Europe/Berlin' });
-  const page = await context.newPage();
-
+  // Context and page are created inside the try, so a setup that fails still
+  // reaches the finally that closes the browser: the runner sets
+  // process.exitCode rather than calling process.exit(), and an open browser
+  // would keep the process alive (#7741 review).
+  let context;
   try {
+    context = await browser.newContext({ locale: 'de-DE', timezoneId: 'Europe/Berlin' });
+    const page = await context.newPage();
+
     for (let i = 0; i < keywords.length; i++) {
       const kw = keywords[i];
       process.stdout.write(`  Searching "${kw}"... `);
       try {
         const found = await searchInteramt(page, kw, i === 0);
         totalFound += found.length;
+        keywordsRead++;
         process.stdout.write(`${found.length} found\n`);
 
         for (const offer of found) {
@@ -356,7 +366,7 @@ async function main() {
       }
     }
   } finally {
-    await context.close();
+    await context?.close();
     await browser.close();
   }
 
@@ -400,6 +410,9 @@ async function main() {
   }
 
   console.log('\n→ Run /career-ops pipeline to evaluate new offers.');
+
+  // A run that read no keyword at all is an outage: exit 2 like scan.mjs (#5720).
+  exitIfEveryTargetFailed({ attempted: keywords.length, read: keywordsRead, unit: 'Interamt search', thing: 'search' });
 }
 
 // Guarded like every sibling scanner (scan-hn.mjs:122, scan-ats-full.mjs:1115).
@@ -412,6 +425,8 @@ if (isMainModule(import.meta.url)) {
   validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
   main().catch(err => {
     console.error('Fatal:', err.message);
-    process.exit(1);
+    // process.exitCode, not process.exit(): on Windows Node 24 aborts when
+    // process.exit() runs right after a request (nodejs/node#56645, #3788).
+    process.exitCode = 1;
   });
 }

@@ -1,5 +1,8 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
+/** @typedef {import('./_types.js').Job} Job */
+
+import { employmentTypeField } from './_employment-type.mjs';
 
 // Welcome to the Jungle provider — queries WTTJ's public Algolia search index
 // (the same one the welcometothejungle.com jobs UI calls). The Algolia app id
@@ -113,9 +116,10 @@ export function parseEnvPayload(text) {
  *               posting allows fulltime remote
  *   - postedAt: `published_at_timestamp` (epoch seconds → ms)
  *   - salary:   {min, max, currency} from salary_yearly_minimum/salary_maximum
+ *   - employmentType: `contract_type`, normalized (_employment-type.mjs); absent when unknown
  *
  * @param {any} h
- * @returns {{ title: string, url: string, company: string, location: string, postedAt?: number, salary?: {min: number, max: number, currency: string} } | null}
+ * @returns {Job | null}
  */
 export function normalizeWttjHit(h) {
   if (!h || typeof h !== 'object') return null;
@@ -139,8 +143,8 @@ export function normalizeWttjHit(h) {
   if (h.remote === 'fulltime') parts.push('Remote');
   const location = parts.join(', ');
 
-  /** @type {{ title: string, url: string, company: string, location: string, postedAt?: number, salary?: {min: number, max: number, currency: string} }} */
-  const job = { title, url, company, location };
+  /** @type {Job} */
+  const job = { title, url, company, location, ...employmentTypeField(h.contract_type) };
 
   const ts = h.published_at_timestamp;
   if (Number.isFinite(ts) && ts > 0) job.postedAt = ts * 1000;
@@ -217,7 +221,7 @@ export default {
         query,
         hitsPerPage: String(maxHits),
         attributesToRetrieve:
-          'name,slug,organization,offices,remote,published_at_timestamp,salary_yearly_minimum,salary_maximum,salary_period,salary_currency',
+          'name,slug,organization,offices,remote,published_at_timestamp,salary_yearly_minimum,salary_maximum,salary_period,salary_currency,contract_type',
       });
       // Algolia parses `filters` as a filter expression against the index's
       // faceted attributes; it never reaches a URL or host, so the assertHost

@@ -17,6 +17,13 @@ try {
   else fail('radancy.resolveListUrl() should keep the search-jobs URL');
   if (radListUrl({ careers_url: 'https://careers.munichre.com/de/some-page' }) === 'https://careers.munichre.com/de/search-jobs') pass('radancy.resolveListUrl() defaults to /{lang}/search-jobs');
   else fail(`radancy.resolveListUrl() default wrong: ${radListUrl({ careers_url: 'https://careers.munichre.com/de/some-page' })}`);
+  // An `http:` entry is upgraded, not fetched in the clear: this list page is
+  // what the whole board is read from, and every sibling adapter treats its
+  // board URL as https (softgarden, rheinmetall).
+  if (radListUrl({ careers_url: 'http://careers.munichre.com/de/some-page' }) === 'https://careers.munichre.com/de/search-jobs') pass('radancy.resolveListUrl() upgrades an http: board URL to https');
+  else fail(`radancy.resolveListUrl() should upgrade http: to https, got ${radListUrl({ careers_url: 'http://careers.munichre.com/de/some-page' })}`);
+  if (radListUrl({ api: 'http://careers.munichre.com/en/search-jobs' }) === 'https://careers.munichre.com/en/search-jobs') pass('radancy.resolveListUrl() upgrades an http: explicit search-jobs URL to https');
+  else fail(`radancy.resolveListUrl() should upgrade the explicit http: search-jobs URL, got ${radListUrl({ api: 'http://careers.munichre.com/en/search-jobs' })}`);
 
   // detect — never auto-claims (branded hosts, wire explicitly).
   if (radancy.detect({ careers_url: 'https://careers.munichre.com/en/search-jobs' }) === null) pass('radancy.detect() returns null (explicit wiring only)');
@@ -284,6 +291,105 @@ try {
   else fail(`radancy.parseLegacyResults() Barclays locations = ${JSON.stringify(bcRows.map(r => r.location))}`);
   if (parseModernResults(LEGACY_BARCLAYS, 'https://x').length === 0) pass('radancy.parseModernResults() does not claim the Barclays card layout');
   else fail('radancy.parseModernResults() wrongly matched Barclays markup');
+
+  // A posting link the page hands back as an ABSOLUTE `http:` URL keeps its own
+  // scheme through `new URL(href, origin)`, so upgrading the board origin alone
+  // never reaches it. Both parsers must still return an https: posting URL.
+  const LEGACY_ABS_HTTP = `
+<ul><li>
+  <a href="http://careers.unitedhealthgroup.com/job/acton/patient-service-representative/34088/98479156752" data-job-id="98479156752" class="brand-facet">
+    <div><h2>Patient Service Representative</h2><span class="job-location 1">Acton, Massachusetts</span></div>
+  </a>
+  <button type="button" class="js-save-job-btn" data-job-id="98479156752"></button>
+</li></ul>`;
+  const absLegacy = parseLegacyResults(LEGACY_ABS_HTTP, 'https://careers.unitedhealthgroup.com');
+  if (absLegacy.length === 1 && absLegacy[0]?.url === 'https://careers.unitedhealthgroup.com/job/acton/patient-service-representative/34088/98479156752') pass('radancy.parseLegacyResults() upgrades an absolute http: posting link to https');
+  else fail(`radancy.parseLegacyResults() absolute http: link = ${JSON.stringify(absLegacy.map((r) => r.url))}`);
+
+  const MODERN_ABS_HTTP = '<html><li class="search-results-list__item job-list-01-list__item"><div class="search-results-list__content">'
+    + '<h5 class="search-results-list__job-title"><a class="search-results-list__job-link job-card-brand-hover--x" href="http://careers.munichre.com/en/job/city/40548453568-slug/3193/40548453568" data-job-id="40548453568" id="job-40548453568">Innendienst f&#252;r Versicherungsagentur</a></h5>'
+    + '<ul class="search-results-list__job-info-list"><li class="search-results-list__job-info job-list-01-list__job-info--location"><i class="icon"></i> <span>Bingen am Rhein, Germany</span> </li></ul></div></li></html>';
+  const absModern = parseModernResults(MODERN_ABS_HTTP, 'https://careers.munichre.com');
+  if (absModern.length === 1 && absModern[0]?.url === 'https://careers.munichre.com/en/job/city/40548453568-slug/3193/40548453568') pass('radancy.parseModernResults() upgrades an absolute http: posting link to https');
+  else fail(`radancy.parseModernResults() absolute http: link = ${JSON.stringify(absModern.map((r) => r.url))}`);
+
+  // A link that is not a posting at all is not an https posting URL either, so
+  // the row is skipped rather than carried into the tracker and the report.
+  const MODERN_NON_HTTP = '<html><li class="search-results-list__item"><div class="search-results-list__content">'
+    + '<h5 class="search-results-list__job-title"><a class="search-results-list__job-link" href="javascript:alert(1)" data-job-id="88">Not a posting</a></h5>'
+    + '<ul class="search-results-list__job-info-list"><li class="search-results-list__job-info job-list-01-list__job-info--location"><i class="icon"></i> <span>Berlin, Germany</span> </li></ul></div></li></html>';
+  const nonHttpModern = parseModernResults(MODERN_NON_HTTP, 'https://careers.munichre.com');
+  if (nonHttpModern.length === 0) pass('radancy.parseModernResults() skips a non-http(s) posting link');
+  else fail(`radancy.parseModernResults() should skip a javascript: link, got ${JSON.stringify(nonHttpModern.map((r) => r.url))}`);
+
+  // ExampleCo list rows whose title is a class-named <span> inside the anchor
+  // (not a heading) and whose location is a <span class="job-location">: the
+  // old parser removed every span from the anchor, so it found no title.
+  const LEGACY_SPAN_TITLE = `
+<ul>
+<li class="list__item"><div><button type="button" class="js-save-job-btn" data-job-id="501">Save</button></div>
+<a class="list__item--content" href="/en/job/madrid/analyst-finance/1299/501" data-job-id="501">
+<span class="jobtitle">Analyst, Finance &amp; Planning</span><br/><br/><span class="job-location"> Madrid, Spain </span><span class="button-circle"></span></a></li>
+<li class="list__item"><a class="list__item--content" href="/en/job/multiple/buyer/1299/502" data-job-id="502">
+<span class="jobtitle">Buyer</span><span class="job-location"> Multiple locations </span></a></li>
+</ul>`;
+  const spanRows = parseResults(LEGACY_SPAN_TITLE, 'https://careers.acme.example');
+  if (spanRows.length === 2 && spanRows[0].title === 'Analyst, Finance & Planning' && spanRows[1].title === 'Buyer') pass('radancy.parseResults() reads a <span class="jobtitle"> title inside the anchor');
+  else fail(`radancy.parseResults() span-title rows = ${JSON.stringify(spanRows)}`);
+  if (spanRows[0]?.location === 'Madrid, Spain' && spanRows[1]?.location === 'Multiple locations') pass('radancy.parseResults() keeps the location the board prints, even a generic one');
+  else fail(`radancy.parseResults() span-title locations = ${JSON.stringify(spanRows.map(r => r.location))}`);
+
+  // ExampleCo modern rows: title in <h3 class="…__job-title"> and location in
+  // <span class="… job-location"> INSIDE the link. The location must neither be
+  // glued onto the title nor left empty.
+  const MODERN_JOB_LOCATION = `
+<ul>
+<li class="search-results-list__item ">
+<a class="search-results-list__job-link" href="/en/job/lyon/data-manager/3456/601" data-job-id="601">
+<h3 class="search-results-list__job-title">Data Manager</h3>
+<span class="search-results-list__job-info job-location">Lyon, Auvergne-Rh&ocirc;ne-Alpes, France</span></a>
+<button type="button" class="search-results-list__save-job-btn js-save-job-btn" data-job-id="601"><span class="sr-only">Save</span></button></li>
+<li class="search-results-list__item ">
+<a class="search-results-list__job-link" href="/en/job/turin/buyer/3456/602" data-job-id="602">
+<h3 class="search-results-list__job-title">Buyer</h3></a></li>
+</ul>`;
+  const mjRows = parseResults(MODERN_JOB_LOCATION, 'https://careers.acme.example');
+  if (mjRows.length === 2 && mjRows[0].title === 'Data Manager' && mjRows[1].title === 'Buyer') pass('radancy.parseResults() keeps the location span out of a modern title');
+  else fail(`radancy.parseResults() modern job-location titles = ${JSON.stringify(mjRows.map(r => r.title))}`);
+  if (mjRows[0]?.location === 'Lyon, Auvergne-Rhône-Alpes, France' && mjRows[1]?.location === '') pass('radancy.parseResults() reads a modern row’s <span class="job-location"> and leaves a location-less row empty');
+  else fail(`radancy.parseResults() modern job-location locations = ${JSON.stringify(mjRows.map(r => r.location))}`);
+
+  // Review follow-up. A title element holding a nested element of its own type
+  // is read whole, not cut at the inner closing tag.
+  const NESTED_TITLE = `
+<ul>
+<li class="list__item"><a class="list__item--content" href="/en/job/madrid/lead/1299/701" data-job-id="701">
+<div class="jobtitle">Lead <div class="tag">Hybrid</div> Analyst</div><span class="job-location">Madrid, Spain</span></a></li>
+</ul>`;
+  const nestedRows = parseResults(NESTED_TITLE, 'https://careers.acme.example');
+  if (nestedRows.length === 1 && /^Lead\b.*Analyst$/.test(nestedRows[0].title) && nestedRows[0].location === 'Madrid, Spain') pass('radancy.parseResults() reads a title element that nests a same-type element in full');
+  else fail(`radancy.parseResults() nested title rows = ${JSON.stringify(nestedRows)}`);
+
+  // The last modern row has no location of its own and the page carries a
+  // location-classed element after the list: the row must stay empty.
+  const MODERN_TRAILING = `
+<ul>
+<li class="search-results-list__item ">
+<a class="search-results-list__job-link" href="/en/job/turin/buyer/3456/801" data-job-id="801">
+<h3 class="search-results-list__job-title">Buyer</h3></a></li>
+</ul>
+<div class="footer"><span class="job-location">Elsewhere, Nowhere</span></div>`;
+  const trailRows = parseResults(MODERN_TRAILING, 'https://careers.acme.example');
+  if (trailRows.length === 1 && trailRows[0].location === '') pass('radancy.parseResults() keeps the location fallback inside the last modern row');
+  else fail(`radancy.parseResults() trailing location rows = ${JSON.stringify(trailRows)}`);
+
+  // The title class is a whole class token: a `job-title-label` span is not the
+  // title, so the anchor's own text stays the title.
+  const LABEL_SPAN = '<a href="/job/madrid/buyer/1299/702" data-job-id="702">Buyer <span class="job-title-label">Job title</span></a>';
+  const labelRows = parseLegacyResults(LABEL_SPAN, 'https://careers.acme.example');
+  if (labelRows.length === 1 && labelRows[0].title === 'Buyer') pass('radancy.parseLegacyResults() matches the title class as a whole token, not a substring');
+  else fail(`radancy.parseLegacyResults() label-span rows = ${JSON.stringify(labelRows)}`);
+
 
   // A <p class="job-location"> and a row with no location at all: the sibling
   // fallback must read the former and must not invent a location for the latter

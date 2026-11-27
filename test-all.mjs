@@ -24,6 +24,13 @@
  *                                             # below run at the same time as the
  *                                             # discovered suites, in one of the N slots.
  *
+ *   node test-all.mjs --shard <i>/<n>         # Run the i-th of n slices of a full run (CI
+ *                                             # splits a slow leg across machines): every
+ *                                             # n-th discovered suite from the i-th, and the
+ *                                             # inline sections in shard 1 only. Every
+ *                                             # suite is in exactly one shard. See
+ *                                             # tests/shard.mjs.
+ *
  *   A full run (anything but --only) waits for any other full run on this
  *   machine to finish first; CAREER_OPS_TEST_QUEUE=0 skips the wait. See
  *   lib/test-queue.mjs.
@@ -76,7 +83,7 @@ import { join, dirname, basename, relative, delimiter } from 'path';
 import { tmpdir, availableParallelism } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { pass, fail, warn, stripJsComments, run, runRejects, runAcrossUtcDay, runAcrossLocalDay, lastRunFailure, formatRunFailure, fileExists, finish, results, absorbResults, importSuiteContained, linkNodeModules, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv, pinSandboxDataRoot, exitOnInterrupt, ownRootEnv } from './tests/helpers.mjs';
+import { pass, fail, failIn, failureList, warn, stripJsComments, run, runRejects, runAcrossUtcDay, runAcrossLocalDay, lastRunFailure, formatRunFailure, fileExists, finish, results, absorbResults, importSuiteContained, linkNodeModules, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, NODE_TEST_BUDGET_FACTOR, getBash, toBashPath, hermeticGitEnv, pinSandboxDataRoot, exitOnInterrupt, ownRootEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { REQUIRED_TOOL_ENV, declaresTool } from './tests/required-tools.mjs';
 import { collectMjsFiles } from './lib/mjs-files.mjs';
@@ -88,6 +95,8 @@ import { SCRATCH_PREFIX, markScratchOwner, sweepScratchDirs } from './lib/scratc
 import { MARKER_FILE } from './tests/data-root-guard.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { holdTestQueue } from './lib/test-queue.mjs';
+import { nodeFloor } from './lib/node-floor.mjs';
+import { parseShard, pickShard, runsInlineSections } from './tests/shard.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -284,13 +293,14 @@ function reportNodeTestSuite(rel, ok, stdout, detail, how) {
     pass(`${rel} — node:test suite passed${count ? ` (${count} tests)` : ''}`);
     return;
   }
-  fail(`${rel} — node:test suite failed (${how})`);
   // Surface the runner's own summary; a bare "failed" is not actionable.
   // The trailing window alone is not actionable either: node prints the
   // error message above the frames, so a twelve-line tail kept
   // `actual: false, expected: true` and dropped the interpolated value
   // that says WHICH assertion and by how much (#4017).
-  for (const line of childFailureExcerpt(detail)) {
+  const excerpt = childFailureExcerpt(detail);
+  failIn(rel, `${rel} — node:test suite failed (${how})`, excerpt);
+  for (const line of excerpt) {
     console.log(`      ${line}`);
   }
 }
@@ -329,16 +339,23 @@ async function runDiscovered(filter = null, tools = null) {
     pinSandboxDataRoot();
     const kind = discoveredSuiteKind(readFileSync(f, 'utf-8'));
     if (SUITE_REFUSALS[kind]) {
-      fail(SUITE_REFUSALS[kind](rel));
+      failIn(rel, SUITE_REFUSALS[kind](rel));
       continue;
     }
     if (kind === 'node-test') {
-      const out = run(NODE, ['--test', f]);
+      // node:test suites get the same FACTOR-scaled budget the parallel loop
+      // gives each spawned suite: they spawn child processes per test, which
+      // a bare 30s script budget cannot cover on slow-spawn platforms
+      // (Windows). Derived from the helpers constant so sandbox runs that
+      // shrink the default shrink this budget with it.
+      const out = run(NODE, ['--test', f], { timeout: DEFAULT_SCRIPT_TIMEOUT_MS * NODE_TEST_BUDGET_FACTOR });
       const failure = lastRunFailure();
-      // run()'s timeout is DEFAULT_SCRIPT_TIMEOUT_MS. Said the way the parallel
-      // loop says it, since a killed suite has no exit status to print.
+      // run()'s timeout for node:test suites is the FACTOR-scaled budget above.
+      // Said the way the parallel loop says it, since a killed suite has no
+      // exit status to print — and the line reports the budget actually given.
+      const budgetMs = DEFAULT_SCRIPT_TIMEOUT_MS * NODE_TEST_BUDGET_FACTOR;
       const how = failure?.code === 'ETIMEDOUT'
-        ? `killed after ${DEFAULT_SCRIPT_TIMEOUT_MS / 1000}s`
+        ? `killed after ${budgetMs / 1000}s`
         : `exit ${failure?.status ?? '?'}`;
       reportNodeTestSuite(rel, out !== null, out ?? '', failure, how);
       continue;
@@ -368,13 +385,14 @@ async function runDiscovered(filter = null, tools = null) {
 // and one that keeps the event loop open is cut off after a grace period
 // instead of riding along until finish(). Both are reported, not hidden.
 
-// A node:test suite gets the same 30s budget run() gives it, times this, when
-// it shares the machine with N-1 others. Measured on 8 cores: a file takes
-// about 1.7x as long at 8 jobs as it does alone, and the slowest is 16s alone.
-const PARALLEL_NODE_TEST_BUDGET_FACTOR = 4;
+// A node:test suite gets DEFAULT_SCRIPT_TIMEOUT_MS × NODE_TEST_BUDGET_FACTOR
+// (tests/helpers.mjs), the same budget the in-process loop gives it.
 // The serial loop has no limit for an imported suite at all; a child that never
 // exits must not hang the whole run, so this one is only a backstop.
 const PARALLEL_SUITE_TIMEOUT_MS = 5 * 60_000;
+// Named under the total suite time, so a slow run says where it spent that
+// time before a suite reaches its budget and gets killed (#7713).
+const SLOWEST_SUITES_SHOWN = 10;
 
 /**
  * Spawn node on one suite and collect what it printed.
@@ -443,10 +461,10 @@ async function runSuiteInChild(f, scratch, index) {
   const rel = f.slice(ROOT.length + 1);
   const kind = discoveredSuiteKind(readFileSync(f, 'utf-8'));
   if (SUITE_REFUSALS[kind]) {
-    return { ms: 0, lingered: false, report: () => fail(SUITE_REFUSALS[kind](rel)) };
+    return { ms: 0, lingered: false, report: () => failIn(rel, SUITE_REFUSALS[kind](rel)) };
   }
   if (kind === 'node-test') {
-    const r = await spawnSuite(['--test', f], DEFAULT_SCRIPT_TIMEOUT_MS * PARALLEL_NODE_TEST_BUDGET_FACTOR);
+    const r = await spawnSuite(['--test', f], DEFAULT_SCRIPT_TIMEOUT_MS * NODE_TEST_BUDGET_FACTOR);
     const how = r.timedOut ? `killed after ${Math.round(r.ms / 1000)}s` : `exit ${r.status ?? '?'}`;
     return { ms: r.ms, lingered: false, report: () => reportNodeTestSuite(rel, r.status === 0, r.stdout, r, how) };
   }
@@ -461,18 +479,18 @@ async function runSuiteInChild(f, scratch, index) {
     lingered: counts?.lingered === true,
     report: () => {
       if (r.merged) process.stdout.write(r.merged.endsWith('\n') ? r.merged : `${r.merged}\n`);
-      if (counts) absorbResults(counts);
+      if (counts) absorbResults(counts, rel);
       if (r.timedOut) {
-        fail(`${rel} — suite was killed after ${Math.round(r.ms / 1000)}s without finishing`);
+        failIn(rel, `${rel} — suite was killed after ${Math.round(r.ms / 1000)}s without finishing`);
       } else if (!counts) {
         // No result file: the process died before its exit handler ran, so
         // however many assertions printed above, none of them were counted.
-        fail(`${rel} — suite process died without reporting (exit ${r.status ?? '?'}${r.signal ? `, ${r.signal}` : ''}); its assertions above are not in the totals`);
+        failIn(rel, `${rel} — suite process died without reporting (exit ${r.status ?? '?'}${r.signal ? `, ${r.signal}` : ''}); its assertions above are not in the totals`);
       } else if (r.status !== 0) {
         // The suite reported, then the process ended badly anyway: an error
         // thrown from async work after the import resolved. In the serial loop
         // that same error takes the whole run down with it.
-        fail(`${rel} — suite process exited ${r.status ?? r.signal ?? '?'} after reporting (an error outside its awaited work)`);
+        failIn(rel, `${rel} — suite process exited ${r.status ?? r.signal ?? '?'} after reporting (an error outside its awaited work)`);
         // Nothing to excerpt: the error is already in the suite's output above.
       }
     },
@@ -624,6 +642,11 @@ async function runDiscoveredParallel(files, jobs, { withInlineSections = false }
   const wall = (Date.now() - startedAt) / 1000;
   const summed = finished.reduce((n, r) => n + (r?.ms ?? 0), 0) / 1000;
   console.log(`\n  ⏱  ${files.length} discovered suites in ${wall.toFixed(0)}s, ${pool} at a time (${summed.toFixed(0)}s of suite time; --jobs N or CAREER_OPS_TEST_JOBS to change, 1 runs them in-process)`);
+  const slowest = files
+    .map((f, i) => ({ rel: f.slice(ROOT.length + 1), ms: finished[i]?.ms ?? 0 }))
+    .sort((a, b) => b.ms - a.ms)
+    .slice(0, SLOWEST_SUITES_SHOWN);
+  console.log(`  ⏱  slowest: ${slowest.map((s) => `${s.rel} ${(s.ms / 1000).toFixed(0)}s`).join(', ')}`);
   if (withInlineSections) {
     console.log(`  ⏱  the inline sections ran at the same time, for the first ${(inlineMs / 1000).toFixed(0)}s, in one of the ${jobs} slots`);
   }
@@ -643,7 +666,7 @@ async function runDiscoveredParallel(files, jobs, { withInlineSections = false }
 // (#1633/#1635) and reply-watch.mjs: an unknown flag outranks --help, so
 // `--help --bogus` is still an error (#2745). `-h` is the only single-dash
 // flag, since the suite has no short flags for it to collide with.
-const FLAGS_WITH_VALUE = new Set(['--only', '--needs', '--jobs', '--inline-child']);
+const FLAGS_WITH_VALUE = new Set(['--only', '--needs', '--jobs', '--shard', '--inline-child']);
 const KNOWN_FLAGS = new Set([...FLAGS_WITH_VALUE, '--quick', '--help']);
 const USAGE = [
   'Usage:',
@@ -652,6 +675,7 @@ const USAGE = [
   '  node test-all.mjs --only <substring>    Run only the discovered tests/**/*.test.mjs whose path matches',
   '  node test-all.mjs --needs <tool,...>    Run only the suites that declare one of these tools',
   '  node test-all.mjs --jobs <N>            At most N discovered suites at a time',
+  '  node test-all.mjs --shard <i>/<n>       The i-th of n slices of a full run (inline sections in shard 1)',
 ].join('\n');
 const ARGS = process.argv.slice(2);
 const UNKNOWN_FLAGS = [];
@@ -684,6 +708,20 @@ if (UNKNOWN_FLAGS.length > 0) {
 if (WANTS_HELP) {
   console.log(USAGE);
   process.exit(0);
+}
+
+// Below the project's Node floor (lib/node-floor.mjs, #4801) the tracker's
+// node:sqlite cannot load, so every suite that runs tracker.mjs or doctor.mjs
+// fails, each with the cause buried in its own output, and only after a full
+// run. Say so once, up front, the way doctor.mjs does, and run nothing. Called
+// where each kind of run starts, after its own flag checks, so a usage error
+// is still reported as one on any Node.
+function requireNodeFloor() {
+  const floor = nodeFloor(process.versions.node);
+  if (floor.pass) return;
+  console.log(`  ❌ ${floor.label}`);
+  for (const line of floor.fix ?? []) console.log(`     → ${line}`);
+  process.exit(1);
 }
 
 // Set in the process a run with more than one job starts for the inline
@@ -769,6 +807,31 @@ const ONLY = hasFlag(process.argv, '--only') ? (flagValue(process.argv, '--only'
 // are installed: the tool-suites CI job, in the cv-visual image. Composes with
 // --only. Like --only, it skips every inline section.
 const NEEDS = hasFlag(process.argv, '--needs') ? (flagValue(process.argv, '--needs') ?? '') : null;
+
+// `--shard i/n`: one slice of a full run (tests/shard.mjs). Only of a full run,
+// and only in parallel: --only and --needs already pick their own subset, and
+// the serial loop runs the inline sections in this process, where a shard
+// other than the first could not leave them out. Checked before either of
+// those runs starts, so a combination is a usage error rather than a run of
+// something else. The inline sections' child is started with the same command
+// line and serial by design, so it skips the checks.
+const SHARD = (() => {
+  if (!hasFlag(process.argv, '--shard')) return null;
+  const parsed = parseShard(flagValue(process.argv, '--shard') ?? '');
+  if (parsed.error) {
+    console.log(`  ❌ ${parsed.error}`);
+    process.exit(1);
+  }
+  if (INLINE_CHILD === null && (ONLY !== null || NEEDS !== null)) {
+    console.log('  ❌ --shard slices a full run; it cannot be combined with --only or --needs');
+    process.exit(1);
+  }
+  if (INLINE_CHILD === null && JOBS === 1) {
+    console.log('  ❌ --shard runs the suites in parallel; it cannot be combined with --jobs 1 or CAREER_OPS_TEST_JOBS=1');
+    process.exit(1);
+  }
+  return parsed;
+})();
 if (NEEDS !== null) {
   const tools = NEEDS.split(',').map((t) => t.trim()).filter(Boolean);
   const unknown = tools.filter((t) => !Object.hasOwn(REQUIRED_TOOL_ENV, t));
@@ -782,6 +845,7 @@ if (NEEDS !== null) {
   }
   // Set before any suite starts: children inherit it, and toolRequired()
   // reads it on every call in this process.
+  requireNodeFloor();
   for (const tool of tools) process.env[REQUIRED_TOOL_ENV[tool]] = '1';
   console.log(`\n🧪 career-ops test suite (--needs ${tools.join(',')}${ONLY ? ` --only ${ONLY}` : ''})\n`);
   await runDiscovered(ONLY || null, tools);
@@ -793,6 +857,7 @@ if (ONLY !== null) {
     console.log('  ❌ --only requires a path substring, e.g. --only providers/themuse');
     process.exit(1);
   }
+  requireNodeFloor();
   console.log('\n🧪 career-ops test suite (--only ' + ONLY + ')\n');
   await runDiscovered(ONLY);
   finish();
@@ -803,6 +868,7 @@ if (ONLY !== null) {
 // lib/test-queue.mjs. Not in the inline sections' child, whose parent holds the
 // queue already.
 if (INLINE_CHILD === null) {
+  requireNodeFloor();
   try {
     await holdTestQueue();
   } catch (err) {
@@ -816,9 +882,19 @@ if (INLINE_CHILD === null) {
 // its own, as in runDiscovered(), and none at all is the hard failure
 // runDiscovered() reports once the sections have run.
 if (INLINE_CHILD === null && JOBS > 1) {
-  const files = discoverTests(TESTS_DIR);
-  if (files.length > 1) {
-    await runDiscoveredParallel(files, JOBS, { withInlineSections: true });
+  const all = discoverTests(TESTS_DIR);
+  const files = SHARD ? pickShard(all, SHARD) : all;
+  if (SHARD) {
+    const inline = runsInlineSections(SHARD) ? ', and the inline sections' : '; the inline sections run in shard 1';
+    console.log(`\n🧪 shard ${SHARD.index}/${SHARD.count}: ${files.length} of ${all.length} discovered suites${inline}\n`);
+    if (files.length === 0) {
+      // More shards than suites. Green here would read as a slice that passed.
+      fail(`shard ${SHARD.index}/${SHARD.count} has no suites to run (${all.length} discovered): use fewer shards`);
+      finish();
+    }
+  }
+  if (files.length > 1 || SHARD) {
+    await runDiscoveredParallel(files, JOBS, { withInlineSections: !SHARD || runsInlineSections(SHARD) });
     finish();
   }
 }
@@ -831,7 +907,7 @@ let inlineRunnerFailed = false;
 if (INLINE_CHILD !== null) {
   process.on('exit', () => {
     try {
-      writeFileSync(INLINE_CHILD, JSON.stringify({ ...results(), completed: inlineSectionsCompleted, runnerFailed: inlineRunnerFailed }));
+      writeFileSync(INLINE_CHILD, JSON.stringify({ ...results(), failures: failureList(), completed: inlineSectionsCompleted, runnerFailed: inlineRunnerFailed }));
     } catch {
       // Nothing to report to: the parent reads a missing file as sections that died.
     }
@@ -943,9 +1019,11 @@ const scripts = [
   { name: 'reconcile-pipeline.mjs --dry-run', expectExit: 0 },
   { name: 'analyze-patterns.mjs --self-test', expectExit: 0 },
   { name: 'keyword-match.mjs --self-test', expectExit: 0 },
+  { name: 'verify-all.mjs --self-test', expectExit: 0 },
   { name: 'calibrate.mjs --self-test', expectExit: 0 },
   { name: 'check-table-freshness.mjs --self-test', expectExit: 0 },
   { name: 'check-jd-archive.mjs --self-test', expectExit: 0 },
+  { name: 'check-output-names.mjs --self-test', expectExit: 0 },
   { name: 'upskill.mjs --self-test', expectExit: 0 },
   { name: 'detect-reposts.mjs --self-test', expectExit: 0 },
   { name: 'rank-pipeline.mjs --self-test', expectExit: 0 },
@@ -961,6 +1039,7 @@ const scripts = [
   { name: 'img-to-pdf.mjs --self-test', expectExit: 0 },
   { name: 'assessment-log.mjs --self-test', expectExit: 0 },
   { name: 'weekly-digest.mjs --self-test', expectExit: 0 },
+  { name: 'interview-jd-terms.mjs --self-test', expectExit: 0 },
   { name: 'build-cv-html.mjs --test', expectExit: 0 },
   { name: 'jd-skill-gap.mjs --self-test', expectExit: 0 },
   { name: 'story-provenance-check.mjs --self-test', expectExit: 0 },
@@ -977,7 +1056,7 @@ const scripts = [
   { name: 'tracker-sync-check.mjs --self-test', expectExit: 0 },
   { name: 'linkedin-join.mjs --self-test', expectExit: 0 },
   { name: 'validate-profile.mjs --self-test', expectExit: 0 },
-  { name: 'updater-migration-tests.mjs', expectExit: 0 },
+  { name: 'updater-migration-tests.mjs', expectExit: 0, timeoutMs: 300_000 },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   { name: 'validate-system-paths-coverage.mjs --self-test', expectExit: 0 },
   // The bare coverage run is NOT here on purpose: this section executes each
@@ -1345,9 +1424,15 @@ try {
     visibleMetric,
     '<html><body><p>Improved onboarding for 918273645 users.</p></body></html>'
   );
+  // The suite pins CAREER_OPS_ROOT at a temp dir with no cv.md. Without a
+  // source file the script exits 1 and says so, and a check that only looks
+  // at the status reports that as "script contents were visible".
+  writeFileSync(join(tmp, 'cv.md'), '# Jordan Example\n\n- Led a team of 4 engineers.\n');
+  const factEnv = { ...process.env, CAREER_OPS_ROOT: tmp, CAREER_OPS_DATA_DIR: '' };
 
   const hiddenResult = run(NODE, ['verify-cv-facts.mjs', hiddenScriptMetric], {
     stdio: ['pipe', 'pipe', 'pipe'],
+    env: factEnv,
   });
   if (hiddenResult !== null) {
     pass('verify-cv-facts strips script tags with irregular closing tags');
@@ -1357,6 +1442,7 @@ try {
 
   const visibleResult = run(NODE, ['verify-cv-facts.mjs', visibleMetric], {
     stdio: ['pipe', 'pipe', 'pipe'],
+    env: factEnv,
   });
   if (visibleResult === null) {
     pass('verify-cv-facts still flags visible unsupported metrics');
@@ -10068,6 +10154,8 @@ try {
       // ...and pipeline-lock.mjs runs the shared lock protocol from
       // lib/dir-lock.mjs (#5358), so the fixture carries that too.
       copyFileSync(join(ROOT, 'lib', 'dir-lock.mjs'), join(e2eTmp, 'lib', 'dir-lock.mjs'));
+      // ...and tracker-utils imports its rename retry from lib/rename-retry.mjs.
+      copyFileSync(join(ROOT, 'lib', 'rename-retry.mjs'), join(e2eTmp, 'lib', 'rename-retry.mjs'));
       copyFileSync(join(ROOT, 'lib', 'yaml-document.mjs'), join(e2eTmp, 'lib', 'yaml-document.mjs'));
       // ...and followup-cadence now delegates flag validation to the shared
       // lib/cli-flags.mjs helper, so the fixture carries that too.
@@ -16246,9 +16334,6 @@ try {
   if (r.present.includes('Python')) pass('keyword coverage: exact match (Python)');
   else fail('keyword coverage: Python should be present');
 
-  if (!r.thin.includes('Python')) pass('keyword coverage: count>1 keyword not flagged thin (Python x2)');
-  else fail('keyword coverage: Python appears twice and must not be thin');
-
   if (r.present.includes('Kubernetes')) pass('keyword coverage: synonym match (k8s -> Kubernetes)');
   else fail('keyword coverage: Kubernetes should match via k8s synonym');
 
@@ -16267,8 +16352,8 @@ try {
   if (r.missing.includes('gRPC')) pass('keyword coverage: genuine miss reported (gRPC)');
   else fail('keyword coverage: gRPC should be missing');
 
-  if (r.thin.includes('observability')) pass('keyword coverage: count-1 keyword flagged thin (observability)');
-  else fail('keyword coverage: observability should be thin');
+  if (r.present.includes('observability')) pass('keyword coverage: one occurrence counts as present (observability)');
+  else fail('keyword coverage: one mention of observability should count as present');
 
   if (r.coveragePct === 80) pass('keyword coverage: percentage computed correctly (8/10 = 80%)');
   else fail(`keyword coverage: percentage wrong: ${r.coveragePct} (expected 80)`);
@@ -17340,10 +17425,12 @@ try {
     const cadKeys = Object.keys(DEFAULT_CADENCE);
     const schemaOk = defaults && typeof defaults === 'object'
       && cadKeys.length > 0
-      && cadKeys.every((k) => Number.isInteger(defaults[k]) && defaults[k] >= 0)
+      && cadKeys.every((k) => k === 'interview_followups'
+        ? defaults[k] === true
+        : Number.isInteger(defaults[k]) && defaults[k] >= 0)
       && Object.keys(defaults).length === cadKeys.length;
     if (schemaOk) {
-      pass('followup-cadence --json emits a complete integer cadenceDefaults for the web to derive from (#2369)');
+      pass('followup-cadence --json emits a complete cadenceDefaults for the web to derive from (#2369)');
     } else {
       fail(`cadenceDefaults payload broken — the web cadence form loses its baseline (#2369): ${JSON.stringify(defaults)}`);
     }
@@ -17374,7 +17461,7 @@ try {
     // would be reverting to, which is the #2369 mistake exactly.
     const emptyOk = emptyDefaults && typeof emptyDefaults === 'object'
       && Object.keys(emptyDefaults).length === cadKeys.length
-      && cadKeys.every((k) => Number.isInteger(emptyDefaults[k]) && emptyDefaults[k] === DEFAULT_CADENCE[k]);
+      && cadKeys.every((k) => emptyDefaults[k] === DEFAULT_CADENCE[k]);
     if (emptyOk) {
       pass('followup-cadence emits cadenceDefaults even when the tracker is empty (#4005)');
     } else {
@@ -19632,25 +19719,25 @@ try {
     fail('docs/SCRIPTS.md missing the exit-code semantics for check-table-freshness');
   }
 
-  const agentsDoc = readFile('AGENTS.md');
-  // Only the table under the Main Files heading counts: the name in prose,
-  // another table or a fenced example does not list the script there.
-  const agentsLines = agentsDoc.split(/\r?\n/);
-  const mainFilesHeading = agentsLines.indexOf('### Main Files');
+  // The Main Files table moved from AGENTS.md to modes/_files.md (#6693).
+  // Only the table under its heading counts: the name in prose, another table
+  // or a fenced example does not list the script there.
+  const filesLines = readFile('modes/_files.md').split(/\r?\n/);
+  const mainFilesHeading = filesLines.indexOf('## Scripts and data files');
   const mainFilesRows = [];
-  for (const line of mainFilesHeading < 0 ? [] : agentsLines.slice(mainFilesHeading + 1)) {
+  for (const line of mainFilesHeading < 0 ? [] : filesLines.slice(mainFilesHeading + 1)) {
     if (line.startsWith('|')) mainFilesRows.push(line);
     else if (mainFilesRows.length > 0 || line.trim() !== '') break;
   }
   if (mainFilesRows.some((row) => row.startsWith('| `check-table-freshness.mjs` |'))) {
-    pass('AGENTS.md Main Files table lists check-table-freshness.mjs');
+    pass('modes/_files.md Main Files table lists check-table-freshness.mjs');
   } else {
-    fail('AGENTS.md Main Files table missing check-table-freshness.mjs');
+    fail('modes/_files.md Main Files table missing check-table-freshness.mjs');
   }
   if (mainFilesRows.some((row) => row.startsWith('| `add-entry.mjs` |'))) {
-    pass('AGENTS.md Main Files table lists add-entry.mjs');
+    pass('modes/_files.md Main Files table lists add-entry.mjs');
   } else {
-    fail('AGENTS.md Main Files table missing add-entry.mjs');
+    fail('modes/_files.md Main Files table missing add-entry.mjs');
   }
 
   // Read-only import boundary: the ONLY fs capabilities the script may hold

@@ -108,6 +108,9 @@ export function sourceBadge(source) {
   }[source] || source;
 }
 
+/** The hosts the engine treats as loopback (plugins/_engine.mjs validateManifest). */
+const LOOPBACK_HOST_RE = /^(localhost|127\.\d+\.\d+\.\d+|::1|\[::1\])$/i;
+
 /**
  * Validate one registry entry's shape (used by the registry CI + a test-all
  * assertion). Returns an array of problems (empty = valid). `idRe` + `hookKinds`
@@ -125,6 +128,11 @@ export function validateRegistryEntry(e, { idRe, hookKinds, reservedEnv }) {
   else if (e.requiredEnv.some(n => reservedEnv.has(n) || /^AWS_/.test(n))) errs.push('requiredEnv declares a reserved/core-owned var');
   if (!Array.isArray(e.allowedHosts)) errs.push('allowedHosts must be an array');
   else if (Array.isArray(e.requiredEnv) && e.requiredEnv.length > 0 && e.allowedHosts.length === 0) errs.push('a keyed plugin must declare allowedHosts');
+  // The engine refuses a loopback host unless the manifest opted in, so the
+  // registry has to carry that opt-in: a reviewer sees it here, at review time,
+  // instead of finding it in the plugin's own manifest after install.
+  if (e.allowsLocalhost !== undefined && typeof e.allowsLocalhost !== 'boolean') errs.push('allowsLocalhost, if present, must be a boolean');
+  else if (Array.isArray(e.allowedHosts) && e.allowedHosts.some(h => LOOPBACK_HOST_RE.test(String(h))) && e.allowsLocalhost !== true) errs.push('allowedHosts contains a loopback host, so allowsLocalhost must be true');
   if (typeof e.license !== 'string' || !e.license) errs.push('license is required');
   if (typeof e.version !== 'string') errs.push('version is required');
   // Optional successor marker: a community plugin can declare itself the

@@ -25,12 +25,12 @@ import { fileURLToPath } from 'url';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { normalizeStatus, analyzeFromContent, loadFollowupsEnabled } from './followup-cadence.mjs';
+import { normalizeStatus, analyzeFromContent, loadFollowupsEnabled, parseFollowups } from './followup-cadence.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { parseStatusLogStages, recoverFunnelStages } from './funnel-stages.mjs';
 export { parseStatusLogStages } from './funnel-stages.mjs';
-import { parseScanHistoryLine } from './lib/scan-history-columns.mjs';
+import { parseScanHistoryLine, OBSERVATIONAL_SCAN_HISTORY_STATUSES } from './lib/scan-history-columns.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -275,12 +275,22 @@ export function computeScanStats(content, { weeks = 8 } = {}) {
   return { totalRecorded, added, byStatus, byPortal, distinctCompanies: companies.size, firstSeen, lastSeen, addedPerWeek };
 }
 
-/** Lowercased set of company names that ever appeared in scan-history.tsv. */
+// Rows a scanner recorded only so a drop stays visible (modes/scan.md): the
+// user's title, location, age and experience filters, scan-dayforce.mjs's
+// content, visa and country-eligibility cuts, and a posting --verify found no
+// Apply control on. None of them reached the pipeline, so none is a match.
+// Counted as one, any board that returned a posting at all "produced a match",
+// and --prune could never point at a title_filter that matches nothing. The
+// set is the one scan.mjs keeps unpinned, read from where it is defined, so a
+// status added there is not missed here.
+const FILTER_REJECTED_STATUSES = OBSERVATIONAL_SCAN_HISTORY_STATUSES;
+
+/** Lowercased set of company names with a scan-history.tsv row the filters kept. */
 export function scanCompanyNames(content) {
   const names = new Set();
   for (const line of String(content ?? '').replace(/\r/g, '').split('\n')) {
     const row = parseScanHistoryLine(line);
-    if (!/^https?:\/\//.test(row.url)) continue;
+    if (!/^https?:\/\//.test(row.url) || FILTER_REJECTED_STATUSES.has(row.status.trim())) continue;
     const company = row.company.trim();
     if (company) names.add(company.toLowerCase());
   }
@@ -410,10 +420,10 @@ export function computePortalRecommendations(portalsContent, scanContent, health
   const produced = new Set(scanCompanyNames(scanContent));
   const lastMatch = new Map();
   for (const line of String(scanContent ?? '').split('\n')) {
-    const c = line.trimEnd().split('\t');
-    if (!/^https?:\/\//.test(c[0]) || !validDate(c[1]) || !c[4]) continue;
-    const key = c[4].trim().toLowerCase();
-    if (!lastMatch.has(key) || c[1] > lastMatch.get(key)) lastMatch.set(key, c[1]);
+    const { url, first_seen: seen, company, status } = parseScanHistoryLine(line.trimEnd());
+    if (!/^https?:\/\//.test(url) || !validDate(seen) || !company || FILTER_REJECTED_STATUSES.has(status.trim())) continue;
+    const key = company.trim().toLowerCase();
+    if (!lastMatch.has(key) || seen > lastMatch.get(key)) lastMatch.set(key, seen);
   }
   const health = new Map();
   const healthRows = [];
@@ -463,8 +473,12 @@ export function computePortalRecommendations(portalsContent, scanContent, health
 }
 
 /**
- * Follow-up compliance from follow-ups.md (same table shape followup-cadence
- * parses: | num | appNum | date | company | role | channel | contact | notes |).
+ * Follow-up compliance from follow-ups.md, read with followup-cadence.mjs's
+ * parseFollowups(): table rows (| num | appNum | date | company | role | channel
+ * | contact | notes |) and the legacy `- YYYY-MM-DD · #N Company — note`
+ * bullets. Reading only the table made one --summary contradict itself: a row
+ * was cold (analyzeFromContent() counts its bullet follow-ups) while the
+ * Follow-ups line said none were sent.
  * appliedWithoutFollowup counts tracker rows currently in Applied with zero
  * logged follow-ups — the rows the followup mode would flag as aging silently.
  *
@@ -473,17 +487,9 @@ export function computePortalRecommendations(portalsContent, scanContent, health
  */
 export function computeFollowupStats(followupsContent, trackerByNum) {
   const byApp = new Map();
-  let totalFollowups = 0;
-  for (const line of String(followupsContent ?? '').replace(/\r/g, '').split('\n')) {
-    if (!line.startsWith('|')) continue;
-    const parts = line.split('|').map((s) => s.trim());
-    if (parts.length < 8) continue;
-    const num = parseInt(parts[1], 10);
-    const appNum = parseInt(parts[2], 10);
-    if (Number.isNaN(num) || Number.isNaN(appNum)) continue; // header/separator
-    totalFollowups++;
-    byApp.set(appNum, (byApp.get(appNum) || 0) + 1);
-  }
+  const entries = parseFollowups(String(followupsContent ?? '').replace(/\r/g, ''));
+  const totalFollowups = entries.length;
+  for (const { appNum } of entries) byApp.set(appNum, (byApp.get(appNum) || 0) + 1);
   let appliedWithoutFollowup = 0;
   for (const [num, status] of trackerByNum) {
     if (status === 'Applied' && !byApp.has(num)) appliedWithoutFollowup++;

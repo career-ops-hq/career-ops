@@ -26,7 +26,7 @@ const HTML = '<!DOCTYPE html><html><body><h1>Synthetic Candidate</h1></body></ht
 // written (output/cv-candidate-report.html: no `name` in the profile, and the
 // report is report.md), so saving it fails. A file in place of output/ would
 // stop the run before the request: generate-pdf.mjs creates output/ on import.
-function runTailor({ preloadBody, passExit = false, blockSave = false }) {
+function runTailor({ preloadBody, passExit = false, blockSave = false, apiKey = '' }) {
   const dir = mkdtempSync(join(tmpdir(), 'openai-tailor-exit-'));
   try {
     mkdirSync(join(dir, 'config'), { recursive: true });
@@ -58,7 +58,8 @@ ${preloadBody}`);
     // DOTENV_CONFIG_QUIET keeps dotenv's own banner out of the stderr checks.
     Object.assign(env, { CAREER_OPS_ROOT: dir, OPENAI_TIMEOUT_MS: '10000', DOTENV_CONFIG_QUIET: 'true' });
     const result = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, join(ROOT, 'openai-tailor.mjs'),
-      '--url', URL_BASE, '--model', 'synthetic-test', '--jd', join(dir, 'jd.txt'), '--report', join(dir, 'report.md')],
+      '--url', URL_BASE, '--model', 'synthetic-test', '--jd', join(dir, 'jd.txt'), '--report', join(dir, 'report.md'),
+      ...(apiKey ? ['--key', apiKey] : [])],
     { cwd: dir, encoding: 'utf8', timeout: 30000, env });
     let requests = [];
     try { requests = readFileSync(log, 'utf8').split('\n').filter(Boolean); } catch { /* the run never exited */ }
@@ -113,4 +114,16 @@ test('a failed run whose event loop stays open still exits 1 once the backstop f
   });
   assert.equal(result.status, 1, describeSpawn(result));
   assert.ok(result.stderr.endsWith('process.exit called with 1\n'), describeSpawn(result));
+});
+
+test('an error body that quotes the API key is redacted before it is printed', () => {
+  const key = 'sk-synthetic-secret-value-1234567890';
+  const result = runTailor({
+    apiKey: key,
+    preloadBody: `const answer = () => new Response('bad request: key ${key} is not valid', { status: 400 });`,
+  });
+  assert.equal(result.status, 1, describeSpawn(result));
+  assert.deepEqual(result.requests, ['POST /v1/chat/completions']);
+  assert.doesNotMatch(result.stderr, /sk-synthetic-secret-value-1234567890/, 'the key must not reach stderr');
+  assert.match(result.stderr, /\[REDACTED\]/);
 });

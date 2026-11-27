@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applicationKey, applySavedStatus, saveStatus, undoStatus } from "../../src/lib/pipeline-status.mjs";
+import { applicationKey, applySavedStatus, isStaleRowError, saveStatus, STALE_ROW_MESSAGE, undoStatus } from "../../src/lib/pipeline-status.mjs";
 
 const row = { n: "11", company: "Fixture Alpha", role: "Engineer", date: "2026-10-02", report: "", status: "Evaluated" };
 const other = { ...row, n: "12", company: "Fixture Beta" };
@@ -47,11 +47,41 @@ test("save uses the existing row-number contract and requires confirmed success"
   const status = await saveStatus("11", "Evaluated", "Applied", async (url, options) => {
     assert.equal(url, "/api/status");
     assert.equal(options.method, "POST");
-    assert.deepEqual(JSON.parse(options.body), { n: "11", status: "Applied" });
+    // The status on screen travels with the save as the expectation, so a row
+    // another session moved on is refused rather than written (#5034).
+    assert.deepEqual(JSON.parse(options.body), { n: "11", status: "Applied", expectStatus: "Evaluated" });
     assert.equal(options.headers["Content-Type"], "application/json");
     return Response.json({ ok: true, status: "Applied", changed: true, statusLogged: true });
   });
   assert.equal(status, "Applied");
+});
+
+test("a row with no displayed status sends no expectation", async () => {
+  await saveStatus("11", "", "Applied", async (_url, options) => {
+    assert.deepEqual(JSON.parse(options.body), { n: "11", status: "Applied" });
+    return Response.json({ ok: true, status: "Applied", changed: true });
+  });
+});
+
+test("a stale row is a reload-and-retry, not a bare failure", async () => {
+  for (const code of ["status-changed", "row-changed"]) {
+    const stale = await saveStatus("11", "Evaluated", "Applied", async () => Response.json(
+      { error: "Tracker #11 is now Interview, not Evaluated; review it again before retrying", code },
+      { status: 409 },
+    )).then(() => null, (e) => e);
+    assert.equal(stale.message, STALE_ROW_MESSAGE);
+    assert.match(stale.message, /Reload/);
+    // The flag is what lets the editor refresh the row behind the message.
+    assert.equal(isStaleRowError(stale), true);
+  }
+});
+
+test("an ordinary failure stays an ordinary failure", async () => {
+  const other = await saveStatus("11", "Evaluated", "Applied", async () => Response.json(
+    { error: "Tracker #11 not found", code: "not-found" }, { status: 404 },
+  )).then(() => null, (e) => e);
+  assert.match(other.message, /not found/);
+  assert.equal(isStaleRowError(other), false);
 });
 
 test("unchanged-but-confirmed success is accepted", async () => {

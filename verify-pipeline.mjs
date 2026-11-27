@@ -20,6 +20,7 @@
  * 15. portals.yml entries no provider claims (see #3251)
  * 16. No invisible control characters in tracker cells (error — see #3892)
  * 17. JD archive coverage — check-jd-archive.mjs's findings (warning/error — see #4525)
+ * 18. Output filename standard — check-output-names.mjs's findings (warning — see #6667)
  *
  * Every error/warning is followed by a one-line `→ fix:` hint (#5796), printed
  * once per kind. Pass --no-hints for the bare, hint-free output.
@@ -35,15 +36,19 @@ import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import {
   looksLikeScoreCell, isSeparatorRow, isHeaderRow, resolveColumns,
   normalizeTextKey, normalizeVia, unwrapReportUrlToken, parseMarkdownLinks,
-  extractReqNumber,
+  extractReqNumber, extractCellUrl, isUnsetUrlCell,
 } from './tracker-parse.mjs';
-import { CONTROL_CHARS, findDeadReportLink, trackerLinkDirsFor, corporateFormTokensMatch, MIN_STEM_CHARS } from './tracker-utils.mjs';
-import { normalizeUrl } from './url-key.mjs';
+import {
+  CONTROL_CHARS, findDeadReportLink, trackerLinkDirsFor, corporateFormTokensMatch, MIN_STEM_CHARS,
+  resolveWorkspaceRoot, containedReportFile, reportUrlToken,
+} from './tracker-utils.mjs';
+import { normalizeUrl, postingUrlRelation } from './url-key.mjs';
 import { checkTrackerSync } from './tracker-sync-check.mjs';
 import { normalizeStatus } from './followup-cadence.mjs';
 import { checkFollowupsSchema } from './stats.mjs';
 import { loadCanonicalStates, stripStatusDecoration } from './tracker-utils.mjs';
 import { checkJdArchive } from './check-jd-archive.mjs';
+import { checkOutputNames } from './check-output-names.mjs';
 import { machineSummarySection } from './lib/machine-summary-section.mjs';
 
 const USAGE = `Usage: node verify-pipeline.mjs [--no-hints]
@@ -159,6 +164,7 @@ for (const line of lines) {
     pdf: parts[COLMAP.pdf],
     report: parts[COLMAP.report],
     notes: COLMAP.notes != null ? (parts[COLMAP.notes] || '') : '',
+    url: COLMAP.url != null ? extractCellUrl(parts[COLMAP.url]) : '',
   });
 }
 
@@ -220,18 +226,39 @@ for (const e of entries) {
     buckets.get(bucketKey).push({ entry: e, companyKey, tokens });
   }
 }
+// Two rows are different openings when they carry distinct requisition IDs,
+// or two posting URLs that name different postings: the rule dedup-tracker.mjs
+// applies before it keeps both rows. A row's posting URL is its URL cell, or
+// else its report's **URL:** header (the default tracker has no URL cell). A
+// missing ID or URL is not enough to rule out a duplicate.
+const REPORTS_ROOT = resolveWorkspaceRoot(APPS_FILE);
+const postingUrls = new Map();
+function postingUrl(e) {
+  if (!isUnsetUrlCell(e.url)) return e.url;
+  if (!postingUrls.has(e.report)) {
+    let url = '';
+    try {
+      url = reportUrlToken(containedReportFile(e.report, REPORTS_ROOT));
+    } catch {
+      // Unreadable report: no URL is known, so the pair still warns.
+    }
+    postingUrls.set(e.report, url);
+  }
+  return postingUrls.get(e.report);
+}
+function distinctOpenings(a, b) {
+  const reqA = extractReqNumber(a.notes);
+  const reqB = extractReqNumber(b.notes);
+  if (reqA && reqB && reqA !== reqB) return true;
+  return postingUrlRelation(postingUrl(a), postingUrl(b)) === 'distinct';
+}
 for (const [key, group] of companyRoleMap) {
   if (group.length > 1) {
     let hasPossibleDuplicate = false;
 
     for (let i = 0; i < group.length && !hasPossibleDuplicate; i++) {
       for (let j = i + 1; j < group.length; j++) {
-        const reqA = extractReqNumber(group[i].notes);
-        const reqB = extractReqNumber(group[j].notes);
-
-        // Distinct known requisition IDs mean distinct openings.
-        // Missing IDs are not enough to rule out a duplicate.
-        if (!reqA || !reqB || reqA === reqB) {
+        if (!distinctOpenings(group[i], group[j])) {
           hasPossibleDuplicate = true;
           break;
         }
@@ -240,7 +267,7 @@ for (const [key, group] of companyRoleMap) {
 
     if (hasPossibleDuplicate) {
       warn(`Possible duplicates: ${group.map(e => `#${e.num}`).join(', ')} (${group[0].company} — ${group[0].role})`,
-        "run node dedup-tracker.mjs --dry-run to preview a merge; if they are genuinely different openings, put each req/job ID in the notes column so they stay distinct");
+        "run node dedup-tracker.mjs --dry-run to preview a merge; if they are genuinely different openings, put each req/job ID in the notes column or each posting URL in its report so they stay distinct");
       dupes++;
     }
   }
@@ -260,11 +287,9 @@ for (const group of [...roleMap.values()].flatMap(buckets => [...buckets.values(
           || !corporateFormTokensMatch(left.tokens, right.tokens)) continue;
       const a = left.entry;
       const b = right.entry;
-      const reqA = extractReqNumber(a.notes);
-      const reqB = extractReqNumber(b.notes);
-      if (reqA && reqB && reqA !== reqB) continue;
+      if (distinctOpenings(a, b)) continue;
       warn(`Possible duplicates: #${a.num}, #${b.num} (${a.company} — ${a.role})`,
-        "run node dedup-tracker.mjs --dry-run to preview a merge; if they are genuinely different openings, put each req/job ID in the notes column so they stay distinct");
+        "run node dedup-tracker.mjs --dry-run to preview a merge; if they are genuinely different openings, put each req/job ID in the notes column or each posting URL in its report so they stay distinct");
       dupes++;
     }
   }
@@ -792,7 +817,10 @@ async function checkPortalsCoverage() {
           : `All ${enabled} enabled portals.yml entries resolve to a provider`);
       }
     } catch (err) {
-      warn(`Portal coverage check could not run: ${err.message}`,
+      // A check that could not run is a failed check, as for the sync check
+      // below: warn() leaves the exit code at 0, so a portals.yml that no longer
+      // parses read as a pass, and its unknown-provider errors went unreported.
+      error(`Portal coverage check could not run — portals.yml was NOT checked: ${err.message}`,
            "check portals.yml parses as YAML and run node audit-portals.mjs for the underlying error");
     }
   }
@@ -853,6 +881,18 @@ if (jdArchiveMissing.length === 0 && jdArchiveReviewDue.length === 0 && jdArchiv
   ok(jdArchiveResult.reportsScanned === 0
     ? 'No reports yet — nothing to check for JD archives'
     : `All ${jdArchiveResult.reportsScanned} report(s) have an archived JD or a resolvable jds/ capture`);
+}
+
+// --- Check 18: output filename standard (#6667) ---
+// Soft only: names with no report number keep their legacy form and are not
+// judged. A name that starts with a report number is held to the standard.
+const outputNamesResult = checkOutputNames(join(CAREER_OPS, 'output'), REPORTS_DIR);
+for (const f of outputNamesResult.findings) warn(`output/${f.file}: ${f.message}`,
+  'run node check-output-names.mjs for details; see modes/pdf.md for the naming standard');
+if (outputNamesResult.findings.length === 0) {
+  ok(outputNamesResult.checked === 0
+    ? 'No report-numbered artifacts in output/ — nothing to check for the filename standard'
+    : `All ${outputNamesResult.checked} report-numbered artifact(s) in output/ follow the filename standard`);
 }
 
 // --- Summary ---

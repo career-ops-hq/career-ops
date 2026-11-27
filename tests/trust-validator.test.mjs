@@ -329,6 +329,13 @@ section('buildTrustValidator — Rule 4: ATS allowlist bypasses mismatch');
 }
 
 {
+  // Workday's other posting host: the tenant is in the path, not the hostname.
+  const v = buildTrustValidator({ enabled: true });
+  const r = v({ url: 'https://wd5.myworkdaysite.com/recruiting/acme/External/job/Remote/Engineer_R-1', company: 'Acme' });
+  assert(!r.flags.includes('company_domain_mismatch'), 'myworkdaysite.com → ATS allowlist, no mismatch');
+}
+
+{
   const v = buildTrustValidator({ enabled: true });
   const r = v({ url: 'https://acme.ashbyhq.com/jobs', company: 'Acme' });
   assert(!r.flags.includes('company_domain_mismatch'), 'ashbyhq.com → ATS allowlist, no mismatch');
@@ -375,6 +382,12 @@ section('buildTrustValidator — Rule 4: ATS allowlist bypasses mismatch');
   const v = buildTrustValidator({ enabled: true });
   const r = v({ url: 'https://join.com/companies/acme/15402839', company: 'Acme' });
   assert(!r.flags.includes('company_domain_mismatch'), 'join.com → ATS allowlist, no mismatch');
+}
+
+{
+  const v = buildTrustValidator({ enabled: true });
+  const r = v({ url: 'https://wellfound.com/jobs/4881145-qa-engineer', company: 'ExampleCo' });
+  assert(!r.flags.includes('company_domain_mismatch'), 'wellfound.com → ATS allowlist, no mismatch');
 }
 
 section('buildTrustValidator — Rule 4: empty company → no mismatch flag');

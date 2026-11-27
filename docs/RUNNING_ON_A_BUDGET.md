@@ -342,9 +342,9 @@ When choosing a budget-friendly model, you need strong reasoning capabilities to
 > ```
 > As with other hosted providers, this sends your CV and job description to the configured endpoint.
 >
-> UberLLM (`https://api.uberllm.dev/v1`) is another OpenAI-compatible endpoint that works the same way, for example with `deepseek/deepseek-v4-flash`. It is prepaid pay-as-you-go, with no free tier:
+> MartLLM (`https://api.martllm.com/v1`) is another OpenAI-compatible endpoint that works the same way, for example with `deepseek/deepseek-v4-flash`. It is prepaid pay-as-you-go, with no free tier:
 > ```bash
-> OPENAI_BASE_URL=https://api.uberllm.dev/v1 \
+> OPENAI_BASE_URL=https://api.martllm.com/v1 \
 > OPENAI_MODEL=deepseek/deepseek-v4-flash \
 > OPENAI_API_KEY=your_uberllm_key \
 > node openai-eval.mjs --file ./jds/job.txt
@@ -360,11 +360,38 @@ When choosing a budget-friendly model, you need strong reasoning capabilities to
 > ```
 > As with other hosted providers, this sends your CV and job description to the configured endpoint.
 >
+> onomeo (`https://onomeo.com/v1`) is another OpenAI-compatible endpoint that works the same way, for example with `deepseek-v4.1-flash`. An evaluation prompt is longer than onomeo's free models accept, so it needs a topped-up balance:
+> ```bash
+> OPENAI_BASE_URL=https://onomeo.com/v1 \
+> OPENAI_MODEL=deepseek-v4.1-flash \
+> OPENAI_API_KEY=your_onomeo_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint. onomeo then forwards each request to the model's upstream provider, so your CV and job description also reach that provider.
+>
+> TrustedRouter (`https://api.trustedrouter.com/v1`) is another OpenAI-compatible endpoint that works the same way, for example with `deepseek/deepseek-v4-flash`. Model ids are vendor-prefixed and listed at `https://api.trustedrouter.com/v1/models`:
+> ```bash
+> OPENAI_BASE_URL=https://api.trustedrouter.com/v1 \
+> OPENAI_MODEL=deepseek/deepseek-v4-flash \
+> OPENAI_API_KEY=your_trustedrouter_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint. TrustedRouter then forwards each request to the model's upstream provider, so your CV and job description also reach that provider.
+>
+> Straitly (`https://api.straitly.ai/v1`) is another OpenAI-compatible endpoint that works the same way, for example with `deepseek/deepseek-v4-1-flash-1017` or `claude-sonnet-5-5`. Model ids for 100+ models are listed at `https://straitly.ai/models` (and `https://api.straitly.ai/v1/models`):
+> ```bash
+> OPENAI_BASE_URL=https://api.straitly.ai/v1 \
+> OPENAI_MODEL=deepseek/deepseek-v4-1-flash-1017 \
+> OPENAI_API_KEY=your_straitly_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint. Straitly then forwards each request to the model's upstream provider, so your CV and job description also reach that provider.
+>
 > Run `node openai-eval.mjs --help` for per-provider examples. For 100% local/private use, point `--url` at a local server (LM Studio / llama.cpp / vLLM) or use `node ollama-eval.mjs`.
 
 > NVIDIA NIM also works (hosted `https://integrate.api.nvidia.com/v1` or a self-hosted container's `/v1`), e.g. `--model meta/llama-3.3-70b-instruct`. The hosted free tier can queue for minutes, so raise `OPENAI_TIMEOUT_MS` above the 300s default.
 
-> **Output cap (`CAREER_OPS_MAX_TOKENS`, default `32768`).** `openai-eval.mjs` and `openai-tailor.mjs` send this as `max_tokens` (as `max_completion_tokens` to `api.openai.com`, whose reasoning models reject `max_tokens`). Without a cap, OpenRouter reserves credit for the model's whole output window before generating anything and answers **HTTP 402** when your balance cannot cover that reservation, even when the report itself costs cents. The default holds a full A-G report (about 9K tokens) plus the reasoning a thinking model spends first. If you see a 402 on a low balance, lower it (`CAREER_OPS_MAX_TOKENS=16384`); if the script warns that the reply stopped at the cap, raise it. `openai-tailor.mjs` saves nothing in that case, since a CV cut off at the cap is missing its last sections.
+> **Output cap (`CAREER_OPS_MAX_TOKENS`, default `32768`).** `openai-eval.mjs` and `openai-tailor.mjs` send this as `max_tokens` (as `max_completion_tokens` to `api.openai.com`, whose reasoning models reject `max_tokens`). Without a cap, OpenRouter reserves credit for the model's whole output window before generating anything and answers **HTTP 402** when your balance cannot cover that reservation, even when the report itself costs cents. The default holds a full A-G report (about 9K tokens) plus the reasoning a thinking model spends first. If you see a 402 on a low balance, lower it (`CAREER_OPS_MAX_TOKENS=16384`); if the script warns that the reply stopped at the cap, raise it. `openai-tailor.mjs` saves nothing in that case, since a CV cut off at the cap is missing its last sections. `openrouter-runner.mjs` (`npm run or:*`) reads the same variable, but its default stays at 8192: raise it there when a pinned reasoning model's evaluation fails as cut off at `max_tokens`.
 
 ## 5. Local LLM Tradeoffs (Ollama / Llama.cpp)
 

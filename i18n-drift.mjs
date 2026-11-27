@@ -22,10 +22,10 @@ import { basename, join, posix, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { isNestedCheckout } from './lib/mjs-files.mjs';
+import { isLanguageModeSet, isMarketModeSet } from './lib/mode-sets.mjs';
 import { walkTree } from './lib/walk-tree.mjs';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
-const LANGUAGE = /^[a-z]{2}(?:-[A-Za-z0-9]{2,8})*$/;
 
 /** Top-level Markdown ATX/setext headings, with one-based source lines. */
 export function extractHeadings(text) {
@@ -180,11 +180,14 @@ export function parseReadmeMapping(readmePath) {
   return map;
 }
 
+// Market sets (modes/at/, modes/in/, modes/sg/) are left out: they are English
+// overlays that defer to the base modes, so a heading-coverage score for them
+// measures how little they override, not how much is translated.
 export function discoverLangs(root = ROOT) {
   const dir = sourcePath(root, '');
   if (!dir || !lstatSync(dir).isDirectory()) throw new Error('modes/ directory not found');
   return readdirSync(dir, { withFileTypes: true })
-    .filter(entry => LANGUAGE.test(entry.name) && entry.isDirectory() && !isNestedCheckout(join(dir, entry.name)))
+    .filter(entry => isLanguageModeSet(entry.name) && entry.isDirectory() && !isNestedCheckout(join(dir, entry.name)))
     .map(entry => entry.name).sort();
 }
 
@@ -203,6 +206,7 @@ function markdownFiles(dir) {
 
 /** Compare the shipped subset, plus README-promised files that were deleted. */
 export function checkLang(lang, root = ROOT) {
+  if (isMarketModeSet(lang)) throw new Error(`modes/${lang}/ is a market set (English modes plus market rules), not a translation`);
   if (!discoverLangs(root).includes(lang)) throw new Error(`language directory not found: modes/${lang}/`);
   const maps = new Map();
   const mapping = (language) => {
@@ -217,7 +221,7 @@ export function checkLang(lang, root = ROOT) {
     const [first, ...tail] = source.split('/');
     // Some languages translate another locale (NL -> FR); follow its declared
     // source to the canonical root rather than measuring two stale mirrors.
-    if (tail.length && LANGUAGE.test(first)) return canonicalFor(first, tail.join('/'), seen);
+    if (tail.length && isLanguageModeSet(first)) return canonicalFor(first, tail.join('/'), seen);
     return modePath(source) ? source : null;
   };
   const names = new Set([...markdownFiles(sourcePath(root, lang)), ...mapping(lang).keys()]);
@@ -314,7 +318,7 @@ function main(args) {
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--lang' || args[i].startsWith('--lang=')) {
       const lang = args[i] === '--lang' ? args[++i] : args[i].slice('--lang='.length);
-      if (!lang || !LANGUAGE.test(lang)) throw new Error('--lang requires a language code, e.g. tr or zh-TW');
+      if (!lang || !(isLanguageModeSet(lang) || isMarketModeSet(lang))) throw new Error('--lang requires a language code, e.g. tr or zh-TW');
       langs.push(lang);
     } else if (args[i] === '--json') json = true;
     else if (args[i] === '--summary') summary = true;

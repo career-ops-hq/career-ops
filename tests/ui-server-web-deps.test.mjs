@@ -5,6 +5,7 @@
 // The launcher finds web/ next to its own directory, so each test copies it and
 // the modules it imports into a throwaway tree.
 import { test } from 'node:test';
+import { listenOnSafePort } from './helpers/listen-safe-port.mjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -34,7 +35,7 @@ function launcherTree() {
 
 async function freePort() {
   const server = createServer();
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await listenOnSafePort(server);
   const { port } = server.address();
   await new Promise((resolve) => server.close(resolve));
   return port;

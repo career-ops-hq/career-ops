@@ -99,6 +99,101 @@ import { decodeEntities } from './_html-entities.mjs';
 import { ATS_HOST_PATTERNS } from '../ats-vendor.mjs';
 
 /**
+ * `text.replace(/<a\s[^>]*href="([^"]+)"[^>]*>.*?<\/a>/gi, (_, href) => href)`
+ * in O(n log n), with the same result on every input. Exported for tests.
+ *
+ * At an `<a` plus one whitespace character, the pattern reads up to the first
+ * `>` (g1) and backtracks from there for `href="`; then the value up to the
+ * next `"`, everything up to the next `>`, and the shortest run with no line
+ * terminator in it up to the first `</a>`. Once `href="` is placed each of
+ * those parts has one way to match, so whether an `href="` completes depends
+ * on its own position alone, and the pattern takes the rightmost one between
+ * the opener and g1 that does. The regex worked that out again from every
+ * opener, rescanning the rest of the text when none completed; here each
+ * `href="` is tried once and every lookup is a binary search.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function replaceAnchorsWithHref(text) {
+  const positions = (re) => [...text.matchAll(re)].map((m) => m.index);
+  const gts = positions(/>/g);
+  const quotes = positions(/"/g);
+  const closers = positions(/<\/a>/gi);
+  const lineEnds = positions(/[\n\r\u2028\u2029]/g);
+  const hrefs = positions(/href="/gi);
+  // Index of the first element >= pos (list.length when there is none).
+  const firstAtOrAfter = (list, pos) => {
+    let lo = 0;
+    let hi = list.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (list[mid] < pos) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+  const next = (list, pos) => {
+    const i = firstAtOrAfter(list, pos);
+    return i < list.length ? list[i] : -1;
+  };
+  /** @type {Map<number, {end: number, href: string} | null>} */
+  const completions = new Map();
+  const completion = (h) => {
+    if (completions.has(h)) return completions.get(h);
+    let result = null;
+    const quote = next(quotes, h + 6);
+    if (quote > h + 6) {
+      const gt = next(gts, quote + 1);
+      const closer = gt === -1 ? -1 : next(closers, gt + 1);
+      const lineEnd = gt === -1 ? -1 : next(lineEnds, gt + 1);
+      if (closer !== -1 && (lineEnd === -1 || lineEnd > closer)) {
+        result = { end: closer + 4, href: text.slice(h + 6, quote) };
+      }
+    }
+    completions.set(h, result);
+    return result;
+  };
+  // For the `>` at g1: the rightmost completing `href="` after the previous
+  // `>` and ending before g1.
+  /** @type {Map<number, {h: number, end: number, href: string} | null>} */
+  const rightmost = new Map();
+  const rightmostBefore = (g1) => {
+    if (rightmost.has(g1)) return rightmost.get(g1);
+    const g1Index = firstAtOrAfter(gts, g1);
+    const previousGt = g1Index > 0 ? gts[g1Index - 1] : -1;
+    let found = null;
+    for (let i = firstAtOrAfter(hrefs, g1 - 5) - 1; i >= 0 && hrefs[i] > previousGt; i--) {
+      const done = completion(hrefs[i]);
+      if (done) {
+        found = { h: hrefs[i], ...done };
+        break;
+      }
+    }
+    rightmost.set(g1, found);
+    return found;
+  };
+  const opener = /<a\s/gi;
+  let out = '';
+  let from = 0;
+  for (let m = opener.exec(text); m; m = opener.exec(text)) {
+    const bodyStart = m.index + 3;
+    const g1 = next(gts, bodyStart);
+    // No `>` after this opener: none after any later one either.
+    if (g1 === -1) break;
+    const found = rightmostBefore(g1);
+    if (found && found.h >= bodyStart) {
+      out += text.slice(from, m.index) + found.href;
+      from = found.end;
+      opener.lastIndex = found.end;
+    } else {
+      opener.lastIndex = m.index + 1;
+    }
+  }
+  return from === 0 ? text : out + text.slice(from);
+}
+
+/**
  * Parse a single HN comment text into a normalized job object.
  * The canonical format is "Company | Role | Location | URL" on the first line,
  * but posts are free-form — we only guarantee title (first line) and url.
@@ -127,10 +222,9 @@ export function parseHnComment(text, fallbackUrl = '') {
   // Strip HTML. Anchors: keep the href value in place so URL extraction works.
   // Block-level tags (<p>, <br>, <div>, <li>, headings) become newlines so that
   // body paragraphs never bleed into the first header line after the join.
-  const plain = decodeEntities(text
-    .replace(/<a\s[^>]*href="([^"]+)"[^>]*>.*?<\/a>/gi, (_, href) => href)
-    .replace(/<\/?(?:p|br|div|li|h[1-6])\b[^>]*>/gi, '\n')
-    .replace(/<[^>]+>/g, ' '))
+  const plain = decodeEntities(replaceAnchorsWithHref(text)
+    .replace(/<\/?(?:p|br|div|li|h[1-6])\b[^>]*(>?)/gi, (tag, close) => (close ? '\n' : tag))
+    .replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag)))
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n');
 

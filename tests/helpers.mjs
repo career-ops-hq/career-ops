@@ -2,7 +2,7 @@
 // Moved verbatim from test-all.mjs (issue #1440); no framework by design:
 // the suite must run on a fresh clone with only Node.
 import { execFileSync } from 'child_process';
-import { accessSync, constants, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync as _rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
+import { accessSync, appendFileSync, constants, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync as _rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { basename, join, dirname, resolve, sep, delimiter } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -11,6 +11,11 @@ import { localToday } from '../lib/local-today.mjs';
 import { getCareerOpsRoot } from '../path-resolver.mjs';
 import { describeDrift, diffSnapshots, snapshotDataRoot } from './data-root-guard.mjs';
 import { REQUIRED_TOOL_ENV, toolRequired } from './required-tools.mjs';
+import { annotations, recapLines, stepSummary } from './failure-recap.mjs';
+import { formatManifest, looseManifest } from '../seeds/employers-fold.mjs';
+import { chunkInbox } from '../seeds/employers-import.mjs';
+import { INBOX_DIR } from '../seeds/employers-inbox.mjs';
+import { loadOwnDomainContributors } from '../seeds/employers-validate.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one level down)
@@ -214,7 +219,36 @@ export function isolatedBatchStatePath(additionsDir) {
 // option still wins, and a removal that keeps failing still throws. Same
 // wrapper test-all.mjs applies to its own call sites (#3066), shared so the
 // suites under tests/ cannot drift from it.
-export const rmSync = (target, opts = {}) => _rmSync(target, { maxRetries: 10, retryDelay: 100, ...opts });
+export const rmSync = (target, opts = {}) => {
+  // A junction (or directory symlink) reports itself as a directory, so
+  // _rmSync treats it as a real directory and throws ERR_FS_EISDIR instead of
+  // dropping the link. Match Node's own rmSync semantics: a symbolic link is
+  // removed as the link itself, never recursed into — even with recursive.
+  const targetStat = lstatSync(target, { throwIfNoEntry: false });
+  if (targetStat?.isSymbolicLink()) {
+    // unlinkSync has no retry support of its own, so give the link removal
+    // the same transient-failure policy _rmSync applies below — the very
+    // Windows handle window (EBUSY/EMFILE/ENFILE/ENOTEMPTY/EPERM) this
+    // wrapper exists for — still removing only the link. Node retries with
+    // linear backoff (retry 1 waits retryDelay, retry 2 waits 2×retryDelay,
+    // …), so the wait scales with the attempt; Atomics.wait is the blocking
+    // sleep a synchronous retry loop needs.
+    const maxRetries = opts.maxRetries ?? 10;
+    const retryDelay = opts.retryDelay ?? 100;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        unlinkSync(target);
+        return;
+      } catch (err) {
+        if (attempt >= maxRetries || !TRANSIENT_UNLINK_ERRORS.has(err?.code)) throw err;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, (attempt + 1) * retryDelay);
+      }
+    }
+  }
+  return _rmSync(target, { maxRetries: 10, retryDelay: 100, ...opts });
+};
+
+const TRANSIENT_UNLINK_ERRORS = new Set(['EBUSY', 'EMFILE', 'ENFILE', 'ENOTEMPTY', 'EPERM']);
 
 /**
  * The per-script budget run() applies when a caller does not override it.
@@ -229,9 +263,35 @@ export const rmSync = (target, opts = {}) => _rmSync(target, { maxRetries: 10, r
  */
 export const DEFAULT_SCRIPT_TIMEOUT_MS = 30_000;
 
+/**
+ * How many times DEFAULT_SCRIPT_TIMEOUT_MS test-all.mjs gives a `node:test`
+ * suite, which spawns child processes per test and shares the machine with
+ * the rest of the pool.
+ *
+ * 4 was measured on 8 cores: a file takes about 1.7x as long at 8 jobs as
+ * alone, and the slowest is 16s alone. On the windows-latest runner (4 vCPU,
+ * 4 jobs) the same suites take about twice as long as on ubuntu-latest, and
+ * that baseline swings 1.7x between runs of the same tree, so a suite that
+ * used 40% of 120s on ubuntu overran it on a slow Windows run (#7713).
+ * Windows gets double the factor for the doubled baseline.
+ */
+export const NODE_TEST_BUDGET_FACTOR = process.platform === 'win32' ? 8 : 4;
+
 let passed = 0;
 let failed = 0;
 let warnings = 0;
+// What failed, for the recap finish() prints at the end of the log
+// (tests/failure-recap.mjs). The counters above stay the verdict; this list
+// only says where. `suite` is the repo-relative file being imported when the
+// failure was recorded (importSuiteContained sets it), or null for
+// test-all.mjs's own inline sections. Capped: a run failing thousands of times
+// has one cause, and the first entries name it.
+const MAX_RECORDED_FAILURES = 250;
+const failures = [];
+let currentSuite = null;
+function recordFailure(entry) {
+  if (failures.length < MAX_RECORDED_FAILURES) failures.push(entry);
+}
 
 /**
  * Record and print one passing test assertion.
@@ -253,7 +313,28 @@ export function pass(msg) { console.log(`  ✅ ${msg}`); passed++; }
  * @param {string} msg - Human-readable failure message for the terminal log.
  * @returns {void}
  */
-export function fail(msg) { console.log(`  ❌ ${msg}`); failed++; }
+export function fail(msg) { console.log(`  ❌ ${msg}`); failed++; recordFailure({ suite: currentSuite, msg: String(msg), detail: [] }); }
+
+/**
+ * Record and print one failure that belongs to a named suite.
+ *
+ * For the runner itself (test-all.mjs), which reports a whole suite's outcome
+ * from outside it: a node:test suite that failed, a child that was killed. The
+ * line printed is fail()'s; `suite` and `detail` only feed the recap.
+ *
+ * @param {string} suite - Repo-relative path of the suite.
+ * @param {string} msg - Human-readable failure message for the terminal log.
+ * @param {string[]} [detail] - What the suite printed, for the step summary.
+ * @returns {void}
+ */
+export function failIn(suite, msg, detail = []) {
+  console.log(`  ❌ ${msg}`);
+  failed++;
+  recordFailure({ suite, msg: String(msg), detail: detail.map(String) });
+}
+
+/** The failures recorded so far, oldest first. */
+export function failureList() { return failures.map((f) => ({ ...f, detail: [...f.detail] })); }
 
 /**
  * Record and print one non-fatal warning.
@@ -296,10 +377,15 @@ export function results() { return { passed, failed, warnings }; }
  * @param {{passed?: number, failed?: number, warnings?: number}} counts - A results() snapshot from a child.
  * @returns {void}
  */
-export function absorbResults({ passed: p = 0, failed: f = 0, warnings: w = 0 } = {}) {
+export function absorbResults({ passed: p = 0, failed: f = 0, warnings: w = 0, failures: list = [] } = {}, suite = null) {
   passed += p;
   failed += f;
   warnings += w;
+  // A child's failures keep the suite it recorded them under; one recorded
+  // outside any import (a timer that fired after it) belongs to `suite`.
+  for (const entry of Array.isArray(list) ? list : []) {
+    recordFailure({ suite: entry?.suite ?? suite, msg: String(entry?.msg ?? ''), detail: Array.isArray(entry?.detail) ? entry.detail.map(String) : [] });
+  }
 }
 
 /**
@@ -342,6 +428,8 @@ export function absorbResults({ passed: p = 0, failed: f = 0, warnings: w = 0 } 
  */
 export async function importSuiteContained(file, rel) {
   const before = results();
+  const outerSuite = currentSuite;
+  currentSuite = rel;
   try {
     await import(pathToFileURL(file).href);
   } catch (err) {
@@ -354,6 +442,7 @@ export async function importSuiteContained(file, rel) {
       if (line.trim()) console.log(`      ${line.trim()}`);
     }
   } finally {
+    currentSuite = outerSuite;
     // A suite that sealed git (sealProcessGitEnv) hands the environment back,
     // so the suites after it in this process do not inherit the seal.
     if (unsealGitEnv) {
@@ -387,6 +476,7 @@ export function finish() {
   // print "All tests passed" above the line that says it did (#5113).
   const drift = realDataRootDrift();
   if (drift) fail(drift.join('\n     '));
+  reportFailures();
   console.log('\n' + '='.repeat(50));
   console.log(`📊 Results: ${passed} passed, ${failed} failed, ${warnings} warnings`
     + (runnerFailed ? ' — plus failures in a discovered node:test suite (see above)' : ''));
@@ -1949,6 +2039,22 @@ export function copyEmployerRegistry(destDir) {
   cpSync(src, join(destDir, 'employers'), { recursive: true, filter: (p) => p !== inbox && !p.startsWith(inbox + sep) });
 }
 
+/** Write the own-domain rows as a separate contribution beside the imported files. */
+export function writeOwnDomainInbox(root, rows, date) {
+  if (rows.length === 0) return [];
+  const [login] = loadOwnDomainContributors(root);
+  if (!login) throw new Error('expected an authorized own-domain contributor');
+  const id = `${date}-${login}`;
+  const inbox = join(root, INBOX_DIR);
+  const lines = rows.map(({ ats, board, name, own_domain_mark }) => ({ ats, board, name, own_domain_mark }));
+  const chunks = chunkInbox(lines, id);
+  for (const chunk of chunks) {
+    writeFileSync(join(inbox, chunk.name), `${chunk.lines.map((line) => JSON.stringify(line)).join('\n')}\n`, { flag: 'wx' });
+  }
+  writeFileSync(join(inbox, `${id}.json`), formatManifest(looseManifest({ id, login, date, rows: lines.length })), { flag: 'wx' });
+  return chunks.map(({ name }) => name);
+}
+
 /** Every row of the committed employer registry, parsed. */
 function employerRegistryRows() {
   const rows = [];
@@ -2016,4 +2122,29 @@ export function unlistedEmployerBoard(ats, board) {
   let n = 1;
   while (taken.has(numbered(n).toLowerCase())) n++;
   return numbered(n);
+}
+
+/**
+ * Say where the run failed, at the end of the log and, under GitHub Actions,
+ * on the run's summary page and the PR's checks. Nothing on a passing run.
+ *
+ * Never throws: a recap that cannot be written must not change the verdict.
+ *
+ * @returns {void}
+ */
+function reportFailures() {
+  if (failures.length === 0) return;
+  try {
+    for (const line of recapLines(failures)) console.log(line);
+    if (process.env.GITHUB_ACTIONS === 'true') {
+      for (const line of annotations(failures)) console.log(line);
+    }
+    const summaryFile = process.env.GITHUB_STEP_SUMMARY;
+    if (summaryFile) {
+      const md = stepSummary(failures, { os: process.env.RUNNER_OS || '' });
+      if (md) appendFileSync(summaryFile, `${md}\n`);
+    }
+  } catch (err) {
+    console.log(`  (could not write the failure recap: ${err?.message ?? err})`);
+  }
 }

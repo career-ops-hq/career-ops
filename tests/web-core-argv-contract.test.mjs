@@ -69,8 +69,19 @@ const CALL_SITES = [
     source: 'web/src/lib/core-cli.ts',
     argvSource: 'web/src/app/api/status/route.ts',
     script: 'set-status.mjs',
+    // The shape the route builds when the caller sends the status it displayed.
+    // Row 1 is Applied here, so the expectation matches and the write lands —
+    // what the guard REFUSES is covered by web/tests/lib/status-expect-route.test.mjs.
+    args: ['--row', '1', 'Responded', '--source', 'web', '--detach-jd-archive', '--json', '--expect-status', 'Applied'],
+    probe: 'run',
+  },
+  {
+    source: 'web/src/lib/core-cli.ts',
+    argvSource: 'web/src/app/api/status/route.ts',
+    script: 'set-status.mjs',
     // The route builds ['--row', row, canon, '--source', 'web', '--detach-jd-archive', '--json'];
     // row 1 and Responded are the fixture tracker's row and a canonical state.
+    // Idempotent after the probe above, which already moved the row there.
     args: ['--row', '1', 'Responded', '--source', 'web', '--detach-jd-archive', '--json'],
     probe: 'run',
   },
@@ -172,6 +183,14 @@ const CALL_SITES = [
   },
   {
     source: 'web/src/lib/core/pipeline.ts',
+    script: null,
+    args: [],
+    probe: 'none',
+  },
+  {
+    // Like pipeline.ts: `node --input-type=module -e` with an inline module
+    // that imports captureJd() from capture-jd.mjs. No flags reach the script.
+    source: 'web/src/lib/core/capture.ts',
     script: null,
     args: [],
     probe: 'none',

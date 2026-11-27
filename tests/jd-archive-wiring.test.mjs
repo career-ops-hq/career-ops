@@ -54,12 +54,14 @@ try {
     fail('docs/SCRIPTS.md missing the check-jd-archive section');
   }
 
-  const agentsDoc = readFile('AGENTS.md');
-  if (agentsDoc.includes('`check-jd-archive.mjs`')) {
-    pass('AGENTS.md Main Files table lists check-jd-archive.mjs');
+  // The Main Files table moved from AGENTS.md to modes/_files.md (#6693).
+  const filesDoc = readFile('modes/_files.md');
+  if (filesDoc.includes('`check-jd-archive.mjs`')) {
+    pass('modes/_files.md Main Files table lists check-jd-archive.mjs');
   } else {
-    fail('AGENTS.md Main Files table missing check-jd-archive.mjs');
+    fail('modes/_files.md Main Files table missing check-jd-archive.mjs');
   }
+  const agentsDoc = readFile('AGENTS.md');
   if (/REQUIRED.*Job Description \(archived verbatim\)|Job Description \(archived verbatim\).*REQUIRED/.test(agentsDoc)) {
     pass('AGENTS.md states the JD-archive section as required, not conditional');
   } else {

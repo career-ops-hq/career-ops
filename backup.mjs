@@ -37,8 +37,9 @@
 
 import {
   accessSync, closeSync, constants as fsConstants, copyFileSync, existsSync, lstatSync, mkdirSync, openSync,
-  readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync,
+  readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync,
 } from 'fs';
+import { randomUUID } from 'node:crypto';
 import { homedir, platform as osPlatform } from 'os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
@@ -54,6 +55,7 @@ import {
   isGeneratedTemplateArtifact,
   isUserConfiguredTemplateVariant,
 } from './update-system.mjs';
+import { renameSyncWithRetry } from './lib/rename-retry.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 
@@ -434,6 +436,13 @@ function listEntry(dataRoot, entry, { include, onError, onSkip = () => {} }) {
       // Nested checkouts (a git-cloned plugin under plugins.local/) are the
       // user's own work, so they are copied rather than skipped.
       allowNestedCheckouts: true,
+      // A symlink nested in a copied directory is skipped (see the default
+      // above), and skipping it silently makes the backup report success while
+      // omitting the user's files. The top-level entry already warns; this makes
+      // the nested case say so too. It goes through the callback `listEntry`
+      // already receives, because `result` belongs to the caller and is not in
+      // scope here.
+      onSkip: (skipped) => onSkip(relative(dataRoot, skipped)),
       skip: (dirent, dir) => {
         const p = join(dir, dirent.name);
         if (isExcluded(relative(dataRoot, p), include)) return true;
@@ -537,12 +546,13 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
     }
     if (unchanged(file, source, target)) { result.unchanged++; return; }
     if (dryRun) { result.copied++; result.bytes += file.size; return; }
-    const part = `${target}.part`;
+    // Keep overlapping copies from renaming or cleaning up each other's file.
+    const part = join(dirname(target), `.career-ops-${randomUUID()}.part`);
     try {
       mkdirSync(dirname(target), { recursive: true });
       copyFileSync(source, part);
       utimesSync(part, new Date(), new Date(file.mtimeMs));
-      renameSync(part, target);
+      renameSyncWithRetry(part, target);
       result.copied++;
       result.bytes += file.size;
     } catch (error) {

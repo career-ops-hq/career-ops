@@ -47,7 +47,6 @@ reviews:
     base_branches:
       - main
     ignore_usernames:
-      - renovate[bot]
       - dependabot[bot]
       - github-actions[bot]
     ignore_title_keywords:

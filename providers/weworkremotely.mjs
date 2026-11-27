@@ -2,6 +2,7 @@
 import { decodeEntities } from './_html-entities.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 import { normalizeEmploymentType } from './_employment-type.mjs';
+import { isAssignedCountryCode } from './_country.mjs';
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // We Work Remotely provider - board-wide RSS feed
@@ -70,6 +71,48 @@ function tagText(block, tag) {
   return m ? extractText(m[1]) : '';
 }
 
+/**
+ * The ISO 3166-1 alpha-2 code behind the flag emoji in `<country>`
+ * ("🇺🇸 United States of America" → "US"). A flag is two regional-indicator
+ * letters; a subdivision flag (England, Scotland, Wales) is a black flag plus
+ * tag letters, whose first two give the country ("gbeng" → "GB"). A code
+ * counts only when it is an assigned country code, so "🇽🇽" and "🇪🇺" give none. Repeated flags
+ * of one country give that country. A posting open to flags for more than one
+ * country ("🇨🇦 Canada, 🇵🇱 Poland, and 🇬🇧 United Kingdom ...") gets none, as
+ * one code would misstate it, and so does a value with no flag.
+ * @param {string} value
+ * @returns {string | undefined}
+ */
+function countryCodeFromFlags(value) {
+  const letter = (c) => String.fromCharCode(c.codePointAt(0) - 0x1F1E6 + 65);
+  const codes = new Set([
+    ...[...value.matchAll(/([\u{1F1E6}-\u{1F1FF}])([\u{1F1E6}-\u{1F1FF}])/gu)]
+      .map((m) => letter(m[1]) + letter(m[2])),
+    ...[...value.matchAll(/\u{1F3F4}([\u{E0061}-\u{E007A}]{2})[\u{E0061}-\u{E007A}]*\u{E007F}/gu)]
+      .map((m) => [...m[1]].map((c) => String.fromCharCode(c.codePointAt(0) - 0xE0061 + 65)).join('')),
+  ]);
+  if (codes.size !== 1) return undefined;
+  const [code] = codes;
+  return isAssignedCountryCode(code) ? code : undefined;
+}
+
+/**
+ * The places in `<country>`, one per flag, as written after it
+ * ("🇺🇸 United States, 🇪🇺 Europe" → ["United States", "Europe"]). The joining
+ * comma and "and" are dropped; a repeated place is kept once. A value with no
+ * flag is one place ("Germany"). Empty gives none.
+ * @param {string} value
+ * @returns {string[]}
+ */
+function placesFromFlags(value) {
+  const flag = /[\u{1F1E6}-\u{1F1FF}]{2}|\u{1F3F4}[\u{E0061}-\u{E007A}]+\u{E007F}/u;
+  const parts = value.split(new RegExp(flag.source, 'gu')).slice(flag.test(value) ? 1 : 0);
+  const places = parts
+    .map((p) => p.trim().replace(/^(?:,\s*)?(?:and\s+)?/, '').replace(/(?:\s*,)?(?:\s+and)?\s*$/, '').trim())
+    .filter(Boolean);
+  return [...new Set(places)];
+}
+
 function cleanUrl(value) {
   if (!value) return '';
   const trimmed = value.trim();
@@ -100,14 +143,15 @@ function splitTitle(rawTitle, defaultCompany) {
  * Shape: `<rss><channel><item>...</item>...</channel></rss>`, each item
  * carrying `<title>`, `<link>`, `<pubDate>`, and often `<region>`,
  * `<category>` and `<type>` (the employment type, normalized into
- * `employmentType`), and `<description>` holds the posting's HTML. The title is
- * usually "Company: Role"; when that split is present, company and title are
+ * `employmentType`), `<country>` (its flag gives `country`), and
+ * `<description>` holds the posting's HTML. The title is usually
+ * "Company: Role"; when that split is present, company and title are
  * normalized separately. The RSS `<link>` is the dedup key; items without a
  * usable absolute URL are dropped.
  *
  * @param {string} xml - raw RSS feed body
  * @param {string} [defaultCompany] - fallback company for unsplittable titles
- * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number, employmentType?: string}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number, employmentType?: string, country?: string, locations?: string[]}>}
  */
 export function parseWwrFeed(xml, defaultCompany = 'We Work Remotely') {
   if (typeof xml !== 'string') return [];
@@ -141,6 +185,12 @@ export function parseWwrFeed(xml, defaultCompany = 'We Work Remotely') {
     // <type> is the posting's employment type ("Full-Time", "Contract").
     const employmentType = normalizeEmploymentType(tagText(item, 'type'));
     if (employmentType) job.employmentType = employmentType;
+    // <country> is the posting's country, with its flag first. Empty on most items.
+    const countryText = tagText(item, 'country');
+    const country = countryCodeFromFlags(countryText);
+    if (country) job.country = country;
+    const places = placesFromFlags(countryText);
+    if (places.length > 0) job.locations = places;
     jobs.push(job);
   }
 

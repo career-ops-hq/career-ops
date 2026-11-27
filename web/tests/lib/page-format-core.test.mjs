@@ -19,7 +19,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { readPageFormatSetting, resolveRenderPageFormat } from "../../src/lib/core/page-format.mjs";
+import { normalizeChosenPageFormat, readPageFormatSetting, resolveRenderPageFormat } from "../../src/lib/core/page-format.mjs";
 
 const CORE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
@@ -147,4 +147,14 @@ test("resolveRenderPageFormat: nothing stated and nothing declared takes the def
   assert.equal(sheet.format, "letter");
   assert.equal(sheet.warnings.length, 1);
   assert.match(sheet.warnings[0], /declared no page format.*letter/);
+});
+
+test("normalizeChosenPageFormat: canonicalizes what the core accepts and rejects what it rejects", needsCore, async () => {
+  assert.equal(await normalizeChosenPageFormat(CORE, " A4 "), "a4");
+  assert.equal(await normalizeChosenPageFormat(CORE, "LETTER"), "letter");
+  for (const bad of ["auto", "legal", "", 4, null, ["a4"]]) assert.equal(await normalizeChosenPageFormat(CORE, bad), null, String(bad));
+});
+
+test("normalizeChosenPageFormat: a core that cannot be loaded is an error, not an accepted value", async () => {
+  await assert.rejects(normalizeChosenPageFormat(tempDir(), "a4"), /could not be loaded/);
 });
