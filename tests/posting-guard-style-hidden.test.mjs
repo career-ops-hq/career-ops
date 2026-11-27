@@ -126,6 +126,18 @@ test('styleHidden validates multi-keyword display combinations', () => {
   assert.ok(!invalid.clean.includes('Hidden payload'));
 });
 
+test('styleHidden rejects list-item combined with non-flow display keywords', () => {
+  for (const override of ['flex list-item', 'inline-flex list-item', 'table list-item']) {
+    const html = `<p>Role</p><div style="display:none;display:${override}">Hidden payload</div>`;
+    const { clean, findings } = guard(html, 'html');
+    assert.ok(
+      findings.hidden_blocks.some((b) => b.reason === 'display:none'),
+      `${override} must not override: ${JSON.stringify(findings.hidden_blocks)}`,
+    );
+    assert.ok(!clean.includes('Hidden payload'), `${override} leaked hidden text`);
+  }
+});
+
 test('styleHidden keeps escaped CRLF continuations inside quoted values', () => {
   const html = `<p>Role</p><div style="content:'x\\&#13;&#10;;display:none;'">Visible after continuation</div>`;
   const { clean, findings } = guard(html, 'html');

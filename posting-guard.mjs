@@ -134,6 +134,8 @@ const CSS_VALUE_VALIDATORS = {
       : DISPLAY_INSIDE.has(p) ? 'inside' : DISPLAY_SINGLE.has(p) ? 'single' : 'item';
     const groups = parts.map(groupOf);
     if (new Set(groups).size !== groups.length) return false;
+    if (parts.includes('list-item') && parts.some((p) => p !== 'list-item'
+      && !DISPLAY_OUTSIDE.has(p) && p !== 'flow' && p !== 'flow-root')) return false;
     return !DISPLAY_CONFLICTS.some(([a, b]) => parts.includes(a) && parts.includes(b));
   },
   visibility: new RegExp(`^(?:visible|hidden|collapse|${CSS_KEYWORDS})$`),
