@@ -13,8 +13,7 @@ const SHIPPED_FILES = spawnSync('git', ['ls-files', '-z', '--', '.', ':!tests', 
 
 // One copy of the shipped tree for the whole file: copying all of it per test
 // was most of this suite's time on Windows, and doctor never writes to it.
-// Each test sets only what differs, package.json and node_modules. The link is
-// one-way: the tests that need no node_modules run first, in file order.
+// Each test sets only what differs, package.json and the node_modules link.
 let checkout = null;
 let linked = false;
 after(() => { if (checkout) rmSync(checkout, { recursive: true, force: true, maxRetries: 10 }); });
@@ -28,10 +27,14 @@ function doctorCheckout({ packageJson, nodeModules }) {
       copyFileSync(join(ROOT, file), join(checkout, file));
     }
   }
-  if (linked && !nodeModules) throw new Error('node_modules is already linked: put this test before the ones that link it');
   if (nodeModules && !linked) {
     assert.equal(linkNodeModules(checkout), null);
     linked = true;
+  } else if (!nodeModules && linked) {
+    // A link to the repo's tree, or a directory of per-package links when the
+    // packages are inherited (tests/helpers.mjs). rmSync follows no link either way.
+    rmSync(join(checkout, 'node_modules'), { recursive: true, force: true });
+    linked = false;
   }
   rmSync(join(checkout, 'package.json'), { force: true });
   if (packageJson) writeFileSync(join(checkout, 'package.json'), packageJson);
