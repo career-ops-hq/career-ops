@@ -86,6 +86,14 @@ test("generic hash-route jobs keep distinct identity in both core and web keys",
   assert.equal(webKey(jobB), coreKey(jobB));
 });
 
+test("fragment language params keep case-insensitive parity between core and web", () => {
+  const en = "https://jobs.example.com/careers#/jobs/123?Lang=en";
+  const de = "https://jobs.example.com/careers#/jobs/123?Lang=de";
+  assert.notEqual(webKey(en), webKey(de));
+  assert.equal(webKey(en), webKey("https://jobs.example.com/careers#/jobs/123?lang=en"));
+  assert.equal(webKey(en), coreKey(en), "root/web parity");
+});
+
 test("promoted fragment identity does not overwrite pre-existing internal comparison params", () => {
   const input = "https://jobs.example.com/careers?_career_ops_fragment_job_id=query-id#/jobs/hash-id";
   const expected = "https://jobs.example.com/careers?_career_ops_fragment_job_id=hash-id&_career_ops_fragment_job_id=query-id";
