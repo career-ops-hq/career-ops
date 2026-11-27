@@ -72,10 +72,9 @@ Once the interview is complete, or once enough new details have been collected:
 4. **Update `config/profile.yml`**: Update the targets, compensation, and narrative sections.
 5. **Update `modes/_profile.md`**: Map the new projects/proof points to the target archetypes and update the adaptive framing rules.
 6. Run `node doctor.mjs` silently to verify project integrity.
-7. Provide a summary of the files updated:
+7. Provide a summary that lists only the files you changed, with one line each on what changed. Leave out any file the user did not approve. For example:
    > "✅ Interactive interview completed! Updated your profile:
    > - **CV**: Refined summaries and project bullets with new metrics.
-   > - **Profile config**: Updated target roles and comp expectations.
-   > - **Custom framing**: Integrated project mappings into _profile.md."
+   > - **Profile config**: Updated target roles and comp expectations."
 
    End with the list of missing metrics, if any, so the user can add the figures to `cv.md` themselves.
