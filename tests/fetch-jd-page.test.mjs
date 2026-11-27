@@ -170,7 +170,7 @@ test('fetchJdViaPage says the page was unreachable when no HTTP response came ba
   try {
     const out = await fetchJdViaPage('https://careers.example.com/job/1');
     assert.equal(out.unreachable, true);
-    assert.equal(out.text, '');
+    assert.equal(out.text, undefined);
   } finally { net.restore(); }
 });
 
@@ -186,7 +186,7 @@ test('fetchJdViaPage reports a page answering 404 or 410 as closed, with no JD t
     try {
       const out = await fetchJdViaPage('https://careers.example.com/job/1');
       assert.equal(out.closed, true, String(status));
-      assert.equal(out.text, '');
+      assert.equal(out.text, undefined);
       assert.equal(out.evidence, `HTTP ${status}`);
     } finally { net.restore(); }
   }
@@ -269,7 +269,7 @@ test('fetchJdViaPage passes the closure on even when the visible page still show
   try {
     const out = await fetchJdViaPage('https://careers.example.com/job/1');
     assert.equal(out.closed, true);
-    assert.equal(out.text, '');
+    assert.equal(out.text, undefined);
     assert.match(out.evidence, /validThrough 2020-01-01/);
   } finally { net.restore(); }
 });
@@ -408,7 +408,7 @@ test('a visible closure banner makes the page closed even with no JSON-LD expiry
   try {
     const out = await fetchJdViaPage('https://careers.example.com/job/1');
     assert.equal(out.closed, true);
-    assert.equal(out.text, '', 'a closed page must not hand its JD to a scorer');
+    assert.equal(out.text, undefined, 'a closed page must not hand its JD to a scorer');
     assert.match(out.evidence, /^page text:/);
   } finally { net.restore(); }
 });

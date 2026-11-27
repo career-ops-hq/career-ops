@@ -7,13 +7,13 @@ import { fetchJd, fetchJdViaBrowser } from '../fetch-jd.mjs';
 
 const PRIVATE = 'http://127.0.0.1/jobs/1';
 
-test('without browser: true a miss stays a miss (null), no browser is launched', async () => {
-  assert.equal(await fetchJd(PRIVATE), null);
+test('without browser: true a miss stays a miss, no browser is launched', async () => {
+  assert.deepEqual(await fetchJd(PRIVATE), { kind: 'miss' });
 });
 
 test('with browser: true the browser tier answers with a failure reason, never a fabricated JD', async () => {
   const r = await fetchJd(PRIVATE, { browser: true });
-  assert.ok(r.failure, 'a failure object, not a JD');
+  assert.equal(r.kind, 'failed', 'a failure, not a JD');
   assert.ok(r.failure.code);
   assert.equal(r.text, undefined);
 });

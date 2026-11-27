@@ -126,7 +126,7 @@ export function workdayCxsUrl(rawUrl) {
 }
 
 /**
- * Shape a jd-mode result from a Workday CXS job payload, into the SAME
+ * Shape a JD result from a Workday CXS job payload, into the SAME
  * `{ url, title, text }` contract as the scraped path so no caller has to know
  * which route produced it. Pure — exported for tests.
  *
@@ -243,7 +243,7 @@ async function fetchWorkdayJd(resolved, postingUrl, textCap, timeoutMs) {
 }
 
 /**
- * Shape one Ashby board entry into a jd-mode result. Pure, so the field
+ * Shape one Ashby board entry into a JD result. Pure, so the field
  * mapping is unit-testable without a network round trip.
  *
  * Ashby's public API is ORG-level (the whole board), not per-job, so the job
@@ -321,7 +321,7 @@ async function fetchAshbyJd(resolved, postingUrl, textCap, timeoutMs) {
 }
 
 /**
- * Shape one Greenhouse per-job payload into a jd-mode result. Pure, same
+ * Shape one Greenhouse per-job payload into a JD result. Pure, same
  * contract as normalizeWorkdayJob/normalizeAshbyJob.
  *
  * `content` is HTML (and HTML-escaped at that), so it goes through
@@ -390,7 +390,7 @@ async function fetchGreenhouseJd(resolved, postingUrl, textCap, timeoutMs) {
 }
 
 /**
- * Shape one Lever posting into a jd-mode result. Pure, same contract as the
+ * Shape one Lever posting into a JD result. Pure, same contract as the
  * other normalizers.
  *
  * `descriptionPlain` is already plain text but is only the first slice of the
@@ -408,7 +408,7 @@ async function fetchGreenhouseJd(resolved, postingUrl, textCap, timeoutMs) {
  * `--max-chars` has to drop boilerplate, not requirements.
  *
  * There is no closed-state check. The public v0 endpoint 404s a closed posting
- * (liveness-api.mjs:91) and emits no `state` field at all on a live one
+ * (see liveness-api.mjs) and emits no `state` field at all on a live one
  * (verified over 10 postings on two boards), so the fetcher's non-OK guard is
  * the whole of it.
  *
@@ -493,7 +493,7 @@ async function fetchGreenhouseEmbeddedJd(resolved, postingUrl, textCap, timeoutM
 }
 
 /**
- * Shape one SmartRecruiters posting into a jd-mode result. Pure, same contract
+ * Shape one SmartRecruiters posting into a JD result. Pure, same contract
  * as the other normalizers. The body is `jobAd.sections`, HTML blocks appended
  * in the order the rendered page shows them; the location object also carries
  * remote/hybrid flags, surfaced because they are often the only work-model
@@ -540,7 +540,7 @@ async function fetchSmartRecruitersJd(resolved, postingUrl, textCap, timeoutMs) 
 }
 
 /**
- * Shape one Zoho Recruit posting page into a jd-mode result. Pure, same
+ * Shape one Zoho Recruit posting page into a JD result. Pure, same
  * contract as the other normalizers. The page embeds the posting record
  * (providers/zoho-recruit.mjs parseZohoDetailPage); its `Job_Description` is
  * HTML. The record must be THIS posting's: a page carrying another id, or no
@@ -580,7 +580,7 @@ async function fetchZohoJd(resolved, postingUrl, textCap, timeoutMs) {
 }
 
 /**
- * Shape one HireHive per-posting API answer into a jd-mode result. Pure, same
+ * Shape one HireHive per-posting API answer into a JD result. Pure, same
  * contract as the other normalizers. The body must be THIS posting's: another
  * id returns null so the caller falls through.
  *
@@ -638,7 +638,7 @@ function ultiproYears(min, max) {
 }
 
 /**
- * Shape one UltiPro (UKG Pro Recruiting) detail page into a jd-mode result.
+ * Shape one UltiPro (UKG Pro Recruiting) detail page into a JD result.
  * Pure, same contract as normalizeZohoJob: UKG has no per-posting JSON API
  * either, and the page embeds the posting record (providers/ultipro.mjs
  * extractCandidateOpportunityDetail), whose `Description` is HTML. The record
@@ -730,7 +730,7 @@ async function fetchUltiproJd(resolved, postingUrl, textCap, timeoutMs) {
 }
 
 /**
- * Shape one HiBob `/api/job-ad/{uuid}/application-form` answer into a jd-mode
+ * Shape one HiBob `/api/job-ad/{uuid}/application-form` answer into a JD
  * result. Pure, same contract as the other normalizers. `data.jobAd` carries
  * the title, the site as the page shows it ("Berlin, Germany"), the work model
  * and the employment type; `jobDescription` keys each field by a path ending
@@ -925,10 +925,9 @@ export const JD_FETCHERS = {
 
 /**
  * Try every known JD-text-capable ATS API for one posting URL before anyone
- * reaches for a browser. This is the single dispatch point both this script's
- * own CLI (jd mode) and `fetch-jd.mjs` (the bash-callable front door) call —
- * one copy of the routing table, so the interactive and headless paths cannot
- * drift on which ATS is API-fetchable.
+ * reaches for a browser. This is the one routing table for which ATS is
+ * API-fetchable; every JD fetch (this file's CLI and browser-extract.mjs) goes
+ * through it.
  *
  * @param {string} url
  * @param {number} [textCap]
@@ -944,9 +943,9 @@ export async function fetchJdViaKnownApi(url, textCap = JD_TEXT_CAP, timeoutMs =
   if (!fetcher) return null;
 
   // `resolveAtsApi` carries a per-ATS timeout for the APIs that need one
-  // (Ashby: 20 s, liveness-api.mjs:113); without it a slow Ashby board that
+  // (Ashby: 20 s); without it a slow Ashby board that
   // liveness waits for falls through here on the generic 15 s both callers
-  // pass. Same precedence liveness-api.mjs:357 applies to the same field —
+  // pass. Same precedence liveness-api.mjs applies to the same field —
   // the resolved value wins, the argument is the fallback for every ATS that
   // declares none.
   const budgetMs = resolved.timeoutMs || timeoutMs;
@@ -1235,10 +1234,14 @@ export function extractJd(page, url, { textCap = JD_TEXT_CAP, minWords = MIN_PAG
 }
 
 /**
+ * Tier 2: fetch the posting's own HTML, say whether it is closed, otherwise
+ * read the JD out of it (extractJd).
+ *
  * @param {string} url
  * @param {number} [textCap]
  * @param {number} [timeoutMs]
- * @returns {Promise<{url: string, title: string, text: string, method: string, closed?: boolean, evidence?: string, unreachable?: boolean}|null>}
+ * @returns {Promise<{url: string, title: string, text: string, method: string}|{closed: true, evidence: string}|{unreachable: true}|null>}
+ *   null = nothing readable (not fetchable, not a JD, or ambiguous)
  */
 export async function fetchJdViaPage(url, textCap = JD_TEXT_CAP, timeoutMs = DEFAULT_TIMEOUT_MS, { visibleText = false } = {}) {
   let host;
@@ -1246,9 +1249,9 @@ export async function fetchJdViaPage(url, textCap = JD_TEXT_CAP, timeoutMs = DEF
   if (isLinkedInHost(host)) return null;
   const page = await fetchHtml(url, timeoutMs);
   if (!page) return null;
-  if (page.unreachable) return { url, title: '', text: '', method: 'unreachable', unreachable: true };
+  if (page.unreachable) return { unreachable: true };
   const closure = fetchedPageClosure(page, url);
-  if (closure) return { url, title: '', text: '', method: page.gone ? 'http-gone' : 'page-closure', closed: true, evidence: closure };
+  if (closure) return { closed: true, evidence: closure };
   return extractJd(page, url, { textCap, visibleText });
 }
 
@@ -1348,18 +1351,16 @@ export function fetchedPageClosure(page, url) {
 // Tier 3 — a rendered page in headless Chromium (only with browser: true)
 // ========================================================================
 
-// Floor below which a jd-mode extraction is treated as failure, not content.
+// Floor below which a JD extraction is treated as failure, not content.
 // A posting page whose main text is a couple of sentences is a render we
 // missed (SPA shell, consent wall, bot interstitial), never a real JD; the
 // cost of being wrong is one silent fallback to the MCP path, whereas the
 // cost of NOT failing is an empty JD evaluated as if it were the posting.
-// Only jd mode gets this guard: an empty `listing` result is legitimate — a
-// company with no open roles.
 const MIN_JD_TEXT_CHARS = 200;
 
 /**
  * A Cloudflare challenge or block page served in place of the posting, as a
- * jd-mode failure, or null. Pure — exported for tests.
+ * JD failure, or null. Pure — exported for tests.
  *
  * jdFailure() never rejects a result above the length floor, and a
  * site-branded challenge body clears it (#6713: 838 characters, "Humans
@@ -1377,7 +1378,7 @@ export function challengeFailure({ status = 0, pageTitle = '', url = '' } = {}) 
 }
 
 /**
- * Why a jd-mode result cannot be emitted, or null when it can. Pure — exported
+ * Why a JD result cannot be emitted, or null when it can. Pure — exported
  * for tests.
  *
  * A page whose cleaned text is below the floor is either unreadable (a client-
@@ -1591,17 +1592,34 @@ export async function fetchJdViaBrowser(url, textCap = JD_TEXT_CAP, timeoutMs = 
  * stale body of it.
  *
  * @param {string} url
+ * What came back, by `kind`:
+ *   jd          the JD: `{url, title, text, method}`
+ *   closed      the posting is taken down: `{evidence}`
+ *   unreachable no HTTP response at all (DNS, refused, timeout, TLS); worth a retry
+ *   failed      the browser tier ran and could not read it: `{failure: {error, code}}`
+ *   miss        no tier found a JD, and none of them proved anything else
+ * @typedef {{kind: 'jd', url: string, title: string, text: string, method: string}
+ *   | {kind: 'closed', evidence: string}
+ *   | {kind: 'unreachable'}
+ *   | {kind: 'failed', failure: {error: string, code: string}}
+ *   | {kind: 'miss'}} JdOutcome
+ *
  * @param {{textCap?: number, timeoutMs?: number, visibleText?: boolean, browser?: boolean}} [opts]
- * @returns {Promise<object|null>} a JD result, `{closed, evidence}`, `{unreachable}`,
- *   `{failure}` from the browser tier, or null when no tier found anything
+ * @returns {Promise<JdOutcome>}
  */
 export async function fetchJd(url, { textCap = JD_TEXT_CAP, timeoutMs = DEFAULT_TIMEOUT_MS, visibleText = false, browser = false } = {}) {
   const viaApi = await fetchJdViaKnownApi(url, textCap, timeoutMs);
-  if (viaApi) return viaApi;
+  if (viaApi) return { kind: 'jd', ...viaApi };
   const viaPage = await fetchJdViaPage(url, textCap, timeoutMs, { visibleText });
-  if (viaPage && !viaPage.unreachable) return viaPage;
-  if (!browser) return viaPage;
-  return await fetchJdViaBrowser(url, textCap, timeoutMs);
+  if (viaPage?.closed) return { kind: 'closed', evidence: viaPage.evidence };
+  if (viaPage?.unreachable && !browser) return { kind: 'unreachable' };
+  if (viaPage && !viaPage.unreachable) return { kind: 'jd', ...viaPage };
+  if (!browser) return { kind: 'miss' };
+  const viaBrowser = await fetchJdViaBrowser(url, textCap, timeoutMs);
+  if (!viaBrowser.failure) return { kind: 'jd', ...viaBrowser };
+  // A taken-down posting is closed, not a failed read.
+  if (viaBrowser.failure.code === 'unavailable') return { kind: 'closed', evidence: viaBrowser.failure.error };
+  return { kind: 'failed', failure: viaBrowser.failure };
 }
 
 async function main() {
@@ -1637,49 +1655,34 @@ Options:
     visibleText: hasFlag(args, '--visible-text'),
     browser: hasFlag(args, '--browser'),
   });
-  // No stderr, by design: the caller's browser/WebFetch fallback is the
-  // intended next step, and warning on every non-covered host would make the
-  // normal path look broken.
-  // Signal the miss via exitCode, not process.exit(1). On Windows, Node 24
+  // A plain miss prints nothing to stderr: the caller's browser/WebFetch fallback
+  // is the intended next step, and warning on every non-covered host would make
+  // the normal path look broken. Only a browser-tier failure explains itself.
+  // Exit codes are set via exitCode, not process.exit(). On Windows, Node 24
   // aborts when process.exit() runs right after a request (nodejs/node#56645):
   // it prints a libuv assertion and exits with a crash code instead of 1.
   // Measured 2026-11-04 on Node 24.14.1: misses on Greenhouse, Workable,
   // SmartRecruiters and Workday aborted 4 times out of 4. Returning lets the
-  // process exit 1 once the event loop drains, right after the answer.
-  if (!result) {
-    process.exitCode = 1;
-    return;
-  }
-
-  // No HTTP response at all (DNS, refused, timeout, TLS): a transport problem, not
-  // a page that cannot be read, so a caller may retry it. Exit 2, empty stdout.
-  if (result.unreachable) {
-    process.exitCode = 2;
-    return;
-  }
-
-  // The browser tier ran and could not return a JD: a taken-down posting is
-  // closed (exit 3), anything else (challenge, empty render, no Playwright) is a
-  // miss whose reason goes to stderr as JSON, as browser-extract.mjs prints it.
-  if (result.failure) {
-    if (result.failure.code === 'unavailable') {
-      process.stdout.write(`CLOSED_POSTING ${result.failure.error}`);
+  // process exit once the event loop drains, right after the answer.
+  switch (result.kind) {
+    case 'miss':
+      process.exitCode = 1;
+      return;
+    case 'unreachable':
+      // A transport problem, not a page that cannot be read, so a caller may retry.
+      process.exitCode = 2;
+      return;
+    case 'failed':
+      // Challenge, empty render, no Playwright: the reason goes to stderr as JSON.
+      console.error(JSON.stringify(result.failure));
+      process.exitCode = 1;
+      return;
+    case 'closed':
+      // A distinct exit code, so a caller does not fall back to a fetch that
+      // could return the JD from a cached page and score it.
+      process.stdout.write(`CLOSED_POSTING ${result.evidence}`);
       process.exitCode = 3;
       return;
-    }
-    console.error(JSON.stringify(result.failure));
-    process.exitCode = 1;
-    return;
-  }
-
-  // The posting's own data says it is closed: the page's JobPosting, its visible
-  // text, or an ATS API flag such as Ashby's isListed: false. Say so with a
-  // distinct exit code instead of a plain miss, so a caller does not fall back
-  // to a fetch that could return the JD from the visible page and score it.
-  if (result.closed) {
-    process.stdout.write(`CLOSED_POSTING ${result.evidence}`);
-    process.exitCode = 3;
-    return;
   }
 
   // The structured-page reader already includes the posting title in its text.
@@ -1690,6 +1693,6 @@ Options:
 if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(`fetch-jd: unexpected error — ${err?.message || err}`);
-    process.exitCode = 1; // not process.exit(1), for the reason given at the miss
+    process.exitCode = 1; // not process.exit(1), for the reason given in main()
   });
 }

@@ -253,14 +253,14 @@ async function main() {
     // then a rendered page. Workday hydrates its JD into a virtualized DOM
     // readDom() cannot see, so for it the API tier is the only path that works.
     const result = await fetchJd(url, { textCap: maxChars, timeoutMs: timeout, browser: true });
-    if (result?.failure) {
-      console.error(JSON.stringify(result.failure));
-      process.exitCode = 1;
-    } else if (result?.closed) {
+    if (result.kind === 'jd') {
+      emitJd(result, maxChars);
+    } else if (result.kind === 'closed') {
       console.error(JSON.stringify({ error: result.evidence, code: 'unavailable', url }));
       process.exitCode = 1;
-    } else if (result) {
-      emitJd(result, maxChars);
+    } else if (result.kind === 'failed') {
+      console.error(JSON.stringify(result.failure));
+      process.exitCode = 1;
     }
     return;
   }
