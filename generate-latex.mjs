@@ -258,6 +258,12 @@ export async function compileLatexFile(absPath, content, outputPath, compileOnly
 
     report.compiled = false;
     report.compileError = latexError;
+  } finally {
+    // The patched copy is a build input, not output: a failed compile left it
+    // in the user's directory.
+    if (engine === 'tectonic') {
+      await rm(compilePath).catch(() => {});
+    }
   }
 
   if (report.compiled) {
@@ -276,15 +282,14 @@ export async function compileLatexFile(absPath, content, outputPath, compileOnly
         sizeKB: parseFloat((pdfStat.size / 1024).toFixed(1)),
       };
     } catch (err) {
+      // The engine ran, but there is no PDF at the target, so the run failed.
+      report.compiled = false;
       report.postCompileError = `Failed to finalize PDF: ${err.message}`;
     }
 
     const auxExts = ['.aux', '.log', '.out', '.fls', '.fdb_latexmk', '.synctex.gz'];
     for (const ext of auxExts) {
       await rm(join(texDir, `${compileBase}${ext}`)).catch(() => {});
-    }
-    if (engine === 'tectonic') {
-      await rm(compilePath).catch(() => {});
     }
   }
 
@@ -451,7 +456,8 @@ async function main() {
     ...(factCheck.result ? { configMissing: factCheck.result.configMissing } : {}),
   };
   console.log(JSON.stringify(report, null, 2));
-  process.exit(report.compiled ? 0 : (report.valid ? 1 : 1));
+  if (report.postCompileError) console.error(report.postCompileError);
+  process.exit(report.compiled ? 0 : 1);
 }
 
 if (isMainModule(import.meta.url)) {
