@@ -50,12 +50,22 @@ const CLIENT_ERROR_CODES = new Set(["usage", "invalid-state", "undo-unknown-prio
 // the document from the end rather than from the first `{`.
 
 export async function POST(req: Request) {
-  const body = await readJsonObject<{ n?: string; status?: string; undo?: boolean }>(req);
+  const body = await readJsonObject<{ n?: string; status?: string; undo?: boolean; expectStatus?: unknown }>(req);
   if (!body) return Response.json({ error: "bad json" }, { status: 400 });
   const { n, status } = body;
+  // The status the caller DISPLAYED, forwarded as --expect-status. Optional, so
+  // every existing caller keeps working — but a present-and-unusable value is a
+  // 400 rather than a silently dropped guard. A value starting with "--" would
+  // be read by the CLI as the next flag.
+  const expectStatus = body.expectStatus;
+  if (expectStatus !== undefined
+      && (typeof expectStatus !== "string" || !expectStatus.trim() || expectStatus.trim().startsWith("--"))) {
+    return Response.json({ error: "expectStatus must be the displayed status" }, { status: 400 });
+  }
+  const expect = typeof expectStatus === "string" ? expectStatus.trim() : null;
   // {n, undo: true} takes back the row's last logged change (set-status.mjs
   // --undo). The CLI picks the status to restore, so there is none to check.
-  if (body.undo === true) return writeStatus(n, null);
+  if (body.undo === true) return writeStatus(n, null, expect);
   if (!n || typeof status !== "string" || !status.trim()) {
     return Response.json({ error: "n and status required" }, { status: 400 });
   }
@@ -73,10 +83,10 @@ export async function POST(req: Request) {
   if (!canon) {
     return Response.json({ error: `not a canonical status: ${status}` }, { status: 400 });
   }
-  return writeStatus(n, canon);
+  return writeStatus(n, canon, expect);
 }
 
-async function writeStatus(n: unknown, canon: string | null) {
+async function writeStatus(n: unknown, canon: string | null, expect: string | null) {
   // Same reason the status is checked above: answer a bad request before paying
   // for a process spawn and a tracker lock. `n` is typed as a string but arrives
   // from untrusted JSON, so it can be an array or an object, and `String(n)`
@@ -108,6 +118,13 @@ async function writeStatus(n: unknown, canon: string | null) {
   // --detach-jd-archive: a move into Interview may start a JD archive that can
   // run past this request's 30s budget. Waiting for it turned a saved status
   // into a 504, and this route never reads the archive's outcome anyway.
+  // --expect-status: the row the caller selected is resolved when the picker is
+  // drawn and sent when it is confirmed, so another session renumbering rows in
+  // between can point `--row` at a different application (#5034: consent
+  // belongs to the displayed application, not a reusable row number). Partial
+  // mitigation only — set-status.mjs permits the mismatch when the row already
+  // holds the requested status, so a stale selection landing on a row that is
+  // already there is still written.
   const { code, stdout, stderr, spawnFailed, timedOut } = await runSetStatus([
     "--row",
     row,
@@ -116,6 +133,7 @@ async function writeStatus(n: unknown, canon: string | null) {
     "web",
     "--detach-jd-archive",
     "--json",
+    ...(expect ? ["--expect-status", expect] : []),
   ]);
   const parsed = parseCliJson(stdout);
 

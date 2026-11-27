@@ -46,7 +46,7 @@ import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   closeSync, existsSync, fchmodSync, fsyncSync, lstatSync, mkdirSync,
-  openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync,
+  openSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -54,6 +54,8 @@ import { withPipelineLock } from './pipeline-lock.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
 import { captureIdentity, captureSlug, findCaptureForUrl, isSupportedCaptureExtension, validateCaptureUrl } from './jd-capture.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { renameSyncWithRetry } from './lib/rename-retry.mjs';
+import { postingUrlRelation } from './url-key.mjs';
 
 const PIPELINE_SKELETON = '# Pipeline\n\n## Pending\n\n## Processed\n';
 
@@ -82,7 +84,7 @@ export function atomicWrite(filePath, text, { followSymlinks = true } = {}) {
     fsyncSync(fd);
     closeSync(fd);
     fd = null;
-    renameSync(tempPath, targetPath);
+    renameSyncWithRetry(tempPath, targetPath);
   } catch (err) {
     if (fd !== null) { try { closeSync(fd); } catch { /* already closed */ } }
     try { unlinkSync(tempPath); } catch { /* never created, or already renamed */ }
@@ -303,9 +305,30 @@ function trimPathSlash(value) {
   return base.replace(/\/+$/, '') + rest;
 }
 
+/** A URL split at its first `#`: the page, and the fragment verbatim ('' when none). */
+function splitFragment(value) {
+  const s = String(value).trim();
+  const hash = s.indexOf('#');
+  return hash < 0 ? [s, ''] : [s.slice(0, hash), s.slice(hash)];
+}
+
+/**
+ * Do two pipeline URLs name the same posting? The page is compared the way the
+ * scanner's dedup compares it (url-key.mjs): a tracking parameter (`gh_src`,
+ * `utm_*`), the host's case or a trailing slash on the path does not make a
+ * second posting, and two known, different languages stay two. The fragment
+ * is compared verbatim, as before.
+ */
+function samePosting(a, b) {
+  const [pageA, fragmentA] = splitFragment(a);
+  const [pageB, fragmentB] = splitFragment(b);
+  if (fragmentA !== fragmentB) return false;
+  if (trimPathSlash(pageA) === trimPathSlash(pageB)) return true;
+  return postingUrlRelation(pageA, pageB) === 'same';
+}
+
 /** Is this URL already a row (Pending or Processed) in the pipeline text? */
 export function urlAlreadyPresent(text, url) {
-  const needle = trimPathSlash(url);
   return text
     .split(/\r?\n/)
     .filter((line) => /^\s*-\s*\[[ xX!]\]/.test(line))
@@ -315,7 +338,7 @@ export function urlAlreadyPresent(text, url) {
       // rows wrap the URL and labels in strikethrough (modes/pipeline.md).
       const index = /^#\d+$/.test(cells[0].trim()) ? 1 : 0;
       const cell = (cells[index] || '').trim().replace(/^~~/, '').replace(/~~$/, '');
-      return trimPathSlash(cell) === needle;
+      return samePosting(cell, url);
     });
 }
 

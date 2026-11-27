@@ -14,6 +14,7 @@
 // non-HTTPS remote), so a preload rewrites that one base URL to the mock: the
 // CLI still sees api.openai.com as its host, which is what the branch reads.
 import { createServer } from 'http';
+import { listenOnSafePort } from './helpers/listen-safe-port.mjs';
 import { execFile } from 'child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -40,7 +41,7 @@ const server = createServer((req, res) => {
     res.end(event({ content: 'Evaluation body.\n' }) + event({}, finishReason) + 'data: [DONE]\n\n');
   });
 });
-await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+await listenOnSafePort(server);
 const base = `http://127.0.0.1:${server.address().port}/v1`;
 
 // cwd for the children: openai-eval loads .env from its cwd, and a developer's

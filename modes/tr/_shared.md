@@ -124,7 +124,7 @@ varsayılan tablo hedef kümesidir: sınıflandırmayı ona göre yap; oradaki b
 eşleşme hedefli sayılır.
 
 Aşağıdaki tablo kapalı bir liste değil, bir varsayılandır. Belirli bir iş
-aramasını yansıtır (bkz. AGENTS.md → Origin) ve her kullanıcının alanını
+aramasını yansıtır (bkz. AGENTS.md → Personalization) ve her kullanıcının alanını
 tanımlamaz: silikon tasarım doğrulama mühendisi, kantitatif analist ya da
 klinisyen için burada hiçbir arketip yoktur.
 

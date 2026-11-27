@@ -280,6 +280,9 @@ try {
   for (const [label, badUrl] of [
     ['an untrusted host', 'https://evil.example/rss'],
     ['a non-HTTPS URL', 'http://germantechjobs.de/rss'],
+    ['a look-alike family host', 'https://swissdevjobs.ch.evil.example/rss'],
+    ['a family name inside another host', 'https://evilswissdevjobs.ch/rss'],
+    ['a family board outside the list', 'https://devitjobs.com/rss'],
   ]) {
     let fetchEntered = false;
     let threw = false;
@@ -297,6 +300,52 @@ try {
     if (threw && !fetchEntered) pass(`fetch(): ${label} in feed_url is rejected before any request`);
     else fail(`fetch(): ${label} in feed_url — threw=${threw}, fetch entered=${fetchEntered}`);
   }
+
+  // ── Other boards of the family, read through feed_url ──
+  // Same item shape as GermanTechJobs; the salary bracket is in the board's
+  // currency, and "[CHF ? - ?]" when the posting gives no figure.
+  const familyFeed = (host, items) => `<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0"><channel><title>Example board</title><link>https://${host}/</link>
+${items.map(([title, slug]) => `<item><title><![CDATA[${title}]]></title>
+<link>https://${slug.includes('://') ? slug : `${host}/jobs/${slug}`}?utm_source=our_rss_feed&amp;utm_medium=our_rss_feed</link>
+<pubDate>Mon, 23 Nov 2026 12:00:00 GMT</pubDate><description><![CDATA[<p>Build things.</p>]]></description></item>`).join('\n')}
+</channel></rss>`;
+
+  for (const [host, title, role, company] of [
+    ['swissdevjobs.ch', "Platform Engineer @ Acme AG [CHF 100'000 - 130'000]", 'Platform Engineer', 'Acme AG'],
+    ['swissdevjobs.ch', 'Data Engineer @ Acme AG [CHF ? - ?]', 'Data Engineer', 'Acme AG'],
+    ['devitjobs.uk', 'Java Engineer @ ExampleCo Ltd [£35,000 - 60,000]', 'Java Engineer', 'ExampleCo Ltd'],
+    ['devitjobs.nl', 'Cloud Engineer @ BigCo B.V. [€52.824 - 76.680]', 'Cloud Engineer', 'BigCo B.V.'],
+    ['devitjobs.nl', 'Systeembeheerder [m/v/x] @ BigCo B.V. [€40.000 - 50.000]', 'Systeembeheerder [m/v/x]', 'BigCo B.V.'],
+  ]) {
+    const calls = [];
+    const rows = await germantechjobs.fetch(
+      { name: 'Family board', provider: 'germantechjobs', feed_url: `https://${host}/rss` },
+      { fetchText: async (url, options) => { calls.push({ url, options }); return familyFeed(host, [[title, 'role-at-company']]); } },
+    );
+    const row = rows[0];
+    const ok = calls.length === 1 && calls[0].url === `https://${host}/rss` && calls[0].options?.redirect === 'error'
+      && rows.length === 1 && row.title === role && row.company === company
+      && row.url === `https://${host}/jobs/role-at-company`;
+    if (ok) pass(`fetch(): feed_url on ${host} reads that board; ${JSON.stringify(title)} → role ${JSON.stringify(role)}, employer ${JSON.stringify(company)}`);
+    else fail(`fetch(): ${host} ${JSON.stringify(title)} → ${JSON.stringify({ calls, rows })}`);
+  }
+
+  // A row linking to another board of the family is not this board's posting.
+  const crossLinked = parseGermantechjobsFeed(familyFeed('swissdevjobs.ch', [
+    ['Own Role @ Acme AG [CHF 1 - 2]', 'own-role'],
+    ['Other Board Role @ Acme AG [CHF 1 - 2]', 'https://devitjobs.uk/jobs/other-role'],
+  ]), 'swissdevjobs.ch');
+  if (crossLinked.length === 1 && crossLinked[0].url === 'https://swissdevjobs.ch/jobs/own-role') {
+    pass('parse: a link to another family board is dropped when reading this board');
+  } else {
+    fail(`parse: cross-board link → ${JSON.stringify(crossLinked)}`);
+  }
+
+  // The default board is unchanged: a SwissDevJobs link in the GermanTechJobs feed is off-board.
+  const defaultBoard = parseGermantechjobsFeed(familyFeed('germantechjobs.de', [['Role @ Acme GmbH [1 - 2 €]', 'https://swissdevjobs.ch/jobs/x']]));
+  if (defaultBoard.length === 0) pass('parse: without a board host, only germantechjobs.de links are kept');
+  else fail(`parse: default board kept ${JSON.stringify(defaultBoard)}`);
 } catch (e) {
   fail(`germantechjobs provider tests crashed: ${e.message}`);
 }

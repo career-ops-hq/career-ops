@@ -23,8 +23,10 @@
  * @property {string} location May be empty.
  * @property {'remote' | 'hybrid' | 'onsite'} [workplaceType]
  *                               Workplace model, populated ONLY when the source
- *                               exposes a dedicated field (`ashby.mjs` and
- *                               `lever.mjs` are producers; most providers omit it).
+ *                               exposes a dedicated field (`ashby.mjs`, `lever.mjs`,
+ *                               `getro.mjs`, `a16z-speedrun-talent.mjs` and
+ *                               `consider.mjs`, from its `remote` and `hybrid`
+ *                               flags, are producers; most providers omit it).
  *                               Normalized to lowercase: 'remote' | 'hybrid' | 'onsite'.
  *                               Never inferred from location text, title, or
  *                               `isRemote`. Omitted when unknown or unspecified.
@@ -34,7 +36,9 @@
  *                               or work models. Omitted when empty.
  * @property {string} [country]  The source's country code when it exposes a
  *                               dedicated field (Lever's `country`), trimmed but
- *                               otherwise as given. Omitted when absent or null.
+ *                               otherwise as given. We Work Remotely gives the
+ *                               flag in `<country>`, read as its ISO code.
+ *                               Omitted when absent or null.
  * @property {string} [description] Job description text, populated ONLY when the
  *                               provider's list payload carries it for free (no
  *                               extra per-job request — the scanner is zero-token),

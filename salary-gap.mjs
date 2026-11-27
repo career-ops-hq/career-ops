@@ -547,7 +547,11 @@ export function computeRelocationAdjustment({ grossAnnual, homeCode, destCode, j
 export function relocationForApplication(a, { jurisdictions, homeLocation }) {
   const postingLocation = a?.advertised?.postingLocation;
   if (!jurisdictions || !homeLocation || !postingLocation || !a?.advertised) return null;
-  if (a.advertised.period !== 'annual') return null;
+  // parseAmount() already refuses every explicitly non-annual period. A
+  // periodless figure is annual only at annual-scale magnitude, so an
+  // unlabelled hourly rate cannot silently become a gross salary.
+  if (a.advertised.period && a.advertised.period !== 'annual') return null;
+  if (a.advertised.period === null && !(a.advertised.value >= 10000)) return null;
   const homeCode = matchJurisdiction(homeLocation, jurisdictions);
   const destCode = matchJurisdiction(postingLocation, jurisdictions);
   return computeRelocationAdjustment({

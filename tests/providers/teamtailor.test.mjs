@@ -97,6 +97,77 @@ try {
     fail(`row 1 = ${JSON.stringify(jobs[1])}`);
   }
 
+  // Postings as live feeds list them (2026-11-23): one <tt:location> per place
+  // in the <tt:locations> block, an empty tag written self-closing, and a remote
+  // posting that names a place too. Reading only the item's first <tt:city> and
+  // <tt:country> kept one place of a multi-place posting, and "Remote" was used
+  // only when there was no place.
+  {
+    const place = (city, country) => '<tt:location>'
+      + (city ? `<tt:city>${city}</tt:city>` : '<tt:city/>')
+      + (country ? `<tt:country>${country}</tt:country>` : '<tt:country/>')
+      + '</tt:location>';
+    const item = (id, remoteStatus, ...places) => `<item><title>Role ${id}</title>`
+      + `<link>https://acme.teamtailor.com/jobs/${id}-role</link>`
+      + `<remoteStatus>${remoteStatus}</remoteStatus><tt:locations>${places.join('')}</tt:locations></item>`;
+    const [multi, remote, temporary, noCity, remotePlace, remoteInName] = parseTeamtailorFeed([
+      '<rss version="2.0" xmlns:tt="https://teamtailor.com/locations"><channel>',
+      item(1, 'hybrid', place('København', 'Denmark'), place('Berlin', 'Germany'), place('Eindhoven', 'Netherlands')),
+      item(2, 'fully', place('Stockholm', 'Sweden'), place('Stockholm', 'Sweden')),
+      item(3, 'temporary', place('Oslo', 'Norway')),
+      item(4, 'onsite', place('', 'Norway'), place('', ''), place('Berlin', 'Germany')),
+      item(5, 'fully', place('Remote', '')),
+      item(6, 'fully', place('Remoteville', 'Canada')),
+      '</channel></rss>',
+    ].join('\n'), 'Acme');
+
+    if (multi?.location === 'København, Denmark · Berlin, Germany · Eindhoven, Netherlands'
+      && JSON.stringify(multi?.locations) === '["København, Denmark","Berlin, Germany","Eindhoven, Netherlands"]') {
+      pass('parseTeamtailorFeed keeps every <tt:location> of a posting, in feed order, joined with " · " and as Job.locations');
+    } else {
+      fail(`multi-place posting: location ${JSON.stringify(multi?.location)}, locations ${JSON.stringify(multi?.locations)}`);
+    }
+
+    if (remote?.location === 'Stockholm, Sweden · Remote' && JSON.stringify(remote?.locations) === '["Stockholm, Sweden"]') {
+      pass('parseTeamtailorFeed appends "Remote" after the places of a fully remote posting, each place once');
+    } else {
+      fail(`fully remote posting: location ${JSON.stringify(remote?.location)}, locations ${JSON.stringify(remote?.locations)}`);
+    }
+
+    if (temporary?.location === 'Oslo, Norway · Remote') pass('parseTeamtailorFeed appends "Remote" for remoteStatus temporary too');
+    else fail(`temporarily remote posting: location ${JSON.stringify(temporary?.location)}, expected "Oslo, Norway · Remote"`);
+
+    if (noCity?.location === 'Norway · Berlin, Germany' && JSON.stringify(noCity?.locations) === '["Norway","Berlin, Germany"]') {
+      pass('parseTeamtailorFeed pairs each city with the country of its own <tt:location> and skips one with neither');
+    } else {
+      fail(`places without a city: location ${JSON.stringify(noCity?.location)}, locations ${JSON.stringify(noCity?.locations)}`);
+    }
+
+    if (remotePlace?.location === 'Remote' && remotePlace?.locations === undefined) {
+      pass('parseTeamtailorFeed does not append "Remote" to a place that says it, nor list a work model as a place');
+    } else {
+      fail(`place "Remote": location ${JSON.stringify(remotePlace?.location)}, locations ${JSON.stringify(remotePlace?.locations)}`);
+    }
+
+    if (remoteInName?.location === 'Remoteville, Canada · Remote') {
+      pass('parseTeamtailorFeed still appends "Remote" when a place name only contains the word');
+    } else {
+      fail(`place "Remoteville": location ${JSON.stringify(remoteInName?.location)}, expected "Remoteville, Canada · Remote"`);
+    }
+
+    const { buildLocationFilter } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+    if (buildLocationFilter({ allow: ['Berlin'] })(multi?.location, multi?.url, multi?.title, multi)) {
+      pass('location_filter allow: [Berlin] keeps a posting whose second place is Berlin');
+    } else {
+      fail(`location_filter allow: [Berlin] dropped ${JSON.stringify(multi?.location)}`);
+    }
+    if (buildLocationFilter({ allow: ['Remote'] })(remote?.location, remote?.url, remote?.title, remote)) {
+      pass('location_filter allow: [Remote] keeps a fully remote posting that names a place');
+    } else {
+      fail(`location_filter allow: [Remote] dropped ${JSON.stringify(remote?.location)}`);
+    }
+  }
+
   // Robustness
   if (parseTeamtailorFeed('', 'X').length === 0) pass('empty input → empty result');
   else fail('empty input should yield empty result');

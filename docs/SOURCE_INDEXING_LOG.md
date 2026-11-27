@@ -322,3 +322,53 @@ Startup jobs. The provider reads Wellfound in two ways: the jobs page of one com
 **Rule 6 (read what is public).** No page needs a login, and no request got a CAPTCHA. career-ops' default User-Agent gets the same pages as a browser. `robots.txt` (checked 2026-11-12) has only a `User-agent: *` group and no `Crawl-delay`, and disallows none of the paths the provider reads (`/company/<slug>/jobs`, `/role/…`, `/location/…`). The provider waits 250 ms between requests and bounds them with at most 20 search URLs per entry, each read up to `max_pages`, and with `wellfound.max_companies`.
 
 **Not in this PR.** AGENTS.md ("Aggregator Listings — Confirm at the Employer") names Wellfound, and a job with no `atsSource` may exist only on Wellfound. The maintainers chose a separate PR for that rule and for passing `atsSource` on with each job (#4903).
+
+---
+
+## itjobs.pt
+
+| | |
+|---|---|
+| **Proposed by** | @SalvadorCorreia in issue [#7686](https://github.com/career-ops-hq/career-ops/issues/7686) (not the operator) |
+| **Provider** | `providers/itjobs.mjs` |
+| **PR** | this PR · issue [#7686](https://github.com/career-ops-hq/career-ops/issues/7686) |
+| **Status** | Proposed |
+
+Portugal's IT job board. The provider reads the board's public RSS feed, `https://feeds.itjobs.pt/feed/emprego`, linked from the site's home page, with `limit=5000`. Measured on 2026-11-23: 714 items in one response, the same "714 ofertas" the site shows, newest first. The feed also accepts the site's search filters (`q`, `location`, `company`); the provider does not use them, because the whole board fits in one request. ITJobs also has a keyed JSON API, which the provider does not use.
+
+**Rule 1 (real listings, identifiable employer, free for candidates).** Every one of the 714 items names its employer on the `Empresa` line of its description; the provider drops a row without one. Many employers are IT consultancies and staffing firms (Neotalent Conclusion, Dellent and Olisipo were the most frequent). Offers are free to read without an account. To see an offer's application address (email or site), a candidate signs in with a free ITJobs account, as on Computrabajo. The terms ask candidates not to send mass or automated applications; the provider only reads.
+
+**Rule 2 (canonical URL).** The feed links each item to its ITJobs offer page (`https://www.itjobs.pt/oferta/<id>/<slug>`) and carries no employer link; the employer's application address is on the offer page, for signed-in candidates. The provider keeps the offer page without its query string.
+
+**Rule 3 (complete inventory, no paid placement).** ITJobs sells featured ads ("Anúncios em destaque", on its plans page). The feed does not mark them, but it lists every offer newest first, and its count matches the site's, so a featured ad cannot change what the provider reads or its order.
+
+**Rule 4 (operator declared).** Red Maze, per the copyright line in the site footer. The proposer is not the operator but a candidate using the board.
+
+**Rule 5 (aggregation stays in core).** The provider reads only itjobs.pt.
+
+**Rule 6 (read what is public).** The feed and the offer pages need no login, and no request got a CAPTCHA. `www.itjobs.pt/robots.txt` (read 2026-11-23) sets `Crawl-delay: 1` and disallows search and filter query strings on the site, which the provider does not request; `feeds.itjobs.pt` serves no `robots.txt` (404). The provider makes one request per scan.
+
+---
+
+## jobindex.dk
+
+| | |
+|---|---|
+| **Proposed by** | @SalvadorCorreia in issue [#7677](https://github.com/career-ops-hq/career-ops/issues/7677) (not the operator) |
+| **Provider** | `providers/jobindex.mjs` |
+| **PR** | this PR · issue [#7677](https://github.com/career-ops-hq/career-ops/issues/7677) |
+| **Status** | Proposed |
+
+A Danish job board. Every search page has an RSS twin, `https://www.jobindex.dk/jobsoegning.rss`, with the same query parameters (`q`, `subid`, `geoareaid`, `jobage`, `lang`), 20 items a page and `page=N` to walk them. Search URLs that put filters in the path (`/jobsoegning/it/...`) have no RSS twin (404), and the provider refuses them with a message.
+
+**Rule 1 (real listings, identifiable employer, free for candidates).** Each item is either an ad placed on Jobindex (card class `PaidJob`) or a posting Jobindex collects from elsewhere (`jix_robotjob`). The provider keeps only the placed ads. For `q=python` on 2026-11-24, all 87 placed ads named their employer. Reading needs no account. In a sample of 10 placed ads (2026-11-23), 8 link to the employer's applicant tracking system (hr-manager.net, emply.com) through a Jobindex click redirect, 1 names the employer's own careers page in the ad text, and 1 showed no apply link in the static HTML. Jobindex also offers employers a free application form (QuickApply); whether a candidate needs an account for it was not checked.
+
+**Rule 2 (canonical URL).** The feed links only the Jobindex posting page (`https://www.jobindex.dk/vis-job/<id>`), and the provider uses it. When an ad has an external application link, it is on that page behind a Jobindex click redirect (`/c?t=e<id>`), not in the feed; resolving it would take one request per posting, which this first version does not make.
+
+**Rule 3 (complete inventory, no paid placement).** Employers pay Jobindex to place ads (price list: https://www.jobindex.dk/virksomheder/prisliste); no product sold as a higher position in search results was found. The feed lists the placed ads before the collected postings, and marks each item's kind. Walking every page of `q=python` returned 202 distinct items on 2026-11-24 (87 placed, 115 collected), equal to the `hitcount` the search page reports (205 on 2026-11-23). The provider walks every page up to `max_pages`, warns when the cap cuts a search short, and leaves ranking to the scanner.
+
+**Rule 4 (operator declared).** Jobindex A/S (CVR 21367087), per the site footer. The proposer is not the operator but a candidate using the board.
+
+**Rule 5 (aggregation stays in core).** Following "Se jobbet" on 12 collected postings (2026-11-23): 3 lead to the employer's own site or ATS, 3 to other job boards (jobbank.dk, it-jobbank.dk, thehub.io) and 6 show the ad on Jobindex itself. That is cross-source aggregation (#6471), so the provider leaves the collected postings out and counts them under `collected` in the scan summary. What it reads is Jobindex's own inventory, the ads employers place there, as with jobs.cz and prace.cz (#5627).
+
+**Rule 6 (read what is public).** The feed, the search pages and the posting pages read without signing in, and no CAPTCHA appeared over a few dozen requests. `www.jobindex.dk/robots.txt` (read 2026-11-24) states no `Crawl-delay` and, under `User-agent: *`, disallows search URLs carrying `page=`, `geoareaid=`, `subid=` and `jobage=` (patterns such as `/jobsoegning*page=`). Those patterns also match the feed URL whenever it carries one of these parameters, which is every page after the first. Under rule 6 since 2026-11-08, `robots.txt` is not a stop for a provider reading on the job seeker's machine. The provider reads one page at a time, 250 ms apart, and by default at most 25 pages a search. No request from the operator not to be read was found in the issues.

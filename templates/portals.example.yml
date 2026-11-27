@@ -382,7 +382,8 @@
 
 # -- Workplace filter (optional) --
 # Filter scanned jobs by workplace model (remote | hybrid | onsite).
-# Set only from the provider's dedicated field (Ashby, Lever).
+# Set only from the provider's dedicated field (for example Ashby, Lever, Getro,
+# Consider, a16z speedrun).
 #
 # Semantics:
 #   - allow: list of allowed workplace types ('remote', 'hybrid', 'onsite')
@@ -1476,6 +1477,9 @@ search_queries:
 #   computrabajo    <country>.computrabajo.com/<search path>  (LatAm board; e.g. co.computrabajo.com/trabajo-de-sistemas)
 #   magneto         www.magneto365.com/co/<search path>       (Colombia board; e.g. /co/trabajos/buscar/tecnologia)
 #   bulldogjob      bulldogjob.pl/companies/jobs[/s/<filters>]  (Polish tech board; filters live in the path, e.g. /s/role,devops/city,Remote)
+#   jobindex        www.jobindex.dk/jobsoegning?<query>  (Danish board; filters as query parameters, e.g. ?q=python&geoareaid=15182)
+#   paycom          www.paycomonline.net/v4/ats/web.php/portal/<client-key>/career-page  (or a posting link under the
+#                   same /portal/<client-key>/ path; or provider: paycom with client_key:)
 #   paylocity       recruiting.paylocity.com/Recruiting/Jobs/All/<board-guid>  (or api: field; a posting's
 #                   /Jobs/Details/<id> link carries no board id and is NOT claimed)
 #   remote-com      apply.remote.com  (Remote's own ATS, single company; any path, the board is always read whole)
@@ -1599,6 +1603,11 @@ search_queries:
 #   careers_url: https://app.careerpuck.com/job-board/exampleco   # the board link off the careers page
 #   enabled: true
 #
+# - name: Example Paycom Co
+#   careers_url: https://www.paycomonline.net/v4/ats/web.php/portal/0123456789ABCDEF0123456789ABCDEF/career-page
+#                          # the career-page link off the company site; the hex segment is the client key
+#   enabled: true
+#
 # - name: Example Paylocity Co
 #   careers_url: https://recruiting.paylocity.com/Recruiting/Jobs/All/00000000-0000-4000-8000-000000000000
 #                          # the board link off the careers page; the GUID is the board id
@@ -1617,6 +1626,12 @@ search_queries:
 # - name: Example TalentLink Branded Co
 #   careers_url: https://careers.exampleco.example/jobsearch.html   # the employer's page that embeds the TalentLink job list
 #   provider: talentlink   # branded domains are never auto-detected
+#   enabled: true
+#
+# - name: Example Talents Connect Co
+#   careers_url: https://karriere.exampleco.example/   # the "powered by Talents Connect" career site; keep a language path such as /en/
+#   provider: talents-connect   # every tenant is on its own domain, never auto-detected
+#   max_pages: 20          # optional page cap (250 jobs/page, default 20, max 200)
 #   enabled: true
 #
 # - name: Example Collage HR Co
@@ -2114,6 +2129,17 @@ search_queries:
 #   max_pages: 20          # optional page cap (100 roles/page, default 20, max 100)
 #   enabled: true
 #
+# - name: Google                          # Google Careers (Alphabet companies included)
+#   provider: google
+#   google:
+#     queries: ["business strategy", "business operations"]   # query mode (the default)
+#     location: "United States"
+#     # full_board: true     # walk the whole listing (no q) instead of the queries;
+#     #                      # location still applies, queries are unused
+#   max_pages: 10          # pages per query (20 cards/page, default 10, max 50);
+#                          # full_board: pages for the one walk (default 200, max 300)
+#   enabled: true
+#
 # -- Job boards / aggregators  (→ job_boards:; set provider: explicitly unless the host auto-detects) --
 #
 # - name: Amazon / AWS                    # global amazon.jobs board
@@ -2173,6 +2199,11 @@ search_queries:
 #   max_pages: 5                          # optional page cap (50 jobs/page, default 25, max 100)
 #   enabled: true                         # 250ms pacing between pages
 #
+# - name: Example Jobindex                # Danish general board, many employers
+#   careers_url: https://www.jobindex.dk/jobsoegning?q=python  # auto-detected; filters as query parameters
+#   max_pages: 25                         # optional page cap (20 jobs/page, default 25, max 250)
+#   enabled: true                         # 250ms pacing between pages
+#
 # - name: The Hub                         # Nordic/EU startup board
 #   provider: thehub
 #   max_pages: 3          # optional page cap (15 jobs/page, default 3, max 67; applies to each pass below)
@@ -2183,8 +2214,17 @@ search_queries:
 #
 # - name: a16z speedrun talent network    # a16z speedrun + wider a16z portfolio (~200 startups)
 #   provider: a16z-speedrun-talent
-#   max_pages: 3          # optional page cap (50 jobs/page, default 3)
+#   max_pages: 6          # optional page cap (50 jobs/page, default 6)
 #   q: machine learning   # optional server-side full-text search (synonyms expand)
+#   a16z_speedrun_talent:
+#     filters:            # optional feed filters (documented parameters only)
+#       scope: everywhere # speedrun | portfolio | everywhere
+#       fn: engineering   # list values as a string or a YAML list
+#       wp: remote
+#       sen: [senior, staff, founding, _]   # _ = roles with no stated level
+#       posted: 7d        # 24h | 7d | 30d
+#     fetchDetails: false # optional: read each job's detail for its description and the employer's own apply URL
+#     detailLimit: 25     # optional: max detail requests per scan (default 25, max 100)
 #   enabled: true
 #
 # - name: Arbeitnow                       # EU/DACH-heavy board, newest-first
@@ -2365,6 +2405,10 @@ search_queries:
 #   provider: landingjobs
 #   enabled: true
 #
+# - name: ITJobs                          # Portuguese IT jobs (public RSS feed)
+#   provider: itjobs                      # whole board in one request
+#   enabled: true
+#
 # - name: RemoteOK
 #   provider: remoteok
 #   enabled: true
@@ -2447,6 +2491,11 @@ search_queries:
 #
 # - name: GermanTechJobs                  # German IT jobs, salary on every posting (public RSS feed)
 #   provider: germantechjobs              # whole board in one request; rows carry no location
+#   enabled: true
+#
+# - name: SwissDevJobs                    # Swiss IT jobs, same family and feed shape as GermanTechJobs
+#   provider: germantechjobs
+#   feed_url: https://swissdevjobs.ch/rss # or https://devitjobs.uk/rss, https://devitjobs.nl/rss
 #   enabled: true
 #
 # - name: Python.org Jobs                 # Python Software Foundation jobs (public RSS feed)
@@ -3219,6 +3268,12 @@ tracked_companies:
     notes: "Paris / Berlin / Barcelona / Milan. SMB neobank, MLOps for AI Product roles. Moved from Lever to Ashby (qonto.com/en/careers links here)."
     enabled: true
 
+  - name: Deutsche Börse
+    careers_url: https://careers.deutsche-boerse.com/
+    provider: talents-connect
+    notes: "Frankfurt / Prague / Luxembourg. Exchange and post-trade group (Clearstream, Eurex), IT and QA roles, English postings."
+    enabled: false
+
   # -- DACH logistics / mobility --
 
   - name: Forto
@@ -3640,6 +3695,12 @@ tracked_companies:
     notes: "AI evaluation and observability platform. Bangalore-based, mostly on-site."
     enabled: true
 
+  # -- US healthcare technology --
+  - name: ROMTech
+    careers_url: https://www.paycomonline.net/v4/ats/web.php/portal/74B8425BF3D1B3ACB19CC1353DC5FA0E/career-page
+    notes: "Connected rehabilitation devices. Paycom career page."
+    enabled: false
+
   # ============================================================
   # -- Türkiye / Turkey market
   # ============================================================
@@ -3806,7 +3867,8 @@ tracked_companies:
   #
   # The scanner reads LatAm job boards (Get on Board, OCC, Gupy, HiringRoom),
   # but no LatAm employer was tracked here. These companies publish through
-  # Greenhouse, Lever, Ashby and Workable, whose public zero-auth APIs the
+  # Greenhouse, Lever, Ashby, Workable, Teamtailor, SuccessFactors and
+  # Magneto365, whose public zero-auth endpoints the
   # scanner already reads. The note on each says where it actually hires, so a
   # candidate in Colombia doesn't enable a board that only posts in Brazil.
   # Left `enabled: false` like every other example.
@@ -3861,6 +3923,33 @@ tracked_companies:
     notes: "Remote LatAm + US. Financial reconciliation."
     enabled: false
 
+  - name: La Haus
+    careers_url: https://jobs.lever.co/lahaus
+    notes: "Colombia (Bogotá / Medellín). Proptech. Verified 2026-11-07: small board, 2 postings."
+    enabled: false
+
+  - name: Sofka
+    careers_url: https://oportunidades.sofka.com.co
+    provider: teamtailor
+    notes: "Colombia / Panama / Honduras. Software services and QA. Branded Teamtailor domain. Verified 2026-11-07: 37 postings."
+    enabled: false
+
+  - name: Habi
+    careers_url: https://www.magneto365.com/co/empresas/habi/empleos
+    notes: "Colombia (Bogotá / Cali). Proptech. Company page on Magneto365, mostly commercial roles. Verified 2026-11-07: 10 postings."
+    enabled: false
+
+  - name: Davivienda
+    careers_url: https://www.magneto365.com/co/empresas/davivienda/empleos
+    notes: "Colombia, several cities. Bank. Company page on Magneto365. Verified 2026-11-07: 20 postings."
+    enabled: false
+
+  - name: Bancolombia
+    careers_url: https://empleo.grupobancolombia.com/bancolombia
+    provider: successfactors
+    notes: "Colombia. Bank. Branded SuccessFactors board; /bancolombia scopes it to the bank within the Grupo Bancolombia tenant. Verified 2026-11-07: 42 postings."
+    enabled: false
+    
   # -- Cybersecurity (vendors, offensive security, bug bounty) --
   #
   # No security employer was tracked here, though a SOC analyst, pentester or
@@ -4251,7 +4340,9 @@ job_boards:
   # `careers_url`; the board id (not the host: Founderful's is "wingman") is
   # read from that page. Optional knobs: `consider_size` (default 500, maximum 1000,
   # the jobs one request returns), `max_pages` (default 10, hard cap 100, the
-  # requests per board), `consider_board` (the board id, only when the
+  # requests per board), `consider_posted_since` (an ISO 8601 duration such as
+  # "P7D": the board's own "Posted" filter, so only jobs posted in that window
+  # are read; off by default), `consider_board` (the board id, only when the
   # scan reports that it cannot be read from the page).
 
   - name: Founderful (portfolio)

@@ -745,11 +745,13 @@ func TestStatusPrioritySpeculativeBeatsTerminal(t *testing.T) {
 	}
 }
 
-// Regression: when an external writer (set-status.mjs, merge-tracker.mjs,
-// another session) changes a row's status while the dashboard is open, the
-// in-memory "old" status no longer matches the file. The update must still
-// land in the Status column — identified via the header — rather than
-// silently no-opping.
+// When an external writer (set-status.mjs, merge-tracker.mjs, another session)
+// changes a row's status while the dashboard is open, the in-memory "old"
+// status no longer matches the file. That write is now refused: the picker's
+// consent belongs to the application it displayed, not to a row number another
+// session has moved on. The original regression this test guarded — the update
+// silently no-opping instead of landing in the Status column, which is
+// identified via the header — is still checked, after a reload.
 func TestUpdateApplicationStatusWithStaleInMemoryStatus(t *testing.T) {
 	tempDir := t.TempDir()
 	dataDir := filepath.Join(tempDir, "data")
@@ -774,14 +776,25 @@ func TestUpdateApplicationStatusWithStaleInMemoryStatus(t *testing.T) {
 	}
 
 	// Simulate an external writer changing the status on disk after parse.
-	stale := strings.Replace(applications, "| Evaluated |", "| Applied |", 1)
-	if err := os.WriteFile(path, []byte(stale), 0o644); err != nil {
+	external := strings.Replace(applications, "| Evaluated |", "| Applied |", 1)
+	if err := os.WriteFile(path, []byte(external), 0o644); err != nil {
 		t.Fatalf("rewrite tracker: %v", err)
 	}
 
-	// apps[0].Status is still "Evaluated" (stale) — the update must still work.
-	if err := UpdateApplicationStatus(tempDir, apps[0], "Interview"); err != nil {
-		t.Fatalf("UpdateApplicationStatus with stale status: %v", err)
+	// apps[0].Status is still "Evaluated" (stale) — refused, and the file is
+	// left exactly as the external writer left it.
+	stale := UpdateApplicationStatus(tempDir, apps[0], "Interview")
+	if stale == nil || !strings.Contains(stale.Error(), "reloaded, pick the status again") {
+		t.Fatalf("a stale displayed status must be refused, got %v", stale)
+	}
+	if out, err := os.ReadFile(path); err != nil || string(out) != external {
+		t.Fatalf("refused write changed the tracker: %v, %s", err, out)
+	}
+
+	// Reload and retry: the update lands in the Status column, never a no-op.
+	reloaded := mustParseApplications(t, tempDir)
+	if err := UpdateApplicationStatus(tempDir, reloaded[0], "Interview"); err != nil {
+		t.Fatalf("UpdateApplicationStatus after a reload: %v", err)
 	}
 
 	out, err := os.ReadFile(path)

@@ -26,11 +26,13 @@ test("wide pages grow to 1800px and reading pages stay on the 1152px cap", () =>
   ]) {
     assert.match(read(rel), /pageFrameWidthClass\.wide/, rel);
   }
+  // The report loader stands in for report-view, so both carry the same widths.
+  const reportWidths = /max-w-3xl xl:max-w-5xl 2xl:max-w-\[1600px\]/;
   assert.match(read("components/report-view.tsx"), /<PageFrame className="max-w-3xl/);
+  assert.match(read("components/report-view.tsx"), reportWidths);
   assert.doesNotMatch(read("components/report-view.tsx"), /width="wide"/);
   assert.match(read("app/cv/loading.tsx"), /max-w-6xl/);
-  assert.match(read("app/login/loading.tsx"), /max-w-5xl/);
-  assert.match(read("app/pipeline/[id]/loading.tsx"), /max-w-6xl/);
+  assert.match(read("app/pipeline/[id]/loading.tsx"), reportWidths);
 });
 
 test("pipeline company and role use the wide row and the date cell stays put", () => {

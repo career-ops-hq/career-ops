@@ -13,10 +13,9 @@ import { fileURLToPath } from 'url';
 import { findTitleFilterConflicts } from './lib/title-filter-conflicts.mjs';
 import { sectionState, scanHeadings, SECTIONS } from './lib/personalization.mjs';
 import { discoverPlugins, pluginRoots, pluginStatus, resolveSuccessorIds } from './plugins/_engine.mjs';
-import { getCareerOpsRoot, getProfilePath, hasProfileOverride, isPluginInstallCopy } from './path-resolver.mjs';
+import { canonicalizeTrackerPath, getCareerOpsRoot, getProfilePath, hasProfileOverride, isPluginInstallCopy, resolveTrackerPath } from './path-resolver.mjs';
 import { parseConfigByExtension } from './jsonc-parse.mjs';
 import { validateFlags, flagValue } from './lib/cli-flags.mjs';
-import { geminiNodeFloor } from './lib/gemini-node-floor.mjs';
 import { SKILL_ENTRYPOINTS } from './scaffolder/bin/skill-entrypoints.mjs';
 import { nodeFloor } from './lib/node-floor.mjs';
 import { classifyChromiumLaunchError } from './lib/chromium-launch-error.mjs';
@@ -100,7 +99,7 @@ try {
 // silently diagnosed THIS checkout instead of the one asked for. Handled via
 // lib/cli-flags.mjs's validateFlags() (#2775), which rejects unrecognized
 // flags before --help so `--help --bogus` still errors.
-const KNOWN_FLAGS = ['--target', '--json', '--init-templates', '--strict', '--cli', '--help', '-h'];
+const KNOWN_FLAGS = ['--target', '--json', '--init-templates', '--strict', '--cli', '--check-data', '--help', '-h'];
 
 // Both take a value, as the next argv token or as `--flag=value`. validateFlags
 // accepts either form, so both are read with flagValue(): an indexOf() lookup
@@ -114,6 +113,8 @@ const USAGE = `Usage:
   node doctor.mjs --strict           # also probe portals.yml entries (network)
   node doctor.mjs --target <path>    # diagnose another career-ops checkout
   node doctor.mjs --cli <name>       # check a specific CLI's integration
+  node doctor.mjs --check-data       # read-only integrity check of tracker, report links and JD captures
+  node doctor.mjs --check-data --json # same, machine-readable
   node doctor.mjs --help             # show this message
 
 CLIs: ${AGENT_CLIS.join(', ')}`;
@@ -161,6 +162,14 @@ if (INIT_TEMPLATES && !JSON_OUT) {
 // --strict adds a live reachability probe of every portals.yml entry (network).
 // Opt-in so the default `npm run doctor` stays fast and fully offline.
 const STRICT = argv.includes('--strict');
+// --check-data is the read-only integrity pass over the resolved data root: the
+// tracker parses, every Report link resolves, and every report carries (or has
+// a jds/ capture for) its archived JD. Those checks already exist inside
+// verify-pipeline.mjs, fix-report-links.mjs --dry-run and
+// check-jd-archive.mjs, but a user who moved a data root has no single command
+// that answers "is this root healthy?" — this composes the three, writes
+// nothing, and exits non-zero on a hard problem.
+const CHECK_DATA = argv.includes('--check-data');
 
 const cliFlag = flagValue(argv, '--cli') ?? null;
 
@@ -1674,9 +1683,6 @@ async function main() {
 
   const checks = [
     checkNodeVersion(),
-    // Devuelve null salvo que el CLI activo sea Gemini: el filter(Boolean) de
-    // abajo lo descarta, así que ningún otro usuario ve un check que no le toca.
-    geminiNodeFloor(activeCli, process.versions.node),
     checkBillingSource(),
     checkDependencies(),
     pluginInstall,
@@ -2043,7 +2049,268 @@ function onboardingState(root) {
   };
 }
 
-if (JSON_OUT) {
+/**
+ * The tracker a data root carries when no environment override applies: the
+ * documented `data/applications.md`, or the legacy root copy.
+ */
+function defaultTrackerPath(rootDir) {
+  const preferred = join(rootDir, 'data', 'applications.md');
+  return existsSync(preferred) ? preferred : join(rootDir, 'applications.md');
+}
+
+/**
+ * Read-only integrity pass over the data root (--check-data).
+ *
+ * Three questions, each answered by the module that already owns it:
+ *   - does the tracker exist and parse, and does every Report link resolve?
+ *     (fixReportLinks in inspection mode — it returns the dead links without
+ *     writing, so this never mutates the tracker)
+ *   - does every report carry an archived JD or a matching jds/ capture?
+ *     (checkJdArchive; a live tracker row is a soft review-due warning)
+ *
+ * @param {string} root resolved data root
+ */
+export async function checkDataRoot(root, { ignoreTrackerOverride = false } = {}) {
+  // Loaded here, not at module scope: a plain `node doctor.mjs` must keep
+  // running in a checkout whose dependencies are not installed yet (that is
+  // exactly what its own dependency check reports), and these pull in
+  // js-yaml. Only --check-data needs them.
+  const [
+    { resolveColumns, parseTrackerRow, isHeaderRow, isSeparatorRow, parseMarkdownLinks },
+    { fixReportLinks },
+    { checkJdArchive, findUnarchivedApplications },
+    { trackerLinkDirsFor, findDeadReportLink },
+  ] = await Promise.all([
+    import('./tracker-parse.mjs'),
+    import('./fix-report-links.mjs'),
+    import('./check-jd-archive.mjs'),
+    import('./tracker-utils.mjs'),
+  ]);
+  // The root the caller named (--target included), never the environment's:
+  // `CAREER_OPS_ROOT=/data/a` with `--target /data/b` has to check /data/b, or
+  // the command reports the wrong tree's health.
+  const dataRoot = root || getCareerOpsRoot();
+  // `--target` names a whole other checkout, so `CAREER_OPS_TRACKER` (which
+  // points at the checkout this process runs from) must not redirect the check
+  // outside it. Without --target the override keeps its normal meaning: it is
+  // how a user names a tracker that does not live under the data root.
+  const rawTracker = ignoreTrackerOverride ? defaultTrackerPath(dataRoot) : null;
+  const trackerPath = ignoreTrackerOverride ? canonicalizeTrackerPath(rawTracker) : resolveTrackerPath(dataRoot);
+  const reportsDir = join(dataRoot, 'reports');
+  const jdsDir = join(dataRoot, 'jds');
+  const result = {
+    ok: true,
+    dataRoot,
+    tracker: { path: trackerPath, exists: existsSync(trackerPath), readable: true, rows: 0, hasHeader: false, hasReportColumn: false, malformedRows: [] },
+    reportLinks: { dead: [], ambiguous: [], inspectionErrors: [] },
+    jdArchive: { reportsScanned: 0, missing: [], reviewDue: [], unarchivedApplications: [], warnings: [], error: null },
+  };
+  if (!result.tracker.exists) {
+    result.ok = false;
+    return result;
+  }
+
+  let lines;
+  try {
+    lines = readFileSync(trackerPath, 'utf-8').split(/\r?\n/);
+  } catch (err) {
+    // A moved tracker can exist and still be unreadable (permissions, or a
+    // directory where the file should be). Report it in the same shape as any
+    // other failure instead of throwing past both renderers, which would leave
+    // `--check-data --json` with no JSON at all.
+    result.tracker.readable = false;
+    result.tracker.readError = err?.code || err?.message || String(err);
+    result.ok = false;
+    return result;
+  }
+
+  // A file that parses as nothing is not a healthy tracker. Without this, an
+  // empty or unrelated file yields zero rows and zero findings, and the command
+  // reports success for a root that holds no tracker at all. A header with no
+  // rows stays acceptable: that is a fresh tracker, not a missing one.
+  result.tracker.hasHeader = lines.some((line) => isHeaderRow(line));
+  if (!result.tracker.hasHeader) {
+    result.tracker.schemaError = 'no recognisable tracker table header';
+    result.ok = false;
+    return result;
+  }
+
+  const cols = resolveColumns(lines);
+  result.tracker.hasReportColumn = cols.report != null;
+  // All three checks this command composes need somewhere to put a report link.
+  // A tracker header with no Report column cannot express one, so every row
+  // would pass as "no link to check" and the data would read as fine. Keep a
+  // complete header-only tracker valid: the column exists, there is just nothing
+  // in it yet.
+  if (!result.tracker.hasReportColumn) {
+    result.tracker.schemaError = 'tracker has no Report column';
+    result.ok = false;
+    return result;
+  }
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (isHeaderRow(line) || isSeparatorRow(line)) continue;
+    if (parseTrackerRow(line, cols)) {
+      result.tracker.rows += 1;
+      continue;
+    }
+    // A numbered row the shared parser rejects (cut off before its Notes cell,
+    // say) is invisible to both the row count and the link inspection, so the
+    // command would report success while a real application went unchecked.
+    if (/^\|\s*\d+\s*\|/.test(line)) {
+      result.tracker.malformedRows.push({ line: i + 1, text: line.trim().slice(0, 160) });
+    }
+  }
+  if (result.tracker.malformedRows.length > 0) result.ok = false;
+
+  const linkDirs = ignoreTrackerOverride
+    ? [...new Set([dirname(trackerPath), dirname(rawTracker)])]
+    : trackerLinkDirsFor(dataRoot);
+  const inspected = fixReportLinks(lines, linkDirs, dataRoot);
+  result.reportLinks.dead = inspected.changed.map(({ num, company, role, link, line }) => ({ num, company, role, link, line }));
+  // fixReportLinks reports an inspection failure as `{ link, errors: [{ path, error }] }`.
+  // Serialize the nested causes; reading a flat `error` yields "undefined". This
+  // runs before the skipped-cell loop below, which appends to the same array.
+  result.reportLinks.inspectionErrors = inspected.inspectionErrors.map(({ num, company, role, cell, line, link, errors }) => ({
+    num,
+    company,
+    role,
+    cell,
+    line,
+    link,
+    errors: (errors || []).map(({ path: failedPath, error }) => ({
+      path: failedPath,
+      error: error?.code || error?.message || String(error),
+    })),
+  }));
+  // `skipped` is a cell that holds a link but is not one bare link: text around
+  // it, or several links. Leaving those out of the rewrite is right, but it must
+  // not also skip checking the target — a dead link hidden behind a stray word
+  // is still a dead link. Only a cell with two or more links stays a manual
+  // review item, because the command cannot tell which one the row means.
+  for (const entry of inspected.skipped) {
+    if (parseMarkdownLinks(entry.cell || '').length > 1) {
+      result.reportLinks.ambiguous.push({ num: entry.num, company: entry.company, role: entry.role, link: entry.link, line: entry.line });
+      continue;
+    }
+    let failure = null;
+    const deadLink = findDeadReportLink(entry.cell, linkDirs, dataRoot, {
+      onInspectionError: (found) => { failure = found; },
+    });
+    if (failure) {
+      result.reportLinks.inspectionErrors.push({
+        num: entry.num,
+        company: entry.company,
+        role: entry.role,
+        cell: entry.cell,
+        line: entry.line,
+        link: failure.link,
+        errors: (failure.errors || []).map(({ path: failedPath, error }) => ({
+          path: failedPath,
+          error: error?.code || error?.message || String(error),
+        })),
+      });
+    } else if (deadLink !== null) {
+      result.reportLinks.dead.push({ num: entry.num, company: entry.company, role: entry.role, link: deadLink, line: entry.line });
+    }
+  }
+
+  let archive;
+  try {
+    archive = checkJdArchive(reportsDir, jdsDir, { trackerPath });
+  } catch (err) {
+    // A regular file named `reports` reaches an unguarded readdirSync inside the
+    // archive check. Report it in the same structured shape as every other
+    // failure, so `--check-data --json` still emits JSON.
+    result.jdArchive.error = { path: reportsDir, error: err?.code || err?.message || String(err) };
+    result.ok = false;
+    return result;
+  }
+  result.jdArchive.reportsScanned = archive.reportsScanned;
+  for (const finding of archive.findings) {
+    const item = { file: finding.file, report: finding.report, detail: finding.detail };
+    if (finding.type === 'missing-jd-archive') result.jdArchive.missing.push(item);
+    else if (finding.type === 'jd-archive-review-due') result.jdArchive.reviewDue.push(item);
+  }
+  result.jdArchive.warnings = archive.warnings;
+  // A sent application with no report file is invisible to checkJdArchive,
+  // which walks reports/. check-jd-archive.mjs lists those rows separately;
+  // they are the records a moved root is most likely to have lost (a capture
+  // linked from the tracker that did not come along). Soft, as there: listed,
+  // never a non-zero exit.
+  result.jdArchive.unarchivedApplications = findUnarchivedApplications(trackerPath, reportsDir, jdsDir)
+    .map(({ row, company, role, status }) => ({ row, company, role, status }));
+
+  result.ok = result.reportLinks.dead.length === 0
+    && result.reportLinks.inspectionErrors.length === 0
+    && result.jdArchive.missing.length === 0
+    && result.tracker.malformedRows.length === 0;
+  return result;
+}
+
+function printDataCheck(result) {
+  console.log(`\nData root: ${result.dataRoot}`);
+  if (!result.tracker.exists) {
+    console.log(red(`✗ tracker: ${result.tracker.path} does not exist`));
+    return;
+  }
+  if (!result.tracker.readable) {
+    console.log(red(`✗ tracker: ${result.tracker.path} could not be read (${result.tracker.readError})`));
+    return;
+  }
+  if (result.tracker.schemaError) {
+    console.log(red(`✗ tracker: ${result.tracker.path} — ${result.tracker.schemaError}`));
+    return;
+  }
+  console.log(`${green('✓')} tracker: ${result.tracker.rows} row(s) in ${result.tracker.path}`);
+  for (const row of result.tracker.malformedRows) {
+    console.log(red(`✗ tracker row at line ${row.line} is not a complete row: ${row.text}`));
+  }
+  const { dead, ambiguous, inspectionErrors } = result.reportLinks;
+  if (dead.length === 0 && inspectionErrors.length === 0) {
+    console.log(`${green('✓')} report links: all resolve`);
+  }
+  for (const row of dead) {
+    console.log(red(`✗ report link #${row.num} ${row.company} — ${row.role}: ${row.link} does not resolve (line ${row.line})`));
+  }
+  for (const row of inspectionErrors) {
+    const causes = (row.errors || []).map(({ path: failedPath, error }) => `${failedPath}: ${error}`).join('; ');
+    console.log(red(`✗ report link #${row.num} ${row.company} — ${row.role}: could not inspect ${row.link} (${causes})`));
+  }
+  for (const row of ambiguous) {
+    console.log(yellow(`⚠ report cell #${row.num} ${row.company} — ${row.role} holds more than one link; review by hand`));
+  }
+  const archive = result.jdArchive;
+  if (archive.error) {
+    console.log(red(`✗ JD archive: could not inspect ${archive.error.path} (${archive.error.error})`));
+  } else if (archive.missing.length === 0) {
+    console.log(`${green('✓')} JD archive: ${archive.reportsScanned} report(s) checked, none missing`);
+  }
+  for (const item of archive.missing) {
+    console.log(red(`✗ JD archive: ${item.file} has no archived JD and no jds/ capture`));
+  }
+  for (const item of archive.reviewDue) {
+    console.log(yellow(`⚠ JD archive: ${item.file} is missing its JD but the tracker row is still live`));
+  }
+  for (const item of archive.unarchivedApplications || []) {
+    console.log(yellow(`⚠ JD archive: #${item.row} ${item.company} — ${item.role} (${item.status}) was sent, but no report or jds/ capture records the posting`));
+  }
+  for (const warning of archive.warnings) {
+    console.log(yellow(`⚠ ${warning.file}: ${warning.detail}`));
+  }
+  console.log(result.ok ? green('\nData check passed.') : red('\nData check found problems.'));
+}
+
+if (CHECK_DATA) {
+  const result = await checkDataRoot(projectRoot, { ignoreTrackerOverride: Boolean(explicitTarget) });
+  if (JSON_OUT) console.log(JSON.stringify(result, null, 2));
+  else printDataCheck(result);
+  // Not process.exit(): on POSIX, stdout writes to a pipe are asynchronous, and
+  // an exit here can truncate a large --json report mid-write. Setting the code
+  // lets the process end after stdout drains.
+  process.exitCode = result.ok ? 0 : 1;
+} else if (JSON_OUT) {
   console.log(JSON.stringify(onboardingState(projectRoot)));
   process.exit(0);
 } else {

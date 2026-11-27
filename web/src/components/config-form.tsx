@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
+import { PageFormatSettings } from "@/components/page-format-settings";
 import { TemplatesSection } from "@/components/templates/templates-section";
 import { persistCliId, readSavedCliId } from "@/lib/saved-cli";
 import { keepIfInstalled, pickDefaultInstalled } from "@/lib/cli-pick.mjs";
@@ -299,6 +300,8 @@ export function ConfigForm() {
       </button>
 
       <CadenceSettings />
+
+      <PageFormatSettings />
 
       <TemplatesSection kind="cv" />
 

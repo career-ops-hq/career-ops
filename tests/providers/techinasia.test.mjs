@@ -435,6 +435,11 @@ try {
   } else {
     fail(`techinasia.fetch() warned about max_pages after a fetch error: ${JSON.stringify(partialWarnings)}`);
   }
+  if (partial.truncated?.reason === 'fetch-error' && partial.truncated.fetched === 2) {
+    pass('techinasia.fetch() marks a later-page fetch error truncated');
+  } else {
+    fail(`techinasia.fetch() fetch-error mark = ${JSON.stringify(partial.truncated)}`);
+  }
 
   // ── A lone surrogate in the host-controlled id drops only that row ────
   const surrogateRun = await techinasia.fetch(

@@ -13,7 +13,7 @@ try {
   const mod = await import(pathToFileURL(join(ROOT, 'providers/_html-to-text.mjs')).href);
   const { htmlToText, DESCRIPTION_CAP } = mod;
 
-  if (DESCRIPTION_CAP === 4000) pass('DESCRIPTION_CAP is 4000 (greenhouse/alibaba precedent)');
+  if (DESCRIPTION_CAP === 4000) pass('DESCRIPTION_CAP is 4000 (alibaba precedent)');
   else fail(`DESCRIPTION_CAP = ${JSON.stringify(DESCRIPTION_CAP)}, expected 4000`);
 
   // Non-string and empty inputs degrade to "" — never a thrown error.

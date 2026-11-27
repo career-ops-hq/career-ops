@@ -30,6 +30,7 @@
 // work with the default pool. CAREER_OPS_CONNECTION_SCOPE=0 opts out.
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { createDirectConnect } from './_tls-connect.mjs';
 
 const storage = new AsyncLocalStorage();
 
@@ -81,7 +82,33 @@ export async function withConnectionScope(fn, { agentOptions, signal } = {}) {
   }
   const undici = await loadUndici();
   if (!undici) return signal ? storage.run({ signal }, fn) : fn();
-  const agent = new undici.Agent(agentOptions);
+  const resolvedAgentOptions = typeof agentOptions?.connect === 'function'
+    ? agentOptions
+    : (() => {
+      const connectObj = agentOptions?.connect && typeof agentOptions.connect === 'object'
+        ? agentOptions.connect
+        : undefined;
+      const { socketPath: connectSocketPath, ...restConnect } = connectObj ?? {};
+      const socketPath = connectSocketPath !== undefined
+        ? connectSocketPath
+        : agentOptions?.socketPath;
+      return {
+        ...agentOptions,
+        connect: createDirectConnect({
+          ...agentOptions?.tls,
+          ...(socketPath !== undefined ? { path: socketPath } : undefined),
+          ...(agentOptions?.connectTimeout !== undefined ? { timeout: agentOptions.connectTimeout } : undefined),
+          ...(typeof agentOptions?.autoSelectFamily === 'boolean'
+            ? {
+              autoSelectFamily: agentOptions.autoSelectFamily,
+              autoSelectFamilyAttemptTimeout: agentOptions.autoSelectFamilyAttemptTimeout,
+            }
+            : undefined),
+          ...restConnect,
+        }),
+      };
+    })();
+  const agent = new undici.Agent(resolvedAgentOptions);
   try {
     return await storage.run({ agent, fetch: undici.fetch, signal }, fn);
   } finally {

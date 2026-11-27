@@ -43,6 +43,7 @@ import { appendToPipeline, appendToScanHistory, PORTALS_PATH } from './scan.mjs'
 import { localToday } from './lib/local-today.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
+import { exitIfEveryTargetFailed } from './lib/scan-exit.mjs';
 import { validateFlags, flagValue } from './lib/cli-flags.mjs';
 import { makeHttpCtx, fetchTextWithRetry } from './providers/_http.mjs';
 import {
@@ -75,7 +76,9 @@ Flags:
   --pages N         max pages per search (default 5, cap 50; alias --max-pages)
   --delay-ms N      pause between requests (default 2000)
   --dry-run         do not touch pipeline, scan history or scan-runs
-  --help, -h        show this help and exit`;
+  --help, -h        show this help and exit
+
+Exit status: 0 when the scan ran, 1 on a configuration or fatal error, 2 when every search failed.`;
 
 export const DEFAULT_MAX_PAGES = 5;
 export const MAX_PAGES_CAP = 50;
@@ -432,6 +435,24 @@ export async function scanSeekSearch(
   return collected;
 }
 
+/**
+ * The configuration checks scanSeekSearch runs before its first request, run up
+ * front so a bad portals.yml entry is a configuration error (exit 1), never a
+ * failed search (exit 2). Same calls, same order: max_pages, then the page-1 URL
+ * (keyword, location, daterange). No network.
+ *
+ * @returns {string|null} the error message, or null when the entry is valid.
+ */
+export function seekSearchConfigError(search, { site = SEEK_SITES.nz, daterange = null, maxPages = null } = {}) {
+  try {
+    parsePositiveInt(maxPages ?? search?.max_pages ?? DEFAULT_MAX_PAGES, 'max_pages');
+    buildSeekUrl(search, { site, daterange: daterange ?? search?.daterange ?? null, page: 1 });
+    return null;
+  } catch (err) {
+    return err.message;
+  }
+}
+
 function loadPortals() {
   if (!existsSync(PORTALS_PATH)) return {};
   try {
@@ -486,18 +507,32 @@ async function main(args) {
   const gate = createLocalGate({ config: portals });
   const added = [];
   let found = 0;
+  let searchesRead = 0;
   let errors = 0;
 
-  for (let i = 0; i < searches.length; i++) {
+  // A bad entry is a configuration error: report it, skip it, and exit 1 at the
+  // end, so exit 2 keeps meaning "every search was tried and none could be read".
+  const configErrors = [];
+  const runnable = [];
+  for (const search of searches) {
+    const message = seekSearchConfigError(search, { site, daterange, maxPages });
+    if (message) {
+      configErrors.push(search.keyword);
+      console.error(`Error: seek_searches entry "${search.keyword}": ${message}`);
+    } else runnable.push(search);
+  }
+
+  for (let i = 0; i < runnable.length; i++) {
     if (i > 0) await sleep(delayMs);
     try {
-      const offers = await scanSeekSearch(searches[i], {
+      const offers = await scanSeekSearch(runnable[i], {
         fetchText: (url) => fetchTextWithRetry(ctx, url, { headers: { 'accept-language': 'en' } }),
         site,
         daterange,
         maxPages,
         delayMs,
       });
+      searchesRead++;
       found += offers.length;
       for (const offer of offers) {
         if (gate.check(offer)) continue;
@@ -506,20 +541,25 @@ async function main(args) {
       }
       if (offers.error) {
         errors++;
-        console.warn(`⚠️  ${offers.error.seekUrl || searches[i].keyword}: ${offers.error.message}`);
+        console.warn(`⚠️  ${offers.error.seekUrl || runnable[i].keyword}: ${offers.error.message}`);
       }
     } catch (err) {
       errors++;
-      console.warn(`⚠️  ${err.seekUrl || searches[i].keyword}: ${err.message}`);
+      console.warn(`⚠️  ${err.seekUrl || runnable[i].keyword}: ${err.message}`);
     }
   }
+
+  // Skipped invalid entries were counted in `errors` before they stopped being
+  // failed searches, so the run log and the summary keep counting them (#7741
+  // review); the exit decision still reads `errors` and `searchesRead`.
+  const errorCount = errors + configErrors.length;
 
   if (!dryRun) {
     if (added.length > 0) {
       await appendToPipeline(added);
       await appendToScanHistory(added, localToday(), 'added');
     }
-    await writeRunLog({ found, counts: gate.counts, newAdded: added.length, queries: searches.length, errors });
+    await writeRunLog({ found, counts: gate.counts, newAdded: added.length, queries: searches.length, errors: errorCount });
   }
 
   // Literal per site, not a template: the banner title is a contract tests/
@@ -534,8 +574,15 @@ async function main(args) {
   console.log(`New offers:         ${added.length}${dryRun ? ' (dry run, nothing written)' : ''}`);
   const skipped = formatLocalSkips(gate.counts);
   if (skipped) console.log(`Skipped:            ${skipped}`);
-  if (errors) console.log(`Errors:             ${errors} of ${searches.length} queries`);
-  if (errors === searches.length) process.exitCode = 1;
+  if (errorCount) console.log(`Errors:             ${errorCount} of ${searches.length} queries`);
+  if (configErrors.length > 0) {
+    console.error(`Error: ${configErrors.length} seek_searches ${configErrors.length === 1 ? 'entry is' : 'entries are'} invalid in portals.yml and ${configErrors.length === 1 ? 'was' : 'were'} skipped; fix ${configErrors.length === 1 ? 'it' : 'them'} and run again.`);
+    process.exitCode = 1;
+  } else {
+    // Exit 2, not 1, when no search could be read: 1 stays a config or fatal
+    // error, the same split scan.mjs uses (#5720).
+    exitIfEveryTargetFailed({ attempted: runnable.length, read: searchesRead, unit: 'SEEK search', thing: 'search' });
+  }
 }
 
 if (isMainModule(import.meta.url)) {

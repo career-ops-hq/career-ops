@@ -329,6 +329,13 @@ section('buildTrustValidator — Rule 4: ATS allowlist bypasses mismatch');
 }
 
 {
+  // Workday's other posting host: the tenant is in the path, not the hostname.
+  const v = buildTrustValidator({ enabled: true });
+  const r = v({ url: 'https://wd5.myworkdaysite.com/recruiting/acme/External/job/Remote/Engineer_R-1', company: 'Acme' });
+  assert(!r.flags.includes('company_domain_mismatch'), 'myworkdaysite.com → ATS allowlist, no mismatch');
+}
+
+{
   const v = buildTrustValidator({ enabled: true });
   const r = v({ url: 'https://acme.ashbyhq.com/jobs', company: 'Acme' });
   assert(!r.flags.includes('company_domain_mismatch'), 'ashbyhq.com → ATS allowlist, no mismatch');

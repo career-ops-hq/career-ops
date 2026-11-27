@@ -38,6 +38,12 @@ const PARSE_CASES = [
   ['3+ yrs exp in data analytics', 'stated', 3, true, '3+'],
   ['10-plus years of software engineering experience', 'stated', 10, true, '10+'],
   ['Seven plus years of experience leading teams', 'stated', 7, true, '7+'],
+  // A short line with a spelled-out count and no digit is a bar, not a heading
+  ['Requires five years of experience', 'stated', 5, true, '5+'],
+  ['Five years experience required', 'stated', 5, true, '5+'],
+  ['Five years of experience required, plus the following:', 'stated', 5, true, '5+'],
+  ['5 years of experience required, plus the following:', 'stated', 5, true, '5+'],
+  ['Qualifications\nTen years of relevant experience\nBS degree', 'stated', 10, true, '10+'],
   ['Experience: 3+ years.', 'stated', 3, true, '3+'],
   ['3 years of experience required.', 'stated', 3, true, '3+'],
   ['At least 1 year of experience in a fast-paced environment', 'stated', 1, true, '1+'],

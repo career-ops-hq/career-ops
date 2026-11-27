@@ -138,6 +138,20 @@ func runStatusWriter(dataRoot string, app model.CareerApplication, status, note 
 	// outlast the 30s budget below, and this runs inside Bubble Tea's Update, so
 	// waiting froze the TUI and then reported a saved status as timed out.
 	args := []string{script, ids[0].flag, ids[0].value, status, "--detach-jd-archive", "--json"}
+	// --expect-status: the status the picker DISPLAYED. A selector resolved when
+	// the picker was drawn is sent when the key is pressed, so another session
+	// renumbering rows in between can point it at a different application
+	// (#5034: consent belongs to the displayed application, not a reusable row
+	// number). Partial mitigation only — set-status.mjs permits the mismatch
+	// when the row already holds the requested status, so a stale selection
+	// landing on a row that is already there is still written.
+	//
+	// Skipped when the caller built the application without a Status cell:
+	// there is nothing the picker displayed to assert. A value starting with
+	// `--` would be read as the next flag, so it is not sent either.
+	if expect := strings.TrimSpace(app.Status); expect != "" && !strings.HasPrefix(expect, "--") {
+		args = append(args, "--expect-status", expect)
+	}
 	// The flag keeps the two number spaces apart, so report #32 and row #32 are
 	// never one row — but two rows may share tracker #32 (#1704), and both then
 	// answer to `--row 32`, so ownedBy decides whose repair this is. A repair is
@@ -210,6 +224,7 @@ func runStatusWriter(dataRoot string, app model.CareerApplication, status, note 
 		Changed         *bool  `json:"changed"`
 		NewStatus       string `json:"newStatus"`
 		Error           string `json:"error"`
+		Code            string `json:"code"`
 		StatusLogged    *bool  `json:"statusLogged"`
 		StatusLogRepair *struct {
 			Repaired bool   `json:"repaired"`
@@ -222,6 +237,11 @@ func runStatusWriter(dataRoot string, app model.CareerApplication, status, note 
 	}
 	parseErr := json.Unmarshal(stdout, &result)
 	if result.Error != "" {
+		// The row the selector named is no longer the row the picker showed.
+		// Callers reload before showing this, so the retry is a fresh look.
+		if result.Code == "status-changed" || result.Code == "row-changed" {
+			return fmt.Errorf("%s — reloaded, pick the status again", result.Error)
+		}
 		return fmt.Errorf("status update: %s", result.Error)
 	}
 	if runErr != nil {

@@ -137,6 +137,30 @@ test('a painter that is gone reads as unavailable, so the caller paints locally'
   }
 });
 
+test('a painter that never answers times out as unavailable', { timeout: 2000 }, async () => {
+  const serverMod = await import(new URL('../lib/pdf-server.mjs', import.meta.url));
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-pdf-hang-'));
+  const hanging = testSocket(dir);
+  const hanger = net.createServer((socket) => {
+    socket.on('data', () => {});
+  });
+  await new Promise((resolve) => hanger.listen(hanging, resolve));
+  try {
+    await assert.rejects(
+      serverMod.requestPdfRender(hanging, {
+        html: '<p>z</p>',
+        outputPath: join(dir, 'z.pdf'),
+        opts: {},
+        timeoutMs: 50,
+      }),
+      (err) => err.code === 'PDF_SERVER_UNAVAILABLE' && /timed out/.test(err.message) && !/dropped/.test(err.message),
+    );
+  } finally {
+    await new Promise((resolve) => hanger.close(resolve));
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a painter that drops the request reads as unavailable, and a render error does not', async () => {
   const serverMod = await import(new URL('../lib/pdf-server.mjs', import.meta.url));
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-pdf-drop-'));

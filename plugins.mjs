@@ -18,7 +18,7 @@
 
 import path from 'path';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, writeFileSync, rmSync, mkdirSync, renameSync, statSync } from 'fs';
+import { chmodSync, existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, writeFileSync, rmSync, mkdirSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { hasYamlContent, loadYaml } from './lib/yaml-document.mjs';
@@ -39,6 +39,7 @@ import { canonicalJobKey } from './url-key.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { resolveColumns, parseTrackerRow, isHeaderRow, isSeparatorRow } from './tracker-parse.mjs';
+import { renameSyncWithRetry } from './lib/rename-retry.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -501,7 +502,7 @@ export function setPluginEnabled(root, id, on, settings) {
   try {
     writeFileSync(tmp, text, mode == null ? 'utf8' : { encoding: 'utf8', mode });
     if (mode != null) chmodSync(tmp, mode);
-    renameSync(tmp, dest);
+    renameSyncWithRetry(tmp, dest);
   } catch (err) {
     try { rmSync(tmp, { force: true }); } catch {}
     throw err;

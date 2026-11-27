@@ -34,6 +34,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { parseTrackerRow, resolveColumns, isSeparatorRow, isHeaderRow, parseMarkdownLinks, extractTrackerReportNumbers } from './tracker-parse.mjs';
 import { resolveTrackerPath, resolveWorkspaceRoot, writeFileAtomic, acquireTrackerLock, loadCanonicalStates, resolveCanonicalStateId } from './tracker-utils.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { parsedScanHistory } from './lib/scan-history-columns.mjs';
 import { fileURLToPath } from 'url';
 
 // System-layer states.yml resolves from the codebase, not the data root (#3500).
@@ -283,10 +284,11 @@ export function hiredRows(trackerText) {
  */
 export function weeksFromScanHistory(scanHistoryText, endIso) {
   if (!scanHistoryText || !endIso) return null;
+  // first_seen is the second column (url first), so read it by name: a match
+  // anchored at the start of the line found no date in any real file.
   let earliest = null;
-  for (const line of scanHistoryText.split('\n')) {
-    const m = line.match(/^(\d{4}-\d{2}-\d{2})\t/);
-    if (m && (!earliest || m[1] < earliest)) earliest = m[1];
+  for (const { first_seen: seen } of parsedScanHistory(scanHistoryText)) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(seen) && (!earliest || seen < earliest)) earliest = seen;
   }
   if (!earliest) return null;
   const ms = new Date(`${endIso}T12:00:00Z`) - new Date(`${earliest}T12:00:00Z`);

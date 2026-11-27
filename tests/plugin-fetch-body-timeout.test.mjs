@@ -5,6 +5,7 @@
 // headers and then dripped (or stalled) held the call open indefinitely: the hook's
 // outer timeout reported failure while the socket stayed open. Loopback fixture only.
 import { test, before, after } from 'node:test';
+import { listenOnSafePort } from './helpers/listen-safe-port.mjs';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { buildCtx } from '../plugins/_engine.mjs';
@@ -37,7 +38,7 @@ before(async () => {
       res.writeHead(404).end();
     }
   });
-  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  await listenOnSafePort(server);
   base = `http://127.0.0.1:${server.address().port}`;
 });
 

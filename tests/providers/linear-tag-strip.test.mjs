@@ -74,11 +74,16 @@ test('the linear forms replace exactly what <[^>]*> and <[^>]+> replaced, on eve
 });
 
 function assertFast(label, fn) {
-  const started = performance.now();
-  fn();
-  const elapsed = performance.now() - started;
   // Quadratic, each of these took from one to twenty seconds on a laptop; linear, milliseconds.
-  assert.ok(elapsed < 1500, `${label} took ${Math.round(elapsed)} ms`);
+  // A quadratic strip is slow on every run, while a loaded runner stalls one run
+  // at random, so the fastest of three runs is what the bound is checked against.
+  let best = Infinity;
+  for (let i = 0; i < 3 && best >= 1500; i++) {
+    const started = performance.now();
+    fn();
+    best = Math.min(best, performance.now() - started);
+  }
+  assert.ok(best < 1500, `${label} took ${Math.round(best)} ms`);
 }
 
 test('a Hacker News comment or a fragment of unclosed "<" or "<!--" is stripped in linear time', () => {

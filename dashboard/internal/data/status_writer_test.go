@@ -181,7 +181,11 @@ func TestDashboardStatusRepeatsTheLedgerRefusal(t *testing.T) {
 	if first == nil || !strings.Contains(first.Error(), "stays Evaluated") {
 		t.Fatalf("blocked ledger must refuse the change: %v", first)
 	}
-	second := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7", Status: "Applied"}, "Applied")
+	// Status is what the picker displayed, and the first attempt was rolled
+	// back, so the row the retry sees is still Evaluated. Saying Applied here
+	// would describe a row the tracker does not have, and --expect-status now
+	// refuses that before the ledger refusal this test is about.
+	second := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7", Status: "Evaluated"}, "Applied")
 	if second == nil || !strings.Contains(second.Error(), "stays Evaluated") || strings.Contains(second.Error(), "status-log repair failed") {
 		t.Fatalf("second attempt must refuse the same way: %v", second)
 	}

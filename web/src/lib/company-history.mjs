@@ -136,7 +136,7 @@ export function companyCardModel(payload) {
  */
 export function verdictFor(table, label) {
   if (typeof label !== "string" || label === "") return null;
-  const hit = table[label];
+  const hit = Object.hasOwn(table, label) ? table[label] : null;
   if (hit) return hit;
   return {
     kind: "not-checked",

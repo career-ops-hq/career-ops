@@ -42,10 +42,12 @@ function parseDetailConfig(entry) {
 
 const LEGACY_BOARD_HOSTS = new Set(['boards.greenhouse.io', 'boards.eu.greenhouse.io']);
 const JOB_BOARD_HOSTS = new Set(['job-boards.greenhouse.io', 'job-boards.eu.greenhouse.io']);
+const BOARD_SLUG_RE = /^[A-Za-z0-9._-]+$/;
 
 const ALLOWED_GREENHOUSE_HOSTS = new Set([
   'boards-api.greenhouse.io',
   'boards.greenhouse.io',
+  'boards.eu.greenhouse.io',
   'job-boards.greenhouse.io',
   'job-boards.eu.greenhouse.io',
 ]);
@@ -86,23 +88,21 @@ function resolveApiUrl(entry) {
     const parsed = new URL(url);
     const boardHost = (JOB_BOARD_HOSTS.has(parsed.hostname) && (parsed.protocol === 'https:' || parsed.protocol === 'http:'))
       || (LEGACY_BOARD_HOSTS.has(parsed.hostname) && parsed.protocol === 'https:');
-    if (boardHost) slug = parsed.pathname.split('/').find(Boolean) ?? null;
+    if (boardHost) {
+      slug = parsed.pathname.split('/').find(Boolean) ?? null;
+      // Embed boards carry the token in ?for= (e.g. /embed/job_board?for=stripe).
+      // The path segment is literally "embed", which resolves to a nonexistent
+      // board and 404s — the token is the only usable slug.
+      if (!slug || slug.toLowerCase() === 'embed') {
+        slug = parsed.searchParams.get('for')?.trim() || null;
+      }
+    }
   } catch {
     // unparseable url: no board to read
   }
-  // Embed boards carry the token in ?for= (e.g. /embed/job_board?for=stripe).
-  // The path segment is literally "embed", which resolves to a nonexistent
-  // board and 404s — the token is the only usable slug.
-  if (!slug || slug === 'embed') {
-    try {
-      // Only a Greenhouse URL names a board in ?for=: on any other site the param
-      // is unrelated (example.com/jobs?for=stripe) and must not select a board.
-      slug = new URL(assertGreenhouseUrl(url)).searchParams.get('for');
-    } catch {
-      // unparseable, non-HTTPS or non-Greenhouse URL: no board to read
-    }
+  if (!slug || slug.toLowerCase() === 'embed' || slug === '.' || slug.includes('..') || !BOARD_SLUG_RE.test(slug)) {
+    return null;
   }
-  if (!slug || slug === 'embed') return null;
   return `https://boards-api.greenhouse.io/v1/boards/${slug}/jobs`;
 }
 
@@ -236,13 +236,19 @@ export function buildOfficeMap(json) {
 // tags are gone. That pipeline (and its rationale) now lives in
 // _html-to-text.mjs, shared with the providers added in #3175's phase 2;
 // this wrapper keeps greenhouse's tested export name.
+//
+// The body is kept whole (no DESCRIPTION_CAP), like ashby, lever, gem and
+// join, because the description filters read the end of a JD too, where visa
+// wording usually sits. Measured on 7,933 public Greenhouse postings (2026-11-26),
+// 6,959 ran past 4,000 characters (median 6,161), and the cut hid 106
+// sponsorship refusals from visa_filter and 538 offers from strict mode.
 
 /**
  * Entity-decoded markup → stripped plain text. Exported for tests.
  * @param {unknown} content
  */
 export function contentToText(content) {
-  return htmlToText(content);
+  return htmlToText(content, { cap: Infinity });
 }
 
 /** @type {Provider} */

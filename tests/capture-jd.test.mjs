@@ -9,6 +9,7 @@ import { atomicWrite, captureJd, captureName, commitCapture, deriveLabels, appen
 import { captureIdentity, findCaptureForUrl } from '../jd-capture.mjs';
 import { ensureToken, createServer, startEvaluation, isLoopbackHost } from '../capture-server.mjs';
 import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
+import { listenOnSafePort } from './helpers/listen-safe-port.mjs';
 
 // Isolate every Git subprocess, including production calls inheriting process.env.
 for (const key of Object.keys(process.env)) {
@@ -374,7 +375,7 @@ test('the capture endpoint refuses a request without the token', async () => {
   const root = scratch();
   const token = ensureToken(root);
   const server = createServer({ dataRoot: root, token, evalEnabled: false });
-  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  await listenOnSafePort(server);
   const { port } = server.address();
 
   try {
@@ -410,7 +411,7 @@ test('server-side evaluation disable overrides an evaluate request', async () =>
   const root = scratch();
   const token = ensureToken(root);
   const server = createServer({ dataRoot: root, token, evalEnabled: false });
-  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  await listenOnSafePort(server);
   const { port } = server.address();
 
   try {
@@ -700,6 +701,22 @@ test('startEvaluation off win32 spawns without a shell and passes the URL unquot
   assert.ok(!/\n/.test(calls[0].args[1]));
 });
 
+// The suite traps CAREER_OPS_CLI at the top of this file (`forbidden-evaluation`),
+// so a broken guard would launch it for real. doctor.mjs only *warns* about an
+// unrecognized value, so the spawn site re-checks the same allow-list.
+test('startEvaluation refuses a CLI outside the known agent list, from an explicit cli or the environment', () => {
+  const root = scratch();
+  const calls = [];
+  const spawnSpy = (...a) => { calls.push(a); return { on() { return this; }, unref() {} }; };
+  const explicit = startEvaluation({ url: 'https://acme.test/jobs/1', dataRoot: root, cli: path.join(sandbox, 'forbidden-evaluation'), platform: 'linux', spawnFn: spawnSpy });
+  assert.equal(explicit.started, false, JSON.stringify(explicit));
+  assert.match(explicit.reason, /recognized CLI/i);
+  const fromEnv = startEvaluation({ url: 'https://acme.test/jobs/1', dataRoot: root, platform: 'linux', spawnFn: spawnSpy });
+  assert.equal(fromEnv.started, false, JSON.stringify(fromEnv));
+  assert.match(fromEnv.reason, /recognized CLI/i);
+  assert.equal(calls.length, 0, 'neither call may spawn');
+});
+
 // --- R3 maintainer follow-ups ----------------------------------------------
 
 function initRepoWithRemote() {
@@ -729,7 +746,7 @@ test('the capture endpoint commits without pushing unless the request asks for i
   const { root, git, remoteHead } = initRepoWithRemote();
   const token = ensureToken(root);
   const server = createServer({ dataRoot: root, token, evalEnabled: false });
-  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  await listenOnSafePort(server);
   const { port } = server.address();
   const post = (payload) => fetch(`http://127.0.0.1:${port}/capture`, {
     method: 'POST',
@@ -851,7 +868,7 @@ test('the server answers 400 to a request target new URL() cannot parse, and kee
   const http = await import('node:http');
   const root = scratch();
   const server = createServer({ dataRoot: root, token: ensureToken(root), evalEnabled: false });
-  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  await listenOnSafePort(server);
   const { port } = server.address();
   try {
     const status = await new Promise((resolve, reject) => {

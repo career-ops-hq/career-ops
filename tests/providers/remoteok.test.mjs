@@ -130,6 +130,32 @@ try {
     pass('remoteok preserves correct Unicode and values that fail strict UTF-8 decoding');
   else fail(`remoteok corrupted untouched text: ${JSON.stringify([plain, invalid])}`);
 
+  // salary: USD per year; the feed gives 0 when the poster gave none.
+  const paid = (min, max) => ({ position: 'Data Engineer', company: 'Acme', url: `https://remoteok.com/remote-jobs/p-${min}-${max}`, salary_min: min, salary_max: max });
+  const salaried = await remoteok.fetch({}, { fetchJson: async () => [
+    { last_updated: 1751500000 }, paid(90000, 120000), paid(0, 0), paid(80000, 0), paid(0, 150000), paid('x', null),
+  ] });
+  if (JSON.stringify(salaried[0]?.salary) === JSON.stringify({ min: 90000, max: 120000, currency: 'USD', period: 'year', posted: { min: 90000, max: 120000 } }))
+    pass('remoteok.fetch() sets salary from salary_min and salary_max (USD per year)');
+  else fail(`remoteok.fetch() salary = ${JSON.stringify(salaried[0]?.salary)}`);
+  if (salaried[2]?.salary?.min === 80000 && salaried[2].salary.max === 80000 && !('max' in salaried[2].salary.posted)
+      && salaried[3]?.salary?.min === 150000 && salaried[3].salary.max === 150000 && !('min' in salaried[3].salary.posted))
+    pass('remoteok.fetch() fills a one-sided range from the other bound and keeps the posted bounds one-sided');
+  else fail(`remoteok.fetch() one-sided salary = ${JSON.stringify([salaried[2]?.salary, salaried[3]?.salary])}`);
+  if (!('salary' in salaried[1]) && !('salary' in salaried[4]))
+    pass('remoteok.fetch() sets no salary for 0 or non-numeric bounds');
+  else fail(`remoteok.fetch() empty salary = ${JSON.stringify([salaried[1]?.salary, salaried[4]?.salary])}`);
+
+  // Only a number or a numeric string is a bound: a boolean, array or object is no value.
+  const malformed = await remoteok.fetch({}, { fetchJson: async () => [
+    { last_updated: 1751500000 },
+    ...[[true, false], [[5], {}], [{ valueOf() { throw new Error('boom'); } }, Symbol('x')], ['90000', '120000']]
+      .map(([min, max], i) => ({ ...paid(0, 0), url: `https://remoteok.com/remote-jobs/m${i}`, salary_min: min, salary_max: max })),
+  ] });
+  if (malformed.length === 4 && [0, 1, 2].every((i) => !('salary' in malformed[i])) && malformed[3].salary?.min === 90000 && malformed[3].salary.max === 120000)
+    pass('remoteok.fetch() reads no salary from boolean, array or object bounds, never throws, and reads numeric strings');
+  else fail(`remoteok.fetch() malformed salary = ${JSON.stringify(malformed.map((j) => j.salary))}`);
+
   // company default when both the row's company and entry.name are missing → 'RemoteOK'.
   const noName = await remoteok.fetch(
     {},

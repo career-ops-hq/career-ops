@@ -103,7 +103,8 @@ function withCountry(name, country) {
  *
  * Breezy returns a top-level array of positions:
  *   [{ name, url, published_date?,
- *      location: { name?, city?, state?, country?: { name }, is_remote? } }]
+ *      location: { name?, city?, state?, country?: { name }, is_remote?,
+ *                  remote_details?: { value, label } } }]
  *
  * - url: Breezy supplies an absolute posting URL on the tenant domain
  *   (`https://<tenant>.breezy.hr/p/<id>-<slug>`); it is the Job contract's dedup
@@ -112,7 +113,11 @@ function withCountry(name, country) {
  *   `https:` URL is required; rows without one are dropped.
  * - location: prefer the ready-made `location.name` (with `country.name`
  *   appended when the name doesn't already contain it); else assemble from
- *   city / state / country.name. "Remote" is appended when `is_remote` is truthy.
+ *   city / state / country.name. The work model is appended unless the place
+ *   already says it: "Hybrid" when `location.remote_details.value` is "hybrid",
+ *   else "Remote" when `is_remote` is truthy. Live boards set `is_remote` on a
+ *   hybrid position too, and give the work model in `remote_details.value`
+ *   ("remote", "remote-location" or "hybrid"; checked 2026-11-26).
  * - postedAt: parsed from the ISO `published_date` when present and valid — Breezy
  *   gives it for free in the list payload, so recency consumers can use it.
  *
@@ -146,13 +151,13 @@ export function parseBreezyResponse(json, companyName) {
     if (!url) continue;
 
     const loc = j.location || {};
-    const remote = loc.is_remote ? 'Remote' : '';
+    const workModel = loc.remote_details?.value === 'hybrid' ? 'Hybrid' : loc.is_remote ? 'Remote' : '';
     const assembled = [loc.city, loc.state, loc.country?.name].filter(Boolean).join(', ');
     const base = (typeof loc.name === 'string' && loc.name.trim())
       ? withCountry(loc.name.trim(), loc.country?.name)
       : assembled;
-    const location = remote && !/remote/i.test(base)
-      ? [base, remote].filter(Boolean).join(', ')
+    const location = workModel && !base.toLowerCase().includes(workModel.toLowerCase())
+      ? [base, workModel].filter(Boolean).join(', ')
       : base;
 
     const job = {

@@ -75,6 +75,17 @@ export function ApplyChecklist({
         </Link>
       </header>
 
+      <Section title="After you submit">
+        <div className="flex flex-wrap items-start gap-2">
+          <AppliedButton trackerNum={trackerNum} status={status} />
+          {status.trim().toLowerCase() === "applied" && <SeedButton key={trackerNum} trackerNum={trackerNum} />}
+          <MarkPdfReadyButton reportNum={reportNum} ready={pdfReady} trackerMarked={trackerMarked} />
+        </div>
+        <p className="mt-2 text-xs text-muted">Marking an application Applied also tries to schedule its first follow-up. If the reminder is missing, you can retry here.</p>
+        {pdfNote && <p className="mt-2 text-sm text-muted">{pdfNote}</p>}
+        {!trackerNum && <p className="mt-2 text-xs text-faint">Applied and seed follow-up need a tracker row.</p>}
+      </Section>
+
       {blocked ? (
         <Section title={blocked.label}>
           <table className="w-full text-sm">
@@ -161,16 +172,6 @@ export function ApplyChecklist({
             ))}
           </tbody>
         </table>
-      </Section>
-
-      <Section title="After you submit">
-        <div className="flex flex-wrap items-start gap-2">
-          <AppliedButton trackerNum={trackerNum} status={status} />
-          <SeedButton trackerNum={trackerNum} />
-          <MarkPdfReadyButton reportNum={reportNum} ready={pdfReady} trackerMarked={trackerMarked} />
-        </div>
-        {pdfNote && <p className="mt-2 text-sm text-muted">{pdfNote}</p>}
-        {!trackerNum && <p className="mt-2 text-xs text-faint">Applied and seed follow-up need a tracker row.</p>}
       </Section>
     </PageFrame>
   );
@@ -332,7 +333,7 @@ function SeedButton({ trackerNum }: { trackerNum: string | null }) {
   return (
     <span className="inline-flex flex-col items-start gap-1">
       <button type="button" className={PILL} disabled={!trackerNum || busy} onClick={seed}>
-        {busy ? "Saving…" : "Seed follow-up"}
+        {busy ? "Checking…" : "Retry missing follow-up"}
       </button>
       {note && <span className="text-xs text-muted">{note}</span>}
       {error && <span className="max-w-xs text-xs text-red-500">{error}</span>}

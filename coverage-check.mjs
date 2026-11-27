@@ -97,6 +97,15 @@ export function atsFromUrl(url) {
       : ((jobIdx > 0 ? seg[jobIdx - 1] : (seg.length > 1 && /^[a-z]{2}-[a-z]{2}$/i.test(seg[0]) ? seg[1] : seg[0])) || '');
     if (site) return { ats: 'workday', slug: `${wd[1]}|${wd[2]}|${site}`.toLowerCase(), host };
   }
+  // The same boards on Workday's other host form, tenant in the path:
+  // /recruiting/{tenant}/{site}/..., optionally after a locale.
+  const wds = host.match(/^(wd\d+)\.myworkdaysite\.com$/);
+  if (wds) {
+    const at = /^[a-z]{2}-[a-z]{2}$/i.test(seg[0] || '') ? 1 : 0;
+    if (seg[at]?.toLowerCase() === 'recruiting' && seg[at + 1] && seg[at + 2]) {
+      return { ats: 'workday', slug: `${seg[at + 1]}|${wds[1]}|${seg[at + 2]}`.toLowerCase(), host, workdayHost: 'site' };
+    }
+  }
   const ic = host.match(/^(?:careers-)?([^.]+)\.icims\.com$/);
   if (ic) return { ats: 'icims', slug: ic[1].toLowerCase(), host };
   // A custom careers domain that embeds Greenhouse: the board token is not in the URL.
@@ -104,7 +113,7 @@ export function atsFromUrl(url) {
   return { ats: null, host };
 }
 
-export function careersUrlFor({ ats, slug }) {
+export function careersUrlFor({ ats, slug, workdayHost }) {
   if (!slug) return null;
   switch (ats) {
     case 'greenhouse': return `https://job-boards.greenhouse.io/${slug}`;
@@ -114,6 +123,7 @@ export function careersUrlFor({ ats, slug }) {
     case 'icims': return `https://careers-${slug}.icims.com/jobs`;
     case 'workday': {
       const [tenant, wd, site] = slug.split('|');
+      if (workdayHost === 'site') return `https://${wd}.myworkdaysite.com/recruiting/${tenant}/${site}`;
       return `https://${tenant}.${wd}.myworkdayjobs.com/${site}`;
     }
     default: return null;
@@ -211,6 +221,24 @@ function siteVerdict(posting, target, ctx) {
 }
 
 /**
+ * The title_filter scan.mjs applies to a tracked entry's postings (#7244): the
+ * entry's own title_filter replaces the global one, and an entry with no usable
+ * positive keyword keeps the global positives alongside its own negatives. The
+ * same rule as resolveEntryTitleGate() in scan.mjs; null when the entry has no
+ * title_filter of its own.
+ *
+ * @param {any} entry a tracked_companies entry
+ * @param {any} globalFilter portals.yml's top-level title_filter
+ * @returns {object|null}
+ */
+export function entryTitleFilter(entry, globalFilter) {
+  const own = entry?.title_filter;
+  if (!own || typeof own !== 'object' || Array.isArray(own)) return null;
+  const hasPositives = Array.isArray(own.positive) && own.positive.some(k => typeof k === 'string' && k.trim().length > 0);
+  return !hasPositives && globalFilter?.positive ? { ...own, positive: globalFilter.positive } : own;
+}
+
+/**
  * @param {{url: string, company: string, title: string, location?: string}} posting
  * @param {{config: any, entries: any[], providers: Map<string, any>, history: Map<string, string[]>,
  *          historyCompanies: Map<string, Set<string>>, pipelineText: string, trackerText?: string,
@@ -280,7 +308,18 @@ export function diagnose(posting, ctx) {
       }
       evidence.push(`no provider for the portals.yml entry, but scanned as ${scanners.join(', ')}`);
     }
-    if (!titleOk(title)) return { gap: 'tracked-title-filter', evidence, fix: `title keyword: no title_filter keyword matches "${title}"` };
+    // The scanner judges this entry's postings by its own title_filter when it
+    // has one, so a miss (or a pass) under the global filter says nothing here.
+    const ownFilter = entryTitleFilter(entry, ctx.config.title_filter);
+    if (ownFilter) evidence.push(`"${entry.name}" has its own title_filter, which replaces the global one for its postings`);
+    if (!(ownFilter ? buildTitleFilter(ownFilter) : titleOk)(title)) {
+      return {
+        gap: 'tracked-title-filter', evidence,
+        fix: ownFilter
+          ? `title keyword: the title_filter of "${entry.name}" drops "${title}"`
+          : `title keyword: no title_filter keyword matches "${title}"`,
+      };
+    }
     if (locationOk === false) return { gap: 'tracked-location-filter', evidence, fix: `location: location_filter drops "${location}"` };
     // An enabled provider plugin that cannot run (missing key, failed
     // integrity check) resolves to a stub: the scanner never reads this board.

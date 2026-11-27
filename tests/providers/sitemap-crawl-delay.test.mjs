@@ -66,22 +66,31 @@ test("the paced view leaves the stated gap before every request after the first"
   // The gap is a property of the host, not of one kind of request, so the root
   // sitemap, each child sitemap and each detail page all pass through this. The
   // sleep is injected, so the case asserts the wait it asks for without waiting.
-  const calls = [];
-  const waits = [];
-  const ctx = {
-    async fetchText(url) { calls.push(url); return "x"; },
-    async sleep(ms) { waits.push(ms); },
-  };
+  // paceRequests reads Date.now(), so the clock is faked too: the stubbed sleep
+  // advances it by the wait it was asked for, and a slow CI runner cannot add
+  // time between two requests.
+  const realNow = Date.now;
+  // paceRequests starts with last = 0, so the clock starts well above the gap;
+  // otherwise the first request would look like it still has to wait.
+  let clock = 1_000_000;
+  Date.now = () => clock;
+  try {
+    const calls = [];
+    const waits = [];
+    const ctx = {
+      async fetchText(url) { calls.push(url); return "x"; },
+      async sleep(ms) { waits.push(ms); clock += ms; },
+    };
 
-  const paced = paceRequests(ctx, 1_000);
-  await paced.fetchText("root");
-  await paced.fetchText("child");
-  await paced.fetchText("detail");
+    const paced = paceRequests(ctx, 1_000);
+    await paced.fetchText("root");
+    await paced.fetchText("child");
+    await paced.fetchText("detail");
 
-  assert.deepEqual(calls, ["root", "child", "detail"]);
-  assert.equal(waits.length, 2, "the first request is not delayed, the next two are");
-  for (const ms of waits) {
-    assert.ok(ms > 900 && ms <= 1_000, `expected roughly the stated gap, got ${ms}`);
+    assert.deepEqual(calls, ["root", "child", "detail"]);
+    assert.deepEqual(waits, [1_000, 1_000], "the first request is not delayed, the next two wait the stated gap");
+  } finally {
+    Date.now = realNow;
   }
 });
 

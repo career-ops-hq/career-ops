@@ -148,13 +148,34 @@ test('fetchJdFromPage gives up on a redirect loop', async () => {
 test('fetchJdFromPage misses quietly on a non-HTML answer, an error status, and a thrown fetch', async () => {
   for (const handler of [
     () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }),
-    () => new Response('nope', { status: 404, headers: { 'content-type': 'text/html' } }),
+    () => new Response('nope', { status: 500, headers: { 'content-type': 'text/html' } }),
+    () => new Response('blocked', { status: 403, headers: { 'content-type': 'text/html' } }),
     () => { throw new Error('network down'); },
   ]) {
     const net = stubNetwork(handler);
     try { assert.equal(await fetchJdFromPage('https://careers.example.com/job/1'), null); }
     finally { net.restore(); }
   }
+});
+
+test('fetchJdFromPage reports a page answering 404 or 410 as closed, with no JD text', async () => {
+  for (const status of [404, 410]) {
+    const net = stubNetwork(() => new Response('<p>Not found</p>', { status, headers: { 'content-type': 'text/html' } }));
+    try {
+      const out = await fetchJdFromPage('https://careers.example.com/job/1');
+      assert.equal(out.closed, true, String(status));
+      assert.equal(out.text, '');
+      assert.equal(out.evidence, `HTTP ${status}`);
+    } finally { net.restore(); }
+  }
+});
+
+test('a 404 reached through a redirect to another page stays a miss', async () => {
+  const net = stubNetwork((url) => url.endsWith('/job/1')
+    ? new Response(null, { status: 302, headers: { location: 'https://careers.example.com/jobs' } })
+    : new Response('gone', { status: 404, headers: { 'content-type': 'text/html' } }));
+  try { assert.equal(await fetchJdFromPage('https://careers.example.com/job/1'), null); }
+  finally { net.restore(); }
 });
 
 test('fetchJdFromPage refuses an oversized body', async () => {

@@ -56,16 +56,6 @@ func ReadStatusLedger(root string) (StatusLedger, error) {
 	return parseStatusLedger(string(content)), nil
 }
 
-// ReadFunnelHistory is the funnel-only view of ReadStatusLedger, kept for
-// callers that need nothing but the reached stages.
-func ReadFunnelHistory(root string) (map[int]int, error) {
-	ledger, err := ReadStatusLedger(root)
-	if err != nil {
-		return nil, err
-	}
-	return ledger.Reached, nil
-}
-
 func parseFunnelHistory(content string) map[int]int {
 	return parseStatusLedger(content).Reached
 }

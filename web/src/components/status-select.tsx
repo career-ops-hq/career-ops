@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check, Pencil, X } from "lucide-react";
 import { CANONICAL_STATES, statusDot } from "@/lib/format";
 import { cn } from "@/lib/cn";
-import { saveStatus } from "@/lib/pipeline-status.mjs";
+import { isStaleRowError, saveStatus } from "@/lib/pipeline-status.mjs";
 import { appliedWriteAllowed, statusEditAction } from "@/lib/applied-confirm.mjs";
 
 // Status writeback control. Updates the existing tracker row (status cell) via
@@ -37,6 +37,9 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
   const [pendingApplied, setPendingApplied] = useState(false);
   const pendingFrom = useRef("");
   const saving = useRef(false);
+  // The row's own status, kept current even while a save is in flight, so a
+  // stale refusal can revert to it rather than to what the picker displayed.
+  const latestCurrent = useRef(current);
   const mounted = useRef(false);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pencil = useRef<HTMLButtonElement>(null);
@@ -46,6 +49,9 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
   const label = applicationLabel ?? `application #${n}`;
 
   useEffect(() => {
+    // Before the guard: a `current` that arrives mid-save is exactly the one a
+    // stale refusal needs, and the guard below is what would skip it.
+    latestCurrent.current = current;
     if (!saving.current) {
       setStatus(current);
       setPendingApplied(false);
@@ -121,8 +127,15 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Could not save status. Please try again.";
       onHeldSave?.({ type: "fail", error: message });
+      // The row moved under the picker. Reload it, so the retry the message
+      // asks for starts from the status the row actually holds.
+      if (isStaleRowError(cause)) router.refresh();
       if (!mounted.current) return;
-      setStatus(prev); // revert on failure
+      // The refresh above may return the `current` the props already hold, so
+      // the sync effect never fires again. `prev` is the value the picker
+      // showed — in inline mode the stale `current` itself — so on this path
+      // it is the one value known to be wrong.
+      setStatus(isStaleRowError(cause) ? latestCurrent.current : prev); // revert on failure
       setError(message);
     } finally {
       saving.current = false;

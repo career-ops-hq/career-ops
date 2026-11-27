@@ -110,9 +110,10 @@ Parse the JSON envelope:
 
 | Key | Contents |
 |-----|----------|
-| `metadata` | Counts (`resolved`, `unresolved`, `duplicatesSkipped`, `fresh`, `freshWritten`), `written` flag, `previewOnly`, `portalsPath`, `warnings` |
-| `resolved` | Per company: `name`, `vendor`, `slug`, `careers_url`, `api` (Greenhouse only), `provider` (Workday only), `jobCount` |
+| `metadata` | Counts (`resolved`, `unresolved`, `duplicatesSkipped`, `blacklistedSkipped`, `fresh`, `freshWritten`), `written` flag, `previewOnly`, `portalsPath`, `warnings` |
+| `resolved` | Per company: `name`, `vendor`, `slug`, `careers_url`, `api` (Greenhouse only), `provider` (Workday only), `jobCount`, and `smallBoard: true` on a board at or under the small-board threshold |
 | `unresolved` | Per company: `name`, `triedVendors`, `reason`, and (when present) `emptyBoards`, `errors`, `skippedUnsafeSlug`, `unsupportedSlugShape`, `website` |
+| `blacklisted` | Per company skipped for `data/blacklist.md`: `name`, `entry` (the matching blacklist company), `reason` |
 | `pendingEntries` | The rendered YAML block — present whenever nothing was written (i.e. on a preview run, the default) so the user can paste it manually |
 
 **Default is preview.** Always show the user the `pendingEntries` / resolved

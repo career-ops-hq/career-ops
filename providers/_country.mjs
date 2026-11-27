@@ -257,6 +257,13 @@ const countryValue = value => fold(countryNameFromIso(value)) || value;
 // (XK), without changing the workplace policy's shared country vocabulary.
 const COUNTRY_KEYWORD_CODES = new Set([...Object.values(ALPHA3_TO_ALPHA2), 'XK']);
 
+/** An assigned ISO 3166-1 alpha-2 code (or Kosovo, XK): not an aggregate such as EU or UN.
+ * @param {string} code
+ */
+export function isAssignedCountryCode(code) {
+  return COUNTRY_KEYWORD_CODES.has(code);
+}
+
 /** Exact country name, alias or ISO token in a config list, not a city or region.
  * @param {unknown} value
  */
