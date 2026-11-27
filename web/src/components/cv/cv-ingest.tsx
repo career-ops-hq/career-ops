@@ -335,6 +335,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
           <p role="alert" className="flex flex-wrap items-center gap-1.5 text-[13px] text-amber-800 dark:text-amber-400">
             <AlertTriangle className="size-3.5 shrink-0" /> {err}
             {showConfigLink && <Link href="/config" className="font-medium underline">Connect your AI CLI</Link>}
+            {showConfigLink && <span>Drop a .md or .txt file to continue without a CLI.</span>}
           </p>
         )}
       </div>
