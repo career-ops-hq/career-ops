@@ -171,6 +171,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
   const ingestText = (text: string) => {
     const trimmed = text.trim();
     if (!trimmed) {
+      setShowConfigLink(false);
       setErr("That looks empty — paste your CV instead.");
       setPhase("error");
       return;
@@ -190,6 +191,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
   const ingestFile = (file: File) => {
     const error = cvUploadError(file);
     if (error) {
+      setShowConfigLink(false);
       setErr(error);
       setPhase("error");
       return;
@@ -200,6 +202,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
         .text()
         .then((t) => {
           if (!t.trim()) {
+            setShowConfigLink(false);
             setErr("That file looks empty — paste your CV instead.");
             setPhase("error");
             return;
@@ -209,6 +212,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
           enterReview();
         })
         .catch(() => {
+          setShowConfigLink(false);
           setErr("Couldn't read that file — paste your CV instead.");
           setPhase("error");
         });
