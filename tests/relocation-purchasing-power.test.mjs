@@ -624,7 +624,7 @@ test('a later advertised compensation without posting_location is never paired w
   }
 });
 
-test('folded relocation requires an explicit annual period', () => {
+test('folded relocation accepts a periodless annual-scale figure', () => {
   const dataRoot = fixtureDataRoot('60k CAD');
   try {
     const r = run([], { CAREER_OPS_ROOT: dataRoot, CAREER_OPS_DATA_DIR: '' });
@@ -634,7 +634,25 @@ test('folded relocation requires an explicit annual period', () => {
     assert.ok(app);
     assert.equal(app.advertised.raw, '60k CAD');
     assert.equal(app.advertised.period, null);
-    assert.equal(app.relocation, null, 'a periodless amount must not be treated as annual gross');
+    assert.equal(app.advertised.value, 60000);
+    assert.ok(app.relocation?.ok, 'a periodless annual-scale amount must get the relocation comparison');
+  } finally {
+    rmSync(dataRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test('folded relocation rejects a periodless figure below annual magnitude', () => {
+  const dataRoot = fixtureDataRoot('20 USD');
+  try {
+    const r = run([], { CAREER_OPS_ROOT: dataRoot, CAREER_OPS_DATA_DIR: '' });
+    assert.equal(r.status, 0, describeSpawn(r, `exit 0 expected, got ${r.status}`));
+    const out = JSON.parse(r.stdout);
+    const app = out.applications.find((a) => a.company === 'WidgetCo');
+    assert.ok(app);
+    assert.equal(app.advertised.raw, '20 USD');
+    assert.equal(app.advertised.period, null);
+    assert.equal(app.advertised.value, 20);
+    assert.equal(app.relocation, null, 'an unlabelled hourly-scale amount must not be treated as annual gross');
   } finally {
     rmSync(dataRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
