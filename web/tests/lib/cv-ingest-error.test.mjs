@@ -43,4 +43,5 @@ test("an OK response is not an error, and its stream is left unread", async () =
 test("the CV ingest component routes every failed response through it", () => {
   const src = readFileSync(new URL("../../src/components/cv/cv-ingest.tsx", import.meta.url), "utf8");
   assert.match(src, /ingestErrorMessage\(r\)/);
+  assert.match(src, /setErr\(failure\)/);
 });
