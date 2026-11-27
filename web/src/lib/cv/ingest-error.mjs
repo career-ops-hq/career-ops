@@ -13,7 +13,9 @@ export async function ingestErrorMessage(r) {
   if (r.ok) return null;
   const body = await r.json().catch(() => null);
   const reason = typeof body?.error === "string" ? body.error.trim() : "";
+  if (r.status === 404) {
+    return { message: reason || "Connect an AI CLI in Config first — it parses your CV locally.", configLink: true };
+  }
   if (reason) return { message: reason };
-  if (r.status === 404) return { message: "Connect an AI CLI in Config first — it parses your CV locally.", configLink: true };
   return { message: `Couldn't read your CV (error ${r.status}) — paste the text instead.` };
 }
