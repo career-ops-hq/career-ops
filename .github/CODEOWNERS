@@ -3,7 +3,7 @@
 #
 # Scope principle: gate what CI can't catch (a bad change here passes the
 # tests silently) + the catastrophic updater + governance docs. Code that
-# test-all.mjs / Renovate / dependency-review already guard (scan.mjs,
+# test-all.mjs / Dependabot / dependency-review already guard (scan.mjs,
 # generate-pdf.mjs, test-all.mjs, package.json) is intentionally NOT gated,
 # so routine contributor PRs aren't bottlenecked on a single owner.
 #

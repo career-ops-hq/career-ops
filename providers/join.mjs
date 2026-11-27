@@ -337,7 +337,7 @@ export default {
     // republished posting keeps it, so a role left open for a year reads as a
     // year old. The list payload carries each posting's full body, so the
     // description costs no extra request. It is kept whole (no DESCRIPTION_CAP),
-    // like ashby, lever and gem: the description filters read the end of a JD
+    // like ashby, greenhouse, lever and gem: the description filters read the end of a JD
     // too, where benefits and visa wording usually sit, and about one join
     // posting in seven runs past the default cap. `language` is the posting
     // text's ISO 639-1 code.

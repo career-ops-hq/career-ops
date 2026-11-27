@@ -129,8 +129,7 @@ export function parseCvMarkdown(markdown) {
         for (let j = 0; j < h3Sections.length; j++) {
           const h3Curr = h3Sections[j];
           const h3End = (j + 1 < h3Sections.length) ? h3Sections[j + 1].start : body.length;
-          const h3ActualEnd = h3End === -1 ? body.length : h3End;
-          const h3Body = body.slice(h3Curr.index, h3ActualEnd).trim();
+          const h3Body = body.slice(h3Curr.index, h3End).trim();
 
           const heading = parseCompanyHeading(`### ${h3Curr.title}`);
           const entry = {

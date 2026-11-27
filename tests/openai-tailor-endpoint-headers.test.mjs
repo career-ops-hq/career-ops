@@ -12,6 +12,7 @@
 // non-HTTPS remote), so a preload rewrites that base URL to the mock: the CLI
 // still sees opencode.ai as its host, which is what the headers are keyed on.
 import { createServer } from 'http';
+import { listenOnSafePort } from './helpers/listen-safe-port.mjs';
 import { execFile } from 'child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -31,7 +32,7 @@ const server = createServer((req, res) => {
     res.end(JSON.stringify({ choices: [{ index: 0, message: { role: 'assistant', content: HTML }, finish_reason: 'stop' }] }));
   });
 });
-await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+await listenOnSafePort(server);
 const base = `http://127.0.0.1:${server.address().port}/v1`;
 
 // The data root and the children's cwd, so a developer's own CV, profile and

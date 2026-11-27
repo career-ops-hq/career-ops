@@ -195,7 +195,16 @@ export function extractPanelists(text, table) {
   const lines = String(text ?? '').replace(/^\uFEFF/, '').split(/\r\n|\n|\r/);
   const nameRe = new RegExp(`(${NAME_SRC})${SEP_SRC}`, 'gu');
 
-  for (const line of lines) {
+  // Up to three lines after a sign-off, the block pass 3 reads.
+  const signoffLines = new Set();
+  lines.forEach((l, i) => {
+    if (!SIGNOFF.test(l)) return;
+    for (let j = i + 1, seen = 0; j < lines.length && seen < 3; j += 1) {
+      if (lines[j].trim()) { signoffLines.add(j); seen += 1; } else if (seen) break;
+    }
+  });
+
+  for (const [lineIndex, line] of lines.entries()) {
     // 1. Name - Title / Name, Title
     const cands = [];
     nameRe.lastIndex = 0;
@@ -223,6 +232,9 @@ export function extractPanelists(text, table) {
       const title = trimTitle(line.slice(c.titleStart, end));
       if (!title || /^\d/.test(title)) return;
       if (c.form === 'comma' && !hasKeyword(title, table)) return;
+      // A signature line "Talent Acquisition Partner | Acme Corp" is a title, then the company.
+      // Only a line that starts with it: "You will meet Pat Head - Biostatistician" names a person.
+      if (signoffLines.has(lineIndex) && !line.slice(0, c.start).trim() && hasKeyword(c.name, table) && !hasKeyword(title, table)) return;
       add(c.name, title, c.form === 'dash' ? 'name-dash-title' : 'name-comma-title');
     });
 

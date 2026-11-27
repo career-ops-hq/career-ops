@@ -172,6 +172,16 @@ test("company-wide churn does not claim that the report's role was reposted", ()
   }
 });
 
+test("an inherited object key is not a verdict from the label table", () => {
+  const table = { "none-detected": { kind: "absence", headline: "No repeat postings found", detail: null } };
+  for (const label of ["constructor", "toString", "__proto__"]) {
+    const v = verdictFor(table, label);
+    assert.equal(v?.kind, "not-checked", label);
+    assert.match(v?.headline ?? "", /Not evaluated/);
+    assert.equal(isConclusion(v), false, label);
+  }
+});
+
 test("an evaluation fallback date is not a confirmed application date", () => {
   const fact = { num: 1, appliedDate: "2026-08-01", silentDays: 42, dateBasis: "evaluation-date" };
   assert.match(factLine(fact), /evaluated 2026-08-01/);

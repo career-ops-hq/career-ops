@@ -10,6 +10,7 @@ import {
 } from '../user-agent.mjs';
 import { providerFetchContext, isBlockedAddress, blockedAddressError } from './_ip-guard.mjs';
 import { currentConnectionScope, currentAbortSignal } from './_connection-scope.mjs';
+import { directConnect } from './_tls-connect.mjs';
 import { cachedText } from './_http-cache.mjs';
 import { normalizeUrl, aggregatorPostingId } from '../url-key.mjs';
 
@@ -62,6 +63,29 @@ export function resolveDefaultTimeoutMs(raw, fallback = 10_000) {
 let proxyAgent;
 let proxySignature;
 
+const INITIAL_GLOBAL_FETCH = globalThis.fetch;
+let directTransportPromise = null;
+
+// Preserve test stubs installed either before module load (--import/--require)
+// or after load (globalThis.fetch = ...), while routing unstubbed native
+// Node fetch through an undici Agent that omits ALPNProtocols (#7785).
+function isNativeFetch(fn) {
+  if (typeof fn !== 'function' || fn !== INITIAL_GLOBAL_FETCH) return false;
+  return Function.prototype.toString.call(fn).includes('internal/deps/undici/undici');
+}
+
+async function getDirectTransport() {
+  if (directTransportPromise === null) {
+    directTransportPromise = import('undici')
+      .then((mod) => {
+        if (typeof mod.Agent !== 'function' || typeof mod.fetch !== 'function') return null;
+        return { agent: new mod.Agent({ connect: directConnect }), fetch: mod.fetch };
+      })
+      .catch(() => null);
+  }
+  return directTransportPromise;
+}
+
 async function proxyFor(url) {
   if (process.env.CAREER_OPS_TRUST_PROXY_EGRESS !== '1') return { dispatcher: undefined, proxyHost: undefined };
   const target = new URL(url);
@@ -95,7 +119,7 @@ async function proxyFor(url) {
     // tunnel through the proxy. That is the default in undici 6 and 7. From
     // undici 8 an http:// target is forwarded as an absolute-form request
     // instead, which is what turned tests/providers/proxy-egress.test.mjs red.
-    proxyAgent = new EnvHttpProxyAgent({ httpProxy, httpsProxy, noProxy, proxyTunnel: true });
+    proxyAgent = new EnvHttpProxyAgent({ httpProxy, httpsProxy, noProxy, proxyTunnel: true, connect: directConnect });
     proxySignature = signature;
   }
   return { dispatcher: proxyAgent, proxyHost, fetchImpl: undiciFetch };
@@ -177,6 +201,15 @@ async function fetchInContext(url, { timeoutMs = resolveDefaultTimeoutMs(process
     // A trusted-proxy dispatcher, when configured, still takes precedence,
     // together with the fetchImpl proxyFor() paired it with.
     const scope = dispatcher ? undefined : currentConnectionScope();
+    let requestDispatcher = dispatcher ?? scope?.agent;
+    let requestFetch = scope?.fetch ?? fetchImpl;
+    if (!requestDispatcher && requestFetch === globalThis.fetch && isNativeFetch(globalThis.fetch)) {
+      const direct = await getDirectTransport();
+      if (direct) {
+        requestDispatcher = direct.agent;
+        requestFetch = direct.fetch;
+      }
+    }
     // A sweep's per-company watchdog aborts the board's signal when it times
     // out; fold it into this request's own timeout so an abandoned board stops
     // mid-flight instead of running on in the background (#5570). Read straight
@@ -188,13 +221,13 @@ async function fetchInContext(url, { timeoutMs = resolveDefaultTimeoutMs(process
       : controller.signal;
     let res;
     try {
-      res = await (scope?.fetch ?? fetchImpl)(url, {
+      res = await requestFetch(url, {
         method,
         headers: requestHeaders,
         body,
         redirect,
         signal: requestSignal,
-        dispatcher: dispatcher ?? scope?.agent,
+        dispatcher: requestDispatcher,
       });
     } catch (err) {
       if (!dispatcher && ['ENOTFOUND', 'EAI_AGAIN'].includes(err?.cause?.code)

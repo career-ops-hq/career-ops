@@ -45,7 +45,7 @@ All User Layer files (such as `cv.md`, `config/profile.yml`, `modes/_profile.md`
 ### Tracker Path Resolution Order:
 * **Explicit override**: If `CAREER_OPS_TRACKER` is set as an environment variable, use it as the absolute path to the tracker file (resolved relative to the repository root if it is a relative path).
 * **Default**: Otherwise, use `{DATA_ROOT}/data/applications.md` if it exists; if not, use `{DATA_ROOT}/applications.md`.
-* **Writing**: All new/boilerplate writes must target `{DATA_ROOT}/data/applications.md`.
+* **Writing**: Write to the tracker the rules above find. Only when the file those rules pick does not exist, create it: at the `CAREER_OPS_TRACKER` path when that is set, otherwise at `{DATA_ROOT}/data/applications.md`. `DATA_CONTRACT.md` → "Tracker Path & Writes" is the source for this rule.
 
 ---
 
@@ -208,7 +208,7 @@ override the defaults in this file. If `_profile.md` is missing, has no
 is the target set: classify against it, and a match there counts as targeted.
 
 The table below is a default, not a closed set. It reflects one particular
-search (see AGENTS.md → Origin) and will not describe every user's field: a
+search (see AGENTS.md → Personalization) and will not describe every user's field: a
 silicon design-verification engineer, a quant, a clinician have no archetype
 here at all.
 

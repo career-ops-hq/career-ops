@@ -125,7 +125,7 @@ check('signal handles fee-demanded, silent, third-party and no-row outcomes',
     && /there is no silence check/.test(signal),
   'outcome sections missing');
 check('signal is table-driven: a row that protects every work-seeker may say so, no Ontario-only rule text',
-  /protects every work-seeker \(Great Britain\)/.test(signal) && /rows for Ontario and Great Britain/.test(signal)
+  /protects every work-seeker \(Great Britain, Norway\)/.test(signal) && /rows for Ontario, Great Britain and Norway/.test(signal)
     && !/Ontario: foreign nationals under EPFNA/.test(signal),
   'table-driven wording missing');
 check('signal never says a fee is unlawful for citizens or PRs and never accuses',

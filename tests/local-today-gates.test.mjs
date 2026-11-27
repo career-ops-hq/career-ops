@@ -424,8 +424,9 @@ test('the scanner resolves every call the four known writers contain', () => {
   // sibling scanners' skip buckets. scan-interamt.mjs stayed at 5: its four
   // skip writes moved onto that helper, which this counts as the same writer.
   // scan-ats-full.mjs went 1 → 2 when a timed-out --json sweep started writing
-  // the roles it had already kept. Both calls pass the same localToday() date.
-  for (const [file, expected] of [['scan.mjs', 10], ['scan-ats-full.mjs', 2], ['scan-hn.mjs', 1], ['scan-interamt.mjs', 5]]) {
+  // the roles it had already kept, and 2 → 3 when a plain run stopped by
+  // SIGTERM or SIGINT did too. Every call passes the same localToday() date.
+  for (const [file, expected] of [['scan.mjs', 10], ['scan-ats-full.mjs', 3], ['scan-hn.mjs', 1], ['scan-interamt.mjs', 5]]) {
     const src = readFileSync(join(ROOT, file), 'utf-8');
     const naive = [...src.matchAll(SCAN_HISTORY_WRITER)].length;
     assert.equal(naive, expected, `${file}: expected ${expected} call sites, source has ${naive} — update this expectation deliberately`);

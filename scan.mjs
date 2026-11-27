@@ -1441,7 +1441,12 @@ export const DEFAULT_VISA_NEGATIVE = [
 // mention of sponsorship was a refusal, most often "visa sponsorship is not
 // offered for this role" and "we are unable to offer visa sponsorship".
 // Curly apostrophes are folded to straight ones before matching, so "n't"
-// covers "can’t" and "won’t" as well.
+// covers "can’t" and "won’t" as well. Reading whole Greenhouse bodies
+// (2026-11-26, 7,933 postings) turned up four more refusals that sat past the
+// old 4,000-character cut, so they are listed too ("does not include visa
+// sponsorship", "without the need for new visa sponsorship", "visa
+// sponsorship and relocation support are not available" and "Visa
+// Sponsorship is not offer").
 function visaRefusalPhrases() {
   const sponsorship = ['sponsorship', 'visa sponsorship', 'work visa sponsorship'];
   const anySponsorship = [...sponsorship, 'company sponsorship', 'employer sponsorship'];
@@ -1453,6 +1458,14 @@ function visaRefusalPhrases() {
       ['not', "n't", 'unable to', 'not able to', 'not currently able to', 'not in a position to']
         .flatMap(neg => ['offer', 'provide', 'support'].map(verb => `${neg} ${verb}`)),
       sponsorship,
+    ),
+    // "this position does not include visa sponsorship". Visa objects only,
+    // because "the benefits do not include sponsorship for conferences" is
+    // about something else.
+    ...cross(
+      ['not', "n't", 'unable to', 'not able to', 'not currently able to', 'not in a position to']
+        .map(neg => `${neg} include`),
+      ['visa sponsorship', 'work visa sponsorship'],
     ),
     // "work authorization that does not require sponsorship", "applicants
     // must not require visa sponsorship now or in the future". Only in these
@@ -1470,6 +1483,11 @@ function visaRefusalPhrases() {
     ),
     // "you must be able to work without requiring visa sponsorship"
     ...cross(['without requiring', 'without needing', 'without the need for'], anySponsorship),
+    // "You must be work authorized in the United States without the need for
+    // new visa sponsorship". Only in this measured framing, because "we
+    // welcome candidates who can work without the need for new visa
+    // sponsorship" can also be welcome text in a posting that sponsors.
+    'authorized in the united states without the need for new visa sponsorship',
     'without visa sponsorship',
     // "this position is not eligible for visa sponsorship"
     'not eligible for sponsorship',
@@ -1485,6 +1503,12 @@ function visaRefusalPhrases() {
     'sponsorship will not be provided',
     'sponsorship cannot be offered',
     'sponsorship cannot be provided',
+    // "Visa Sponsorship is not offer for this position", a typo one employer
+    // repeats on every posting
+    'sponsorship is not offer',
+    // "visa sponsorship and relocation support are not available"
+    'sponsorship and relocation support are not available',
+    'sponsorship and relocation are not available',
     // "we won't sponsor visas", "we are not currently able to sponsor visas"
     "n't sponsor",
     'will not sponsor',
@@ -2380,9 +2404,8 @@ export function isUnseenLanguageVersion(seenRows, candidate, siblings = []) {
 /**
  * The leading checkbox marker of a `data/pipeline.md` entry.
  *
- * Only ` ` and `x` are recognized, matching the pre-existing gates: `- [!]`
- * marks a URL that could not be fetched, which is not evidence a posting was
- * surfaced.
+ * Only ` `, `x`, and `X` are recognized. `- [!]` marks a URL that could not
+ * be fetched, which is not evidence a posting was surfaced.
  *
  * Anchored, because the URL it guards is then matched anywhere in the entry: a
  * hand-written note that happens to contain checkbox syntax mid-sentence and a
@@ -2390,7 +2413,7 @@ export function isUnseenLanguageVersion(seenRows, candidate, siblings = []) {
  * whitespace is tolerated so an indented entry still dedupes, as it did when the
  * URL had to sit immediately after the checkbox.
  */
-const PIPELINE_CHECKBOX_RE = /^\s*- \[[ x]\]\s+/;
+const PIPELINE_CHECKBOX_RE = /^\s*- \[[ xX]\]\s+/;
 
 /**
  * As `PIPELINE_CHECKBOX_RE`, but rejecting indentation.
@@ -2399,7 +2422,7 @@ const PIPELINE_CHECKBOX_RE = /^\s*- \[[ x]\]\s+/;
  * replaces: widening it would seed *more* role keys, and one role key suppresses
  * every other posting that shares it.
  */
-const PIPELINE_CHECKBOX_STRICT_RE = /^- \[[ x]\]\s+/;
+const PIPELINE_CHECKBOX_STRICT_RE = /^- \[[ xX]\]\s+/;
 
 /**
  * A labeled trailing segment of a pipeline entry, as written by the two writers

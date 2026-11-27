@@ -48,7 +48,7 @@ The inputs above are report-first, but a common path skips evaluation entirely: 
 
 **Fetch ladder** — same as `modes/oferta.md` and the AGENTS.md Offer Verification rule; JD fetching follows the same ladder:
 
-1. For ATS-shaped URLs (Greenhouse / Lever / Ashby / Workday — the four `liveness-core.mjs` already recognizes), the structured API endpoint may serve the JD directly.
+1. For ATS-shaped URLs (Greenhouse, Lever, Ashby, Workday and the other ATSes `liveness-api.mjs` recognizes), the structured API endpoint may serve the JD directly.
 2. Otherwise Playwright: `browser_navigate` → `browser_snapshot`, read title, URL, and visible content.
 3. WebFetch **only** as the headless/batch fallback. If the JD came from WebFetch, mark the prep output header `**JD source:** unconfirmed (fetched without browser)`.
 4. Closed/expired posting (footer/navbar only, "no longer accepting applications", 404) → tell the user and ask them to paste the JD text instead. **Never fabricate JD content.**

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { listenOnSafePort } from './helpers/listen-safe-port.mjs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -89,10 +90,7 @@ globalThis.fetch = async (...args) => {
         } else res.end(body);
       });
     });
-    await new Promise((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, '127.0.0.1', resolve);
-    });
+    await listenOnSafePort(server);
     const url = `http://127.0.0.1:${server.address().port}`;
     let output;
     try {

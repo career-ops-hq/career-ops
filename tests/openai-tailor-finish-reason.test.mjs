@@ -11,6 +11,7 @@
 // This drives the real CLI against a mock endpoint, the same way
 // tests/openai-tailor-max-tokens.test.mjs does.
 import { createServer } from 'http';
+import { listenOnSafePort } from './helpers/listen-safe-port.mjs';
 import { execFile } from 'child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -33,7 +34,7 @@ const server = createServer((req, res) => {
     res.end(JSON.stringify({ choices: [{ index: 0, message: { role: 'assistant', content }, ...choiceExtra }] }));
   });
 });
-await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+await listenOnSafePort(server);
 const base = `http://127.0.0.1:${server.address().port}/v1`;
 
 // openai-tailor loads .env from its cwd and reads the CV and profile from the

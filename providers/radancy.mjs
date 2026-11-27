@@ -144,6 +144,11 @@ export function resolveListUrl(entry) {
     return null;
   }
   if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+  // An `http:` entry is upgraded, not fetched in the clear: this list page is
+  // what the whole board is read from, and every sibling adapter treats its
+  // board URL as https. The origin the fragment and posting URLs are built from
+  // follows.
+  u.protocol = 'https:';
   if (/\/search-jobs\/?$/.test(u.pathname)) return `${u.origin}${u.pathname.replace(/\/$/, '')}`;
   const lang = (u.pathname.match(/^\/([a-z]{2})(\/|$)/) || [])[1] || 'en';
   return `${u.origin}/${lang}/search-jobs`;
@@ -261,6 +266,30 @@ function titleElementText(inner) {
 }
 
 /**
+ * Resolve a posting href against the board origin and keep the result https:.
+ *
+ * `new URL(href, origin)` keeps the scheme an ABSOLUTE href carries, so the
+ * origin upgrade in resolveListUrl() never reaches a posting link the page hands
+ * back as `http:`. A posting link is http(s): anything else (javascript:, data:,
+ * mailto:) is not a posting. Returns null for such an href or for one that is not
+ * a valid URL, which both parsers treat as a row to skip.
+ *
+ * @param {string} href @param {string} origin
+ * @returns {string|null}
+ */
+function resolvePostingUrl(href, origin) {
+  let url;
+  try {
+    url = new URL(href, origin);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+  url.protocol = 'https:';
+  return url.href;
+}
+
+/**
  * Parse the LEGACY markup: the anchor IS the row, with no list-item class to
  * split on. Anchored on <a> carrying both data-job-id and a /job/ href, so the
  * sibling `js-save-job-btn` <button> (which repeats data-job-id) can't produce
@@ -292,12 +321,8 @@ export function parseLegacyResults(html, origin) {
     const title = titleElementText(inner) ?? clean(inner.replace(/<span[\s\S]*?<\/span>/gi, ' '));
     if (!title) continue;
 
-    let url;
-    try {
-      url = new URL(href, origin).href;
-    } catch {
-      continue;
-    }
+    const url = resolvePostingUrl(href, origin);
+    if (!url) continue;
     // Barclays puts job-location AFTER the anchor rather than inside it, so
     // fall back to the markup up to the next anchor (to the end of the page for
     // the last row — the results fragment carries nothing else after it).
@@ -360,12 +385,8 @@ export function parseModernResults(html, origin) {
     // (careers.loreal.com) out of the title.
     const title = titleElementText(link[2]) ?? clean(link[2]);
     if (!title) continue;
-    let url;
-    try {
-      url = new URL(href, origin).href;
-    } catch {
-      continue;
-    }
+    const url = resolvePostingUrl(href, origin);
+    if (!url) continue;
     // `__job-info--location` is the classic markup; careers.loreal.com puts the
     // location in `<span class="… job-location">` instead.
     const locM = block.match(/__job-info--location[\s\S]*?<span>([\s\S]*?)<\/span>/)

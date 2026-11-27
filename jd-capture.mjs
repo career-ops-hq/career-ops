@@ -112,7 +112,10 @@ export function findCaptureForReport(jdsDir, reportNum, { companySlug } = {}) {
 
   // The trailing hyphen is load-bearing: it stops `64` matching `640-epsilon.txt`
   // and stops a numeric run inside a name (`li-0640-...`) from matching at all.
+  // A name that opens with a capture date (`2026-11-27_...`, archive-posting.mjs
+  // without --report) carries no report number; its year is not one.
   const matches = entries.filter(name => {
+    if (/^\d{4}-\d{2}-\d{2}_/.test(name)) return false;
     const m = /^(\d+)-/.exec(name);
     return m ? parseInt(m[1], 10) === target : false;
   });

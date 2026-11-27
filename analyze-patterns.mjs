@@ -570,6 +570,7 @@ requirement_importance:
     ['https://acme.wd1.myworkdayjobs.com/en-US/careers/job/R-1', 'workday'],
     ['https://careers.icims.com/jobs/9/x', 'icims'],
     ['https://jobs.dayforcehcm.com/en-US/co/CANDIDATEPORTAL/jobs/1', 'dayforce'],
+    ['https://acme.breezy.hr/p/abc-backend', 'breezy'],
     ['https://careers.example.com/jobs/1', 'careers.example.com'],
     ['not a url', null],
     ['', null],
@@ -579,6 +580,8 @@ requirement_importance:
     const got = atsVendorOf(url);
     if (got !== expected) failures.push(`atsVendorOf(${JSON.stringify(url)}) → ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
   }
+  // A vendor the shared detector knows for scan routing stays outside the analysis scope.
+  if (knownAtsVendorOf('https://acme.breezy.hr/p/abc-backend') !== null) failures.push('knownAtsVendorOf widened past VENDOR_ANALYSIS_SCOPE to breezy');
 
   // Report header fields survive the locale they were written in. French output
   // puts a space before the colon and accents "Archétype"; both used to make the

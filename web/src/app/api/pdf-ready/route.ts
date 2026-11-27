@@ -2,7 +2,6 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { rootScript } from "@/lib/career-ops";
-import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { coreScriptHttp } from "@/lib/core-script-result.mjs";
 import { readJsonObject } from "@/lib/json-body";
 import { markTrackerReady } from "@/lib/pdf-render.mjs";

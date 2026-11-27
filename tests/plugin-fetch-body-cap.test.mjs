@@ -7,6 +7,7 @@
 // process by ~900 MB. The fixture is a loopback server (the manifest opts in with
 // allowsLocalhost), so nothing here touches the network.
 import { test, before, after } from 'node:test';
+import { listenOnSafePort } from './helpers/listen-safe-port.mjs';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { gzipSync } from 'node:zlib';
@@ -66,7 +67,7 @@ before(async () => {
       res.writeHead(404).end();
     }
   });
-  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  await listenOnSafePort(server);
   base = `http://127.0.0.1:${server.address().port}`;
 });
 

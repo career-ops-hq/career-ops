@@ -67,7 +67,7 @@ Alle filer i brukerlaget (som `cv.md`, `config/profile.yml`, `modes/_profile.md`
 ### Rekkefølge for trackerens sti:
 * **Eksplisitt overstyring**: Er miljøvariabelen `CAREER_OPS_TRACKER` satt, er den stien til trackerfilen (relativt til repository-roten hvis stien er relativ).
 * **Standard**: Ellers `{DATA_ROOT}/data/applications.md` hvis den finnes, og ellers `{DATA_ROOT}/applications.md`.
-* **Skriving**: Alle nye skrivinger går til `{DATA_ROOT}/data/applications.md`.
+* **Skriving**: Skriv til trackeren som reglene over finner. Bare når filen reglene velger ikke finnes, opprett den: på stien i `CAREER_OPS_TRACKER` når den er satt, ellers på `{DATA_ROOT}/data/applications.md`. `DATA_CONTRACT.md` → «Tracker Path & Writes» er kilden for denne regelen.
 
 ---
 
@@ -219,7 +219,7 @@ standardverdiene i denne filen. Mangler `_profile.md`, har den ingen
 nedenfor målsettet: klassifiser mot den, og en match der regnes som et mål.
 
 Tabellen nedenfor er en standard, ikke et lukket sett. Den speiler ett bestemt
-jobbsøk (se AGENTS.md → Origin) og beskriver ikke alle brukeres fagfelt.
+jobbsøk (se AGENTS.md → Personalization) og beskriver ikke alle brukeres fagfelt.
 
 **Matcher en stilling ingen arketype brukeren faktisk sikter mot, si det rett ut
 og gi North Star alignment 1.** Det er et reelt og nyttig signal. Å tvinge den

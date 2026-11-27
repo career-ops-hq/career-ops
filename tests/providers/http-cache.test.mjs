@@ -2,6 +2,7 @@
 // hit the network a second time. After the fresh window, a GET rechecks with
 // If-None-Match and keeps the saved body when the server answers 304.
 import { createServer } from 'node:http';
+import { listenOnSafePort } from '../helpers/listen-safe-port.mjs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -46,7 +47,7 @@ const server = createServer((req, res) => {
     res.end(payload);
   });
 });
-await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+await listenOnSafePort(server);
 const origin = 'http://boards.example.test';
 const local = `http://127.0.0.1:${server.address().port}`;
 const via = (fn) => withLocalServerAs(origin, local, fn);

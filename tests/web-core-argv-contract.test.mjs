@@ -187,6 +187,14 @@ const CALL_SITES = [
     args: [],
     probe: 'none',
   },
+  {
+    // Like pipeline.ts: `node --input-type=module -e` with an inline module
+    // that imports captureJd() from capture-jd.mjs. No flags reach the script.
+    source: 'web/src/lib/core/capture.ts',
+    script: null,
+    args: [],
+    probe: 'none',
+  },
 ];
 
 /**

@@ -38,6 +38,7 @@ const DEFAULT_ATS_ALLOWLIST = [
   'smartrecruiters.com',
   'jobvite.com',
   'myworkdayjobs.com',
+  'myworkdaysite.com',
   'recruitee.com',
   'workable.com',
   'icims.com',

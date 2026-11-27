@@ -1,8 +1,8 @@
 // tests/market-modes-documented.test.mjs — every market mode set that ships is
 // listed in the market table, modes/_markets.md (it lived in AGENTS.md until #6693).
 //
-// The table is not a nicety. AGENTS.md is loaded into every agent session, and
-// its own rule for choosing a set reads:
+// The table is not a nicety. The rule for choosing a set (modes/_markets.md →
+// "Choosing a market set", which AGENTS.md sends a non-English JD to) reads:
 //
 //     "you detect a JD written in that language -> suggest switching"
 //

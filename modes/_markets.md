@@ -1,6 +1,6 @@
 # Market mode sets
 
-AGENTS.md → "Output Language vs Market Modes" sends you here. It defines `language.output` and `language.modes_dir` and when to switch to a market set; this file lists the sets and covers a `modes_dir` list for several markets at once.
+AGENTS.md → "Output Language vs Market Modes" sends you here. It defines `language.output` and `language.modes_dir`; this file lists the sets, says when to select one, and covers a `modes_dir` list for several markets at once. Prose always follows `language.output`, whichever set is in use.
 
 ## Market sets
 
@@ -31,6 +31,16 @@ Default modes are in `modes/` (English). Market-specific mode sets (each include
 | Turkish (Turkey) | `modes/tr/` | `is-ilani` / `basvuru` | SGK, kıdem tazminatı, brüt/net maaş, BES |
 | Ukrainian (Ukraine) | `modes/ua/` | `oferta` / `apply` | ФОП, КЗпП, оклад, випробувальний термін |
 | Vietnamese (Vietnam) | `modes/vi/` | `tuyen-dung` / `ung-tuyen` | Gross vs Net, thử việc, BHXH/BHYT/BHTN, lương tháng 13, trợ cấp thôi việc |
+
+## Choosing a market set
+
+A set is used when the user targets postings in that language or market, lives in that market, or asks for it. Any of these selects it:
+
+1. The user says "use {market} modes" → layer that dir on the English `modes/` canon: read each mode-loaded English file first, then that dir's version when it provides one, and English workflow rules win conflicts.
+2. The user sets `language.modes_dir: modes/de` (or their market's dir) in `config/profile.yml` → use that dir, unless the user asks for another market's modes in this conversation: that request wins for the conversation.
+3. You detect a JD written in that language → *suggest* switching, naming the set's directory from the table above.
+
+**When not to switch:** for English-language roles, even at companies from those markets, use the default English modes, unless the user asked for another market's modes in this conversation or `language.modes_dir` is set in `config/profile.yml`. The user's explicit choice always wins over JD-language detection.
 
 ## Multiple simultaneous target markets (#3793)
 

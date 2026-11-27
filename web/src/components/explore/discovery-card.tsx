@@ -164,6 +164,7 @@ export function DiscoveryCard({
               type="button"
               disabled={isAdded || isAdding}
               onClick={() => addToPipeline([offer])}
+              title={isAdded ? "Already in your Inbox." : "Saves the posting to your Inbox. No evaluation, no tokens."}
               className={cn(
                 "inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
                 isAdded ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-400" : "bg-surface-hover text-foreground hover:bg-brand-soft hover:text-brand-text",

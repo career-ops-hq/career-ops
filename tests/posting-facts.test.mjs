@@ -63,6 +63,32 @@ test('liveness log: uncertain and unreadable verdicts never overwrite a conclusi
   assert.equal(parsed.has('https://a.example.com/j/2'), false);
 });
 
+test('liveness log: a newer row written after an older one still wins when parsing raw text', () => {
+  const log = [
+    'url\tchecked_at\tresult',
+    'https://a.example.com/j/1\t2026-11-23T10:00:00\texpired',
+    'https://a.example.com/j/1\t2026-11-23T09:00:00\tactive',
+  ].join('\n');
+  assert.deepEqual(parseLivenessLog(log).get('https://a.example.com/j/1'), {
+    result: 'expired', day: '2026-11-23', at: '2026-11-23T10:00:00',
+  });
+});
+
+test('mergeLivenessLog selects the URL from a conclusive row, not a newer uncertain one', () => {
+  const log = [
+    'url\tchecked_at\tresult',
+    'https://a.example.com/j/1\t2026-11-20\tactive',
+    'https://a.example.com/j/1?utm_source=uncertain\t2026-11-22\tuncertain',
+  ].join('\n');
+  const lines = mergeLivenessLog(log, [], '2026-11-23').split('\n')
+    .filter((line) => line && !line.startsWith('url\t'));
+  assert.equal(lines.length, 1);
+  assert.ok(
+    lines[0].startsWith('https://a.example.com/j/1\t') && !lines[0].includes('utm_source'),
+    `URL must come from the conclusive row: ${lines[0]}`,
+  );
+});
+
 test('facts carry the liveness verdict joined by posting url', () => {
   const log = mergeLivenessLog('', [{ url: 'https://a.example.com/j/1', result: 'active', code: 'ok' }], '2026-11-20');
   const index = postingFactsIndex('', log);
