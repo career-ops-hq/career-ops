@@ -42,6 +42,8 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
   const [md, setMd] = useState("");
   const [seed, setSeed] = useState<CvSeed | null>(null);
   const [err, setErr] = useState("");
+  // The 404 reason from the route (no CLI resolved), shown with the Config link while it is the current error.
+  const [cliMissing, setCliMissing] = useState("");
   const [saveErr, setSaveErr] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const baseRef = useRef<{ content: string; exists: boolean } | null>(null);
@@ -120,7 +122,8 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
       const r = await fetch("/api/cv/ingest", { ...init, signal: abort.signal });
       const failure = await ingestErrorMessage(r);
       if (failure) {
-        setErr(r.status === 404 ? "needs-cli" : failure);
+        setErr(failure);
+        setCliMissing(r.status === 404 ? failure : "");
         setPhase("error");
         return;
       }
@@ -324,10 +327,10 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
           </div>
         </div>
         {phase === "error" &&
-          (err === "needs-cli" ? (
+          (cliMissing && err === cliMissing ? (
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-[13px] text-amber-800 dark:text-amber-300">
               <AlertTriangle className="size-3.5 shrink-0" />
-              <span>To convert a PDF, TeX or Word file, connect an AI CLI in Config. Paste or drop .md / .txt to start without one.</span>
+              <span>{err} Paste or drop .md / .txt to start without one.</span>
               <Link href="/config" className="ml-auto inline-flex items-center gap-1 rounded-md bg-amber-500/20 px-2.5 py-1 font-medium text-amber-800 transition hover:bg-amber-500/30 dark:text-amber-200">
                 Connect your AI CLI <ArrowRight className="size-3.5" />
               </Link>

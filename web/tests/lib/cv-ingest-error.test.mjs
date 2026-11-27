@@ -23,9 +23,15 @@ test("an error body without a usable `error` string also falls back", async () =
   }
 });
 
-test("404 keeps pointing at Config (no CLI connected)", async () => {
-  const msg = await ingestErrorMessage(json({ error: "whatever the route says" }, 404));
-  assert.equal(msg, "Connect an AI CLI in Config first — it parses your CV locally.");
+test("404 shows the route's reason, so a machine with no CLI is told to install one (#7868)", async () => {
+  const error = "CLI 'claude' not found on this machine, and no supported CLI is installed. Install one, then choose it in Config.";
+  assert.equal(await ingestErrorMessage(json({ error, installed: [] }, 404)), error);
+});
+
+test("404 without a usable reason falls back to pointing at Config", async () => {
+  for (const r of [json({}, 404), new Response("Not Found", { status: 404 })]) {
+    assert.equal(await ingestErrorMessage(r), "Connect an AI CLI in Config first — it parses your CV locally.");
+  }
 });
 
 test("an OK response is not an error, and its stream is left unread", async () => {
