@@ -81,3 +81,12 @@ test('a server that exits during startup is not blamed on the port', async () =>
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('an unknown or mistyped flag is rejected before anything starts', () => {
+  for (const arg of ['--prot=4000', '--no-opne', 'extra']) {
+    const run = spawnSync(process.execPath, [join(ROOT, 'scripts', 'ui-server.mjs'), arg], { encoding: 'utf-8', timeout: 15_000 });
+    assert.equal(run.status, 1, describeSpawn(run));
+    assert.match(run.stderr, /Unknown argument/);
+    assert.doesNotMatch(run.stdout, /Web UI:/);
+  }
+});

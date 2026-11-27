@@ -91,6 +91,9 @@ for (let i = 0; i < args.length; i++) {
     console.log("  --host=<addr>   Host interface to bind to (default: 127.0.0.1)");
     console.log("  --no-open       Do not open the browser automatically");
     process.exit(0);
+  } else {
+    console.error(`\x1b[31mError:\x1b[0m Unknown argument: "${arg}". Run with --help for usage.`);
+    process.exit(1);
   }
 }
 

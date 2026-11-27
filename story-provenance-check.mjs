@@ -157,7 +157,7 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { flagValue } from './lib/cli-flags.mjs';
+import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { splitStoryBlocks, isValidStory, getField, STORY_FIELDS } from './lib/story-bank.mjs';
@@ -387,19 +387,6 @@ function extractClaims(body) {
   }
   claims.sort((a, b) => a.index - b.index);
   return claims;
-}
-
-/**
- * Numeric values present anywhere in a text (cv.md), as a Set for O(1) lookup.
- * @param {string} text
- * @returns {Set<number>}
- */
-function extractNumbers(text) {
-  const out = new Set();
-  let m;
-  const re = new RegExp(NUMBER_SCAN_RE);
-  while ((m = re.exec(text)) !== null) out.add(parseFloat(m[0]));
-  return out;
 }
 
 /**
@@ -716,7 +703,7 @@ function diagnose(storyBankExists, cvExists, storyCount, claimCount, storyBankPa
 }
 
 // ── Exports (for test-all.mjs and other consumers) ───────────────────
-export { parseStoryBlocks, malformedEntries, extractClaims, extractNumbers, classifyStoryBank, classifyEntries, diagnose };
+export { parseStoryBlocks, malformedEntries, extractClaims, classifyStoryBank, classifyEntries, diagnose };
 
 // ── CLI ──────────────────────────────────────────────────────────────
 
@@ -977,6 +964,14 @@ if (isMainModule(import.meta.url)) {
   if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
     console.log(USAGE);
     process.exit(0);
+  }
+  // A bare `--cv` or `--cv=` names no file. Falling back to the default would
+  // check a file the caller did not ask for and report it as the result.
+  for (const flag of ['--story-bank', '--cv']) {
+    if (hasFlag(args, flag) && !flagValue(args, flag)) {
+      console.error(`Error: ${flag} requires a path.`);
+      process.exit(1);
+    }
   }
   if (selfTestMode) {
     runSelfTest();
