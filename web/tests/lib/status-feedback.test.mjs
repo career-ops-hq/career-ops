@@ -8,7 +8,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { statusFeedback } from "../../src/lib/status-feedback.mjs";
+import { savedLabel, statusFeedback } from "../../src/lib/status-feedback.mjs";
 
 test("a real seed with a date announces the date", () => {
   assert.deepEqual(statusFeedback({ seeded: true, nextDate: "2026-09-09" }), { kind: "followup", date: "2026-09-09" });
@@ -22,7 +22,10 @@ test("no follow-up in the response falls back to the plain confirmation", () => 
 test("an idempotent re-run says saved, not a date it did not schedule", () => {
   // set-status is idempotent: a second Applied reports seeded:false with a
   // reason. Announcing a follow-up there would claim something just happened.
-  assert.deepEqual(statusFeedback({ seeded: false, nextDate: null, reason: "already-seeded" }), { kind: "saved" });
+  // The CLI computes nextDate before the already-seeded check, so the real
+  // payload carries a date next to seeded:false. With a null date here the
+  // seeded === true guard was never exercised.
+  assert.deepEqual(statusFeedback({ seeded: false, nextDate: "2026-09-16", reason: "already-seeded" }), { kind: "saved" });
 });
 
 test("a failed seed does not surface as a scheduled follow-up", () => {
@@ -37,4 +40,11 @@ test("seeded true with no date never renders an undefined date", () => {
   for (const bad of [{ seeded: true, nextDate: null }, { seeded: true }, { seeded: true, nextDate: "" }]) {
     assert.deepEqual(statusFeedback(bad), { kind: "saved" }, JSON.stringify(bad));
   }
+});
+
+test("the label keeps the save confirmation and adds the date after it", () => {
+  // role="status" announces this text: a screen reader must still hear that
+  // the write succeeded, not only the date.
+  assert.equal(savedLabel({ kind: "followup", date: "2026-09-09" }), "saved · follow-up 2026-09-09");
+  assert.equal(savedLabel({ kind: "saved" }), "saved");
 });

@@ -7,7 +7,7 @@ import { CANONICAL_STATES, statusDot } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import { isStaleRowError, saveStatus } from "@/lib/pipeline-status.mjs";
 import { appliedWriteAllowed, statusEditAction } from "@/lib/applied-confirm.mjs";
-import { statusFeedback } from "@/lib/status-feedback.mjs";
+import { savedLabel, statusFeedback } from "@/lib/status-feedback.mjs";
 
 // Status writeback control. Updates the existing tracker row (status cell) via
 // /api/status — never adds rows. Reverts on failure; confirms with the
@@ -117,6 +117,9 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
       if (onSaved) onSaved(confirmed, restoreFocus);
       else router.refresh();
       onHeldSave?.({ type: "clear" });
+      // On a list tab the row can leave the tab it was in (Evaluated to Applied
+      // from the EVALUATED tab), which unmounts this editor: the follow-up
+      // date then shows only where the editor stays, the detail page and ALL.
       if (!mounted.current) return;
       setStatus(confirmed);
       setEditing(false);
@@ -239,7 +242,7 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
         {inline && savingNow && <span role="status" className="shrink-0 text-xs text-faint">saving…</span>}
         {inline && saved && (
           <span role="status" className="inline-flex shrink-0 animate-terminal-popup items-center gap-1 text-xs font-medium text-brand-text">
-            <Check aria-hidden="true" className="size-3" /> saved
+            <Check aria-hidden="true" className="size-3" /> {savedLabel(saved)}
           </span>
         )}
       </span>
@@ -258,7 +261,7 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
       {!inline && saved && (
         <span role="status" className="animate-terminal-popup inline-flex items-center gap-1 text-xs font-medium text-brand-text">
           <Check aria-hidden="true" className="size-3" />
-          {saved.kind === "followup" ? `follow-up ${saved.date}` : "saved"}
+          {savedLabel(saved)}
         </span>
       )}
       {errorShown && <span id={`${id}-error`} role="alert" className="basis-full whitespace-normal text-xs text-red-700 dark:text-red-400">{errorShown}</span>}

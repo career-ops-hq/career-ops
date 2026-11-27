@@ -21,3 +21,15 @@ export function statusFeedback(followupSeeded) {
   }
   return { kind: "saved" };
 }
+
+/**
+ * The text of that feedback. "saved" always leads: the role="status" region
+ * is the only write confirmation a screen reader gets, so the date is added
+ * to it rather than replacing it.
+ *
+ * @param {{ kind: "saved" }|{ kind: "followup", date: string }} feedback
+ * @returns {string}
+ */
+export function savedLabel(feedback) {
+  return feedback?.kind === "followup" ? `saved · follow-up ${feedback.date}` : "saved";
+}
