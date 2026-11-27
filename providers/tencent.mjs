@@ -111,7 +111,7 @@ export default {
     let partialReason = null;
     let succeededOnce = false;
 
-    for (const keyword of keywords) {
+    for (const [keywordIndex, keyword] of keywords.entries()) {
       for (let page = 1; page <= maxPages; page++) {
         if (firstRequest) firstRequest = false;
         else await sleep(INTER_PAGE_DELAY_MS, ctx);
@@ -129,7 +129,7 @@ export default {
           console.error(`  ⚠ tencent: keyword "${keyword}" page ${page} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
           // The rest of the board was never read: the result says so, so scan.mjs
           // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
-          return markKeywordScope(markTruncated([...seen.values()], partialReason ?? 'fetch-error', { fetched: seen.size }), 'keywords', keywords);
+          return markKeywordScope(markTruncated([...seen.values()], partialReason ?? 'fetch-error', { fetched: seen.size }), 'keywords', keywords.slice(0, keywordIndex + 1));
         }
         succeededOnce = true;
         const { jobs, total, rawCount } = parseTencentResponse(json, entry.name || '腾讯');

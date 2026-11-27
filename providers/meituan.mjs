@@ -133,7 +133,7 @@ export default {
     /** @type {'source-reports-more' | 'page-cap' | null} */
     let partialReason = null;
 
-    for (const keyword of keywords) {
+    for (const [keywordIndex, keyword] of keywords.entries()) {
       let total = 0;
 
       for (let pageNo = 1; pageNo <= maxPages; pageNo++) {
@@ -162,7 +162,7 @@ export default {
             console.error(`  ⚠ meituan: keyword "${keyword}" page ${pageNo} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
             // The rest of the board was never read: the result says so, so scan.mjs
             // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
-            return markKeywordScope(markTruncated([...seen.values()], partialReason ?? 'fetch-error', { fetched: seen.size }), 'keywords', keywords);
+            return markKeywordScope(markTruncated([...seen.values()], partialReason ?? 'fetch-error', { fetched: seen.size }), 'keywords', keywords.slice(0, keywordIndex + 1));
           }
           const parsed = parseMeituanResponse(json, entry.name || '美团');
           succeededOnce = true;

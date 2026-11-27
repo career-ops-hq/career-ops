@@ -284,6 +284,20 @@ try {
     return { success: true, content: { totalCount: 1, datas: [mkJob(7, '幸存岗位')] } };
   });
   const blipJobs = await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI', '大模型'] }, blip.ctx);
+  // The scope names the keywords the run reached, not the ones a failure kept it from:
+  // the blank (whole-board) query after the failure was never sent.
+  const reached = mkCtx(({ key }) => {
+    if (key === '大模型') throw new Error('HTTP 503');
+    return { success: true, content: { totalCount: 1, datas: [mkJob(7, '幸存岗位')] } };
+  });
+  const { result: reachedJobs } = await captureConsoleErrors(() =>
+    alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI', '大模型', 'Agent', ''] }, reached.ctx));
+  if (reachedJobs.truncated?.reason === 'fetch-error'
+      && JSON.stringify(reachedJobs.queryScope) === JSON.stringify({ config: 'keywords', queries: ['AI', '大模型'] })) {
+    pass('alibaba.fetch() scopes a partly read board to the keywords it reached');
+  } else {
+    fail(`alibaba.fetch() partial scope: truncated = ${JSON.stringify(reachedJobs.truncated)}, queryScope = ${JSON.stringify(reachedJobs.queryScope)}`);
+  }
   if (blipJobs.length === 1 && blipJobs[0].title === '幸存岗位') {
     pass('alibaba.fetch() keeps already-collected jobs when a later request fails');
   } else {

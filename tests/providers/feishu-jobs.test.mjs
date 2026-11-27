@@ -409,6 +409,19 @@ try {
     return { code: 0, data: { count: 1, job_post_list: [mkJob('7', '幸存岗位')] } };
   });
   const blipJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI', '大模型'] }, blip.ctx);
+  // The scope names the keywords the run reached, not the ones a failure kept it from:
+  // the blank (whole-board) query after the failure was never sent.
+  const reached = mkCtx(({ keyword }) => {
+    if (keyword === '大模型') throw new Error('HTTP 503');
+    return { code: 0, data: { count: 1, job_post_list: [mkJob('7', '幸存岗位')] } };
+  });
+  const reachedJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI', '大模型', 'Agent', ''] }, reached.ctx);
+  if (reachedJobs.truncated?.reason === 'fetch-error'
+      && JSON.stringify(reachedJobs.queryScope) === JSON.stringify({ config: 'keywords', queries: ['AI', '大模型'] })) {
+    pass('feishu-jobs.fetch() scopes a partly read board to the keywords it reached');
+  } else {
+    fail(`feishu-jobs.fetch() partial scope: truncated = ${JSON.stringify(reachedJobs.truncated)}, queryScope = ${JSON.stringify(reachedJobs.queryScope)}`);
+  }
   if (blipJobs.length === 1 && blipJobs[0].title === '幸存岗位') {
     pass('feishu-jobs.fetch() keeps already-collected jobs when a later request fails');
   } else {

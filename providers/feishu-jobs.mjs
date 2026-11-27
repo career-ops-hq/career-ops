@@ -178,7 +178,7 @@ export default {
     /** @type {'page-cap' | null} */
     let partialReason = null;
 
-    for (const keyword of keywords) {
+    for (const [keywordIndex, keyword] of keywords.entries()) {
       // Page 1 tells us the inventory size; the rest of the keyword's pages are
       // then fetched PAGE_CONCURRENCY at a time. Each request takes ~3s server
       // side, so a 5000-post board was ~150s sequential.
@@ -204,7 +204,7 @@ export default {
             console.error(`  ⚠ feishu-jobs: keyword "${keyword}" page ${batch[i]} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
             // The rest of the board was never read: the result says so, so scan.mjs
             // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
-            return markKeywordScope(markTruncated([...seen.values()], partialReason ?? 'fetch-error', { fetched: seen.size }), 'keywords', keywords);
+            return markKeywordScope(markTruncated([...seen.values()], partialReason ?? 'fetch-error', { fetched: seen.size }), 'keywords', keywords.slice(0, keywordIndex + 1));
           }
           const json = result.value;
           const sourcePage = Array.isArray(json?.data?.job_post_list) ? json.data.job_post_list : [];
