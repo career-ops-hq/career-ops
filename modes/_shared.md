@@ -45,7 +45,7 @@ All User Layer files (such as `cv.md`, `config/profile.yml`, `modes/_profile.md`
 ### Tracker Path Resolution Order:
 * **Explicit override**: If `CAREER_OPS_TRACKER` is set as an environment variable, use it as the absolute path to the tracker file (resolved relative to the repository root if it is a relative path).
 * **Default**: Otherwise, use `{DATA_ROOT}/data/applications.md` if it exists; if not, use `{DATA_ROOT}/applications.md`.
-* **Writing**: Write to the tracker the rules above find. Only when neither file exists, create `{DATA_ROOT}/data/applications.md` (or the `CAREER_OPS_TRACKER` path). `DATA_CONTRACT.md` → "Tracker Path & Writes" is the source for this rule.
+* **Writing**: Write to the tracker the rules above find. Only when the file those rules pick does not exist, create it: at the `CAREER_OPS_TRACKER` path when that is set, otherwise at `{DATA_ROOT}/data/applications.md`. `DATA_CONTRACT.md` → "Tracker Path & Writes" is the source for this rule.
 
 ---
 
