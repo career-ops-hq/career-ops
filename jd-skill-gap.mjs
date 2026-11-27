@@ -108,9 +108,19 @@ const QUALIFIED_REQUIREMENT_HEADER_RE = new RegExp(
 // bullet extraction runs). Stripping only doubled `**`/`__` markers — never
 // a single `*`/`_` — leaves a literal bullet character untouched, since a
 // real bullet is one asterisk, not two.
+const PREFERRED_HEADER_TERMS = [
+  'preferred', 'nice[- ]to[- ]have',
+  'it\\s+would\\s+be\\s+great\\s+if\\s+you\\s+ha(?:ve|d)',
+];
+const PREFERRED_HEADER_TERMS_CJK = [
+  '\u52A0\u5206\u9879',         // 加分项 (zh-CN)
+  '\u52A0\u5206\u9805\u76EE',   // 加分項目
+  '\u52A0\u5206\u689D\u4EF6',   // 加分條件
+];
+
 const REQUIREMENT_HEADER_RE = new RegExp(
   '^#{0,6}\\s*\u3010?\\s*(?:(?:' + [
-    'required', 'requirements', 'qualifications', 'must[- ]have', 'preferred', 'nice[- ]to[- ]have',
+    'required', 'requirements', 'qualifications', 'must[- ]have', ...PREFERRED_HEADER_TERMS,
     // (?:'|’)?\s*re|\s+are (not just (?:'|’)?\s*re): the contracted-only form
     // matched "we're"/"we re" but not the equally common uncontracted "we are"
     // (#4273 — the Netflix posting that surfaced this used the uncontracted,
@@ -129,7 +139,6 @@ const REQUIREMENT_HEADER_RE = new RegExp(
     // Postings that phrase must-have/nice-to-have as full sentences rather
     // than noun headings.
     "it(?:'|’)?s\\s+important\\s+to\\s+us\\s+that\\s+you\\s+have",
-    'it\\s+would\\s+be\\s+great\\s+if\\s+you\\s+ha(?:ve|d)',
     'ideal\\s+candidate',
     'skills\\s+(?:and|&)\\s+experience',
     ...QUALIFIED_REQUIREMENT_ARMS,
@@ -177,10 +186,7 @@ const REQUIREMENT_HEADER_RE = new RegExp(
     '\u4EFB\u804C\u8981\u6C42',   // 任职要求
     '\u4EFB\u804C\u8D44\u683C',   // 任职资格
     '\u6761\u4EF6\u8981\u6C42',   // 条件要求
-    // preferred / nice-to-have
-    '\u52A0\u5206\u9805\u76EE',   // 加分項目
-    '\u52A0\u5206\u689D\u4EF6',   // 加分條件
-    '\u52A0\u5206\u9879',         // 加分项 (zh-CN)
+    ...PREFERRED_HEADER_TERMS_CJK,
   ].join('|') + ')).*$',
   'im'
 );
@@ -293,6 +299,8 @@ const STOPWORDS = new Set([
   'bachelor', 'bachelors', 'master', 'masters', 'degree', 'diploma', 'certification', 'certificate',
   // experience / seniority boilerplate
   'experience', 'years', 'year', 'senior', 'junior', 'entry', 'level', 'minimum', 'preferred', 'required',
+  // Preferred bullet markers are not skill names.
+  'nice', 'plus',
   // generic sentence-starters that show up capitalized at the start of a bullet
   'candidates', 'candidate', 'applicants', 'applicant', 'ideal', 'successful',
   'knowledge', 'understanding', 'familiarity', 'exposure', 'background',
@@ -332,6 +340,57 @@ function isPhraseMatch(match) {
 const UNREAD_HAN_MIN = 4;
 const HAN_RE = /\p{Script=Han}/gu;
 
+const PREFERRED_HEADER_RE = new RegExp(
+  '^#{0,6}\\s*\u3010?\\s*(?:(?:' + [...PREFERRED_HEADER_TERMS, 'bonus(?:\\s+points)?', 'plus(?:es)?'].join('|') + ')s?\\b|(?:'
+  + PREFERRED_HEADER_TERMS_CJK.join('|') + ')).*$',
+  'im'
+);
+
+function isPreferredHeader(text) {
+  // Reuse the already recognized qualified-heading grammar. A qualifier may
+  // follow "Additional", while a mixed required/preferred label is uncertain.
+  if (/\b(?:required|mandatory|must)\b/i.test(text)) return false;
+  return PREFERRED_HEADER_RE.test(text)
+    || (QUALIFIED_REQUIREMENT_HEADER_RE.test(text) && /\b(?:desired|desirable)\b/i.test(text));
+}
+
+// Preferred terms identify the class; the rest of the line's shape decides
+// whether that class applies to a whole section or only this requirement.
+function isPreferredSectionHeader(line) {
+  const raw = line.trim();
+  const text = stripBoldMarkers(raw);
+  if (BULLET_LINE_RE.test(text) || !isPreferredHeader(text)) return false;
+  const label = text.replace(/^#{1,6}\s+/, '').replace(/\s+#+$/, '')
+    .replace(/^【\s*|\s*】$/g, '').trim();
+  // Sentence punctuation wins even inside bold or a Markdown heading.
+  if (/[.!?。！？]$/.test(label)) return false;
+  if (/[:：]$/.test(label) || /^#{1,6}\s/.test(raw)
+    || /^(?:\*\*[^*]+\*\*|__[^_]+__)$/.test(raw)) return true;
+  // Preserve the existing heading-plus-inline-list form, e.g.
+  // "Preferred: Rust; Scala"; a colon inside prose alone is not enough.
+  if (/[:：].+[;,、，；]/.test(label)) return true;
+  // Five words include "Nice to have backend experience" and
+  // "Preferred Skills and Experience", but exclude the six-word prose
+  // "Bonus points if you know Rust". The 60-code-point cap also bounds
+  // whitespace-free text (e.g. CJK). These are conservative shape limits,
+  // not a vocabulary of allowed heading nouns; explicit markup has no cap.
+  return !/[.!?。！？:：;,，；()（）]/.test(label)
+    && label.split(/\s+/).length <= 5 && [...label].length <= 60;
+}
+
+// Explicit optional wording can follow the skill list, too. Keep the scope
+// to one line; a following bullet still inherits its own section's class.
+function requirementLineClass(text, blockClass) {
+  const line = stripBoldMarkers(text).trim();
+  // A negated requirement is optional; "required, not just a plus" is not.
+  const explicitlyOptional = /\bpreferred\s+but\s+not\s+required[.!]?$/i.test(line);
+  const optionalWording = /\b(?:a plus|preferred|nice[- ]to[- ]have)[.!]?$/i.test(line)
+    || /^bonus\s+points\s+if\b/i.test(line);
+  const optionalLine = explicitlyOptional || (optionalWording
+    && !/\b(?:not|never|required|mandatory|must)\b/i.test(line));
+  return isPreferredHeader(line) || optionalLine ? 'preferred' : blockClass;
+}
+
 // The Set scanJd() collects skills into, plus the requirement lines it could
 // not read. A Set subclass, so addSkillTokens() keeps its (text, skills)
 // signature at every call site.
@@ -357,11 +416,30 @@ class SkillCollector extends Set {
  * failure the shared skill-extract.mjs module was introduced to end.
  *
  * @param {string} jdText
- * @returns {{skills: string[], sawRequirementSection: boolean}}
+ * @returns {{skills: string[], sawRequirementSection: boolean, unreadLines: string[],
+ *   required: string[], preferred: string[], sawRequiredSection: boolean, sawPreferredSection: boolean, hasAlternativeRequirements: boolean}}
  */
 function scanJd(jdText) {
   const lines = jdText.split('\n');
   const skills = new SkillCollector();
+  const required = new Set();
+  const preferred = new Set();
+  let blockClass = 'required';
+  let sawRequiredSection = false;
+  let sawPreferredSection = false;
+  let hasAlternativeRequirements = false;
+  // All extraction paths keep the flat result and unread-line diagnostics,
+  // while prescore receives only the tokens from the appropriate class.
+  const collectorFor = (classification, text = '') => {
+    if (classification === 'required' && /\b(?:one of|either)\b/i.test(text)) hasAlternativeRequirements = true;
+    return {
+      add(skill) {
+        skills.add(skill);
+        (classification === 'preferred' ? preferred : required).add(skill);
+      },
+      unreadLines: skills.unreadLines,
+    };
+  };
   let inRequirementsBlock = false;
   let sawRequirementSection = false;
 
@@ -381,9 +459,14 @@ function scanJd(jdText) {
       inRequirementsBlock = false;
       continue;
     }
-    if (REQUIREMENT_HEADER_RE.test(headerLine)) {
+    const preferredLine = isPreferredHeader(headerLine);
+    const preferredSection = isPreferredSectionHeader(line);
+    if (preferredSection || (REQUIREMENT_HEADER_RE.test(headerLine) && !preferredLine)) {
       inRequirementsBlock = true;
       sawRequirementSection = true;
+      blockClass = preferredSection ? 'preferred' : 'required';
+      if (blockClass === 'preferred') sawPreferredSection = true;
+      else sawRequiredSection = true;
       // "Requirements: SQL; dbt; Tableau" puts the whole list on the header
       // line, with no bullets under it. A separator is required so a sentence
       // such as "About you: Curious and kind" is not read as a list.
@@ -402,21 +485,22 @@ function scanJd(jdText) {
       // heading, so its known skills are kept — vocabulary names only. Every
       // other heading keeps the #5173 rule: a sentence after the colon ("About
       // you: Curious about Kubernetes.") is not a list.
-      if (/[;,、，；]/.test(inline)) addSkillTokens(inline, skills);
+      if (/[;,、，；]/.test(inline)) addSkillTokens(inline, collectorFor(blockClass, inline));
       else if (QUALIFIED_REQUIREMENT_HEADER_RE.test(headerLine)) {
-        for (const skill of extractSkills(inline)) skills.add(skill);
+        for (const skill of extractSkills(inline)) collectorFor(blockClass, inline).add(skill);
       }
       continue;
     }
+    const bulletMatch = preferredLine ? null : BULLET_LINE_RE.exec(line);
     if (inRequirementsBlock && line.trim() === '') continue;
-    if (inRequirementsBlock && /^#{1,6}\s/.test(line) && !REQUIREMENT_HEADER_RE.test(headerLine)) {
+    if (inRequirementsBlock && !preferredLine && /^#{1,6}\s/.test(line) && !REQUIREMENT_HEADER_RE.test(headerLine)) {
       inRequirementsBlock = false;
     }
 
     if (!inRequirementsBlock) continue;
-    const bulletMatch = BULLET_LINE_RE.exec(line);
     if (bulletMatch) {
-      addSkillTokens(bulletMatch[1], skills);
+      const lineClass = requirementLineClass(bulletMatch[1], blockClass);
+      addSkillTokens(bulletMatch[1], collectorFor(lineClass, bulletMatch[1]));
       continue;
     }
     // Text copied from a rendered posting page loses its list markers, so each
@@ -424,7 +508,7 @@ function scanJd(jdText) {
     // sides is a heading neither regex knows ("Core values"), and it closes the
     // block. A bare line next to other lines is a requirement.
     const isolated = (lines[i - 1] ?? '').trim() === '' && (lines[i + 1] ?? '').trim() === '';
-    if (isolated) {
+    if (isolated && !preferredLine) {
       inRequirementsBlock = false;
       continue;
     }
@@ -432,9 +516,12 @@ function scanJd(jdText) {
     // ("Possess a curiosity"). Drop it unless the vocabulary knows it as a skill.
     const opener = /^\s*([A-Z][a-z]+)\s+[a-z]/.exec(line);
     const unknownOpener = opener && extractSkills(opener[1]).size === 0;
-    addSkillTokens(unknownOpener ? line.slice(opener[0].length - 1) : line, skills);
+    addSkillTokens(unknownOpener ? line.slice(opener[0].length - 1) : line, collectorFor(requirementLineClass(line, blockClass), line));
   }
-  return { skills: [...skills], sawRequirementSection, unreadLines: skills.unreadLines };
+  return {
+    skills: [...skills], sawRequirementSection, unreadLines: skills.unreadLines,
+    required: [...required], preferred: [...preferred], sawRequiredSection, sawPreferredSection, hasAlternativeRequirements,
+  };
 }
 
 function addSkillTokens(text, skills) {
@@ -472,6 +559,32 @@ function addSkillTokens(text, skills) {
  */
 function extractJdSkills(jdText) {
   return scanJd(jdText).skills;
+}
+
+/**
+ * The same extraction, split by whether the header that opened the block asked
+ * for a MUST-have or a NICE-to-have.
+ *
+ * Added for prescore.mjs, which computes a coverage RATIO and therefore cannot
+ * use the flat list: a posting with two must-haves and eight nice-to-haves
+ * would score 20% on a perfect must-have match. extractJdSkills() above is
+ * unchanged: its own question is the same for both classes.
+ *
+ * A token named under both classes appears in both arrays; a caller scoring
+ * required coverage should read `required` and ignore the overlap.
+ *
+ * @param {string} jdText
+ * @returns {{required: string[], preferred: string[], sawRequired: boolean, sawPreferred: boolean, hasAlternativeRequirements: boolean}}
+ */
+function extractJdSkillsByClass(jdText) {
+  const scan = scanJd(jdText);
+  return {
+    required: scan.required,
+    preferred: scan.preferred,
+    sawRequired: scan.sawRequiredSection,
+    sawPreferred: scan.sawPreferredSection,
+    hasAlternativeRequirements: scan.hasAlternativeRequirements,
+  };
 }
 
 /**
@@ -720,7 +833,7 @@ function classifySkillGaps(jdSkills, cvText) {
 }
 
 // ── Exports (for test-all.mjs and other consumers) ───────────────────
-export { extractJdSkills, skillMentionedInText, classifySkillGaps, diagnoseExtraction, diagnoseCoverage };
+export { extractJdSkills, extractJdSkillsByClass, skillMentionedInText, classifySkillGaps, diagnoseExtraction, diagnoseCoverage };
 
 // ── CLI ──────────────────────────────────────────────────────────────
 
