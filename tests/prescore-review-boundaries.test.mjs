@@ -166,3 +166,39 @@ for (const allowanceLine of ['housing allowance EUR 500', '- Python experience; 
     assert.match(withoutCad.signals.requirements.evidence, /1 of 2 must-have/);
   });
 }
+
+test('preferred technical heading keeps optional skills out of the prescore gate', () => {
+  for (const newline of ['\n', '\r\n']) {
+    const jd = ['Title: Backend Developer', '## Requirements', '- Python', '## Preferred technical skills:', '- Rust', '- Docker'].join(newline);
+    const result = evaluate(jd, profile, 4.5);
+    assert.equal(result.score, 4.8);
+    assert.equal(result.verdict, 'proceed');
+    assert.match(result.signals.requirements.evidence, /1 of 1 must-have/);
+    assert.equal(DEFAULT_THRESHOLD, 3.0);
+  }
+});
+
+test('CLI preferred technical heading proceeds at the requested threshold', () => {
+  const root = mkdtempSync(join(tmpdir(), 'prescore-heading-'));
+  const selected = join(root, 'config/profile.yml');
+  mkdirSync(join(root, 'config'));
+  writeFileSync(selected, JSON.stringify(profile));
+  writeFileSync(join(root, 'cv.md'), 'Python\n');
+  try {
+    for (const newline of ['\n', '\r\n']) {
+      const input = ['Title: Backend Developer', '## Requirements', '- Python', '## Preferred technical skills:', '- Rust', '- Docker'].join(newline);
+      const child = spawnSync(process.execPath, [fileURLToPath(new URL('../prescore.mjs', import.meta.url)), '-', '--threshold', '4.5'], {
+        input, encoding: 'utf8', timeout: 10000, windowsHide: true,
+        env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PROFILE: selected },
+      });
+      assert.equal(child.status, 0, child.stderr);
+      const result = JSON.parse(child.stdout);
+      assert.equal(result.score, 4.8);
+      assert.equal(result.verdict, 'proceed');
+      assert.equal(result.threshold, 4.5);
+      assert.match(result.signals.requirements.evidence, /1 of 1 must-have/);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true, maxRetries: 5 });
+  }
+});

@@ -341,7 +341,7 @@ const UNREAD_HAN_MIN = 4;
 const HAN_RE = /\p{Script=Han}/gu;
 
 const PREFERRED_HEADER_RE = new RegExp(
-  '^#{0,6}\\s*\u3010?\\s*(?:(?:' + [...PREFERRED_HEADER_TERMS, 'bonus(?:\\s+points)?(?=\\s*(?:[:：]|$))', 'plus(?:es)?'].join('|') + ')s?\\b|(?:'
+  '^#{0,6}\\s*\u3010?\\s*(?:(?:' + [...PREFERRED_HEADER_TERMS, 'bonus(?:\\s+points)?', 'plus(?:es)?'].join('|') + ')s?\\b|(?:'
   + PREFERRED_HEADER_TERMS_CJK.join('|') + ')).*$',
   'im'
 );
@@ -354,18 +354,28 @@ function isPreferredHeader(text) {
     || (QUALIFIED_REQUIREMENT_HEADER_RE.test(text) && /\b(?:desired|desirable)\b/i.test(text));
 }
 
-// A section label must end at heading syntax, not continue into prose such
-// as "Preferred experience with Rust." or "Plus Rust experience.".
-const PREFERRED_SECTION_HEADER_RE = new RegExp(
-  '^#{0,6}\\s*【?\\s*(?:' + [
-    ...PREFERRED_HEADER_TERMS, 'bonus(?:\\s+points)?', 'plus(?:es)?', ...PREFERRED_HEADER_TERMS_CJK,
-  ].join('|') + ')(?:\\s+(?:qualifications?|requirements?|skills?|experience)(?:\\s+(?:and|&)\\s+experience)?)?[\\s#】]*(?:[:：(（]|$)',
-  'i'
-);
-
-function isPreferredSectionHeader(text) {
-  return isPreferredHeader(text)
-    && (PREFERRED_SECTION_HEADER_RE.test(text) || QUALIFIED_REQUIREMENT_HEADER_RE.test(text));
+// Preferred terms identify the class; the rest of the line's shape decides
+// whether that class applies to a whole section or only this requirement.
+function isPreferredSectionHeader(line) {
+  const raw = line.trim();
+  const text = stripBoldMarkers(raw);
+  if (BULLET_LINE_RE.test(text) || !isPreferredHeader(text)) return false;
+  const label = text.replace(/^#{1,6}\s+/, '').replace(/\s+#+$/, '')
+    .replace(/^【\s*|\s*】$/g, '').trim();
+  // Sentence punctuation wins even inside bold or a Markdown heading.
+  if (/[.!?。！？]$/.test(label)) return false;
+  if (/[:：]$/.test(label) || /^#{1,6}\s/.test(raw)
+    || /^(?:\*\*[^*]+\*\*|__[^_]+__)$/.test(raw)) return true;
+  // Preserve the existing heading-plus-inline-list form, e.g.
+  // "Preferred: Rust; Scala"; a colon inside prose alone is not enough.
+  if (/[:：].+[;,、，；]/.test(label)) return true;
+  // Five words include "Nice to have backend experience" and
+  // "Preferred Skills and Experience", but exclude the six-word prose
+  // "Bonus points if you know Rust". The 60-code-point cap also bounds
+  // whitespace-free text (e.g. CJK). These are conservative shape limits,
+  // not a vocabulary of allowed heading nouns; explicit markup has no cap.
+  return !/[.!?。！？:：;,，；()（）]/.test(label)
+    && label.split(/\s+/).length <= 5 && [...label].length <= 60;
 }
 
 // Explicit optional wording can follow the skill list, too. Keep the scope
@@ -449,11 +459,12 @@ function scanJd(jdText) {
       inRequirementsBlock = false;
       continue;
     }
-    if (REQUIREMENT_HEADER_RE.test(headerLine)
-      && (!isPreferredHeader(headerLine) || isPreferredSectionHeader(headerLine))) {
+    const preferredLine = isPreferredHeader(headerLine);
+    const preferredSection = isPreferredSectionHeader(line);
+    if (preferredSection || (REQUIREMENT_HEADER_RE.test(headerLine) && !preferredLine)) {
       inRequirementsBlock = true;
       sawRequirementSection = true;
-      blockClass = isPreferredHeader(headerLine) ? 'preferred' : 'required';
+      blockClass = preferredSection ? 'preferred' : 'required';
       if (blockClass === 'preferred') sawPreferredSection = true;
       else sawRequiredSection = true;
       // "Requirements: SQL; dbt; Tableau" puts the whole list on the header
@@ -480,18 +491,9 @@ function scanJd(jdText) {
       }
       continue;
     }
-    const bulletMatch = BULLET_LINE_RE.exec(line);
-    // A bare, bold or markdown "Bonus points:" separator changes the class
-    // before generic heading closure can discard its following bullets.
-    if (inRequirementsBlock && !BULLET_LINE_RE.test(headerLine) && isPreferredSectionHeader(headerLine)) {
-      blockClass = 'preferred';
-      sawPreferredSection = true;
-      const colon = headerLine.search(/[:：]/);
-      if (colon !== -1) addSkillTokens(headerLine.slice(colon + 1), collectorFor(blockClass));
-      continue;
-    }
+    const bulletMatch = preferredLine ? null : BULLET_LINE_RE.exec(line);
     if (inRequirementsBlock && line.trim() === '') continue;
-    if (inRequirementsBlock && /^#{1,6}\s/.test(line) && !REQUIREMENT_HEADER_RE.test(headerLine)) {
+    if (inRequirementsBlock && !preferredLine && /^#{1,6}\s/.test(line) && !REQUIREMENT_HEADER_RE.test(headerLine)) {
       inRequirementsBlock = false;
     }
 
@@ -506,7 +508,7 @@ function scanJd(jdText) {
     // sides is a heading neither regex knows ("Core values"), and it closes the
     // block. A bare line next to other lines is a requirement.
     const isolated = (lines[i - 1] ?? '').trim() === '' && (lines[i + 1] ?? '').trim() === '';
-    if (isolated) {
+    if (isolated && !preferredLine) {
       inRequirementsBlock = false;
       continue;
     }
