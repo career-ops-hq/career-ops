@@ -276,6 +276,13 @@ if (!existsSync(CLEAN_PATH)) {
       fail(`cleanForDisplay null/empty handling failed: null="${cleanForDisplay(null)}" undef="${cleanForDisplay(undefined)}"`);
     }
 
+    // Other falsy values are content, not missing input.
+    if (cleanForDisplay(0) === '0' && cleanForDisplay(false) === 'false') {
+      pass('cleanForDisplay: preserves numeric zero and false');
+    } else {
+      fail(`cleanForDisplay falsy-value handling failed: zero="${cleanForDisplay(0)}" false="${cleanForDisplay(false)}"`);
+    }
+
     // whitespace collapse and trim
     if (cleanForDisplay('  hello   world  \t\n  again  ') === 'hello world again') {
       pass('cleanForDisplay: collapses internal whitespace and trims ends');
@@ -286,10 +293,18 @@ if (!existsSync(CLEAN_PATH)) {
     // control character stripping (C0, DEL, C1)
     const withControls = `foo${ESC}[31mbar${BEL}${CRLF}baz\x7fqux\x80\x9f`;
     const cleaned = cleanForDisplay(withControls);
-    if (!/[\u0000-\u001f\u007f-\u009f]/.test(cleaned) && cleaned === 'foo[31mbar bazqux') {
-      pass('cleanForDisplay: strips C0, DEL, and C1 control characters');
+    if (!/[\u0000-\u001f\u007f-\u009f]/.test(cleaned) && cleaned === 'foobar bazqux') {
+      pass('cleanForDisplay: strips terminal sequences, C0, DEL, and C1 control characters');
     } else {
       fail(`cleanForDisplay control character strip failed: got "${cleaned}"`);
+    }
+
+    // Remove the whole OSC command rather than leaving its printable payload.
+    const withOscTitle = `${ESC}]0;forged-title${BEL}hello`;
+    if (cleanForDisplay(withOscTitle) === 'hello') {
+      pass('cleanForDisplay: strips complete OSC terminal commands');
+    } else {
+      fail(`cleanForDisplay OSC strip failed: got "${cleanForDisplay(withOscTitle)}"`);
     }
   } catch (e) {
     fail(`lib/clean.mjs crashed: ${e.message}`);
