@@ -15,7 +15,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
-import { matchInvite, normalizeCompanyName, companySimilarity, extractCompany, extractDate, extractReqId, extractPlatform, isAIInterviewerPlatform, classifyEmail, analyzeInvite, applyRejectionStatus, selectApplyTarget } from '../invite-match.mjs';
+import { matchInvite, normalizeCompanyName, companySimilarity, extractCompany, extractInterviewer, extractDate, extractInterviewDate, formatInviteNote, extractReqId, extractPlatform, isAIInterviewerPlatform, classifyEmail, analyzeInvite, applyStatusUpdate, applyRejectionStatus, applyInviteStatus, selectApplyTarget } from '../invite-match.mjs';
 import { pass, fail } from './helpers.mjs';
 
 console.log('\ninvite-match.mjs — interview invite matching');
@@ -288,6 +288,42 @@ function makeSandboxTracker(rows) {
   ]);
   const applied = applyRejectionStatus(999, { appsFile: sb.tracker });
   eq('applyRejectionStatus on a nonexistent tracker # reports a structured error, not a thrown exception', typeof applied.error, 'string');
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// --- #1960: --apply-to-Interview path (applyInviteStatus, real sandboxed tracker) ---
+
+{
+  const sb = makeSandboxTracker([
+    '| 1 | 2026-06-01 | Fabrikam | Engineer | 4.0/5 | Applied | ❌ | — | — |',
+  ]);
+  const applied = applyInviteStatus(1, { date: '2026-06-15', interviewer: 'Jane Doe' }, { appsFile: sb.tracker });
+  eq('applyInviteStatus reports the Interview transition', applied.newStatus, 'Interview');
+  eq('applyInviteStatus reports changed:true', applied.changed, true);
+  const content = readFileSync(sb.tracker, 'utf-8');
+  eq('applyInviteStatus actually writes Interview to the tracker on disk', /\|\s*Interview\s*\|/.test(content), true);
+  eq('applyInviteStatus records date and interviewer in the notes column', content.includes('Interview: 2026-06-15 with Jane Doe'), true);
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+{
+  // Re-running against an already-Interview row must be a safe no-op.
+  const sb = makeSandboxTracker([
+    '| 1 | 2026-06-01 | Fabrikam | Engineer | 4.0/5 | Interview | ❌ | — | Interview: 2026-06-15 with Jane Doe |',
+  ]);
+  const applied = applyInviteStatus(1, { date: '2026-06-15', interviewer: 'Jane Doe' }, { appsFile: sb.tracker });
+  eq('applyInviteStatus is idempotent — no-op re-run reports changed:false', applied.changed, false);
+  eq('applyInviteStatus idempotent re-run still reports newStatus Interview', applied.newStatus, 'Interview');
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+{
+  // A tracker # that doesn't exist must fail structured, not throw uncaught.
+  const sb = makeSandboxTracker([
+    '| 1 | 2026-06-01 | Fabrikam | Engineer | 4.0/5 | Applied | ❌ | — | — |',
+  ]);
+  const applied = applyInviteStatus(999, {}, { appsFile: sb.tracker });
+  eq('applyInviteStatus on a nonexistent tracker # reports a structured error, not a thrown exception', typeof applied.error, 'string');
   rmSync(sb.dir, { recursive: true, force: true });
 }
 
@@ -611,7 +647,7 @@ eq('rejection language wins when both invite and rejection phrasing appear (refe
 
 // classifyEmail phraseStrength & demoted phrases
 eq('a strong rejection phrase reports phraseStrength "strong"', classifyEmail('We are sorry to inform you that we have decided not to move forward with your application.').phraseStrength, 'strong');
-eq('an invite classification reports phraseStrength null', classifyEmail('We would like to invite you to schedule your phone screen.').phraseStrength, null);
+eq('an interview-specific invite reports strong phraseStrength', classifyEmail('We would like to invite you to schedule your phone screen.').phraseStrength, 'strong');
 eq('an unknown classification reports phraseStrength null', classifyEmail('Thanks for your recent purchase.').phraseStrength, null);
 eq('"not successful" alone (demoted phrase, unrelated context) does not classify as rejection', classifyEmail('We are sorry to report the negotiation was not successful.').classification !== 'rejection', true);
 eq('"regret to inform" alone (demoted phrase, non-candidate-directed context) does not classify as rejection', classifyEmail('We regret to inform all staff that the downtown office lease will not be renewed.').classification !== 'rejection', true);
@@ -650,3 +686,154 @@ eq('"unable to offer you" alone (demoted phrase, non-rejection context) does not
   eq('selectApplyTarget exposes the ranked candidate list on an ambiguous refusal', Array.isArray(ambiguousSelection.candidates) && ambiguousSelection.candidates.length === 2, true);
 }
 
+// --- #1960: extractInterviewer & formatInviteNote ---
+
+eq('extractInterviewer: "Interviewer: Jane Doe"', extractInterviewer('Interviewer: Jane Doe'), 'Jane Doe');
+eq('extractInterviewer: "Speaking with: Bob Smith"', extractInterviewer('Speaking with: Bob Smith'), 'Bob Smith');
+eq('extractInterviewer: conversational speaking with', extractInterviewer('You will be speaking with Sarah Connor on Tuesday'), 'Sarah Connor');
+eq('extractInterviewer: conversational meeting with', extractInterviewer('You\'ll be meeting with David Miller to discuss the role'), 'David Miller');
+eq('extractInterviewer: preserves accented characters', extractInterviewer('Interviewer: René Descartes'), 'René Descartes');
+eq('extractInterviewer: avoids matching the company name', extractInterviewer('Your interview with Acme Corp on Monday', 'Acme Corp'), null);
+eq('extractInterviewer: filters out generic non-person phrases', extractInterviewer('Looking forward to speaking with the team'), null);
+eq('extractInterviewer: returns null for empty text', extractInterviewer(''), null);
+
+eq('formatInviteNote: date and interviewer combined', formatInviteNote({ date: '2026-06-15', interviewer: 'Jane Doe' }), 'Interview: 2026-06-15 with Jane Doe');
+eq('formatInviteNote: date only', formatInviteNote({ date: '2026-06-15', interviewer: null }), 'Interview: 2026-06-15');
+eq('formatInviteNote: interviewer only', formatInviteNote({ date: null, interviewer: 'Jane Doe' }), 'Interview with Jane Doe');
+eq('formatInviteNote: neither date nor interviewer present', formatInviteNote({}), 'Interview scheduled');
+
+// --- #1960, #5016: extractDate ---
+
+eq('extractInterviewDate: ignores email Sent: header date and extracts scheduled interview date',
+  extractInterviewDate('Sent: Monday, June 1, 2026 10:00 AM\nSubject: Interview\n\nYour interview with Acme is scheduled for 2026-06-20.'),
+  '2026-06-20');
+eq('extractInterviewDate: ignores email Date: header date',
+  extractInterviewDate('Date: 2026-06-01\n\nWe look forward to speaking with you on June 20, 2026.'),
+  '2026-06-20');
+eq('extractInterviewDate: returns null when email only contains sent date and no interview date',
+  extractInterviewDate('Sent: 2026-06-01\nPlease use this link to book your interview: https://calendly.com/acme'),
+  null);
+eq('extractInterviewDate: returns null when date refers to application submission rather than interview schedule',
+  extractInterviewDate('Thank you for applying on 2026-05-15. We would love to chat!'),
+  null);
+eq('extractInterviewDate: extracts named date tied to "see you on"',
+  extractInterviewDate('See you on July 9, 2026 for the technical screen.'),
+  '2026-07-09');
+
+// --- #5016: classifyEmail phraseStrength on invite ---
+
+eq('classifyEmail: strong invite phrase reports phraseStrength "strong"',
+  classifyEmail('We would like to invite you to interview with Acme.').phraseStrength,
+  'strong');
+eq('classifyEmail: weak invite phrase reports phraseStrength "weak"',
+  classifyEmail('Please book a time to speak with our recruiter.').phraseStrength,
+  'weak');
+
+// --- #1960, #5016: selectApplyTarget invite confidence & safety gates ---
+
+const inviteExactResult = {
+  candidates: [{ appNumber: 701, nameScore: 1, status: 'Applied' }],
+  classification: 'invite',
+  phraseStrength: 'strong',
+};
+const inviteExactSel = selectApplyTarget(inviteExactResult, null);
+eq('selectApplyTarget auto-applies a sole exact-company candidate for invite classification', !inviteExactSel.error && inviteExactSel.target.appNumber, 701);
+
+const inviteClosedRejectedResult = {
+  candidates: [{ appNumber: 703, nameScore: 1, status: 'Rejected' }],
+  classification: 'invite',
+  phraseStrength: 'strong',
+};
+const inviteClosedRejectedSel = selectApplyTarget(inviteClosedRejectedResult, null);
+eq('selectApplyTarget refuses to auto-apply an invite to an already Rejected row', !!inviteClosedRejectedSel.error && inviteClosedRejectedSel.code === 2, true);
+eq('selectApplyTarget exposes candidate on closed Rejected refusal', inviteClosedRejectedSel.candidate && inviteClosedRejectedSel.candidate.appNumber, 703);
+
+const inviteClosedDiscardedResult = {
+  candidates: [{ appNumber: 704, nameScore: 1, status: 'Discarded' }],
+  classification: 'invite',
+  phraseStrength: 'strong',
+};
+const inviteClosedDiscardedSel = selectApplyTarget(inviteClosedDiscardedResult, null);
+eq('selectApplyTarget refuses to auto-apply an invite to an already Discarded row', !!inviteClosedDiscardedSel.error && inviteClosedDiscardedSel.code === 2, true);
+
+const inviteClosedSkipResult = {
+  candidates: [{ appNumber: 705, nameScore: 1, status: 'Skip' }],
+  classification: 'invite',
+  phraseStrength: 'strong',
+};
+const inviteClosedSkipSel = selectApplyTarget(inviteClosedSkipResult, null);
+eq('selectApplyTarget refuses to auto-apply an invite to a Skip row', !!inviteClosedSkipSel.error && inviteClosedSkipSel.code === 2, true);
+
+const inviteWeakPhraseResult = {
+  candidates: [{ appNumber: 706, nameScore: 1, status: 'Applied' }],
+  classification: 'invite',
+  phraseStrength: 'weak',
+};
+const inviteWeakPhraseSel = selectApplyTarget(inviteWeakPhraseResult, null);
+eq('selectApplyTarget refuses to auto-apply an invite with only weak phrase strength', !!inviteWeakPhraseSel.error && inviteWeakPhraseSel.code === 2, true);
+
+const inviteClosedOverrideSel = selectApplyTarget(inviteClosedRejectedResult, 703);
+eq('selectApplyTarget honors explicit --id to apply invite to closed row', !inviteClosedOverrideSel.error && inviteClosedOverrideSel.target.appNumber, 703);
+
+const inviteFuzzyResult = {
+  candidates: [{ appNumber: 702, nameScore: 0.6, status: 'Applied' }],
+  classification: 'invite',
+  phraseStrength: 'strong',
+};
+const inviteFuzzySel = selectApplyTarget(inviteFuzzyResult, null);
+eq('selectApplyTarget refuses to auto-apply a sole fuzzy candidate for invite classification', !!inviteFuzzySel.error && inviteFuzzySel.code === 2, true);
+eq('selectApplyTarget exposes candidate on fuzzy invite refusal', inviteFuzzySel.candidate && inviteFuzzySel.candidate.appNumber, 702);
+
+const inviteIdSel = selectApplyTarget(inviteFuzzyResult, 702);
+eq('selectApplyTarget honors explicit --id for invite classification even with fuzzy candidate', !inviteIdSel.error && inviteIdSel.target.appNumber, 702);
+
+// --- #5016: applyStatusUpdate shared helper ---
+
+{
+  const sb = makeSandboxTracker([
+    '| 1 | 2026-06-01 | Fabrikam | Engineer | 4.0/5 | Applied | ❌ | — | — |',
+  ]);
+  const applied = applyStatusUpdate(1, 'Interview', { note: 'Interview scheduled', appsFile: sb.tracker });
+  eq('applyStatusUpdate reports newStatus Interview', applied.newStatus, 'Interview');
+  eq('applyStatusUpdate records note in tracker', readFileSync(sb.tracker, 'utf-8').includes('Interview scheduled'), true);
+  rmSync(sb.dir, { recursive: true, force: true });
+}
+
+// --- #1960: CLI --apply on invite text ---
+
+{
+  const sb = makeSandboxTracker([
+    '| 1 | 2026-06-01 | Fabrikam | Engineer | 4.0/5 | Applied | ❌ | — | — |',
+  ]);
+  const inviteEmail = 'Schedule your interview with Fabrikam\nInterview scheduled for 2026-06-20\nInterviewer: Alex Rivera';
+  try {
+    const stdout = execFileSync(process.execPath, [SCRIPT_PATH, '--apply'], {
+      encoding: 'utf-8',
+      cwd: dirname(SCRIPT_PATH),
+      env: { ...process.env, CAREER_OPS_TRACKER: sb.tracker },
+      input: inviteEmail,
+    });
+    const parsed = JSON.parse(stdout);
+    eq('CLI: --apply on invite text advances status to Interview', parsed.applied.newStatus, 'Interview');
+    eq('CLI: --apply on invite text marks changed: true', parsed.applied.changed, true);
+    const content = readFileSync(sb.tracker, 'utf-8');
+    eq('CLI: --apply on invite text actually writes to tracker file', /\|\s*Interview\s*\|/.test(content), true);
+    eq('CLI: --apply on invite text writes date and interviewer note', content.includes('Interview: 2026-06-20 with Alex Rivera'), true);
+  } finally {
+    rmSync(sb.dir, { recursive: true, force: true });
+  }
+}
+
+
+{
+  const webinar = analyzeInvite('Company: Fabrikam\nWe would like to invite you to our webinar.', [
+    { num: 900, company: 'Fabrikam', role: 'Developer', status: 'Applied' },
+  ]);
+  eq('a generic webinar invitation is weak', webinar.phraseStrength, 'weak');
+  eq('a webinar invitation cannot automatically update the tracker', selectApplyTarget(webinar, null).code, 2);
+}
+
+for (const status of ['**Rejected**', 'Rejected 2026-06-20', '**Discarded**', 'Skip 2026-06-20']) {
+  const result = { classification: 'invite', phraseStrength: 'strong', candidates: [{ appNumber: 900, nameScore: 1, status }] };
+  eq(`closed display status ${status} needs explicit confirmation`, selectApplyTarget(result, null).code, 2);
+}
