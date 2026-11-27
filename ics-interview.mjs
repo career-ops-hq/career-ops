@@ -268,7 +268,10 @@ function onsetIn(obs, year) {
   if (onset < first) return null;
   if (rule.until) {
     const u = rule.until;
-    const untilMs = Date.UTC(u.y, u.mo - 1, u.d, u.h, u.mi, u.s) + (u.kind === 'utc' ? offsetMinutesToMs(obs.from) : 0);
+    // A DATE-valued UNTIL bounds the whole named day, not its midnight (RFC 5545 3.3.10).
+    const untilMs = u.kind === 'date'
+      ? Date.UTC(u.y, u.mo - 1, u.d + 1) - 1
+      : Date.UTC(u.y, u.mo - 1, u.d, u.h, u.mi, u.s) + (u.kind === 'utc' ? offsetMinutesToMs(obs.from) : 0);
     if (onset > untilMs) return null;
   }
   return onset;
