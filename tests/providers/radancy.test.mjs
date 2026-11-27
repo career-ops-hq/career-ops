@@ -17,6 +17,13 @@ try {
   else fail('radancy.resolveListUrl() should keep the search-jobs URL');
   if (radListUrl({ careers_url: 'https://careers.munichre.com/de/some-page' }) === 'https://careers.munichre.com/de/search-jobs') pass('radancy.resolveListUrl() defaults to /{lang}/search-jobs');
   else fail(`radancy.resolveListUrl() default wrong: ${radListUrl({ careers_url: 'https://careers.munichre.com/de/some-page' })}`);
+  // An `http:` entry is upgraded, not fetched in the clear: this list page is
+  // what the whole board is read from, and every sibling adapter treats its
+  // board URL as https (softgarden, rheinmetall).
+  if (radListUrl({ careers_url: 'http://careers.munichre.com/de/some-page' }) === 'https://careers.munichre.com/de/search-jobs') pass('radancy.resolveListUrl() upgrades an http: board URL to https');
+  else fail(`radancy.resolveListUrl() should upgrade http: to https, got ${radListUrl({ careers_url: 'http://careers.munichre.com/de/some-page' })}`);
+  if (radListUrl({ api: 'http://careers.munichre.com/en/search-jobs' }) === 'https://careers.munichre.com/en/search-jobs') pass('radancy.resolveListUrl() upgrades an http: explicit search-jobs URL to https');
+  else fail(`radancy.resolveListUrl() should upgrade the explicit http: search-jobs URL, got ${radListUrl({ api: 'http://careers.munichre.com/en/search-jobs' })}`);
 
   // detect — never auto-claims (branded hosts, wire explicitly).
   if (radancy.detect({ careers_url: 'https://careers.munichre.com/en/search-jobs' }) === null) pass('radancy.detect() returns null (explicit wiring only)');
@@ -284,6 +291,36 @@ try {
   else fail(`radancy.parseLegacyResults() Barclays locations = ${JSON.stringify(bcRows.map(r => r.location))}`);
   if (parseModernResults(LEGACY_BARCLAYS, 'https://x').length === 0) pass('radancy.parseModernResults() does not claim the Barclays card layout');
   else fail('radancy.parseModernResults() wrongly matched Barclays markup');
+
+  // A posting link the page hands back as an ABSOLUTE `http:` URL keeps its own
+  // scheme through `new URL(href, origin)`, so upgrading the board origin alone
+  // never reaches it. Both parsers must still return an https: posting URL.
+  const LEGACY_ABS_HTTP = `
+<ul><li>
+  <a href="http://careers.unitedhealthgroup.com/job/acton/patient-service-representative/34088/98479156752" data-job-id="98479156752" class="brand-facet">
+    <div><h2>Patient Service Representative</h2><span class="job-location 1">Acton, Massachusetts</span></div>
+  </a>
+  <button type="button" class="js-save-job-btn" data-job-id="98479156752"></button>
+</li></ul>`;
+  const absLegacy = parseLegacyResults(LEGACY_ABS_HTTP, 'https://careers.unitedhealthgroup.com');
+  if (absLegacy.length === 1 && absLegacy[0]?.url === 'https://careers.unitedhealthgroup.com/job/acton/patient-service-representative/34088/98479156752') pass('radancy.parseLegacyResults() upgrades an absolute http: posting link to https');
+  else fail(`radancy.parseLegacyResults() absolute http: link = ${JSON.stringify(absLegacy.map((r) => r.url))}`);
+
+  const MODERN_ABS_HTTP = '<html><li class="search-results-list__item job-list-01-list__item"><div class="search-results-list__content">'
+    + '<h5 class="search-results-list__job-title"><a class="search-results-list__job-link job-card-brand-hover--x" href="http://careers.munichre.com/en/job/city/40548453568-slug/3193/40548453568" data-job-id="40548453568" id="job-40548453568">Innendienst f&#252;r Versicherungsagentur</a></h5>'
+    + '<ul class="search-results-list__job-info-list"><li class="search-results-list__job-info job-list-01-list__job-info--location"><i class="icon"></i> <span>Bingen am Rhein, Germany</span> </li></ul></div></li></html>';
+  const absModern = parseModernResults(MODERN_ABS_HTTP, 'https://careers.munichre.com');
+  if (absModern.length === 1 && absModern[0]?.url === 'https://careers.munichre.com/en/job/city/40548453568-slug/3193/40548453568') pass('radancy.parseModernResults() upgrades an absolute http: posting link to https');
+  else fail(`radancy.parseModernResults() absolute http: link = ${JSON.stringify(absModern.map((r) => r.url))}`);
+
+  // A link that is not a posting at all is not an https posting URL either, so
+  // the row is skipped rather than carried into the tracker and the report.
+  const MODERN_NON_HTTP = '<html><li class="search-results-list__item"><div class="search-results-list__content">'
+    + '<h5 class="search-results-list__job-title"><a class="search-results-list__job-link" href="javascript:alert(1)" data-job-id="88">Not a posting</a></h5>'
+    + '<ul class="search-results-list__job-info-list"><li class="search-results-list__job-info job-list-01-list__job-info--location"><i class="icon"></i> <span>Berlin, Germany</span> </li></ul></div></li></html>';
+  const nonHttpModern = parseModernResults(MODERN_NON_HTTP, 'https://careers.munichre.com');
+  if (nonHttpModern.length === 0) pass('radancy.parseModernResults() skips a non-http(s) posting link');
+  else fail(`radancy.parseModernResults() should skip a javascript: link, got ${JSON.stringify(nonHttpModern.map((r) => r.url))}`);
 
   // ExampleCo list rows whose title is a class-named <span> inside the anchor
   // (not a heading) and whose location is a <span class="job-location">: the
