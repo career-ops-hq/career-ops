@@ -14,6 +14,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, rmSync, cpSync, readdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { validateManifest } from './plugins/_engine.mjs';
 import { hashPluginTree } from './plugins/_lock.mjs';
 import { auditPlugin } from './plugin-audit.mjs';
@@ -79,9 +80,9 @@ export function validateInstall(dir, expectId) {
  * plugins.local/<id>. Returns { id, manifest, integrity, dir } WITHOUT enabling
  * it (the caller runs the consent gate). Throws on any validation failure.
  */
-export function installFromRepo(root, { url, sha }) {
+export function installFromRepo(dataRoot, { url, sha }) {
   const { url: safeUrl, id } = parseRepoArg(url);
-  const dest = path.join(root, 'plugins.local', id);
+  const dest = path.join(dataRoot, 'plugins.local', id);
   if (existsSync(dest)) throw new Error(`plugins.local/${id} already exists — \`node plugins.mjs remove ${id}\` first`);
   let cloned = safeClone(safeUrl, sha);
   let result;
@@ -91,7 +92,7 @@ export function installFromRepo(root, { url, sha }) {
     rmSync(result.dir || cloned, { recursive: true, force: true });
     throw new Error(`plugin rejected:\n  - ${result.problems.join('\n  - ')}`);
   }
-  mkdirSync(path.join(root, 'plugins.local'), { recursive: true });
+  mkdirSync(path.join(dataRoot, 'plugins.local'), { recursive: true });
   cpSync(result.dir, dest, { recursive: true });
   rmSync(result.dir, { recursive: true, force: true });
   const tree = hashPluginTree(dest);
@@ -121,13 +122,22 @@ export function auditRegistryEntry(url, sha, expectId, onWarning = () => {}) {
 }
 
 /** Scaffold a new local plugin from plugins/_template/. */
-export function scaffoldNew(root, name) {
+export function scaffoldNew(dataRoot, name, root = dataRoot) {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error(`plugin name must match [a-z0-9-] (got "${name}")`);
-  const tpl = path.join(root, 'plugins', '_template');
+  let tpl = path.join(root, 'plugins', '_template');
+  if (!existsSync(tpl)) {
+    const fallbackTpl = path.join(dataRoot, 'plugins', '_template');
+    if (existsSync(fallbackTpl)) {
+      tpl = fallbackTpl;
+    } else {
+      const codeTpl = path.join(path.dirname(fileURLToPath(import.meta.url)), 'plugins', '_template');
+      if (existsSync(codeTpl)) tpl = codeTpl;
+    }
+  }
   if (!existsSync(tpl)) throw new Error('plugins/_template/ not found');
-  const dest = path.join(root, 'plugins.local', name);
+  const dest = path.join(dataRoot, 'plugins.local', name);
   if (existsSync(dest)) throw new Error(`plugins.local/${name} already exists`);
-  mkdirSync(path.join(root, 'plugins.local'), { recursive: true });
+  mkdirSync(path.join(dataRoot, 'plugins.local'), { recursive: true });
   cpSync(tpl, dest, { recursive: true });
   // The template ships its skill as skill.md.template so skill catalogs that
   // index any SKILL.md with frontmatter do not list the placeholder as a real

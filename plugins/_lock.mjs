@@ -12,13 +12,13 @@
 // WITHOUT a version bump (the postmark-mcp class). Stated plainly in README.
 
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync, readdirSync, lstatSync, renameSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, linkSync, mkdtempSync, rmSync, renameSync, readdirSync, lstatSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 const LOCK_VERSION = 1;
 
-export function lockPath(root) {
-  return path.join(root, 'plugins.lock');
+export function lockPath(dataRoot) {
+  return path.join(dataRoot, 'plugins.lock');
 }
 
 function sha256(buf) {
@@ -62,10 +62,24 @@ export function hashPluginTree(dir) {
   return { files, integrity: sha256(Buffer.from(aggregate)) };
 }
 
+// A path counts as absent only when the OS says it does not exist. Any other
+// stat failure (permissions, I/O) means the file's state is unknown, so the
+// legacy fallback must not stand in for it.
+function fileState(file) {
+  try { statSync(file); return 'present'; }
+  catch (err) { return err && (err.code === 'ENOENT' || err.code === 'ENOTDIR') ? 'absent' : 'error'; }
+}
+
 /** Read plugins.lock (fail-open to an empty lock — like the rest of the engine). */
-export function readLock(root) {
-  const file = lockPath(root);
-  if (!existsSync(file)) return { lockfileVersion: LOCK_VERSION, plugins: {} };
+export function readLock(dataRoot, root = dataRoot) {
+  let file = lockPath(dataRoot);
+  const primary = fileState(file);
+  if (primary === 'error') return { lockfileVersion: LOCK_VERSION, plugins: {} };
+  if (primary === 'absent' && root && path.resolve(root) !== path.resolve(dataRoot)) {
+    const fallback = lockPath(root);
+    if (fileState(fallback) === 'present') file = fallback;
+  }
+  if (fileState(file) !== 'present') return { lockfileVersion: LOCK_VERSION, plugins: {} };
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8'));
     if (!parsed || typeof parsed !== 'object' || typeof parsed.plugins !== 'object') return { lockfileVersion: LOCK_VERSION, plugins: {} };
@@ -75,11 +89,100 @@ export function readLock(root) {
   }
 }
 
+/**
+ * Persist a legacy code-root lock into the data root BEFORE lockGate relies on
+ * the readLock fallback (#7177 review). Without it, a split layout whose
+ * plugins all still match their legacy pins never writes
+ * dataRoot/plugins.lock: moving plugins.local as warned then leaves the only
+ * lock inside the replaceable code checkout, and the next load treats every
+ * plugin as unpinned — accepting its current files instead of checking the
+ * recorded consent. Every legacy entry is preserved verbatim through the same
+ * write path writeLockEntry() uses. Best-effort by contract: a legacy lock
+ * that does not parse is left where it is (readLock's fallback keeps serving
+ * it) rather than replaced by an empty one. The publish is atomic and
+ * no-replace (complete temp inside an exclusively created same-dir
+ * directory, then a hard link): a failed write or publish never leaves a
+ * PARTIAL final behind - on failure either the final stays absent (legacy
+ * checks keep running) or it is a concurrent writer's complete lock, which
+ * always wins. Only the directory this call provably owns is ever removed.
+ *
+ * @param {{writeFile?: Function, link?: Function}} [io] -
+ *   injection point for tests (same pattern as wasEverShippedUpstream's
+ *   revList); defaults to writeFileSync/linkSync.
+ * @returns {boolean} true when this call published the data-root lock.
+ */
+export function migrateLegacyLock(dataRoot, root = dataRoot, io = {}) {
+  const writeFile = io.writeFile || writeFileSync;
+  const link = io.link || linkSync;
+  if (!root || path.resolve(root) === path.resolve(dataRoot)) return false;
+  const target = lockPath(dataRoot);
+  if (fileState(target) !== 'absent') return false;
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(lockPath(root), 'utf8'));
+  } catch {
+    return false;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !parsed.plugins || typeof parsed.plugins !== 'object' || Array.isArray(parsed.plugins)) return false;
+  // Publish atomically: writing the final path directly (even with wx) can
+  // leave a partial file behind when the write fails midway. readLock probes
+  // existence, so a partial final masks the readable legacy lock and parses
+  // to an empty lock — same-version drift then repins as unpinned instead of
+  // failing the integrity check, and later migrations skip the existing
+  // target, so it never heals (#7251 review). Write the complete lock to a
+  // unique same-directory temp first, then publish it with a no-replace hard
+  // link: a lock created concurrently still wins, exactly as wx did. A write
+  // or publish failure removes only our own temp and leaves the final
+  // absent, so the legacy fallback keeps serving the old pins; no fsync or
+  // crash-durability guarantee is claimed beyond writeFileSync's own.
+  // Ownership is structural, never inferred from error codes: the complete
+  // lock is written inside a directory mkdtemp creates exclusively for this
+  // call, then published with a no-replace hard link. Only that owned
+  // directory is ever removed - a partial temp write, a racing winner, or an
+  // unsupported filesystem can never make cleanup touch a foreign file.
+  let tmpDir;
+  try {
+    tmpDir = mkdtempSync(path.join(path.dirname(target), `.migrate-${path.basename(target)}-`));
+  } catch {
+    return false; // cannot stage exclusively (permissions, read-only fs): nothing was created
+  }
+  try {
+    writeFile(path.join(tmpDir, 'plugins.lock'), JSON.stringify({ ...parsed, lockfileVersion: parsed.lockfileVersion ?? LOCK_VERSION }, null, 2) + '\n', 'utf8');
+    link(path.join(tmpDir, 'plugins.lock'), target);
+  } catch {
+    // Write failure: no final was created. Link EEXIST: a concurrent
+    // writer's complete lock won between the probe and the publish - that
+    // final takes precedence and is left untouched (no legacy fallback
+    // applies over existing consent). EPERM/EXDEV/ENOSYS: this
+    // platform/filesystem cannot hard-link - the final stays absent and the
+    // legacy fallback keeps running.
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* an owned orphan dir is harmless */ }
+    return false;
+  }
+  try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* publish already landed; an owned orphan dir is harmless */ }
+  return true;
+}
+
 // A torn file is not an empty lock. Reading it as empty and writing it back
-// would drop every other pin.
-export function readLockForUpdate(root) {
-  const file = lockPath(root);
-  if (!existsSync(file)) return { lockfileVersion: LOCK_VERSION, plugins: {} };
+// would drop every other pin. Reads the same file readLock does (the data-root
+// lock, else a legacy code-root lock), so a damaged legacy lock is refused too
+// instead of being migrated or re-pinned as if it were empty.
+export function readLockForUpdate(dataRoot, root = dataRoot) {
+  let file = lockPath(dataRoot);
+  const unreadable = (f) => new Error(`plugins.lock at ${f} could not be checked, so it was left unchanged.`);
+  const primary = fileState(file);
+  if (primary === 'error') throw unreadable(file);
+  if (primary === 'absent' && root && path.resolve(root) !== path.resolve(dataRoot)) {
+    const fallback = lockPath(root);
+    const legacy = fileState(fallback);
+    if (legacy === 'error') throw unreadable(fallback);
+    if (legacy === 'present') file = fallback;
+  }
+  // Only an absent file is an empty lock. An unreadable one here would drop
+  // a stale pin's drift check, the same reason the probes above throw.
+  const state = fileState(file);
+  if (state === 'error') throw unreadable(file);
+  if (state !== 'present') return { lockfileVersion: LOCK_VERSION, plugins: {} };
   let parsed;
   try {
     parsed = JSON.parse(readFileSync(file, 'utf8'));
@@ -92,9 +195,9 @@ export function readLockForUpdate(root) {
   return parsed;
 }
 
-function saveLock(root, lock) {
-  const file = lockPath(root);
-  const tmp = path.join(root, `.plugins.lock.${process.pid}.${randomUUID()}.tmp`);
+function saveLock(dataRoot, lock) {
+  const file = lockPath(dataRoot);
+  const tmp = path.join(dataRoot, `.plugins.lock.${process.pid}.${randomUUID()}.tmp`);
   try {
     writeFileSync(tmp, JSON.stringify(lock, null, 2) + '\n', 'utf8');
     renameSync(tmp, file);
@@ -105,18 +208,18 @@ function saveLock(root, lock) {
 }
 
 /** Merge a single entry into plugins.lock (never clobber other plugins' entries). */
-export function writeLockEntry(root, id, entry) {
-  const lock = readLockForUpdate(root);
+export function writeLockEntry(dataRoot, id, entry, root = dataRoot) {
+  const lock = readLockForUpdate(dataRoot, root);
   lock.lockfileVersion = LOCK_VERSION;
   lock.plugins[id] = entry;
-  saveLock(root, lock);
+  saveLock(dataRoot, lock);
 }
 
-export function removeLockEntry(root, id) {
-  const lock = readLockForUpdate(root);
+export function removeLockEntry(dataRoot, id, root = dataRoot) {
+  const lock = readLockForUpdate(dataRoot, root);
   if (!lock.plugins[id]) return;
   delete lock.plugins[id];
-  saveLock(root, lock);
+  saveLock(dataRoot, lock);
 }
 
 /**

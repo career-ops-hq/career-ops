@@ -101,22 +101,13 @@ test('install with no name is the add command, not an unknown command', () => {
   assert.doesNotMatch(r.stderr, /\[list \| available/);
 });
 
-test('the registry name reaches an installed plugin', { skip: linkedInInstalled }, (t) => {
-  const dir = LOCAL_LINKEDIN;
-  const localRoot = join(ROOT, 'plugins.local');
-  const createdLocalRoot = !existsSync(localRoot);
+test('the registry name reaches an installed plugin', () => {
   const data = mkdtempSync(join(tmpdir(), 'co-plugin-name-'));
-  let createdDir = false;
+  const localRoot = join(data, 'plugins.local');
+  const dir = join(localRoot, 'linkedin-alerts');
   try {
     mkdirSync(localRoot, { recursive: true });
-    try {
-      mkdirSync(dir);
-      createdDir = true;
-    } catch (error) {
-      if (error?.code !== 'EEXIST') throw error;
-      t.skip('plugins.local/linkedin-alerts appeared before setup');
-      return;
-    }
+    mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'manifest.json'), JSON.stringify({
       id: 'linkedin-alerts',
       name: 'Job alerts',
@@ -132,8 +123,6 @@ test('the registry name reaches an installed plugin', { skip: linkedInInstalled 
     assert.match(r.stderr, /ships no skill/);
     assert.doesNotMatch(`${r.stdout}\n${r.stderr}`, /Unknown plugin|not installed/);
   } finally {
-    if (createdLocalRoot) rmSync(localRoot, { recursive: true, force: true, maxRetries: 10 });
-    else if (createdDir) rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
     rmSync(data, { recursive: true, force: true, maxRetries: 10 });
   }
 });
