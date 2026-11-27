@@ -63,6 +63,17 @@ test('liveness log: uncertain and unreadable verdicts never overwrite a conclusi
   assert.equal(parsed.has('https://a.example.com/j/2'), false);
 });
 
+test('liveness log: a newer row written after an older one still wins when parsing raw text', () => {
+  const log = [
+    'url\tchecked_at\tresult',
+    'https://a.example.com/j/1\t2026-11-23T10:00:00\texpired',
+    'https://a.example.com/j/1\t2026-11-23T09:00:00\tactive',
+  ].join('\n');
+  assert.deepEqual(parseLivenessLog(log).get('https://a.example.com/j/1'), {
+    result: 'expired', day: '2026-11-23', at: '2026-11-23T10:00:00',
+  });
+});
+
 test('facts carry the liveness verdict joined by posting url', () => {
   const log = mergeLivenessLog('', [{ url: 'https://a.example.com/j/1', result: 'active', code: 'ok' }], '2026-11-20');
   const index = postingFactsIndex('', log);
