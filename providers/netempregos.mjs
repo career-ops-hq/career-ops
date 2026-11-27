@@ -15,10 +15,10 @@
 //
 // PUBLIC PAGES, NO AUTH. The listing pages are server-rendered HTML: 18 cards
 // a page, `page=N` (1-based) walks them, and the page states the total
-// ("807 ofertas encontradas"), which tells a full last page from a cut
-// listing. A page past the last says "Não encontrámos nenhuma oferta"
-// and has no results header. This provider keeps the URL's path and query,
-// drops any `page`, and walks the pages. For the programming category
+// ("807 ofertas encontradas"). A page past the last says "Não encontrámos
+// nenhuma oferta" and has no results header. This provider keeps the URL's
+// path and query, drops any `page`, and walks the pages until a short page or
+// until the cards read reach the stated total. For the programming category
 // (`categoria=5`) on 2026-11-26 the walk read 807 cards in 45 pages, the
 // total the page stated; 6 cards came twice, pushed one page on by ads posted
 // during the walk, and are kept once.
@@ -260,7 +260,6 @@ export default {
     let stop = 'cap';
     let stopError = '';
     let cardsRead = 0; // every card, dropped ones too: the stated total counts them
-    let statedTotal;
     for (let page = 1; page <= maxPages; page++) {
       if (page > 1) await sleep(INTER_PAGE_DELAY_MS, ctx);
       let parsed;
@@ -275,17 +274,18 @@ export default {
       }
       const { jobs, rawCount, noEmployer, unrecognised, total } = parsed;
       cardsRead += rawCount;
-      statedTotal = total;
       if (noEmployer) stats.dropped.no_employer = (stats.dropped.no_employer || 0) + noEmployer;
       if (unrecognised) stats.dropped.unrecognised = (stats.dropped.unrecognised || 0) + unrecognised;
       for (const job of jobs) if (!byUrl.has(job.url)) byUrl.set(job.url, job);
-      if (rawCount < PAGE_SIZE) {
+      // A short page is the last one. So is a full page once the cards read
+      // reach the stated total: no request for a page past the end, which the
+      // site may answer with its login page, and a full page at the cap is
+      // not reported as truncated.
+      if (rawCount < PAGE_SIZE || (total !== undefined && cardsRead >= total)) {
         stop = 'complete';
         break;
       }
     }
-    // A full page at the cap can still be the last one: the stated total says.
-    if (stop === 'cap' && statedTotal !== undefined && cardsRead >= statedTotal) stop = 'complete';
 
     const jobs = [...byUrl.values()];
     // Read by scan.mjs for the per-source summary; not part of the job list.

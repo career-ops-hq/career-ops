@@ -287,6 +287,42 @@ try {
   }
 
   {
+    // The stated total is read on every page: a listing of exactly 18 or 36
+    // ends on its last full page, with no request for the page past it, which
+    // the site may answer with its login page.
+    const login = '<html><head><title>Net-Empregos - Login de Candidato</title></head><body></body></html>';
+    const full = (n, offset) => {
+      const cards = [];
+      for (let i = 0; i < 18; i++) cards.push(card({ id: 3000 + offset + i, title: `Engineer ${offset + i}`, employer: 'Acme' }));
+      return listing(cards, { total: n });
+    };
+    let one = 0;
+    const single = await netempregos.fetch(entry, { sleep: noSleep, fetchText: async () => (one++ ? login : full(18, 0)) });
+    let two = 0;
+    const double = await netempregos.fetch(entry, { sleep: noSleep, fetchText: async () => (two < 2 ? full(36, 18 * two++) : (two++, login)) });
+    if (one === 1 && single.length === 18 && single.truncated === undefined
+      && two === 2 && double.length === 36 && double.truncated === undefined) {
+      pass('fetch() stops on the page whose cards reach the stated total, with no request past it');
+    } else {
+      fail(`fetch() stated total: ${one} and ${two} calls, ${single.length} and ${double.length} jobs, truncated=${JSON.stringify([single.truncated, double.truncated])}`);
+    }
+  }
+
+  {
+    // A later page that fails before the stated total is reached still marks
+    // the listing fetch-error.
+    const cards = [];
+    for (let i = 0; i < 18; i++) cards.push(card({ id: 4000 + i, title: `Engineer ${i}`, employer: 'Acme' }));
+    let n = 0;
+    const out = await netempregos.fetch(entry, {
+      sleep: noSleep,
+      fetchText: async () => { n++; if (n === 2) throw Object.assign(new Error('HTTP 404'), { status: 404 }); return listing(cards, { total: 40 }); },
+    });
+    if (n === 2 && out.length === 18 && out.truncated?.reason === 'fetch-error') pass('fetch() marks fetch-error when a page fails before the stated total is read');
+    else fail(`fetch() error before the total: ${n} calls, ${out.length} jobs, truncated=${JSON.stringify(out.truncated)}`);
+  }
+
+  {
     const search = 'https://www.net-empregos.com/pesquisa-empregos.asp?chaves=+data+engineer+&categoria=&cidade=';
     const scoped = await netempregos.fetch({ ...entry, careers_url: search }, { sleep: noSleep, fetchText: async () => page(3) });
     const plain = await netempregos.fetch(entry, { sleep: noSleep, fetchText: async () => page(3) });
