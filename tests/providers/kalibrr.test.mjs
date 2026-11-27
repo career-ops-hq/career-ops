@@ -192,8 +192,9 @@ try {
   console.warn = (msg) => warnings.push(String(msg));
   let capCalls = 0;
   const capSleeps = [];
+  let capped;
   try {
-    await kalibrr.fetch(
+    capped = await kalibrr.fetch(
       { name: 'Kalibrr', provider: 'kalibrr' },
       {
         fetchJson: async () => {
@@ -227,6 +228,15 @@ try {
     pass('kalibrr.fetch() warns that the cap cut a healthy board short');
   } else {
     fail(`kalibrr.fetch() truncation warnings = ${JSON.stringify(warnings)}`);
+  }
+
+  // scan.mjs reads the canonical mark (lib/board-truncation.mjs) to log the
+  // board partial instead of reachable.
+  const capMark = capped.truncated;
+  if (capMark?.reason === 'page-cap' && capMark.fetched === 2000 && capMark.total === 999999) {
+    pass('kalibrr.fetch() marks a page-cap stop truncated with fetched and total');
+  } else {
+    fail(`kalibrr.fetch() page-cap mark = ${JSON.stringify(capMark)}`);
   }
 
   // ── entry.max_pages is the canonical key; ctx.maxPages caps the walk ───
@@ -297,6 +307,8 @@ try {
   } else {
     fail(`kalibrr.fetch() warned during a probe: ${JSON.stringify(probeWarnings)}`);
   }
+  if (probe.truncated === undefined) pass('kalibrr.fetch() does not mark a ctx.maxPages cap truncated');
+  else fail(`kalibrr.fetch() marked a probe truncated: ${JSON.stringify(probe.truncated)}`);
 
   // ── Contentless bodies are an empty board, not a broken one ───────────
   for (const emptyBody of [null, {}, [], { jobs: null }, { jobs: [] }]) {
@@ -360,6 +372,12 @@ try {
     pass('kalibrr.fetch() does not blame max_pages for a fetch-error stop');
   } else {
     fail(`kalibrr.fetch() warned about max_pages after a fetch error: ${JSON.stringify(partialWarnings)}`);
+  }
+  const partialMark = partial.truncated;
+  if (partialMark?.reason === 'fetch-error' && partialMark.fetched === 2 && partialMark.total === 999) {
+    pass('kalibrr.fetch() marks a later-page fetch error truncated with fetched and total');
+  } else {
+    fail(`kalibrr.fetch() fetch-error mark = ${JSON.stringify(partialMark)}`);
   }
 
   // ── Bounded retry: a 429 is retried, then the policy applies ──────────
