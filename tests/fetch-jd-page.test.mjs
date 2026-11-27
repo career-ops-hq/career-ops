@@ -169,7 +169,7 @@ test('fetchJdViaPage says the page was unreachable when no HTTP response came ba
   const net = stubNetwork(() => { throw new Error('network down'); });
   try {
     const out = await fetchJdViaPage('https://careers.example.com/job/1');
-    assert.equal(out.unreachable, true);
+    assert.equal(out.kind, 'unreachable');
     assert.equal(out.text, undefined);
   } finally { net.restore(); }
 });
@@ -185,7 +185,7 @@ test('fetchJdViaPage reports a page answering 404 or 410 as closed, with no JD t
     const net = stubNetwork(() => new Response('<p>Not found</p>', { status, headers: { 'content-type': 'text/html' } }));
     try {
       const out = await fetchJdViaPage('https://careers.example.com/job/1');
-      assert.equal(out.closed, true, String(status));
+      assert.equal(out.kind, 'closed', String(status));
       assert.equal(out.text, undefined);
       assert.equal(out.evidence, `HTTP ${status}`);
     } finally { net.restore(); }
@@ -268,7 +268,7 @@ test('fetchJdViaPage passes the closure on even when the visible page still show
   const net = stubNetwork(() => html(page(visible, { posting: { validThrough: '2020-01-01T00:00:00Z' }, body: `<article>${BODY}</article>` })));
   try {
     const out = await fetchJdViaPage('https://careers.example.com/job/1');
-    assert.equal(out.closed, true);
+    assert.equal(out.kind, 'closed');
     assert.equal(out.text, undefined);
     assert.match(out.evidence, /validThrough 2020-01-01/);
   } finally { net.restore(); }
@@ -407,7 +407,7 @@ test('a visible closure banner makes the page closed even with no JSON-LD expiry
   const net = stubNetwork(() => html(page(`<p>${BODY}</p>`, { body: '<p>This job is no longer available.</p>' })));
   try {
     const out = await fetchJdViaPage('https://careers.example.com/job/1');
-    assert.equal(out.closed, true);
+    assert.equal(out.kind, 'closed');
     assert.equal(out.text, undefined, 'a closed page must not hand its JD to a scorer');
     assert.match(out.evidence, /^page text:/);
   } finally { net.restore(); }
@@ -417,7 +417,7 @@ test('closure wording inside a script or style is not visible page text', async 
   const net = stubNetwork(() => html(page(`<p>${BODY}</p>`, { body: '<script>var m="This job is no longer available.";</script><style>.x::after{content:"job is no longer available"}</style>' })));
   try {
     const out = await fetchJdViaPage('https://careers.example.com/job/1');
-    assert.ok(out && !out.closed, 'only text a reader sees counts');
+    assert.ok(out && out.kind === 'jd', 'only text a reader sees counts');
   } finally { net.restore(); }
 });
 
@@ -442,7 +442,7 @@ test('a closure banner written with numeric entities is still recognised', async
   const net = stubNetwork(() => html(page(`<p>${BODY}</p>`, { body: '<p>This job is no longer available &#8212; it&#39;s closed.</p>' })));
   try {
     const out = await fetchJdViaPage('https://careers.example.com/job/1');
-    assert.equal(out.closed, true);
+    assert.equal(out.kind, 'closed');
   } finally { net.restore(); }
 });
 
@@ -457,7 +457,7 @@ test('a job URL that redirects to a different page is a miss, not that page\'s p
 
 test('conditional text before a closure banner does not hide the banner', async () => {
   const net = stubNetwork(() => html(page(`<p>${BODY}</p>`, { body: '<div>Sign in to apply</div><div>This job is no longer available.</div>' })));
-  try { assert.equal((await fetchJdViaPage('https://careers.example.com/job/1')).closed, true); } finally { net.restore(); }
+  try { assert.equal((await fetchJdViaPage('https://careers.example.com/job/1')).kind, 'closed'); } finally { net.restore(); }
 });
 
 test('a ">" inside a quoted script attribute does not hide the ld+json block', () => {
@@ -478,7 +478,7 @@ test('a closure banner that only matches once &#39; is decoded is recognised', a
   const net = stubNetwork(() => html(page(`<p>${BODY}</p>`, { body: '<p>You can&#39;t view this job because it&#39;s not available</p>' })));
   try {
     const out = await fetchJdViaPage('https://careers.example.com/job/1');
-    assert.equal(out.closed, true);
+    assert.equal(out.kind, 'closed');
   } finally { net.restore(); }
 });
 
@@ -517,7 +517,7 @@ test('a page with no extractable JD but a closure banner is closed, not a plain 
   const net = stubNetwork(() => html('<html><body><h1>Careers</h1><p>This job is no longer available.</p></body></html>'));
   try {
     const out = await fetchJdViaPage('https://careers.example.com/job/1');
-    assert.equal(out?.closed, true);
+    assert.equal(out?.kind, 'closed');
     assert.match(out.evidence, /page text/);
   } finally { net.restore(); }
 });
@@ -575,7 +575,7 @@ test('a Phenom page that ships a hidden expiry view is not closed by that banner
   const net = stubNetwork(() => html(page(`<p>${BODY}</p>`, { body: tpl })));
   try {
     const out = await fetchJdViaPage('https://careers.example.com/job/1');
-    assert.ok(out && !out.closed);
+    assert.ok(out && out.kind === 'jd');
     assert.ok(out.text.length > 100);
   } finally { net.restore(); }
   assert.equal(pageClosureEvidence(page(`<p>${BODY}</p>`, { body: tpl }), 'https://careers.example.com/job/1'), null);

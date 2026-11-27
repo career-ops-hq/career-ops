@@ -932,9 +932,9 @@ export const JD_FETCHERS = {
  * @param {string} url
  * @param {number} [textCap]
  * @param {number} [timeoutMs]
- * @returns {Promise<{url: string, title: string, text: string, ats: string}|null>}
+ * @returns {Promise<{kind: 'jd', url: string, title: string, text: string, ats: string}|null>}
  *   null = not a JD_TEXT_API_ATS host, or the fetch/parse was inconclusive —
- *   caller should fall through to a browser-backed read.
+ *   caller should fall through to the next tier.
  */
 export async function fetchJdViaKnownApi(url, textCap = JD_TEXT_CAP, timeoutMs = API_TIMEOUT_MS) {
   const resolved = resolveJdApi(url);
@@ -950,7 +950,7 @@ export async function fetchJdViaKnownApi(url, textCap = JD_TEXT_CAP, timeoutMs =
   // declares none.
   const budgetMs = resolved.timeoutMs || timeoutMs;
   const result = await fetcher(resolved, url, textCap, budgetMs);
-  return result ? { ...result, ats: resolved.ats } : null;
+  return result ? { kind: 'jd', ...result, ats: resolved.ats } : null;
 }
 
 // ========================================================================
@@ -1240,7 +1240,7 @@ export function extractJd(page, url, { textCap = JD_TEXT_CAP, minWords = MIN_PAG
  * @param {string} url
  * @param {number} [textCap]
  * @param {number} [timeoutMs]
- * @returns {Promise<{url: string, title: string, text: string, method: string}|{closed: true, evidence: string}|{unreachable: true}|null>}
+ * @returns {Promise<{kind: 'jd', url: string, title: string, text: string, method: string}|{kind: 'closed', evidence: string}|{kind: 'unreachable'}|null>}
  *   null = nothing readable (not fetchable, not a JD, or ambiguous)
  */
 export async function fetchJdViaPage(url, textCap = JD_TEXT_CAP, timeoutMs = DEFAULT_TIMEOUT_MS, { visibleText = false } = {}) {
@@ -1249,10 +1249,11 @@ export async function fetchJdViaPage(url, textCap = JD_TEXT_CAP, timeoutMs = DEF
   if (isLinkedInHost(host)) return null;
   const page = await fetchHtml(url, timeoutMs);
   if (!page) return null;
-  if (page.unreachable) return { unreachable: true };
+  if (page.unreachable) return { kind: 'unreachable' };
   const closure = fetchedPageClosure(page, url);
-  if (closure) return { closed: true, evidence: closure };
-  return extractJd(page, url, { textCap, visibleText });
+  if (closure) return { kind: 'closed', evidence: closure };
+  const jd = extractJd(page, url, { textCap, visibleText });
+  return jd ? { kind: 'jd', ...jd } : null;
 }
 
 // ========================================================================
@@ -1566,7 +1567,7 @@ export async function withBrowserPage(url, timeoutMs, read) {
  * @param {string} url
  * @param {number} [textCap]
  * @param {number} [timeoutMs]
- * @returns {Promise<{url: string, title: string, text: string, bodyText: string, method: 'browser'}|{failure: {error: string, code: string}}>}
+ * @returns {Promise<{kind: 'jd', url: string, title: string, text: string, bodyText: string, method: 'browser'}|{kind: 'closed', evidence: string}|{kind: 'failed', failure: {error: string, code: string}}>}
  */
 export async function fetchJdViaBrowser(url, textCap = JD_TEXT_CAP, timeoutMs = DEFAULT_TIMEOUT_MS) {
   const read = await withBrowserPage(url, timeoutMs, async ({ page, response, finalUrl }) => {
@@ -1577,7 +1578,11 @@ export async function fetchJdViaBrowser(url, textCap = JD_TEXT_CAP, timeoutMs = 
     const failure = jdFailure(result, textCap);
     return failure ? { failure } : { ...result, method: 'browser' };
   });
-  return read.ok ? read.value : { failure: read.failure };
+  const out = read.ok ? read.value : { failure: read.failure };
+  if (!out.failure) return { kind: 'jd', ...out };
+  // A taken-down posting is closed, not a failed read.
+  if (out.failure.code === 'unavailable') return { kind: 'closed', evidence: out.failure.error };
+  return { kind: 'failed', failure: out.failure };
 }
 
 // ========================================================================
@@ -1609,17 +1614,12 @@ export async function fetchJdViaBrowser(url, textCap = JD_TEXT_CAP, timeoutMs = 
  */
 export async function fetchJd(url, { textCap = JD_TEXT_CAP, timeoutMs = DEFAULT_TIMEOUT_MS, visibleText = false, browser = false } = {}) {
   const viaApi = await fetchJdViaKnownApi(url, textCap, timeoutMs);
-  if (viaApi) return { kind: 'jd', ...viaApi };
+  if (viaApi) return viaApi;
   const viaPage = await fetchJdViaPage(url, textCap, timeoutMs, { visibleText });
-  if (viaPage?.closed) return { kind: 'closed', evidence: viaPage.evidence };
-  if (viaPage?.unreachable && !browser) return { kind: 'unreachable' };
-  if (viaPage && !viaPage.unreachable) return { kind: 'jd', ...viaPage };
+  // With the browser tier on, an unreachable page still gets one rendered try.
+  if (viaPage && (viaPage.kind !== 'unreachable' || !browser)) return viaPage;
   if (!browser) return { kind: 'miss' };
-  const viaBrowser = await fetchJdViaBrowser(url, textCap, timeoutMs);
-  if (!viaBrowser.failure) return { kind: 'jd', ...viaBrowser };
-  // A taken-down posting is closed, not a failed read.
-  if (viaBrowser.failure.code === 'unavailable') return { kind: 'closed', evidence: viaBrowser.failure.error };
-  return { kind: 'failed', failure: viaBrowser.failure };
+  return fetchJdViaBrowser(url, textCap, timeoutMs);
 }
 
 async function main() {

@@ -21,7 +21,7 @@ test('BambooHR JD reads only the requested open job from its tenant detail API',
   });
   assert.equal(resolveAtsApi(bamboo), null);
   assert.deepEqual(await fetchJdViaKnownApi(bamboo), {
-    url: bamboo, title: 'Platform Engineer', text: 'Build & operate services.\n\n- Node.js', ats: 'bamboohr',
+    kind: 'jd', url: bamboo, title: 'Platform Engineer', text: 'Build & operate services.\n\n- Node.js', ats: 'bamboohr',
   });
   opening.jobOpeningStatus = 'Closed';
   assert.equal(await fetchJdViaKnownApi(bamboo), null);
