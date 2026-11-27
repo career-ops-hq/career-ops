@@ -15,6 +15,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
+import { parseTrackerRow, resolveColumns, trackerRowIdentity } from '../tracker-parse.mjs';
 import { matchInvite, normalizeCompanyName, companySimilarity, extractCompany, extractInterviewer, extractDate, extractInterviewDate, formatInviteNote, extractReqId, extractPlatform, isAIInterviewerPlatform, classifyEmail, analyzeInvite, applyStatusUpdate, applyRejectionStatus, applyInviteStatus, selectApplyTarget } from '../invite-match.mjs';
 import { pass, fail } from './helpers.mjs';
 
@@ -798,6 +799,15 @@ eq('selectApplyTarget honors explicit --id for invite classification even with f
   eq('applyStatusUpdate records note in tracker', readFileSync(sb.tracker, 'utf-8').includes('Interview scheduled'), true);
   const refused = applyStatusUpdate(1, 'Interview', { expectStatus: 'Applied', appsFile: sb.tracker });
   eq('an already applied interview update remains idempotent', refused.changed, false);
+  const oldTracker = readFileSync(sb.tracker, 'utf8');
+  const lines = oldTracker.split('\n');
+  const originalRow = parseTrackerRow(lines.find(line => line.startsWith('| 1 |')), resolveColumns(lines));
+  const replacement = oldTracker.replace('Fabrikam', 'Replacement');
+  writeFileSync(sb.tracker, replacement);
+  const replaced = applyInviteStatus(1, {}, { expectStatus: 'Interview', expectRow: trackerRowIdentity(originalRow), appsFile: sb.tracker });
+  eq('a changed tracker row is refused even when the status matches', replaced.code, 'row-changed');
+  eq('refusing the replacement leaves the tracker untouched', readFileSync(sb.tracker, 'utf8'), replacement);
+  writeFileSync(sb.tracker, oldTracker);
   applyStatusUpdate(1, 'Rejected', { appsFile: sb.tracker });
   const stale = applyInviteStatus(1, {}, { expectStatus: 'Applied', appsFile: sb.tracker });
   eq('a stale invite cannot reopen a rejected tracker row', stale.code, 'status-changed');
@@ -810,7 +820,7 @@ eq('selectApplyTarget honors explicit --id for invite classification even with f
   const sb = makeSandboxTracker([
     '| 1 | 2026-06-01 | Fabrikam | Engineer | 4.0/5 | Applied | ❌ | — | — |',
   ]);
-  const inviteEmail = 'Schedule your interview with Fabrikam\nInterview scheduled for June 20, 2026. Reply by 2026-06-10.\nInterviewer: Alex Rivera';
+  const inviteEmail = 'Schedule your interview with Fabrikam\nInterview scheduled for 10 a.m. on June 20, 2026. Reply by 2026-06-10.\nInterviewer: Alex Rivera';
   try {
     const stdout = execFileSync(process.execPath, [SCRIPT_PATH, '--apply'], {
       encoding: 'utf-8',
