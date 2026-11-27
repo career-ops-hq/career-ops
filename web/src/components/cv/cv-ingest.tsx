@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -41,6 +42,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
   const [md, setMd] = useState("");
   const [seed, setSeed] = useState<CvSeed | null>(null);
   const [err, setErr] = useState("");
+  const [showConfigLink, setShowConfigLink] = useState(false);
   const [saveErr, setSaveErr] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const baseRef = useRef<{ content: string; exists: boolean } | null>(null);
@@ -87,6 +89,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
     }
     setWaitingForBase(true);
     setTrace("Reading the CV already on this machine…");
+    setShowConfigLink(false);
     setPhase("parsing");
   }, []);
   useEffect(() => {
@@ -106,6 +109,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
 
   // Stream the ingest, parsing markers live.
   const runStream = useCallback(async (init: RequestInit) => {
+    setShowConfigLink(false);
     setPhase("parsing");
     setTrace("Reading your CV…");
     setErr("");
@@ -119,7 +123,8 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
       const r = await fetch("/api/cv/ingest", { ...init, signal: abort.signal });
       const failure = await ingestErrorMessage(r);
       if (failure) {
-        setErr(failure);
+        setErr(failure.message);
+        setShowConfigLink(failure.configLink === true);
         setPhase("error");
         return;
       }
@@ -323,8 +328,9 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
           </div>
         </div>
         {phase === "error" && (
-          <p role="alert" className="flex items-center gap-1.5 text-[13px] text-amber-800 dark:text-amber-400">
+          <p role="alert" className="flex flex-wrap items-center gap-1.5 text-[13px] text-amber-800 dark:text-amber-400">
             <AlertTriangle className="size-3.5 shrink-0" /> {err}
+            {showConfigLink && <Link href="/config" className="font-medium underline">Connect your AI CLI</Link>}
           </p>
         )}
       </div>
