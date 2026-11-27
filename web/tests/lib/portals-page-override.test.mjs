@@ -13,6 +13,7 @@ import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "nod
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import * as yaml from "js-yaml";
 import "../helpers/web-ts-alias-loader.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -39,6 +40,7 @@ const mods = skipTs
   : {
       ...(await import("@/lib/career-ops")),
       ...(await import("@/lib/portals-config.mjs")),
+      ...(await import("@/lib/core/portals")),
     };
 
 test("watched companies load from CAREER_OPS_PORTALS when set", { skip: skipTs }, () => {
@@ -69,4 +71,45 @@ test("watched companies load from CAREER_OPS_PORTALS when set", { skip: skipTs }
     else process.env.CAREER_OPS_PORTALS = prevPortals;
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("Explorer uses the selected portals config for filter chips and ad hoc scan policy", { skip: skipTs }, (t) => {
+  const workspace = mkdtempSync(join(tmpdir(), "co-explore-portals-"));
+  const root = join(workspace, "data-root");
+  const defaultPath = join(root, "portals.yml");
+  const overridePath = join(workspace, "selected-portals.yml");
+  const prevRoot = process.env.CAREER_OPS_ROOT;
+  const prevPortals = process.env.CAREER_OPS_PORTALS;
+  t.after(() => {
+    if (prevRoot === undefined) delete process.env.CAREER_OPS_ROOT;
+    else process.env.CAREER_OPS_ROOT = prevRoot;
+    if (prevPortals === undefined) delete process.env.CAREER_OPS_PORTALS;
+    else process.env.CAREER_OPS_PORTALS = prevPortals;
+    rmSync(workspace, { recursive: true, force: true });
+  });
+  const expectedPolicy = { onsite_locations: ["Barcelona"], remote_countries: ["Spain"] };
+  mkdirSync(root);
+  writeFileSync(defaultPath, yaml.dump({
+    title_filter: { positive: ["Default Role"] },
+    location_filter: { workplace_policy: { remote_countries: ["France"] } },
+  }));
+  writeFileSync(overridePath, yaml.dump({
+    title_filter: { positive: ["Selected Role"] },
+    location_filter: { allow: ["Spain"], workplace_policy: expectedPolicy },
+  }));
+  process.env.CAREER_OPS_ROOT = root;
+  process.env.CAREER_OPS_PORTALS = overridePath;
+
+  const { filters } = mods.seedExploreFilters();
+  const overlay = mods.writeTempPortals(filters);
+  t.after(() => mods.cleanupTempPortals(overlay));
+  const parsed = yaml.load(readFileSync(overlay, "utf8"));
+  assert.deepEqual(parsed.title_filter.positive, ["Selected Role"]);
+  assert.deepEqual(parsed.location_filter.allow, ["Spain"]);
+  assert.deepEqual(parsed.location_filter.workplace_policy, expectedPolicy);
+
+  rmSync(overridePath);
+  const missingOverlay = mods.writeTempPortals(filters);
+  t.after(() => mods.cleanupTempPortals(missingOverlay));
+  assert.equal(yaml.load(readFileSync(missingOverlay, "utf8")).location_filter?.workplace_policy, undefined);
 });
