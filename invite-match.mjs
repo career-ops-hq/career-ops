@@ -41,7 +41,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
-import { resolveColumns, parseTrackerRow, extractReqNumber } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, extractReqNumber, trackerRowIdentity } from './tracker-parse.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -353,7 +353,9 @@ export function extractInterviewDate(text) {
   const body = String(text ?? '').replace(/^(?:sent|date|received|from|to|subject|cc|bcc)[ \t]*:[^\r\n]*/gim, '');
   for (const pattern of SCHEDULE_DATE_PATTERNS) {
     const match = body.match(pattern);
-    const schedule = match?.[1].split(/[.!?](?=\s|$)/, 1)[0];
+    // Keep a time abbreviation intact when it leads into a date.
+    const schedule = match?.[1].replace(/\b([ap])\.m\.(?=[ \t]+(?:on\b|[a-z]+[ \t]+\d|\d{4}-))/gi, '$1m')
+      .split(/[.!?](?=\s|$)/, 1)[0];
     const date = extractDate(schedule);
     if (date) return date;
   }
@@ -1138,7 +1140,7 @@ export function analyzeInvite(text, trackerRows = null, options = {}) {
  *
  * @param {number} appNumber - Tracker # to update (must be unambiguous).
  * @param {string} newStatus - Target status ('Rejected', 'Interview', etc.).
- * @param {{appsFile?: string, note?: string, expectStatus?: string}} [options] - appsFile overrides CAREER_OPS_TRACKER for the child process (tests only).
+ * @param {{appsFile?: string, note?: string, expectStatus?: string, expectRow?: string}} [options] - appsFile overrides CAREER_OPS_TRACKER for the child process (tests only).
  * @returns {object} set-status.mjs's own --json result (or its structured error).
  */
 export function applyStatusUpdate(appNumber, newStatus, options = {}) {
@@ -1146,6 +1148,7 @@ export function applyStatusUpdate(appNumber, newStatus, options = {}) {
   const env = options.appsFile ? { ...process.env, CAREER_OPS_TRACKER: options.appsFile } : process.env;
   const cmdArgs = [scriptPath, '--row', String(appNumber), newStatus];
   if (options.expectStatus) cmdArgs.push('--expect-status', options.expectStatus);
+  if (options.expectRow) cmdArgs.push('--expect-row', options.expectRow);
   if (options.note !== undefined && options.note !== null && options.note !== '') {
     cmdArgs.push('--note', options.note);
   }
@@ -1199,7 +1202,7 @@ export function applyRejectionStatus(appNumber, options = {}) {
  *
  * @param {number} appNumber - Tracker # to update (must be unambiguous).
  * @param {object} [signals] - Extracted signals {date, interviewer, ...}.
- * @param {{appsFile?: string, note?: string, expectStatus?: string}} [options] - appsFile overrides CAREER_OPS_TRACKER for the child process (tests only).
+ * @param {{appsFile?: string, note?: string, expectStatus?: string, expectRow?: string}} [options] - appsFile overrides CAREER_OPS_TRACKER for the child process (tests only).
  * @returns {object} set-status.mjs's own --json result (or its structured error).
  */
 export function applyInviteStatus(appNumber, signals = {}, options = {}) {
@@ -1393,7 +1396,8 @@ if (isMainModule(import.meta.url)) {
       text = readFileSync(0, 'utf-8'); // stdin
     }
 
-    const result = analyzeInvite(text, null, { clarificationDraft: !noClarificationDraft });
+    const trackerRows = loadTracker();
+    const result = analyzeInvite(text, trackerRows, { clarificationDraft: !noClarificationDraft });
 
     if (applyMode) {
       if (result.classification !== 'rejection' && result.classification !== 'invite') {
@@ -1423,7 +1427,10 @@ if (isMainModule(import.meta.url)) {
       const target = selection.target;
 
       const applyResult = result.classification === 'invite'
-        ? applyInviteStatus(target.appNumber, { ...result.signals, date: extractInterviewDate(text) }, { expectStatus: target.status })
+        ? applyInviteStatus(target.appNumber, { ...result.signals, date: extractInterviewDate(text) }, {
+          expectStatus: target.status,
+          expectRow: trackerRowIdentity(trackerRows.find(row => row.num === target.appNumber)),
+        })
         : applyRejectionStatus(target.appNumber);
       const output = { ...result, applied: applyResult };
       if (summaryMode) {
