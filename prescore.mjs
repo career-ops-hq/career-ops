@@ -647,12 +647,12 @@ export function scoreTitle(title, targets) {
 // Preserve both the skill clause and the original line/semicolon boundaries.
 function requirementsWithoutAllowances(jdText) {
   return String(jdText ?? '').split('\n').map((line) => line.split(';').map((line) => {
-    if (!/bonus|budget|stipend/i.test(line)) return line;
+    if (!/bonus|budget|stipend|allowance/i.test(line)) return line;
     const figures = extractJdComp(line).annual;
     if (!figures.length || figures.some((figure) => !figure.nonSalary)) return line;
     let label = line;
     for (const figure of figures) label = label.replace(figure.raw, '');
-    if (!/^\s*(?:[-*•]\s*)?(?:(?:relocation|signing|sign[- ]on)\s+bonus|training\s+budget|stipend)\s*:?\s*[.;]?\s*$/i.test(label)) return line;
+    if (!/^\s*(?:[-*•]\s*)?(?:(?:relocation|signing|sign[- ]on)\s+bonus|training\s+budget|stipend|(?:housing\s+)?allowance)\s*:?\s*[.;]?\s*$/i.test(label)) return line;
     return line.match(/^\s*(?:[-*•]\s*)?/)[0] + '[non-salary]';
   }).join(';')).join('\n');
 }

@@ -354,6 +354,20 @@ function isPreferredHeader(text) {
     || (QUALIFIED_REQUIREMENT_HEADER_RE.test(text) && /\b(?:desired|desirable)\b/i.test(text));
 }
 
+// A section label must end at heading syntax, not continue into prose such
+// as "Preferred experience with Rust." or "Plus Rust experience.".
+const PREFERRED_SECTION_HEADER_RE = new RegExp(
+  '^#{0,6}\\s*【?\\s*(?:' + [
+    ...PREFERRED_HEADER_TERMS, 'bonus(?:\\s+points)?', 'plus(?:es)?', ...PREFERRED_HEADER_TERMS_CJK,
+  ].join('|') + ')(?:\\s+(?:qualifications?|requirements?|skills?|experience)(?:\\s+(?:and|&)\\s+experience)?)?[\\s#】]*(?:[:：(（]|$)',
+  'i'
+);
+
+function isPreferredSectionHeader(text) {
+  return isPreferredHeader(text)
+    && (PREFERRED_SECTION_HEADER_RE.test(text) || QUALIFIED_REQUIREMENT_HEADER_RE.test(text));
+}
+
 // Explicit optional wording can follow the skill list, too. Keep the scope
 // to one line; a following bullet still inherits its own section's class.
 function requirementLineClass(text, blockClass) {
@@ -435,7 +449,8 @@ function scanJd(jdText) {
       inRequirementsBlock = false;
       continue;
     }
-    if (REQUIREMENT_HEADER_RE.test(headerLine)) {
+    if (REQUIREMENT_HEADER_RE.test(headerLine)
+      && (!isPreferredHeader(headerLine) || isPreferredSectionHeader(headerLine))) {
       inRequirementsBlock = true;
       sawRequirementSection = true;
       blockClass = isPreferredHeader(headerLine) ? 'preferred' : 'required';
@@ -468,7 +483,7 @@ function scanJd(jdText) {
     const bulletMatch = BULLET_LINE_RE.exec(line);
     // A bare, bold or markdown "Bonus points:" separator changes the class
     // before generic heading closure can discard its following bullets.
-    if (inRequirementsBlock && !BULLET_LINE_RE.test(headerLine) && isPreferredHeader(headerLine)) {
+    if (inRequirementsBlock && !BULLET_LINE_RE.test(headerLine) && isPreferredSectionHeader(headerLine)) {
       blockClass = 'preferred';
       sawPreferredSection = true;
       const colon = headerLine.search(/[:：]/);

@@ -154,3 +154,24 @@ test('bolded preferred headings remain optional after classifying requirements',
     assert.deepEqual(result.preferred, ['Kubernetes'], heading);
   }
 });
+
+for (const newline of ['\n', '\r\n']) {
+  for (const prose of ['Plus Rust experience.', 'Preferred experience with Rust.', 'Nice to have Rust experience.']) {
+    test((newline === '\n' ? 'LF' : 'CRLF') + ': optional prose preserves the required block: ' + prose, async () => {
+      const { extractJdSkillsByClass } = await import(pathToFileURL(join(ROOT, 'jd-skill-gap.mjs')).href);
+      const jd = ['Requirements:', '- Python', prose, '- Docker'].join(newline);
+      assert.deepEqual(extractJdSkills(jd), ['Python', 'Rust', 'Docker']);
+      const split = extractJdSkillsByClass(jd);
+      assert.deepEqual(split.required, ['Python', 'Docker']);
+      assert.deepEqual(split.preferred, ['Rust']);
+      assert.equal(split.sawPreferred, false);
+
+      for (const heading of ['Preferred qualifications', 'Preferred Skills and Experience', 'Preferred Skills & Experience', 'Preferred Qualifications and Experience', 'Additional desired qualifications', '【加分项】', 'Bonus points:', '## Bonus points', '**Bonus points:**']) {
+        const control = extractJdSkillsByClass(['Requirements:', '- Python', heading, '- Rust', '- Docker'].join(newline));
+        assert.deepEqual(control.required, ['Python'], heading);
+        assert.deepEqual(control.preferred, ['Rust', 'Docker'], heading);
+        assert.equal(control.sawPreferred, true, heading);
+      }
+    });
+  }
+}

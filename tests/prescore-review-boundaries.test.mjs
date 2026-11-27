@@ -154,3 +154,15 @@ test('cadence lookup respects line and clause boundaries without truncating pare
   assert.equal(result.annual.length, 2000);
   assert.ok(result.nonAnnual);
 });
+
+for (const allowanceLine of ['housing allowance EUR 500', '- Python experience; housing allowance EUR 500']) {
+  test('housing allowance stays out of must-have coverage: ' + allowanceLine, () => {
+    const jd = 'Title: Backend Developer\n## Requirements\n- Python experience\n' + allowanceLine + '\n- CAD experience\n';
+    const result = prescore({ jdText: jd, cvText: 'Python CAD', profile, threshold: 4.5 });
+    assert.match(result.signals.requirements.evidence, /2 of 2 must-have/);
+    assert.equal(result.signals.requirements.score, 5);
+    assert.equal(result.verdict, 'proceed');
+    const withoutCad = prescore({ jdText: jd, cvText: 'Python', profile, threshold: 4.5 });
+    assert.match(withoutCad.signals.requirements.evidence, /1 of 2 must-have/);
+  });
+}
