@@ -12,6 +12,8 @@ Headless worker command per CLI:
 | Copilot CLI | `copilot -p "prompt"` |
 | Gemini CLI | `gemini -p "prompt"` |
 | Grok Build CLI | `grok -p "prompt"` |
+| Hermes Agent | `hermes chat -q "prompt" --oneshot -Q --no-restore-cwd` (only explicitly non-writing workers; batch ranking does not support Hermes: see **Hermes workers** below) |
+| Oh My Pi | `omp -p "prompt"` |
 | **OpenCode** | `opencode run "prompt"` (falls back to `ollama launch opencode -y -- run "prompt"` if `opencode` binary is not in PATH) |
 | Pi | `pi -p --no-approve --no-skills --skill .agents/skills/career-ops "/skill:career-ops <request>"` (Pi 0.79.1+; no `evaluate`, `research`, `cover` or `pdf` worker: see **Pi workers** below) |
 | Qwen | `qwen -p "prompt"` |
@@ -20,6 +22,8 @@ Headless worker command per CLI:
 - **Headless:** `pi -p --no-approve --no-skills --skill .agents/skills/career-ops "/skill:career-ops <request>"` for one-shot workers, on Pi 0.79.1 or later; add `--mode json` when the caller parses events. Start the prompt with `/skill:career-ops`: Pi then puts the whole router in the prompt, while a plain prompt shows the model only the skill's name and description. `--no-skills` keeps a global skill named `career-ops` from taking the name. `--no-approve` runs the worker with the folder untrusted, even if you trusted it before, so the checkout's extensions and `.pi/` resources stay out; `--skill` still loads the router, and Pi 0.79.1 and later load `AGENTS.md` in an untrusted folder. Never give a worker `-a`: it trusts the checkout for the run and executes its project extensions without asking.
 - **Workers:** Pi never asks before a tool call, and its default tools include bash, edit and write. The web runs the `evaluate`, `research`, `cover` and `pdf` workers without write tools (`pdf` without Bash too), so never run evaluations (`oferta`, `auto-pipeline`, batch), research, cover letters or CV PDFs headless under Pi (see `docs/SUPPORTED_CLIS.md`).
 - **Example:** `pi -p --no-approve --no-skills --skill .agents/skills/career-ops "/skill:career-ops tracker"`
+
+**Hermes workers.** Only explicitly non-writing workers may use `hermes chat -q "prompt" --oneshot -Q --no-restore-cwd`. The worker inherits Hermes's configured tools, approvals, memory and project-context rules, and career-ops has no verified way to map a worker's grant onto Hermes's approval and sandbox controls, so the rule below cannot be enforced for a worker that writes: never run one under Hermes. The web refuses Hermes for any worker whose capability record has `writes: true` (`isCliAllowedForCapabilities` in `web/src/lib/cli-fencing.mjs`). Batch ranking does not support Hermes: `rank-pipeline.mjs --cli hermes` exits with an error. See `docs/HERMES.md`.
 
 **Headless worker permissions — one rule for every entry point (#2876).** A worker never gets more write power headless than the web grants the same worker kind. The web's grant is the audited one: `WRITE_CAPABLE_TOOLS` and the per-kind deny lists in `web/src/lib/claude-invocation.mjs` (`pdf` has had no Bash since #2172 and must never regain it).
 - Never add a blanket auto-approve flag (`--dangerously-skip-permissions`, `--always-approve`, `--yolo`, `--full-auto`, …) to a new spawner. If a CLI has no per-tool deny list to express the restriction, withhold the write-capable workers from that CLI instead of auto-approving them.
