@@ -15,6 +15,7 @@ These files contain your personal data, customizations, and work product. Update
 | `config/cv-facts.json` | Your CV fact-check allowlist and forbidden phrases |
 | `config/benchmarks.yml` | Your market calibration benchmark overrides (optional; copy `templates/benchmarks.yml` here and edit — read by `funnel-velocity.mjs`) |
 | `config/local-paths.txt` | Files *this clone* owns that upstream does not ship — one repo-relative path per line (optional; copy `config/local-paths.example.txt` here and edit). See [Fork-local paths](#fork-local-paths) below |
+| `config/system-overlay.txt` | System files this install edits and wants three-way merged with upstream on every update — one repo-relative file per line (optional). See [System file overlays](#system-file-overlays) below |
 | `modes/_profile.md` | Your archetypes, narrative, negotiation scripts |
 | `modes/_custom.md` | Your house rules, custom workflows & output preferences (procedural — survives updates) |
 | `modes/_brief.md` | Your compact profile brief (~1.5–2K tokens) read by the two-pass triage first pass |
@@ -97,6 +98,26 @@ Three declarations are refused, loudly, naming the entry:
 | An absolute path, or one containing `..` | Would extend "never touch" over files outside the checkout |
 | A path the system layer already ships | The file would silently stop receiving updates, with no other signal that it had been frozen |
 | `config/local-paths.txt` itself | It is gitignored by default, so nothing updates it; listing it protects against a threat that does not exist and reads as though it did. A fork whose CI runs the suite un-ignores and commits it (see `config/local-paths.example.txt`); it is then tracked and not ignored, which both guards accept |
+
+### System file overlays
+
+A direct edit to a system-layer file keeps the whole local file and skips upstream's changes to it: `apply` lists the file and leaves it alone, or, with `--force`, replaces it with upstream's version (your copy goes to `<file>.bak`). For an edit you mean to keep across updates while still taking upstream's changes, list the file in `config/system-overlay.txt` (gitignored, read at runtime):
+
+```text
+# one repo-relative file per line; blank lines and # comments ignored
+dashboard/internal/ui/screens/pipeline.go
+providers/greenhouse.mjs
+```
+
+For a listed file, `apply` runs a three-way merge (`git merge-file`) of your version, the upstream version your edits started from, and the new upstream version. The update records the upstream commit it installed (`refs/career-ops/overlay-base`) as the starting point for the next merge, and `rollback` restores the previous one.
+
+- **Clean merge:** the file gets both sides, and the update commit includes it. Your pre-merge version is in `<file>.bak`.
+- **Conflict:** the update stops before it changes any file. `<file>.overlay-merge.bak` holds the merge with conflict markers and `<file>.bak` your version. Resolve the markers, copy the result over the file, and run the update again, or use `--force` to take upstream's version.
+- **No merge possible** (upstream removed the file, or no earlier upstream version has it): the file is treated like any other local edit, and kept unless you pass `--force`.
+
+An entry must be a single file the system layer ships. A directory, a user-layer path, or a file the updater never touches is refused, naming the entry. Removing a line hands the file back to upstream: the next update replaces it like any system file.
+
+Use an overlay as a last resort. User-specific facts and house rules belong in the user-layer files above (`modes/_profile.md`, `modes/_custom.md`, `config/profile.yml`), and new integrations in a plugin. An overlay is for behaviour coupled to core code that neither can reach.
 
 ## System Layer (safe to auto-update)
 
