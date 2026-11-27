@@ -791,11 +791,16 @@ eq('selectApplyTarget honors explicit --id for invite classification even with f
 
 {
   const sb = makeSandboxTracker([
-    '| 1 | 2026-06-01 | Fabrikam | Engineer | 4.0/5 | Applied | ❌ | — | — |',
+    '| 1 | 2026-06-01 | Fabrikam | Engineer | 4.0/5 | Applied | ❌ | [Report](reports/042-fabrikam.md) | — |',
   ]);
   const applied = applyStatusUpdate(1, 'Interview', { note: 'Interview scheduled', appsFile: sb.tracker });
   eq('applyStatusUpdate reports newStatus Interview', applied.newStatus, 'Interview');
   eq('applyStatusUpdate records note in tracker', readFileSync(sb.tracker, 'utf-8').includes('Interview scheduled'), true);
+  const refused = applyStatusUpdate(1, 'Interview', { expectStatus: 'Applied', appsFile: sb.tracker });
+  eq('an already applied interview update remains idempotent', refused.changed, false);
+  applyStatusUpdate(1, 'Rejected', { appsFile: sb.tracker });
+  const stale = applyInviteStatus(1, {}, { expectStatus: 'Applied', appsFile: sb.tracker });
+  eq('a stale invite cannot reopen a rejected tracker row', stale.code, 'status-changed');
   rmSync(sb.dir, { recursive: true, force: true });
 }
 
@@ -805,7 +810,7 @@ eq('selectApplyTarget honors explicit --id for invite classification even with f
   const sb = makeSandboxTracker([
     '| 1 | 2026-06-01 | Fabrikam | Engineer | 4.0/5 | Applied | ❌ | — | — |',
   ]);
-  const inviteEmail = 'Schedule your interview with Fabrikam\nInterview scheduled for 2026-06-20\nInterviewer: Alex Rivera';
+  const inviteEmail = 'Schedule your interview with Fabrikam\nInterview scheduled for June 20, 2026. Reply by 2026-06-10.\nInterviewer: Alex Rivera';
   try {
     const stdout = execFileSync(process.execPath, [SCRIPT_PATH, '--apply'], {
       encoding: 'utf-8',
