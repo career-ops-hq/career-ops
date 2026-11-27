@@ -82,6 +82,22 @@ jobs:
       - name: Force LF checkout on Windows
         if: runner.os == 'Windows'
         run: git config --global core.autocrlf false
+      # The checkout is on D:, local NVMe. Temp and the caches default to C:,
+      # which is restored from a snapshot as the job runs, so the suites'
+      # fixture trees competed with that restore for I/O (#7909). Everything
+      # after this step writes them under RUNNER_TEMP on D: instead. A job-level
+      # env: cannot read runner.temp, hence a step.
+      - name: Keep temp and caches on the D drive on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/tmp"
+          {
+            echo "TEMP=$RUNNER_TEMP\\tmp"
+            echo "TMP=$RUNNER_TEMP\\tmp"
+            echo "npm_config_cache=$RUNNER_TEMP\\npm-cache"
+            echo "GOCACHE=$RUNNER_TEMP\\go-build"
+          } >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Test code (fork code, in a merge_group) must not find a token in .git/config.
@@ -194,6 +210,22 @@ jobs:
       - name: Force LF checkout on Windows
         if: runner.os == 'Windows'
         run: git config --global core.autocrlf false
+      # The checkout is on D:, local NVMe. Temp and the caches default to C:,
+      # which is restored from a snapshot as the job runs, so the suites'
+      # fixture trees competed with that restore for I/O (#7909). Everything
+      # after this step writes them under RUNNER_TEMP on D: instead. A job-level
+      # env: cannot read runner.temp, hence a step.
+      - name: Keep temp and caches on the D drive on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/tmp"
+          {
+            echo "TEMP=$RUNNER_TEMP\\tmp"
+            echo "TMP=$RUNNER_TEMP\\tmp"
+            echo "npm_config_cache=$RUNNER_TEMP\\npm-cache"
+            echo "GOCACHE=$RUNNER_TEMP\\go-build"
+          } >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Test code (fork code, in a merge_group) must not find a token in .git/config.
@@ -279,6 +311,22 @@ jobs:
       - name: Force LF checkout on Windows
         if: runner.os == 'Windows'
         run: git config --global core.autocrlf false
+      # The checkout is on D:, local NVMe. Temp and the caches default to C:,
+      # which is restored from a snapshot as the job runs, so the suites'
+      # fixture trees competed with that restore for I/O (#7909). Everything
+      # after this step writes them under RUNNER_TEMP on D: instead. A job-level
+      # env: cannot read runner.temp, hence a step.
+      - name: Keep temp and caches on the D drive on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/tmp"
+          {
+            echo "TEMP=$RUNNER_TEMP\\tmp"
+            echo "TMP=$RUNNER_TEMP\\tmp"
+            echo "npm_config_cache=$RUNNER_TEMP\\npm-cache"
+            echo "GOCACHE=$RUNNER_TEMP\\go-build"
+          } >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Test code (fork code, in a merge_group) must not find a token in .git/config.
