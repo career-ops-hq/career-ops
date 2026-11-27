@@ -42,6 +42,19 @@ eq('"Greenhouse" does not pick every posting hosted on boards.greenhouse.io', id
 const WORKDAY = 'id\turl\tsource\tnotes\n1\thttps://acme.wd5.myworkdayjobs.com/External/job/1\tWorkday\t\n2\thttps://globex.wd1.myworkdayjobs.com/Careers/job/2\tWorkday\t\n';
 eq('multi-tenant Workday: the tenant subdomain still matches', idsForCompanies(WORKDAY, 'globex'), ['2']);
 eq('multi-tenant Workday: "Workday" matches no tenant', idsForCompanies(WORKDAY, 'workday'), []);
+const SHARED = [
+  'id\turl\tsource\tnotes',
+  '1\thttps://apply.workable.com/acme/j/ABC123/\tWorkable\t',
+  '2\thttps://globex.breezy.hr/p/abc-analyst\tBreezy\t',
+  '3\thttps://jobs.jobvite.com/initech/job/oABC\tJobvite\t',
+  '4\thttps://umbrella.zohorecruit.com.au/jobs/Careers/1\tZoho\t',
+].join('\n') + '\n';
+for (const vendor of ['breezy', 'jobvite', 'workable', 'zohorecruit']) {
+  eq(`"${vendor}" does not pick every posting on its shared ATS host`, idsForCompanies(SHARED, vendor), []);
+}
+eq('shared ATS hosts: the path still names the company', idsForCompanies(SHARED, 'acme'), ['1']);
+eq('shared ATS hosts: the tenant subdomain still names the company', idsForCompanies(SHARED, 'globex, umbrella'), ['2', '4']);
+eq('a two-part suffix drops the vendor label too', companyOfUrl('https://umbrella.zohorecruit.com.au/jobs/Careers/1'), 'umbrella /jobs/Careers/1 ');
 
 const bad = spawnSync(NODE, ['batch/company-scope.mjs', '--input', 'x.tsv', '--company', ' , '], { cwd: ROOT, encoding: 'utf-8' });
 if (bad.status === 1 && /no usable name/.test(bad.stderr)) pass('CLI rejects a company list with no usable name');

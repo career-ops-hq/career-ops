@@ -36,7 +36,8 @@ export function companyOfNotes(notes) {
 
 /**
  * The part of a posting URL that can name the employer. On a known shared ATS
- * the vendor domain (its last two host labels: lever.co, myworkdayjobs.com…)
+ * the vendor domain (its last two host labels: lever.co, myworkdayjobs.com…;
+ * three under a two-part suffix such as zohorecruit.com.au)
  * names the platform, not the company, so only the tenant subdomain, the path
  * and the query are kept. Any other URL is used whole.
  */
@@ -44,7 +45,9 @@ export function companyOfUrl(url) {
   const text = String(url ?? '');
   if (!KNOWN_ATS_VENDORS.includes(atsVendorOf(text))) return text;
   const { hostname, pathname, search } = new URL(text.trim());
-  const tenant = hostname.split('.').slice(0, -2).join('.');
+  // A two-part suffix (zohorecruit.com.au) puts the vendor one label further in.
+  const vendorLabels = /\.com\.[a-z]{2}$/.test(hostname) ? 3 : 2;
+  const tenant = hostname.split('.').slice(0, -vendorLabels).join('.');
   return `${tenant} ${pathname} ${search}`;
 }
 
