@@ -2404,9 +2404,8 @@ export function isUnseenLanguageVersion(seenRows, candidate, siblings = []) {
 /**
  * The leading checkbox marker of a `data/pipeline.md` entry.
  *
- * Only ` ` and `x` are recognized, matching the pre-existing gates: `- [!]`
- * marks a URL that could not be fetched, which is not evidence a posting was
- * surfaced.
+ * Only ` `, `x`, and `X` are recognized. `- [!]` marks a URL that could not
+ * be fetched, which is not evidence a posting was surfaced.
  *
  * Anchored, because the URL it guards is then matched anywhere in the entry: a
  * hand-written note that happens to contain checkbox syntax mid-sentence and a
@@ -2414,7 +2413,7 @@ export function isUnseenLanguageVersion(seenRows, candidate, siblings = []) {
  * whitespace is tolerated so an indented entry still dedupes, as it did when the
  * URL had to sit immediately after the checkbox.
  */
-const PIPELINE_CHECKBOX_RE = /^\s*- \[[ x]\]\s+/;
+const PIPELINE_CHECKBOX_RE = /^\s*- \[[ xX]\]\s+/;
 
 /**
  * As `PIPELINE_CHECKBOX_RE`, but rejecting indentation.
@@ -2423,7 +2422,7 @@ const PIPELINE_CHECKBOX_RE = /^\s*- \[[ x]\]\s+/;
  * replaces: widening it would seed *more* role keys, and one role key suppresses
  * every other posting that shares it.
  */
-const PIPELINE_CHECKBOX_STRICT_RE = /^- \[[ x]\]\s+/;
+const PIPELINE_CHECKBOX_STRICT_RE = /^- \[[ xX]\]\s+/;
 
 /**
  * A labeled trailing segment of a pipeline entry, as written by the two writers
