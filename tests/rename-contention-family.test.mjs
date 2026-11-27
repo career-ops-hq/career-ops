@@ -26,8 +26,8 @@ console.log('\n📝 rename contention: no shipped core module calls bare renameS
 const ok = (cond, msg) => (cond ? pass(msg) : fail(msg));
 
 // lib/rename-retry.mjs defines renameSyncWithRetry and imports only node:fs,
-// so a module that must load without node_modules can use it. tracker-utils.mjs
-// re-exports it and defines writeFileAtomic on top of it.
+// so plugins/_lock.mjs can use it while doctor.mjs runs without node_modules.
+// tracker-utils.mjs re-exports it and defines writeFileAtomic on top of it.
 const DEFINITIONS = ['lib/rename-retry.mjs', 'tracker-utils.mjs'];
 
 // Files allowed a direct renameSync call, and why. Keep this list short: each
@@ -47,10 +47,6 @@ const EXEMPT = {
   // Renames inside a freshly created temp/scaffold directory, and the first
   // call already has a tolerant catch with an in-place fallback.
   'plugin-install.mjs': 'renames inside a directory it just created',
-  // doctor.mjs loads it through plugins/_engine.mjs and must run before
-  // `npm install` (tests/doctor-without-node-modules.test.mjs). It can move to
-  // lib/rename-retry.mjs, which has no dependencies; that is its own change.
-  'plugins/_lock.mjs': 'loaded by doctor.mjs without node_modules',
 };
 
 // Every core module git ships. The suites are out (fixtures rename by hand on
