@@ -66,6 +66,9 @@ const ATS_SAFE_FONTS = new Set([
   'apple sd gothic neo', 'malgun gothic', 'noto sans cjk kr', 'noto sans kr',
   'nanum gothic', 'pingfang tc', 'microsoft jhenghei', 'noto sans cjk tc',
   'noto sans tc', 'source han sans tc',
+  // Han-coverage fallback the template declares unconditionally (#6184), so the
+  // same reasoning as the Korean and Traditional Chinese stacks above applies.
+  'arial unicode ms',
 ]);
 
 // Generic CSS families — always valid, never "non-standard", so skip them.
@@ -318,6 +321,21 @@ function hasMultiColumn(blob) {
  */
 function extractStyleText(html) {
   return [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map(m => m[1]).join('\n');
+}
+
+/**
+ * Stylesheet text with comments and `:empty`-only rules removed, for the
+ * hidden-text check. A rule is kept if any one of its selectors can match an
+ * element that has content.
+ * @param {string} css
+ * @returns {string}
+ */
+function stripNonHidingRules(css) {
+  return css
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/([^{}]+)\{[^{}]*\}/g, (rule, selectors) => (
+      selectors.split(',').every(sel => /:empty\s*$/i.test(sel.trim())) ? '' : rule
+    ));
 }
 
 /**
@@ -756,10 +774,15 @@ function auditAts(html, opts = {}) {
 
   // 8. No hidden text / keyword stuffing. display:none / visibility:hidden /
   // font-size:0 are scanned across both <style> blocks and inline styles.
+  // CSS comments are not declarations, and a rule whose every selector ends in
+  // `:empty` only applies to an element with no content, so it cannot hide any
+  // text. The shipped templates collapse the optional consent footer that way
+  // (`.cv-consent:empty { display: none; }`), which docked them otherwise.
+  const hiddenScanBlobs = [stripNonHidingRules(css), ...inlineStyles];
   const hiddenSignals = [];
-  if (styleBlobs.some(s => /display\s*:\s*none/i.test(s))) hiddenSignals.push('display:none');
-  if (styleBlobs.some(s => /visibility\s*:\s*hidden/i.test(s))) hiddenSignals.push('visibility:hidden');
-  if (styleBlobs.some(s => /font-size\s*:\s*0(?:px|pt|em|rem|%)?\b/i.test(s))) hiddenSignals.push('font-size:0');
+  if (hiddenScanBlobs.some(s => /display\s*:\s*none/i.test(s))) hiddenSignals.push('display:none');
+  if (hiddenScanBlobs.some(s => /visibility\s*:\s*hidden/i.test(s))) hiddenSignals.push('visibility:hidden');
+  if (hiddenScanBlobs.some(s => /font-size\s*:\s*0(?:px|pt|em|rem|%)?\b/i.test(s))) hiddenSignals.push('font-size:0');
   // White text is checked on INLINE styles only, by design: a white color in a
   // <style> block is overwhelmingly legitimate (white-on-colored badges, section
   // headers, the header gradient), so scanning stylesheets for it would flag
