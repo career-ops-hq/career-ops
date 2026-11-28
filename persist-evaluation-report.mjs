@@ -91,11 +91,16 @@ export function writeEvaluationArtifacts(root, payload, fsImpl = fs) {
   }
 
   const tsv = trackerTsvLine({ num, today, company, role, score, reportFile, notes, via, url });
+  return writeEvaluationArtifactPair({ reportPath, markdown, tsvPath, tsv }, fsImpl);
+}
+
+/** Save a prepared report and tracker addition without replacing existing files. */
+export function writeEvaluationArtifactPair({ reportPath, markdown, tsvPath, tsv }, fsImpl = fs) {
   const attempted = [];
   let lock;
   try {
-    fsImpl.mkdirSync(reportsDir, { recursive: true });
-    fsImpl.mkdirSync(additionsDir, { recursive: true });
+    fsImpl.mkdirSync(path.dirname(reportPath), { recursive: true });
+    fsImpl.mkdirSync(path.dirname(tsvPath), { recursive: true });
     lock = tryAcquireDirLockSync(`${reportPath}.lock`, { staleMs: 30_000, createParent: true });
     if (!lock) throw new Error(`report is busy: ${reportPath}; retry the save`);
     writeNew(fsImpl, reportPath, markdown, attempted);

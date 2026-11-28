@@ -24,12 +24,13 @@ const fixture = `
   await finishPipelineBatch(PATHS.pipeline, [line, ''], new Map([[0, result]]));
 `;
 
-for (const { label, identity, valid } of [
+for (const { label, identity, valid, blocked } of [
   { label: 'missing role', identity: 'COMPANY: Example Corp' },
   { label: 'missing company', identity: 'ROLE: Platform Engineer' },
   { label: 'unknown role', identity: 'COMPANY: Example Corp\nROLE: Unknown' },
   { label: 'unknown company', identity: 'COMPANY: Unknown\nROLE: Platform Engineer' },
   { label: 'identified posting', identity: '**COMPANY:** Example Corp\n**ROLE:** Senior Platform Engineer', valid: true },
+  { label: 'tracker addition cannot be written', identity: 'COMPANY: Example Corp\nROLE: Platform Engineer', blocked: true },
 ]) {
   test(`Gemini batch: ${label}`, (t) => {
     const root = mkdtempSync(join(tmpdir(), 'cops-gemini-summary-'));
@@ -45,6 +46,9 @@ for (const { label, identity, valid } of [
       '|---|---|---|---|---|---|---|---|---|---|', originalRow, '',
     ].join('\n'));
     writeFileSync(pipeline, pending);
+    if (blocked) {
+      mkdirSync(join(root, 'batch', 'tracker-additions', '002-example-corp.tsv'), { recursive: true });
+    }
     const env = Object.fromEntries(Object.entries(process.env).filter(([name]) =>
       !/^(CAREER_OPS_|NODE_OPTIONS$|DOTENV_)/i.test(name)));
     Object.assign(env, {
@@ -57,6 +61,12 @@ for (const { label, identity, valid } of [
       cwd: root, env, encoding: 'utf8', timeout: 30_000,
     });
     run(['--input-type=module', '--eval', fixture]);
+    if (blocked) {
+      assert.equal(readFileSync(pipeline, 'utf8'), pending, 'a failed save must leave the posting pending');
+      assert.deepEqual(readdirSync(join(root, 'reports')).filter(name => !name.endsWith('-RESERVED.md')), [],
+        'a failed tracker addition must leave no visible evaluation report');
+      return;
+    }
     run([merge]);
 
     const saved = readFileSync(tracker, 'utf8');
