@@ -82,6 +82,7 @@ import { robotsAllows } from './robots-check.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { flagValue, hasFlag, safeIntFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { SLUG_RE } from './lib/ats-board-url.mjs';
 import { parseBoardUrl } from './seeds/employers-import.mjs';
@@ -795,7 +796,9 @@ export function loadTrackedEntries(portalsPath) {
  */
 export function renderPortalsYaml(result, opts = {}) {
   const enabled = opts.enabled !== false;
-  const today = new Date().toISOString().slice(0, 10);
+  // The local calendar day (#3070): toISOString() is the UTC one, which west of
+  // Greenwich stamps an evening harvest with tomorrow's date.
+  const today = localToday();
   const { unique, shared } = dedupeBoards(result.resolved || []);
   let resolved = unique;
   let already = [];
@@ -894,7 +897,7 @@ function noteFor(c, sector) {
   const head = [sector, p.blurb].filter(Boolean).join('. ');
   const facts = [p.hq, p.employees && `${p.employees} staff`, p.raised && `${p.raised} raised`]
     .filter(Boolean).join(', ');
-  const tail = `via BuildList ${new Date().toISOString().slice(0, 10)}`;
+  const tail = `via BuildList ${localToday()}`;
   return oneLine([head, facts, tail].filter(Boolean).join(' — '));
 }
 
