@@ -5769,11 +5769,22 @@ async function main() {
       } catch (parserErr) {
         if (provider.id !== 'local-parser') throw parserErr;
         const fallback = resolveProvider(company, providers, { skipIds: ['local-parser'] });
-        if (!fallback || fallback.error) throw parserErr;
+        // Keep status and name so classifyFetchError still sees a network or HTTP failure.
+        const parserFailure = (prefix, cause) => {
+          const err = new Error(`${prefix}: ${cause.message}`, { cause });
+          if (cause.status != null) err.status = cause.status;
+          if (cause.name) err.name = cause.name;
+          return err;
+        };
+        if (!fallback || fallback.error) throw parserFailure('local parser failed', parserErr);
         provider = fallback.provider;
         sourceName = `${provider.id}-api`;
         ctx.idCache = idCaches.forProvider(provider.id);
-        jobs = await provider.fetch(company, ctx);
+        try {
+          jobs = await provider.fetch(company, ctx);
+        } catch (fallbackErr) {
+          throw parserFailure('local parser failed, API fallback threw', fallbackErr);
+        }
         errors.push({
           company: company.name,
           error: `local parser failed, used API fallback: ${parserErr.message}`,
@@ -6554,7 +6565,7 @@ async function main() {
     ...unverifiedZeroTargets.map(company => ({ company, kind: 'unverified_zero' }))]) {
     const streak = currentStreaks.get(e.company) || 1;
     if (streak >= STREAK_THRESHOLD) {
-      if (!persistentlyDead.includes(e.company)) persistentlyDead.push(e.company);
+      if (!persistentlyDead.some((x) => x.company === e.company)) persistentlyDead.push(e);
     } else if (e.kind === 'slug_gone') {
       if (!newlyDeadSlug.some(x => x.company === e.company)) newlyDeadSlug.push(e);
     } else if (e.kind === 'network') {
@@ -6564,12 +6575,22 @@ async function main() {
 
   if (persistentlyDead.length > 0) {
     console.log(`\n🚨 FIX NEEDED: ${persistentlyDead.length} target(s) have been unreachable for ${STREAK_THRESHOLD}+ runs:`);
-    console.log(`   ${persistentlyDead.join(', ')}`);
+    console.log(`   ${persistentlyDead.map((x) => x.company).join(', ')}`);
     console.log(`   Run: node verify-portals.mjs to check if the ATS migrated, or update their board slugs.`);
+    for (const e of persistentlyDead) {
+      if (typeof e.error === 'string' && e.error.startsWith('local parser failed')) {
+        console.log(`  ✗ ${e.company}: ${e.error}`);
+      }
+    }
   }
   if (newlyDeadSlug.length > 0) {
     const names = newlyDeadSlug.map(x => x.company).join(', ');
     console.log(`\n⚠️  ${newlyDeadSlug.length} target(s) unreachable (slug?): ${names} — run: node verify-portals.mjs`);
+    for (const e of newlyDeadSlug) {
+      if (typeof e.error === 'string' && e.error.startsWith('local parser failed')) {
+        console.log(`  ✗ ${e.company}: ${e.error}`);
+      }
+    }
   }
   if (emptyTargets.length > 0) {
     console.log(`🟡 ${emptyTargets.length} target(s) live but empty: ${emptyTargets.join(', ')}`);
