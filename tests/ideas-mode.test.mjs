@@ -13,8 +13,10 @@ import { fileURLToPath } from 'node:url';
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const MODE = readFileSync(join(ROOT, 'modes', 'ideas.md'), 'utf-8').replace(/\r\n/g, '\n');
 
-test('ideas mode delegates gap extraction to upskill.mjs --url-text', () => {
+test('ideas mode delegates gap extraction to upskill.mjs (targeted and pipeline-wide)', () => {
   assert.match(MODE, /node upskill\.mjs --url-text/);
+  assert.match(MODE, /node upskill\.mjs\b/);
+  assert.match(MODE, /skipBlockers/);
   assert.match(MODE, /Never hand-roll a gap list/);
 });
 
@@ -26,7 +28,7 @@ test('ideas mode falls back to jds/ capture via jd-capture.mjs for report number
 
 test('ideas mode reports no gaps found on empty list without claiming full coverage', () => {
   assert.match(MODE, /no\s+gaps were found/i);
-  assert.match(MODE, /Do not report full\s+coverage/i);
+  assert.match(MODE, /Do\s+not\s+report\s+full\s+coverage/i);
 });
 
 test('ideas mode never writes to user profile files directly', () => {

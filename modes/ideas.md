@@ -3,12 +3,13 @@
 ## Purpose
 
 `upskill` finds the gaps; `project` judges an idea you already have. Nothing
-in between proposes WHAT to build. This mode closes that gap for a single JD:
-it runs the JD through `upskill.mjs --url-text` to get the skills it asks for
-that `cv.md`/`config/profile.yml` don't already cover, then proposes concrete,
-small, buildable project ideas that would produce real evidence for those
-gaps — pre-scored against `project`'s own 6-dimension matrix so the candidate
-can pick one and start.
+in between proposes WHAT to build. This mode closes that gap for a single JD
+(or across your entire evaluated pipeline when no JD is given):
+it runs `upskill.mjs` to get the skills asked for that `cv.md`/`config/profile.yml`
+don't already cover, then proposes concrete, small, buildable project ideas
+and free/paid certifications that would produce real evidence for those gaps —
+pre-scored against `project`'s own 6-dimension matrix so the candidate can
+pick one and start.
 
 This mode never claims a project exists. Every idea here is UNBUILT. Nothing
 is written to `cv.md`, `article-digest.md`, or `config/profile.yml` — a
@@ -17,10 +18,12 @@ proposal becomes a CV line only after it is actually built and run through
 
 ## Inputs
 
-- A JD: pasted text, a URL, or a report number (reuse that report's `## Job
-  Description (archived verbatim)` section, falling back to its `jds/`
+- Optional JD: pasted text, a URL, or a report number (reuse that report's
+  `## Job Description (archived verbatim)` section, falling back to its `jds/`
   capture via `jd-capture.mjs` when the report points there instead — never
   re-fetch a live URL when the report already has it archived).
+- Or **no argument** — pipeline-wide mode, which aggregates the highest-frequency
+  gaps across all evaluated reports via `node upskill.mjs`.
 - `cv.md` + `config/profile.yml` — via `upskill.mjs`'s own known-skill
   exclusion, so a skill the candidate already has is never proposed as a gap.
 - `modes/_profile.md` — North Star / archetypes, for the "Signal for target
@@ -32,6 +35,7 @@ Never hand-roll a gap list from memory or re-read the JD yourself for this —
 `upskill.mjs` already does the known-skill exclusion correctly and this mode
 must not duplicate or second-guess it.
 
+**If a JD (text, URL, or report number) is given:**
 Resolve the JD text first: pasted text used as-is; a URL fetched the same way
 other modes fetch a JD; a report number read from its `## Job Description
 (archived verbatim)` section, falling back to its `jds/` capture (resolved
@@ -44,10 +48,25 @@ node upskill.mjs --url-text <path-to-jd-text-file>
 ```
 
 Parse the JSON: `{ mode: "targeted", gaps, excludedAsKnown, knownSkills }`.
-`gaps` is the list to work from. If it comes back empty, say so plainly: no
-gaps were found against `upskill.mjs`'s skill extraction. Do not report full
-coverage — the extractor only catches skills in its catalog, so report that
-no gaps were found, not that the candidate covers every requirement.
+
+**If no argument is given (pipeline-wide):**
+Run `upskill.mjs` across your evaluated reports:
+
+```bash
+node upskill.mjs
+```
+
+Parse the JSON: `{ schema_version, metadata, gaps, excludedAsKnown, knownSkills, skipBlockers }`.
+`gaps` is already ranked by frequency and weight across the pipeline (and
+`skipBlockers` highlights critical/high requirements that blocked skipped
+applications). If `upskill.mjs` returns `error` (e.g., missing tracker or
+fewer than 5 scored reports), tell the candidate plainly and ask for a JD or
+URL (or use the target-role gaps in `modes/_profile.md` if they prefer).
+
+**In both modes:** `gaps` is the list to work from. If it comes back empty, say
+so plainly: no gaps were found against `upskill.mjs`'s skill extraction. Do not
+report full coverage — the extractor only catches skills in its catalog, so
+report that no gaps were found, not that the candidate covers every requirement.
 
 ## Step 2 — Propose Projects & Certifications (LLM)
 
