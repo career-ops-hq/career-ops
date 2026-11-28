@@ -339,6 +339,48 @@ try {
     rmSync(rootLayoutDir, { recursive: true, force: true });
   }
 
+  {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), 'cops-outcome-linked-data-')));
+    try {
+      const root = join(parent, 'workspace');
+      const external = join(parent, 'external');
+      mkdirSync(join(root, 'output'), { recursive: true });
+      mkdirSync(join(external, 'data'), { recursive: true });
+      mkdirSync(join(external, 'output'));
+      symlinkSync(join(external, 'data'), join(root, 'data'), process.platform === 'win32' ? 'junction' : 'dir');
+      writeFileSync(join(external, 'data', 'applications.md'), `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 7 | 2026-07-07 | Acme | Platform Engineer | 4.6/5 | Applied | ✅ | [7](../reports/7-acme.md) | Seeded |
+`);
+      writeFileSync(join(external, 'data', 'pdf-index.tsv'), [
+        '# report\tpdf\thtml\tformat\tdate',
+        '7\toutput/acme.pdf\toutput/acme.html\ta4\t2026-07-07',
+        '',
+      ].join('\n'));
+      for (const ext of ['pdf', 'html']) {
+        writeFileSync(join(root, 'output', `acme.${ext}`), `current ${ext}`);
+        writeFileSync(join(external, 'output', `acme.${ext}`), `older ${ext}`);
+      }
+
+      const env = { ...process.env, CAREER_OPS_ROOT: root };
+      delete env.CAREER_OPS_TRACKER;
+      delete env.CAREER_OPS_PDF_INDEX;
+      const archived = JSON.parse(execFileSync(NODE, [OUTCOME_SCRIPT, '7', 'rejected', '--clean-output', '--json'], {
+        cwd: root, env, encoding: 'utf-8',
+      }));
+      for (const ext of ['pdf', 'html']) {
+        const content = readFileSync(join(archived.outcomeDir, `submitted_cv.${ext}`), 'utf8');
+        check(`a linked data/ archives the generated ${ext} from the workspace output/`, content === `current ${ext}`, content);
+        check(`a linked data/ cleans the archived ${ext} in the workspace output/`, !existsSync(join(root, 'output', `acme.${ext}`)));
+        check(`a linked data/ leaves the other workspace's ${ext} alone`, existsSync(join(external, 'output', `acme.${ext}`)));
+      }
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  }
+
   // Test 17: Windows UNC path containment (CodeRabbit finding on PR #2911).
   // This calls the actual pathIsInside() from tracker-utils.mjs — the same
   // function outcome.mjs's --clean-output uses at runtime (it already existed
