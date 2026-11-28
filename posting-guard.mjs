@@ -102,17 +102,142 @@ function decodeEntities(s) {
   });
 }
 
+const ZERO_NUMBER_RE = /^(?:0(?:\.0+)?|\.0+)$/;
+const ZERO_LENGTH_RE = /^(?:0(?:\.0+)?|\.0+)\s*(?:px|pt|em|rem|%)?$/;
+const CLIP_HIDDEN_RE = /^(?:inset\(\s*100|circle\(\s*0|rect\(\s*0)/;
+const OFF_CANVAS_RE = /^-\d{3,}px$/;
+const OVERFLOW_HIDDEN_RE = /^hidden(?:\s+hidden)?$/;
+const CSS_WS_TRIM = /^[\t\n\f\r ]+|[\t\n\f\r ]+$/g;
+const CSS_IMPORTANT_RE = /[\t\n\f\r ]*![\t\n\f\r ]*important$/;
+const CSS_KEYWORDS = 'inherit|initial|unset|revert';
+const CSS_NUM = '[+-]?(?:\\d+\\.?\\d*|\\.\\d+)';
+const OVERFLOW_KEYWORDS = new Set(['visible', 'hidden', 'clip', 'scroll', 'auto']);
+const DISPLAY_KEYWORDS = new Set([
+  'none', 'block', 'inline', 'inline-block', 'inline-table', 'inline-flex',
+  'inline-grid', 'run-in', 'flow', 'flow-root', 'flex', 'grid', 'ruby',
+  'table', 'table-row', 'table-cell', 'table-row-group', 'table-header-group',
+  'table-footer-group', 'table-column', 'table-column-group', 'table-caption',
+  'list-item', 'contents', 'inherit', 'initial', 'unset', 'revert',
+]);
+const DISPLAY_OUTSIDE = new Set(['block', 'inline', 'run-in']);
+const DISPLAY_INSIDE = new Set(['flow', 'flow-root', 'flex', 'grid', 'ruby', 'table']);
+const DISPLAY_LEGACY_OUTSIDE = new Set(['inline-block', 'inline-table', 'inline-flex', 'inline-grid']);
+const DISPLAY_SINGLE = new Set(['none', 'contents', 'inherit', 'initial', 'unset', 'revert']);
+const DISPLAY_CONFLICTS = [['flex', 'inline-flex'], ['grid', 'inline-grid'], ['table', 'inline-table']];
+const CSS_VALUE_VALIDATORS = {
+  display: (v) => {
+    const parts = v.split(/[\t\n\f\r ]+/);
+    if (parts.length > 3 || parts.some((p) => !DISPLAY_KEYWORDS.has(p))) return false;
+    if (parts.some((p) => DISPLAY_SINGLE.has(p)) && parts.length !== 1) return false;
+    const groupOf = (p) => DISPLAY_OUTSIDE.has(p) || DISPLAY_LEGACY_OUTSIDE.has(p)
+      ? 'outside'
+      : DISPLAY_INSIDE.has(p) ? 'inside' : DISPLAY_SINGLE.has(p) ? 'single' : 'item';
+    const groups = parts.map(groupOf);
+    if (new Set(groups).size !== groups.length) return false;
+    if (parts.includes('list-item') && parts.some((p) => p !== 'list-item'
+      && !DISPLAY_OUTSIDE.has(p) && p !== 'flow' && p !== 'flow-root')) return false;
+    return !DISPLAY_CONFLICTS.some(([a, b]) => parts.includes(a) && parts.includes(b));
+  },
+  visibility: new RegExp(`^(?:visible|hidden|collapse|${CSS_KEYWORDS})$`),
+  overflow: (v) => {
+    const parts = v.split(/[\t\n\f\r ]+/);
+    return parts.length <= 2 && parts.every((p) => OVERFLOW_KEYWORDS.has(p)
+      || (parts.length === 1 && ['inherit', 'initial', 'unset', 'revert'].includes(p)));
+  },
+  opacity: new RegExp(`^(?:${CSS_NUM}%?|${CSS_KEYWORDS})$`),
+  'font-size': new RegExp(`^(?:${CSS_NUM}(?:px|pt|em|rem|%|vw|vh|ch|ex)?|(?:xx-|x-)?small|medium|(?:xx-|x-)?large|larger|smaller|${CSS_KEYWORDS})$`),
+  color: new RegExp(`^(?:transparent|[a-z]+|#[0-9a-f]{3,8}|rgba?\\([^)]*\\)|hsla?\\([^)]*\\)|${CSS_KEYWORDS})$`),
+  clip: new RegExp(`^(?:auto|rect\\([^)]*\\)|inset\\([^)]*\\)|${CSS_KEYWORDS})$`),
+  'clip-path': new RegExp(`^(?:none|inset\\([^)]*\\)|circle\\([^)]*\\)|polygon\\([^)]*\\)|url\\([^)]*\\)|${CSS_KEYWORDS})$`),
+  left: new RegExp(`^(?:auto|${CSS_NUM}(?:px|pt|em|rem|%)?|${CSS_KEYWORDS})$`),
+  'text-indent': new RegExp(`^(?:${CSS_NUM}(?:px|pt|em|rem|%)?|${CSS_KEYWORDS})$`),
+  height: new RegExp(`^(?:auto|${CSS_NUM}(?:px|pt|em|rem|%|vw|vh)?|${CSS_KEYWORDS})$`),
+  width: new RegExp(`^(?:auto|${CSS_NUM}(?:px|pt|em|rem|%|vw|vh)?|${CSS_KEYWORDS})$`),
+  'line-height': new RegExp(`^(?:normal|${CSS_NUM}(?:px|pt|em|rem|%)?|${CSS_KEYWORDS})$`),
+};
+const validDeclaration = (prop, val) =>
+  !Object.hasOwn(CSS_VALUE_VALIDATORS, prop)
+  || /^var\(/i.test(val)
+  || (typeof CSS_VALUE_VALIDATORS[prop] === 'function'
+    ? CSS_VALUE_VALIDATORS[prop](val)
+    : CSS_VALUE_VALIDATORS[prop].test(val));
+
+function parseStyleDeclarations(style) {
+  const s = decodeEntities(style).toLowerCase();
+  const decls = new Map();
+  let buf = '';
+  let quote = null;
+  let depth = 0;
+  for (let i = 0; i <= s.length; i++) {
+    const ch = s[i];
+    if (quote) {
+      if (i === s.length) break;
+      buf += ch;
+      if (ch === '\\' && i + 1 < s.length) {
+        if (s[i + 1] === '\r' && s[i + 2] === '\n') buf += ch + s[++i] + s[++i];
+        else buf += ch + s[++i];
+      }
+      else if (ch === quote || ch === '\n' || ch === '\r' || ch === '\f') quote = null;
+      continue;
+    }
+    if (ch === '/' && s[i + 1] === '*') {
+      const end = s.indexOf('*/', i + 2);
+      buf += ' ';
+      i = end === -1 ? s.length - 1 : end + 1;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      buf += ch;
+      continue;
+    }
+    if (ch === '\\' && i + 1 < s.length) {
+      buf += ch + s[++i];
+      continue;
+    }
+    if (ch === '(') depth += 1;
+    else if (ch === ')') depth = Math.max(0, depth - 1);
+    if ((ch !== ';' || depth > 0) && i !== s.length) {
+      buf += ch;
+      continue;
+    }
+    const colon = buf.indexOf(':');
+    if (colon > 0) {
+      const prop = buf.slice(0, colon).replace(CSS_WS_TRIM, '');
+      const rawVal = buf.slice(colon + 1).replace(CSS_WS_TRIM, '');
+      if (prop && rawVal) {
+        const important = CSS_IMPORTANT_RE.test(rawVal);
+        const val = rawVal.replace(CSS_IMPORTANT_RE, '').replace(CSS_WS_TRIM, '');
+        if (val && validDeclaration(prop, val)) {
+          const normalized = prop === 'opacity' && val.endsWith('%')
+            ? String(Number.parseFloat(val) / 100)
+            : val;
+          const prev = decls.get(prop);
+          if (!prev || important || !prev.important) decls.set(prop, { val: normalized, important });
+        }
+      }
+    }
+    buf = '';
+  }
+  return decls;
+}
+
 function styleHidden(style) {
   if (!style) return null;
-  const s = decodeEntities(style).toLowerCase();
-  if (/display\s*:\s*none/.test(s)) return 'display:none';
-  if (/visibility\s*:\s*hidden/.test(s)) return 'visibility:hidden';
-  if (/(^|[^-])opacity\s*:\s*0(\.0*)?\s*(;|$)/.test(s)) return 'opacity:0';
-  if (/font-size\s*:\s*0(\.0+)?\s*(px|pt|em|rem)?\s*(;|$)/.test(s)) return 'font-size:0';
-  if (/color\s*:\s*transparent/.test(s)) return 'color:transparent';
-  if (/(clip|clip-path)\s*:\s*(inset\(100|circle\(0|rect\(0)/.test(s)) return 'clipped';
-  if (/left\s*:\s*-\d{3,}px/.test(s) || /text-indent\s*:\s*-\d{3,}px/.test(s)) return 'off-canvas';
-  if (/overflow\s*:\s*hidden/.test(s) && /(height|width|line-height)\s*:\s*0(\.0*)?(px|;|$)/.test(s)) {
+  const decls = parseStyleDeclarations(style);
+  const val = (prop) => decls.get(prop)?.val ?? '';
+  if (val('display') === 'none') return 'display:none';
+  if (val('visibility') === 'hidden') return 'visibility:hidden';
+  if (ZERO_NUMBER_RE.test(val('opacity'))) return 'opacity:0';
+  if (ZERO_LENGTH_RE.test(val('font-size'))) return 'font-size:0';
+  if (val('color') === 'transparent') return 'color:transparent';
+  if (CLIP_HIDDEN_RE.test(val('clip')) || CLIP_HIDDEN_RE.test(val('clip-path'))) return 'clipped';
+  if (OFF_CANVAS_RE.test(val('left')) || OFF_CANVAS_RE.test(val('text-indent'))) return 'off-canvas';
+  if (OVERFLOW_HIDDEN_RE.test(val('overflow')) && (
+    ZERO_LENGTH_RE.test(val('height'))
+    || ZERO_LENGTH_RE.test(val('width'))
+    || ZERO_LENGTH_RE.test(val('line-height'))
+  )) {
     return 'zero-box + overflow:hidden';
   }
   return null;
