@@ -419,17 +419,20 @@ Weryfikacja jest sekwencyjna i dotyczy tylko nowych ofert (po deduplikacji), wi�
 
 ### 🇵🇱 Polskie portale z ofertami pracy
 
-career-ops obsługuje główne polskie portale IT. Dwa z nich — JustJoin.it i NoFluffJobs — mają publiczne API i mogą być zintegrowane jako źródła Level 0 (zero tokenów, brak WebSearch, świeże dane w czasie skanowania). Pozostałe portale wymagają weryfikacji ręcznej lub przez Playwright.
+Career-Ops ma wbudowane integracje z czterema polskimi portalami. Przykładowa
+konfiguracja Polski i pracy zdalnej w UE jest opisana w
+[przewodniku rynku polskiego](docs/MARKET_POLAND.md).
 
-| Portal              | URL                                          | API        | Uwagi                                                                 |
-| ------------------- | -------------------------------------------- | ---------- | --------------------------------------------------------------------- |
-| **JustJoin.it**     | [justjoin.it](https://justjoin.it)           | Publiczne  | Największy portal IT w Polsce. JSON API z pełnymi danymi ofert        |
-| **NoFluffJobs**     | [nofluffjobs.com](https://nofluffjobs.com)   | Publiczne  | Obowiązkowe widełki wynagrodzenia. Skierowany do seniorów             |
-| **pracuj.pl**       | [pracuj.pl](https://pracuj.pl)               | Brak       | Największy ogólny portal. Blokuje boty (403) — weryfikacja ręczna     |
-| **BulldogJob**      | [bulldogjob.pl](https://bulldogjob.pl)       | Brak       | IT-focused, oferty z widełkami                                        |
-| **inhire.io**       | [inhire.io](https://inhire.io)               | Brak       | Headhunting IT, często oferty nieujawnione publicznie                 |
-| **theprotocol.io**  | [theprotocol.io](https://theprotocol.io)     | Brak       | Dawny Rocket Jobs. Transparentne wynagrodzenia                        |
-| **solid.jobs**      | [solid.jobs](https://solid.jobs)             | Brak       | Oferty z weryfikacją przez społeczność                                |
+| Portal | Wbudowany dostawca | Źródło |
+| --- | --- | --- |
+| [JustJoin.it](https://justjoin.it) | Tak | Publiczne API |
+| [No Fluff Jobs](https://nofluffjobs.com) | Tak | Publiczne API |
+| [Bulldogjob](https://bulldogjob.pl) | Tak | Parser publicznej strony z ofertami |
+| [SolidJobs](https://solid.jobs) | Tak | Publiczne API, podział na branże |
+| [Pracuj.pl](https://www.pracuj.pl) | Nie | Brak wbudowanego dostawcy skanera |
+| [RocketJobs.pl](https://rocketjobs.pl) | Nie | Brak wbudowanego dostawcy skanera |
+| [theprotocol.it](https://theprotocol.it) | Nie | Brak wbudowanego dostawcy skanera |
+| [Inhire.io](https://inhire.io) | Nie | Brak wbudowanego dostawcy skanera |
 
 #### Polskie realia rynku pracy w ocenach
 

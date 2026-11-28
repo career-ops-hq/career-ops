@@ -1,0 +1,38 @@
+# Polish-city office roles plus remote roles the candidate can work from Poland.
+# Merge into user-owned portals.yml; keep your candidate-specific filters.
+location_filter:
+  allow: [Warsaw, Warszawa, Kraków, Krakow, Wrocław, Wroclaw, Gdańsk, Gdansk, Poznań, Poznan, Łódź, Lodz, Poland, Remote, Worldwide, EU, European Union]
+  workplace_policy:
+    onsite_locations: [Warsaw, Warszawa, Kraków, Wrocław, Wroclaw, Gdańsk, Poznań, Łódź, Lodz]
+    onsite_countries: [Poland]
+    remote_countries: [Poland]
+    remote_regions: [European Union, EU]
+
+job_boards:
+  - name: JustJoin.it
+    provider: justjoin
+    careers_url: https://justjoin.it/job-offers/all-locations
+    enabled: true
+
+  - name: NoFluffJobs
+    provider: nofluffjobs
+    careers_url: https://nofluffjobs.com/pl
+    region: pl
+    language: pl-PL
+    currency: PLN
+    enabled: true
+
+  - name: Bulldogjob
+    provider: bulldogjob
+    careers_url: https://bulldogjob.pl/companies/jobs
+    enabled: true
+
+  - name: SolidJobs IT
+    provider: solidjobs
+    careers_url: https://solid.jobs/public-api/offers/it?campaign=career-ops
+    enabled: true
+
+  - name: SolidJobs Engineering
+    provider: solidjobs
+    careers_url: https://solid.jobs/public-api/offers/engineering?campaign=career-ops
+    enabled: true

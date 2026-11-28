@@ -2,6 +2,7 @@
 import { pass, fail, ROOT } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
+import { buildWorkplacePolicy } from '../../providers/_country.mjs';
 
 console.log('\nProvider — nofluffjobs');
 
@@ -33,7 +34,21 @@ try {
         url: 'frontend-engineer-remote',
         posted: 1781270000000,
         fullyRemote: true,
-        location: { places: [{ city: 'Kraków' }] },
+        location: { places: [{ city: 'Kraków', country: { name: 'Poland' } }] },
+      },
+      {
+        title: 'Backend Engineer',
+        name: 'ExampleCo',
+        url: 'backend-engineer-remote',
+        fullyRemote: true,
+        location: { places: [{ city: 'Berlin', country: { name: 'Germany' } }] },
+      },
+      {
+        title: 'Data Engineer',
+        name: 'ExampleCo',
+        url: 'data-engineer-remote',
+        fullyRemote: true,
+        location: { places: [] },
       },
       { title: '', name: 'Broken', url: 'missing-title' },
       7,
@@ -42,8 +57,8 @@ try {
   };
 
   const parsed = parseNoFluffJobsResponse(fakeResponse);
-  if (parsed.length === 1) pass('nofluffjobs parser filters malformed rows');
-  else fail(`nofluffjobs parser returned ${parsed.length} rows, expected 1`);
+  if (parsed.length === 3) pass('nofluffjobs parser filters malformed rows');
+  else fail(`nofluffjobs parser returned ${parsed.length} rows, expected 3`);
 
   if (parsed[0].title === 'Frontend Engineer' && parsed[0].url === 'https://nofluffjobs.com/pl/job/frontend-engineer-remote') {
     pass('nofluffjobs parser maps title and URL');
@@ -51,10 +66,51 @@ try {
     fail(`nofluffjobs parser mapped title/url incorrectly: ${JSON.stringify(parsed[0])}`);
   }
 
-  if (parsed[0].company === 'ExampleCo' && parsed[0].location === 'Remote, Kraków' && parsed[0].postedAt === 1781270000000) {
+  if (parsed[0].company === 'ExampleCo' && parsed[0].location === 'Remote, Kraków, Poland' && parsed[0].postedAt === 1781270000000) {
     pass('nofluffjobs parser maps company, location, and postedAt');
   } else {
     fail(`nofluffjobs parser mapped fields incorrectly: ${JSON.stringify(parsed[0])}`);
+  }
+
+  const polandPolicy = buildWorkplacePolicy({
+    onsite_locations: ['Warsaw', 'Warszawa'],
+    onsite_countries: ['Poland'],
+    remote_countries: ['Poland'],
+    remote_regions: ['EU', 'European Union'],
+  });
+  if (polandPolicy(parsed[0].location, parsed[0].title).eligible) {
+    pass('remote Polish city posting retains country evidence for workplace policy');
+  } else {
+    fail('remote Polish city posting should pass the Poland workplace policy');
+  }
+  if (polandPolicy(parsed[1].location, parsed[1].title).reason === 'remote_country_restricted') {
+    pass('remote German posting remains outside the Poland workplace policy');
+  } else {
+    fail('remote German posting should remain outside the Poland workplace policy');
+  }
+  if (polandPolicy(parsed[2].location, parsed[2].title).reason === 'remote_eligibility_unconfirmed') {
+    pass('bare remote label remains unconfirmed without country evidence');
+  } else {
+    fail('bare remote label should remain unconfirmed without country evidence');
+  }
+
+  const multiPlace = parseNoFluffJobsResponse({
+    postings: [{
+      title: 'Backend Engineer',
+      name: 'ExampleCo',
+      url: 'backend-engineer-multiple-locations',
+      location: {
+        places: [
+          { city: 'Warsaw' },
+          { city: 'Berlin', country: { name: 'Germany' } },
+        ],
+      },
+    }],
+  })[0];
+  if (multiPlace.location === 'Warsaw; Berlin, Germany' && polandPolicy(multiPlace.location, multiPlace.title).eligible) {
+    pass('multiple places keep country evidence scoped to its city');
+  } else {
+    fail(`multiple places should retain distinct city-country groups: ${JSON.stringify(multiPlace)}`);
   }
 
   let capturedUrl = '';
@@ -71,7 +127,7 @@ try {
       fetchText: async () => '',
     },
   );
-  if (fetched.length === 1 && capturedUrl.startsWith('https://nofluffjobs.com/api/search/posting?')) {
+  if (fetched.length === 3 && capturedUrl.startsWith('https://nofluffjobs.com/api/search/posting?')) {
     pass('nofluffjobs.fetch() uses search posting API endpoint');
   } else {
     fail(`nofluffjobs.fetch() endpoint/result wrong: ${capturedUrl} ${JSON.stringify(fetched)}`);
