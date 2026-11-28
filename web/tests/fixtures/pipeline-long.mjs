@@ -16,7 +16,7 @@ for (let n = 1; n <= 80; n++) {
   const report = `${String(n).padStart(3, "0")}-fixture-company-${nn}.md`;
   const score = (3 + (n % 16) / 10).toFixed(1);
   rows.push(`| ${n} | 2026-10-02 | ${company} | Engineer | ${score}/5 | Evaluated | — | [${n}](../reports/${report}) | Fictional fixture only |`);
-  fs.writeFileSync(path.join(root, "reports", report), `# ${company} — Engineer\n\nFictional browser test report.\n`);
+  fs.writeFileSync(path.join(root, "reports", report), `# ${company} — Engineer\n\nFictional browser test report for ${company}.\n`);
 }
 fs.writeFileSync(path.join(root, "data/applications.md"), `# Fictional browser fixture
 

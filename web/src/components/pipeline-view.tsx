@@ -33,6 +33,7 @@ import { trackerEmptyPresentation, trackerEmptyState, type TrackerEmptyState } f
 import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
 import { listEntrySync } from "@/lib/history-back.mjs";
 import { pipelineFindRolesHref } from "@/lib/scan-on-load.mjs";
+import { PipelineReview } from "@/components/pipeline-review";
 
 type Tab = (typeof PIPELINE_TABS)[number];
 type SavedView = NonNullable<ReturnType<typeof normalizeView>>;
@@ -80,6 +81,8 @@ export function PipelineView({
   const appliedAskYesRef = useRef<HTMLButtonElement>(null);
   const appliedAskScope = useRef<{ selection: string; cursor: number; cursorKey: string } | null>(null);
   const [cursor, setCursor] = useState(-1);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewKey, setReviewKey] = useState<string | null>(null);
   const [views, setViews] = useState<SavedView[]>([]);
   const [naming, setNaming] = useState(false);
   const [draftName, setDraftName] = useState("");
@@ -97,6 +100,7 @@ export function PipelineView({
   // the table identically (no useState mirror → no desync).
   const tab: Tab = pipelineTab(params.get("tab"));
   const visibleTab = isPending && pendingTab ? pendingTab : tab;
+  const reviewing = reviewOpen && visibleTab !== "INBOX";
   const pMin = parseFloat(params.get("min") ?? "");
   const minFilter: number | null = Number.isFinite(pMin) ? pMin : null;
   const pSort = params.get("sort") ?? "";
@@ -288,6 +292,15 @@ export function PipelineView({
     event.preventDefault();
     routerRef.current.push(href);
   }, []);
+  const openTrackerRow = useCallback((event: MouseEvent<HTMLAnchorElement>, n: string, key: string) => {
+    if (reviewing && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey
+      && window.matchMedia("(min-width: 80rem)").matches) {
+      event.preventDefault();
+      setReviewKey(key);
+      return;
+    }
+    followDetail(event, n);
+  }, [reviewing, followDetail]);
   const stampDetail = useCallback((event: PointerEvent<HTMLAnchorElement>, n: string) => {
     event.currentTarget.href = trackerDetailHref(n, paramsRef.current, qRef.current);
   }, []);
@@ -495,9 +508,15 @@ export function PipelineView({
       window.removeEventListener("scroll", measure);
       window.removeEventListener("resize", measure);
     };
-  }, [filterKey, filtered.length, rowPx, heldSaves, bulkError, hasSelection]);
+  }, [filterKey, filtered.length, rowPx, heldSaves, bulkError, hasSelection, reviewing]);
 
   const filteredKeys = filtered.map(applicationKey);
+  const reviewIndex = reviewing && reviewKey !== null ? filteredKeys.indexOf(reviewKey) : -1;
+  const reviewApp = filtered[reviewIndex];
+  const moveReview = (delta: -1 | 1) => {
+    const next = filteredKeys[reviewIndex + delta];
+    if (reviewIndex >= 0 && next !== undefined && !isPending) setReviewKey(next);
+  };
   const selectedRows = filtered.filter((r) => selected.has(applicationKey(r)));
   const allSelected = filteredKeys.length > 0 && filteredKeys.every((k) => selected.has(k));
 
@@ -735,6 +754,15 @@ export function PipelineView({
             </div>
             <button
               type="button"
+              aria-pressed={reviewOpen}
+              aria-controls={reviewOpen ? "pipeline-report-review" : undefined}
+              onClick={() => setReviewOpen((open) => !open)}
+              className="hidden items-center gap-1.5 whitespace-nowrap rounded-md border border-border bg-surface/60 px-3 py-2 text-sm text-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand/40 aria-pressed:border-brand/40 aria-pressed:bg-brand-soft aria-pressed:text-brand-text xl:inline-flex"
+            >
+              <FileText aria-hidden="true" className="size-4" /> Review reports
+            </button>
+            <button
+              type="button"
               onClick={downloadCsv}
               disabled={isPending || filtered.length === 0}
               title={`Download the ${filtered.length} row${filtered.length === 1 ? "" : "s"} shown as a CSV file`}
@@ -936,141 +964,157 @@ export function PipelineView({
         <p className="mt-2 text-xs text-faint">j and k move. 1 Evaluated, 2 Applied, 3 Responded, 4 Interview, 5 Offer, 6 Rejected, 7 Discarded, 8 SKIP. Shift-click selects the rows in between.</p>
       )}
 
-      {visibleTab === "INBOX" ? (
-        /* ── Inbox: the triage surface (Abundance → Triage → Shortlist → Score) ── */
-        <>
-          {inbox === null ? (
-            <div role="status" className="mt-4 overflow-x-auto rounded-2xl border border-border">
-              <span className="sr-only">Loading inbox…</span>
-              <table aria-hidden="true" className="w-full min-w-[44rem] text-sm">
-                <tbody className="divide-y divide-border">
-                  <PipelineTableRowsSkeleton />
+      <div className={cn(reviewing && "xl:grid xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] xl:items-start xl:gap-4")}>
+        {visibleTab === "INBOX" ? (
+          /* ── Inbox: the triage surface (Abundance → Triage → Shortlist → Score) ── */
+          <>
+            {inbox === null ? (
+              <div role="status" className="mt-4 overflow-x-auto rounded-2xl border border-border">
+                <span className="sr-only">Loading inbox…</span>
+                <table aria-hidden="true" className="w-full min-w-[44rem] text-sm">
+                  <tbody className="divide-y divide-border">
+                    <PipelineTableRowsSkeleton />
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <>
+                {inboxFitError && (
+                  <p role="alert" className="mt-2 whitespace-pre-wrap text-xs text-red-500">{inboxFitError}</p>
+                )}
+                <InboxTriage inbox={inbox} />
+                {inbox.length === 0 && <InboxEmpty tracked={visibleApplications.length} />}
+              </>
+            )}
+          </>
+        ) : isPending || filtered.length > 0 ? (
+          /* ── Tracker table ──
+             overflow-x-auto, not overflow-hidden: the rounded corners still clip,
+             but a table too wide for the viewport can now be scrolled to instead
+             of being silently cut off. min-w keeps the columns readable rather
+             than letting w-full crush them on a phone. */
+          <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
+            <table
+              aria-label="Tracked applications"
+              aria-rowcount={filtered.length + 1}
+              className="w-full min-w-[44rem] text-sm min-[1440px]:table-fixed min-[1440px]:[&_th:nth-child(1)]:w-11 min-[1440px]:[&_th:nth-child(2)]:w-[4.5rem] min-[1440px]:[&_th:nth-child(3)]:w-[26%] min-[1440px]:[&_th:nth-child(4)]:w-[32%] min-[1440px]:[&_th:nth-child(5)]:w-[5.5rem] min-[1440px]:[&_th:nth-child(6)]:w-[14rem] min-[1440px]:[&_th:nth-child(7)]:w-[6.75rem] min-[1440px]:[&_th:nth-child(8)]:w-[4.75rem]"
+            >
+              <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
+                <tr aria-rowindex={1}>
+                  <th className="w-8 px-3 py-2.5">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all shown applications"
+                      checked={allSelected}
+                      onChange={() => setSelected(allSelected ? new Set() : new Set(filteredKeys))}
+                    />
+                  </th>
+                  {SORT_KEYS.map((k) => (
+                    <th
+                      key={k}
+                      aria-sort={sort.key === k ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
+                      className={cn(
+                        "whitespace-nowrap px-4 py-2.5 font-medium",
+                        k === "date" && "hidden lg:table-cell",
+                      )}
+                    >
+                      <button
+                        type="button"
+                        className="inline-flex cursor-pointer select-none items-center gap-1 uppercase tracking-wide hover:text-foreground"
+                        onClick={() => setParams({ sort: k, dir: sort.key === k ? sort.dir * -1 : -1 })}
+                      >
+                        {k}
+                        <ChevronsUpDown aria-hidden="true" className="size-3" />
+                      </button>
+                    </th>
+                  ))}
+                  <th className="whitespace-nowrap px-4 py-2.5 font-medium">resume</th>
+                </tr>
+              </thead>
+              {/* Keep editors mounted while query navigation is pending: sorting
+                  must not discard an open editor or an in-flight status save. */}
+              <tbody ref={bodyRef} className="divide-y divide-border" hidden={isPending} aria-busy={false}>
+                {span.start > 0 && (
+                  <tr aria-hidden="true">
+                    <td colSpan={columnCount} style={{ height: span.start * rowPx, padding: 0, border: 0 }} />
+                  </tr>
+                )}
+                {mountedRows.map((r, i) => {
+                  // The cursor is an index into filtered, not into the window.
+                  const index = span.start + i;
+                  const key = applicationKey(r);
+                  return (
+                    <TrackerRow
+                      key={key}
+                      r={r}
+                      rowIndex={index}
+                      selected={selected.has(key)}
+                      isCursor={cursor === index}
+                      isReviewed={reviewIndex === index}
+                      reviewing={reviewing}
+                      hasCv={hasCv.has(r.n)}
+                      detailQuery={detailQuery}
+                      heldSave={heldSaves.get(key)}
+                      onToggle={toggleRow}
+                      onSaved={onStatusSaved}
+                      onHeldSave={onHeldSave}
+                      onOpen={openTrackerRow}
+                      onArm={stampDetail}
+                    />
+                  );
+                })}
+                {span.end < filtered.length && (
+                  <tr aria-hidden="true">
+                    <td colSpan={columnCount} style={{ height: (filtered.length - span.end) * rowPx, padding: 0, border: 0 }} />
+                  </tr>
+                )}
+              </tbody>
+              {isPending && (
+                <tbody className="divide-y divide-border" aria-busy="true">
+                  <PipelineTableRowsSkeleton trackerColumn />
                 </tbody>
-              </table>
-            </div>
-          ) : (
-            <>
-              {inboxFitError && (
-                <p role="alert" className="mt-2 whitespace-pre-wrap text-xs text-red-500">{inboxFitError}</p>
               )}
-              <InboxTriage inbox={inbox} />
-              {inbox.length === 0 && <InboxEmpty tracked={visibleApplications.length} />}
-            </>
-          )}
-        </>
-      ) : isPending || filtered.length > 0 ? (
-        /* ── Tracker table ──
-           overflow-x-auto, not overflow-hidden: the rounded corners still clip,
-           but a table too wide for the viewport can now be scrolled to instead
-           of being silently cut off. min-w keeps the columns readable rather
-           than letting w-full crush them on a phone. */
-        <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
-          <table
-            aria-label="Tracked applications"
-            aria-rowcount={filtered.length + 1}
-            className="w-full min-w-[44rem] text-sm min-[1440px]:table-fixed min-[1440px]:[&_th:nth-child(1)]:w-11 min-[1440px]:[&_th:nth-child(2)]:w-[4.5rem] min-[1440px]:[&_th:nth-child(3)]:w-[26%] min-[1440px]:[&_th:nth-child(4)]:w-[32%] min-[1440px]:[&_th:nth-child(5)]:w-[5.5rem] min-[1440px]:[&_th:nth-child(6)]:w-[14rem] min-[1440px]:[&_th:nth-child(7)]:w-[6.75rem] min-[1440px]:[&_th:nth-child(8)]:w-[4.75rem]"
-          >
-            <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
-              <tr aria-rowindex={1}>
-                <th className="w-8 px-3 py-2.5">
-                  <input
-                    type="checkbox"
-                    aria-label="Select all shown applications"
-                    checked={allSelected}
-                    onChange={() => setSelected(allSelected ? new Set() : new Set(filteredKeys))}
-                  />
-                </th>
-                {SORT_KEYS.map((k) => (
-                  <th
-                    key={k}
-                    aria-sort={sort.key === k ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
+            </table>
+          </div>
+        ) : trackerEmptyMessage({ shape: trackerShape, query, min: minFilter, tab }).kind === "filtered" ? (
+          <div className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
+            <h2 className="font-display text-lg">{empty?.heading}</h2>
+            {empty && empty.actions.length > 0 && (
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                {empty.actions.map(({ label, run }, i) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={run}
                     className={cn(
-                      "whitespace-nowrap px-4 py-2.5 font-medium",
-                      k === "date" && "hidden lg:table-cell",
+                      "rounded-md border px-3 py-1.5 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-brand/40",
+                      i === 0
+                        ? "border-brand/40 bg-brand-soft text-brand-text hover:bg-brand/15"
+                        : "border-border text-muted hover:text-foreground",
                     )}
                   >
-                    <button
-                      type="button"
-                      className="inline-flex cursor-pointer select-none items-center gap-1 uppercase tracking-wide hover:text-foreground"
-                      onClick={() => setParams({ sort: k, dir: sort.key === k ? sort.dir * -1 : -1 })}
-                    >
-                      {k}
-                      <ChevronsUpDown aria-hidden="true" className="size-3" />
-                    </button>
-                  </th>
+                    {label}
+                  </button>
                 ))}
-                <th className="whitespace-nowrap px-4 py-2.5 font-medium">resume</th>
-              </tr>
-            </thead>
-            {/* Keep editors mounted while query navigation is pending: sorting
-                must not discard an open editor or an in-flight status save. */}
-            <tbody ref={bodyRef} className="divide-y divide-border" hidden={isPending} aria-busy={false}>
-              {span.start > 0 && (
-                <tr aria-hidden="true">
-                  <td colSpan={columnCount} style={{ height: span.start * rowPx, padding: 0, border: 0 }} />
-                </tr>
-              )}
-              {mountedRows.map((r, i) => {
-                // The cursor is an index into filtered, not into the window.
-                const index = span.start + i;
-                const key = applicationKey(r);
-                return (
-                  <TrackerRow
-                    key={key}
-                    r={r}
-                    rowIndex={index}
-                    selected={selected.has(key)}
-                    isCursor={cursor === index}
-                    hasCv={hasCv.has(r.n)}
-                    detailQuery={detailQuery}
-                    heldSave={heldSaves.get(key)}
-                    onToggle={toggleRow}
-                    onSaved={onStatusSaved}
-                    onHeldSave={onHeldSave}
-                    onOpen={followDetail}
-                    onArm={stampDetail}
-                  />
-                );
-              })}
-              {span.end < filtered.length && (
-                <tr aria-hidden="true">
-                  <td colSpan={columnCount} style={{ height: (filtered.length - span.end) * rowPx, padding: 0, border: 0 }} />
-                </tr>
-              )}
-            </tbody>
-            {isPending && (
-              <tbody className="divide-y divide-border" aria-busy="true">
-                <PipelineTableRowsSkeleton trackerColumn />
-              </tbody>
+              </div>
             )}
-          </table>
-        </div>
-      ) : trackerEmptyMessage({ shape: trackerShape, query, min: minFilter, tab }).kind === "filtered" ? (
-        <div className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
-          <h2 className="font-display text-lg">{empty?.heading}</h2>
-          {empty && empty.actions.length > 0 && (
-            <div className="mt-4 flex flex-wrap justify-center gap-2">
-              {empty.actions.map(({ label, run }, i) => (
-                <button
-                  key={label}
-                  type="button"
-                  onClick={run}
-                  className={cn(
-                    "rounded-md border px-3 py-1.5 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-brand/40",
-                    i === 0
-                      ? "border-brand/40 bg-brand-soft text-brand-text hover:bg-brand/15"
-                      : "border-border text-muted hover:text-foreground",
-                  )}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      ) : (
-        <EmptyTracker shape={trackerShape} query={deferredQ} min={minFilter} tab={tab} />
-      )}
+          </div>
+        ) : (
+          <EmptyTracker shape={trackerShape} query={deferredQ} min={minFilter} tab={tab} />
+        )}
+        {reviewing && (
+          <PipelineReview
+            app={reviewApp}
+            index={reviewIndex}
+            count={filtered.length}
+            pending={isPending}
+            fullHref={reviewApp ? trackerDetailHref(reviewApp.n, paramsText, q) : ""}
+            onFullReport={followDetail}
+            onStep={moveReview}
+            onClose={() => setReviewOpen(false)}
+          />
+        )}
+      </div>
     </PageFrame>
   );
 }
@@ -1080,6 +1124,8 @@ const TrackerRow = memo(function TrackerRow({
   rowIndex,
   selected,
   isCursor,
+  isReviewed,
+  reviewing,
   hasCv,
   detailQuery,
   heldSave,
@@ -1093,6 +1139,8 @@ const TrackerRow = memo(function TrackerRow({
   rowIndex: number;
   selected: boolean;
   isCursor: boolean;
+  isReviewed: boolean;
+  reviewing: boolean;
   hasCv: boolean;
   detailQuery: string;
   heldSave?: { phase: "pending"; status: string } | { phase: "failed"; error: string };
@@ -1103,17 +1151,17 @@ const TrackerRow = memo(function TrackerRow({
     n: string,
     event: { type: "start"; status: string } | { type: "fail"; error: string } | { type: "clear" },
   ) => void;
-  onOpen: (event: MouseEvent<HTMLAnchorElement>, n: string) => void;
+  onOpen: (event: MouseEvent<HTMLAnchorElement>, n: string, key: string) => void;
   onArm: (event: PointerEvent<HTMLAnchorElement>, n: string) => void;
 }) {
   const company = companyPresentation(r);
   const key = applicationKey(r);
   const detailHref = `/pipeline/${encodeURIComponent(r.n)}${detailQuery ? `?${detailQuery}` : ""}`;
   const posting = postingHref(r.url);
-  const open = (event: MouseEvent<HTMLAnchorElement>) => onOpen(event, r.n);
+  const open = (event: MouseEvent<HTMLAnchorElement>) => onOpen(event, r.n, key);
   const arm = (event: PointerEvent<HTMLAnchorElement>) => onArm(event, r.n);
   return (
-    <tr data-application-key={key} aria-rowindex={rowIndex + 2} data-tracker-cursor={isCursor ? "true" : undefined} className={cn("group transition-colors hover:bg-surface/40", isCursor && "bg-brand-soft/60")}>
+    <tr data-application-key={key} aria-rowindex={rowIndex + 2} data-tracker-cursor={isCursor ? "true" : undefined} className={cn("group transition-colors hover:bg-surface/40", isCursor && "bg-brand-soft/60", isReviewed && "xl:bg-brand-soft")}>
       <td className="w-8 px-3 py-3">
         <input
           type="checkbox"
@@ -1126,19 +1174,19 @@ const TrackerRow = memo(function TrackerRow({
         />
       </td>
       <td className="whitespace-nowrap px-4 py-3 font-medium tabular-nums">
-        <Link href={detailHref} tabIndex={-1} onPointerDown={arm} onClick={open} className="transition-colors group-hover:text-brand-text">
+        <Link href={detailHref} prefetch={reviewing ? false : undefined} tabIndex={-1} onPointerDown={arm} onClick={open} className="transition-colors group-hover:text-brand-text">
           #{r.n}
         </Link>
       </td>
       <td className="px-4 py-3 font-medium">
-        <Link href={detailHref} onPointerDown={arm} onClick={open} className="flex items-center gap-2.5 min-w-0 transition-colors group-hover:text-brand-text min-[1440px]:w-full">
+        <Link href={detailHref} prefetch={reviewing ? false : undefined} aria-current={isReviewed ? "true" : undefined} onPointerDown={arm} onClick={open} className="flex items-center gap-2.5 min-w-0 transition-colors group-hover:text-brand-text min-[1440px]:w-full">
           <CompanyLogo name={company.logoName} size={20} />
           <span className="block max-w-64 truncate min-[1440px]:min-w-0 min-[1440px]:flex-1 min-[1440px]:max-w-none" title={company.label}>{company.label}</span>
         </Link>
       </td>
       <td className="min-w-0 px-4 py-3 text-muted min-[1440px]:overflow-hidden">
         <div className="flex min-w-0 items-center gap-2">
-          <Link href={detailHref} tabIndex={-1} onPointerDown={arm} onClick={open} className="block max-w-72 truncate min-[1440px]:min-w-[8rem] min-[1440px]:flex-1 min-[1440px]:max-w-none" title={r.role}>{r.role}</Link>
+          <Link href={detailHref} prefetch={reviewing ? false : undefined} tabIndex={-1} onPointerDown={arm} onClick={open} className="block max-w-72 truncate min-[1440px]:min-w-[8rem] min-[1440px]:flex-1 min-[1440px]:max-w-none" title={r.role}>{r.role}</Link>
           {r.closesAt ? (
             <span className="whitespace-nowrap text-faint tabular-nums">Closes {r.closesAt}</span>
           ) : null}
