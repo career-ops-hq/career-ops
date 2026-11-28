@@ -685,16 +685,26 @@ function buildAwards(entries, partial) {
   }).join('\n    ');
 }
 
-// Interests renders as one comma-joined, sentence-cased line rather than a
-// repeating table like certifications/awards, so a partial's entryTemplate
-// (built for one row per entry) doesn't fit — html-only, no partial support,
-// same tradeoff certifications/competencies make for having no LaTeX marker.
+// A later interest is lowercased only when the rest of the word is already
+// lowercase. "Chess" becomes "chess". "AWS" stays "AWS".
+function displayInterest(item, index) {
+  const text = String(item);
+  if (index === 0) return text;
+  const rest = text.slice(1);
+  if (rest !== rest.toLowerCase()) return text;
+  return text.charAt(0).toLowerCase() + rest;
+}
+
+// Interests renders as one comma-joined line rather than a repeating table
+// like certifications/awards, so a partial's entryTemplate (built for one row
+// per entry) doesn't fit. Html-only, no partial support, same tradeoff
+// certifications/competencies make for having no LaTeX marker.
 function buildInterests(items) {
   if (!Array.isArray(items) || items.length === 0) return '';
   return items
     .filter(Boolean)
     .map(String)
-    .map((item, idx) => (idx === 0 ? item : item.charAt(0).toLowerCase() + item.slice(1)))
+    .map((item, idx) => displayInterest(item, idx))
     .map(item => escapeHtml(item))
     .join(', ');
 }
@@ -1027,7 +1037,7 @@ function renderMarkdown(payload, template) {
   }
 
   const interests = list(payload.interests).filter(Boolean).map(String)
-    .map((item, idx) => (idx === 0 ? item : item.charAt(0).toLowerCase() + item.slice(1)))
+    .map((item, idx) => displayInterest(item, idx))
     .join(', ');
   if (mdLine(interests)) section('interests', [mdLine(interests), '']);
 
