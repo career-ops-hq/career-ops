@@ -16,7 +16,7 @@ export function companyPresentation({ company = "", via = "" } = {}) {
   const companyName = String(company).trim();
   const intermediary = String(via).trim();
 
-  if (companyName !== "?") return { label: company, logoName: company };
+  if (companyName !== "?") return { label: companyName, logoName: companyName };
   if (intermediary && !DIRECT_VIA.test(intermediary)) {
     return {
       label: `Confidential · via ${intermediary}`,
