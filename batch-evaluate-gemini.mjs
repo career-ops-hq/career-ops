@@ -12,7 +12,7 @@
  *  - Inline updates of data/pipeline.md (marks [ ] as [x])
  */
 
-import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync } from 'fs';
+import { readFileSync, existsSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { chromium } from './lib/hardened-chromium.mjs';
@@ -44,6 +44,7 @@ try {
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { withJdArchiveSection } from './lib/jd-archive-section.mjs';
+import { writeEvaluationArtifactPair } from './persist-evaluation-report.mjs';
 import { assertGoogleRequestAllowed } from './lib/llm-outbound.mjs';
 import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
 
@@ -509,10 +510,6 @@ export async function processOffer(browser, line, idx, _evaluate = evaluateWithR
     const archetype = summary.archetype || 'unknown';
     const legitimacy = parseLegitimacy(summary.legitimacy || 'unknown');
 
-    // Save
-    mkdirSync(PATHS.reports, { recursive: true });
-    mkdirSync(PATHS.trackerAdditions, { recursive: true });
-
     const num = await nextReportNumber();
     // LOCAL calendar day (#3070). This one value becomes three things that have to
     // agree with each other and with the user's calendar: the report FILENAME
@@ -540,8 +537,6 @@ export async function processOffer(browser, line, idx, _evaluate = evaluateWithR
 ---\n
 ${withJdArchiveSection(evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').trim(), jdText).trimEnd()}\n`;
 
-    writeFileSync(reportPath, reportContent, 'utf-8');
-
     const trackerPath = join(PATHS.trackerAdditions, `${num}-${companySlug}.tsv`);
     const trackerFields = [
       String(parseInt(num, 10)), today, tsvSafe(company), tsvSafe(role),
@@ -550,7 +545,13 @@ ${withJdArchiveSection(evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END
     ];
     // Header row first: merge-tracker resolves the fields by name, so this row
     // cannot be ingested into the wrong columns (#3517).
-    writeFileSync(trackerPath, `${TSV_ADDITION_HEADER}\n${trackerFields.join('\t')}\n`, 'utf-8');
+    const saved = writeEvaluationArtifactPair({
+      reportPath,
+      markdown: reportContent,
+      tsvPath: trackerPath,
+      tsv: `${TSV_ADDITION_HEADER}\n${trackerFields.join('\t')}\n`,
+    });
+    if (!saved.ok) throw new Error(saved.error);
 
     console.log(`✅ Success: ${company} - ${role} | Score: ${score}/5 | Saved as ${filename}`);
     
