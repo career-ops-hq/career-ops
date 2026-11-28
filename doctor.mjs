@@ -1847,7 +1847,7 @@ function unpersonalizedFiles(root) {
     }
     if (path === 'modes/_profile.md') {
       // A _profile.md written in the user's own structure, without any of the
-      // eight ## Your … headings, is quiet here rather than reported as missing
+      // nine ## Your … headings, is quiet here rather than reported as missing
       // every section (#5126). Missing prerequisites speak for absent files.
       const userHeadings = new Set(scanHeadings(target).heads.filter((h) => h.level === 2).map((h) => h.heading));
       const hasAnyTemplateHeading = SECTIONS.some((s) => userHeadings.has(s.heading));

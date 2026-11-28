@@ -158,7 +158,7 @@ try {
     const s = runDoctor(dir);
     const hit = (s.unpersonalized || []).find((u) => u.path === 'modes/_profile.md');
     if (s._error) fail(`half-filled: doctor crashed: ${s._error}`);
-    else if (hit && /still has 7 unfilled sections: 7 on template, 0 missing/.test(hit.reason) && hit.reason.includes('targetRoles') && !hit.reason.includes('compTargets')) {
+    else if (hit && /still has 8 unfilled sections: 8 on template, 0 missing/.test(hit.reason) && hit.reason.includes('targetRoles') && !hit.reason.includes('compTargets')) {
       const coreUnfilled = sectionState(halfFilled, tpl).filter((x) => x.state !== 'filled').map((x) => x.id);
       const doctorReportedIds = hit.reason.match(/\(([^)]+)\)/)?.[1].split(', ') ?? [];
       if (JSON.stringify(coreUnfilled) === JSON.stringify(doctorReportedIds)) {
@@ -209,7 +209,7 @@ try {
     }
   }
 
-  // 9. All 8 template headings present with empty bodies are diagnosed as unfilled (#5126).
+  // 9. All 9 template headings present with empty bodies are diagnosed as unfilled (#5126).
   {
     const dir = fixture('all-empty');
     const allEmpty = SECTIONS.map((s) => `${s.heading}\n\n`).join('');
@@ -219,8 +219,8 @@ try {
     const s = runDoctor(dir);
     const hit = (s.unpersonalized || []).find((u) => u.path === 'modes/_profile.md');
     if (s._error) fail(`all-empty: doctor crashed: ${s._error}`);
-    else if (hit && /8 unfilled sections: 0 on template, 8 missing/.test(hit.reason)) {
-      pass('profile with all 8 headings but empty bodies is flagged as 8 missing');
+    else if (hit && /9 unfilled sections: 0 on template, 9 missing/.test(hit.reason)) {
+      pass('profile with all 9 headings but empty bodies is flagged as 9 missing');
     } else {
       fail(`profile with all empty bodies not flagged: ${JSON.stringify(hit)}`);
     }

@@ -119,6 +119,26 @@ test("coerce keeps only well-formed fields and drops junk, unknown keys and bad 
   assert.equal(p.portfolio, undefined, "non-http url is not a portfolio");
 });
 
+test("naturalLevel: coerce keeps rows with a stage and a title, render fills the calibration section", () => {
+  const p = coercePersonalization({
+    naturalLevel: [
+      { stage: "Seed / Series A", title: "Founding Platform Lead", why: "stood up infra 0->1" },
+      { stage: "Series D+ | public", title: "Staff Engineer" },
+      { stage: "no title → dropped" },
+      "junk",
+    ],
+  });
+  assert.equal(p.naturalLevel.length, 2);
+  const md = renderSection("naturalLevel", p.naturalLevel);
+  const rows = md.split("\n");
+  assert.equal(rows[0], "| Company stage | Title that fits you | Why (your evidence) |");
+  assert.equal(rows[2], "| Seed / Series A | Founding Platform Lead | stood up infra 0->1 |");
+  assert.equal(rows[3], "| Series D+ / public | Staff Engineer |  |");
+  const merged = mergeSections(TEMPLATE, { naturalLevel: md }, core);
+  const st = sectionState(merged, TEMPLATE);
+  for (const s of st) assert.equal(s.state, s.id === "naturalLevel" ? "filled" : "template", s.heading);
+});
+
 test("a prose section body can never open its own heading", () => {
   // mergeSections splits the file on `## `, so a body starting with one would
   // silently begin a NEW section instead of filling this one.
