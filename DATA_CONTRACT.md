@@ -101,7 +101,7 @@ Three declarations are refused, loudly, naming the entry:
 
 ### System file overlays
 
-A direct edit to a system-layer file keeps the whole local file and skips upstream's changes to it: `apply` lists the file and leaves it alone, or, with `--force`, replaces it with upstream's version (your copy goes to `<file>.bak`). For an edit you mean to keep across updates while still taking upstream's changes, list the file in `config/system-overlay.txt` (gitignored, read at runtime):
+A direct edit to a system-layer file keeps the whole local file and skips upstream's changes to it: `apply` lists the file and leaves it alone, or, with `--force`, replaces it with upstream's version (your copy goes to `<file>.bak`). For an edit you mean to keep across updates while still taking upstream's changes, list the file in `config/system-overlay.txt` under the data root (gitignored, read at runtime):
 
 ```text
 # one repo-relative file per line; blank lines and # comments ignored
@@ -109,13 +109,15 @@ dashboard/internal/ui/screens/pipeline.go
 providers/greenhouse.mjs
 ```
 
-For a listed file, `apply` runs a three-way merge (`git merge-file`) of your version, the upstream version your edits started from, and the new upstream version. The update records the upstream commit it installed (`refs/career-ops/overlay-base`) as the starting point for the next merge, and `rollback` restores the previous one.
+For a listed file, `apply` runs a three-way merge (`git merge-file`) of your version, the upstream version your edits started from, and the new upstream version. After each update, `refs/career-ops/overlay-base` records that starting point per file: the new upstream version for a file that received it, the previous one for a file the update kept as it was. `rollback` restores the record from before the update.
 
-- **Clean merge:** the file gets both sides, and the update commit includes it. Your pre-merge version is in `<file>.bak`.
-- **Conflict:** the update stops before it changes any file. `<file>.overlay-merge.bak` holds the merge with conflict markers and `<file>.bak` your version. Resolve the markers, copy the result over the file, and run the update again, or use `--force` to take upstream's version.
-- **No merge possible** (upstream removed the file, or no earlier upstream version has it): the file is treated like any other local edit, and kept unless you pass `--force`.
+The updater keeps its copies inside the git directory, under `career-ops/overlay/<backup branch>/` (`git rev-parse --git-path career-ops/overlay` prints the path), never next to your files. Each update prints the exact path it used.
 
-An entry must be a single file the system layer ships. A directory, a user-layer path, or a file the updater never touches is refused, naming the entry. Removing a line hands the file back to upstream: the next update replaces it like any system file.
+- **Clean merge:** the file gets both sides, and the update commit includes it. Your pre-merge version is saved in the run's directory.
+- **Conflict:** the update stops before it changes any file. The run's directory holds `<file>.merge` with diff3 conflict markers. Resolve the markers, copy the result over your file, and run the update again: the next run takes your resolution as already merged with that upstream version, and merges only what upstream changed since. Or use `--force` to take upstream's version.
+- **No merge possible** (upstream removed the file, or no earlier upstream version has it): the file is treated like any other local edit, and kept unless you pass `--force`. For the updater itself, which must load upstream's version to run, the update stops instead, and your version is put back.
+
+An entry must be a single file the system layer ships. A directory, a user-layer path, or a file the updater never touches is refused, naming the entry. Removing a line turns off the merge and hands the file back to the ordinary rules. A merged version an update already committed reads as upstream's, so the next update replaces it with upstream's version and saves no copy; an edit made since is a local edit, kept unless you pass `--force`. Copy the file elsewhere first if you want your edit back later.
 
 Use an overlay as a last resort. User-specific facts and house rules belong in the user-layer files above (`modes/_profile.md`, `modes/_custom.md`, `config/profile.yml`), and new integrations in a plugin. An overlay is for behaviour coupled to core code that neither can reach.
 

@@ -5,15 +5,13 @@
  *
  * apply() is not exported and fetches the canonical repo, so it cannot run
  * here (see updater-failed-checkout-restore.test.mjs). The overlay decisions
- * live in exported functions that apply() calls unchanged:
- * localOverlayPaths, mergeSystemOverlays (with overlayBaseBlob),
- * recordOverlayBase, restoreOverlayBase and updateCommitMessage. Sections 1 to
- * 9 drive them against throwaway repos through several updates, replaying only
- * the checkout and commit apply() performs for every system file. Section 10
+ * live in exported functions that apply() calls unchanged. Sections 1 to 14
+ * drive them against throwaway repos through several updates, replaying only
+ * the checkout and commit apply() performs for every system file. Section 15
  * asserts against apply()'s source that it calls them in that order.
  */
 
-import { mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync, copyFileSync, existsSync, utimesSync } from 'fs';
 import { join } from 'path';
 import { pass, fail, makeUpdaterRepo, sealProcessGitEnv, rmSync, ROOT } from './helpers.mjs';
 import {
@@ -23,8 +21,16 @@ import {
   mergeSystemOverlays,
   overlayBaseBlob,
   overlayBaseRefForBackup,
-  recordOverlayBase,
+  overlayArtifactRoot,
+  saveOverlayArtifact,
+  readOverlayPending,
+  writeOverlayPending,
+  bootstrapOverlaySources,
+  nextOverlayBase,
+  writeOverlayBase,
+  pairOverlayBase,
   restoreOverlayBase,
+  pruneOverlayRuns,
   updateCommitMessage,
 } from '../update-system.mjs';
 
@@ -32,8 +38,9 @@ import {
 sealProcessGitEnv();
 
 const FILE = 'sys/a.txt';
-const BACKUP = 'backup-pre-update-1.0.0-20260101T000000Z';
+const BACKUP_1 = 'backup-pre-update-1.0.0-20260101T000000Z';
 const BACKUP_2 = 'backup-pre-update-2.0.0-20260102T000000Z';
+const BACKUP_3 = 'backup-pre-update-3.0.0-20260103T000000Z';
 
 function write(dir, rel, text) {
   mkdirSync(join(dir, rel, '..'), { recursive: true });
@@ -41,11 +48,18 @@ function write(dir, rel, text) {
 }
 const read = (dir, rel) => readFileSync(join(dir, rel), 'utf-8');
 const lines = (...l) => `${l.join('\n')}\n`;
+const threw = (fn) => {
+  try {
+    fn();
+    return null;
+  } catch (err) {
+    return err;
+  }
+};
 
 /**
  * An install on `main` at upstream v1, plus upstream versions as commits on
  * the `upstream` branch: the objects a real update has after its fetch.
- * Returns each upstream version's commit.
  */
 function makeInstall(versions) {
   const repo = makeUpdaterRepo({ prefix: 'co-overlay-', includeRoot: true });
@@ -65,14 +79,18 @@ function makeInstall(versions) {
   return { ...repo, commits };
 }
 
-/** What apply() does around a planned merge: checkout, write, commit, record. */
+/**
+ * What apply() does around a planned merge: pair the base with the backup,
+ * check out, write the merges, commit, record the next bases.
+ */
 function replayUpdate({ dir, g }, target, results, backupBranch) {
+  pairOverlayBase(backupBranch, { root: dir });
   g('checkout', target, '--', 'sys/');
   const merged = results.filter((r) => r.status === 'merged');
   for (const { file, content } of merged) writeFileSync(join(dir, file), content);
   g('add', '-A', 'sys/');
   g('commit', '-qm', updateCommitMessage('x', merged.map((r) => r.file)));
-  recordOverlayBase(target, backupBranch, { git: g });
+  writeOverlayBase(nextOverlayBase(results, new Set(), target, { git: g }), { root: dir });
 }
 
 // The local edit is on G. Upstream edits stay at least one unchanged line
@@ -85,52 +103,58 @@ const V4 = lines('A up2', 'B', 'C up1', 'D', 'E up3', 'F', 'G up4');
 const LOCAL1 = lines('A', 'B', 'C', 'D', 'E', 'F', 'G local');
 const MERGED2 = lines('A up1', 'B', 'C up1', 'D', 'E', 'F', 'G local');
 const MERGED3 = lines('A up2', 'B', 'C up1', 'D', 'E up3', 'F', 'G local');
+const RESOLVED4 = lines('A up2', 'B', 'C up1', 'D', 'E up3', 'F', 'G local and up4');
 
 console.log('\n🧪 Testing local system-file overlays (#4326)...');
 
-// ── 1. The declaration file is validated, entry by entry ──
+// ── 1. The declaration file is read from the data root and validated ──
 {
   const { dir } = makeUpdaterRepo({ prefix: 'co-overlay-decl-' });
+  const { dir: data } = makeUpdaterRepo({ prefix: 'co-overlay-data-' });
   try {
     const system = ['sys/', 'update-system.mjs'];
     if (localOverlayPaths(dir, system).length === 0) pass('no declaration file: no overlays');
     else fail('an absent declaration file must declare nothing');
 
-    write(dir, SYSTEM_OVERLAY_FILE, '# mine\r\n\r\nsys/a.txt\r\nupdate-system.mjs\r\nsys/a.txt\r\n');
-    const declared = localOverlayPaths(dir, system);
-    if (JSON.stringify(declared) === JSON.stringify(['sys/a.txt', 'update-system.mjs'])) {
-      pass('system files are accepted; comments, blanks, CRLF and duplicates are ignored');
+    write(data, SYSTEM_OVERLAY_FILE, '# mine\r\n\r\nsys/a.txt\r\nupdate-system.mjs\r\nsys/a.txt\r\n');
+    const declared = localOverlayPaths(dir, system, data);
+    if (JSON.stringify(declared) === JSON.stringify(['sys/a.txt', 'update-system.mjs'])
+        && localOverlayPaths(dir, system).length === 0) {
+      pass('the declaration is read from the data root, not the checkout');
     } else {
       fail(`unexpected declaration: ${JSON.stringify(declared)}`);
     }
 
+    mkdirSync(join(dir, 'sys', 'nested'), { recursive: true });
     for (const [entry, why] of [
       ['sys/', /not directories/],
+      ['sys/nested', /is a directory/],
       ['/etc/passwd', /absolute/],
       ['sys/../cv.md', /segments are forbidden/],
       ['./sys/a.txt', /"\.\/" aliases/],
       ['cv.md', /protected user path/],
       ['notes/todo.txt', /not a system file/],
     ]) {
-      write(dir, SYSTEM_OVERLAY_FILE, `${entry}\n`);
-      try {
-        localOverlayPaths(dir, system);
-        fail(`"${entry}" must be refused`);
-      } catch (err) {
-        if (why.test(err.message) && err.message.includes(`"${entry}"`)) pass(`refuses "${entry}", naming it`);
-        else fail(`"${entry}" refused for the wrong reason: ${err.message}`);
-      }
+      write(data, SYSTEM_OVERLAY_FILE, `${entry}\n`);
+      const err = threw(() => localOverlayPaths(dir, system, data));
+      if (err && why.test(err.message) && err.message.includes(`"${entry}"`)) pass(`refuses "${entry}", naming it`);
+      else fail(`"${entry}" refused wrongly or not at all: ${err?.message}`);
     }
+    write(data, SYSTEM_OVERLAY_FILE, 'sys\n');
+    const dirEntry = threw(() => localOverlayPaths(dir, ['sys/'], data));
+    if (dirEntry && /is a directory/.test(dirEntry.message)) pass('refuses a manifest directory named without its slash');
+    else fail(`"sys" must be refused as a directory: ${dirEntry?.message}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+    rmSync(data, { recursive: true, force: true });
   }
 }
 
-// ── 2-4. Three updates: a first merge, a second, a conflict ──
+// ── 2-6. Three updates, a conflict and its resolution, rollback ──
 {
   const install = makeInstall([V1, V2, V3, V4]);
   const { dir, g, commits } = install;
-  const [, c2, c3, c4] = commits;
+  const [c1, c2, c3, c4] = commits;
   try {
     // An uncommitted edit, as most local fixes are.
     write(dir, FILE, LOCAL1);
@@ -138,73 +162,122 @@ console.log('\n🧪 Testing local system-file overlays (#4326)...');
     // 2. First update: no recorded base yet, so the ancestor is what the
     //    install started from (v1), never an empty file.
     const first = mergeSystemOverlays([FILE], c2, { root: dir });
-    const want2 = MERGED2;
-    if (first[0].status === 'merged' && String(first[0].content) === want2) {
+    if (first[0].status === 'merged' && String(first[0].content) === MERGED2) {
       pass('first update: upstream changes and the uncommitted local edit both land');
     } else {
       fail(`first update: ${first[0].status} ${JSON.stringify(String(first[0].content))}`);
     }
-    if (read(dir, FILE) === LOCAL1) {
-      pass('planning the merge leaves the worktree file untouched');
+    if (read(dir, FILE) === LOCAL1) pass('planning the merge leaves the worktree file untouched');
+    else fail('mergeSystemOverlays wrote to the worktree');
+    replayUpdate(install, c2, first, BACKUP_1);
+    if (g('rev-parse', `${OVERLAY_BASE_REF}:${FILE}`) === g('rev-parse', `${c2}:${FILE}`)) {
+      pass('the update records the target\'s blob as the file\'s next merge base');
     } else {
-      fail('mergeSystemOverlays wrote to the worktree');
+      fail('OVERLAY_BASE_REF does not hold the delivered blob');
     }
-    replayUpdate(install, c2, first, BACKUP);
-    if (g('rev-parse', OVERLAY_BASE_REF) === c2) pass('the update records the target as the next merge base');
-    else fail('OVERLAY_BASE_REF was not recorded');
+    if (g('ls-tree', '-r', '--name-only', overlayBaseRefForBackup(BACKUP_1)) === '') {
+      pass('"no base yet" is paired with the backup explicitly, as an empty tree');
+    } else {
+      fail('the first backup must pair an empty base');
+    }
 
     // 3. Second update re-edits a line the first one changed. Its ancestor
     //    must be v2 as upstream shipped it, not v1 and not the merged file.
     const second = mergeSystemOverlays([FILE], c3, { root: dir });
-    const want3 = MERGED3;
-    if (second[0].status === 'merged' && String(second[0].content) === want3) {
+    if (second[0].status === 'merged' && String(second[0].content) === MERGED3) {
       pass('second update: merges against the version the first one installed');
     } else {
       fail(`second update: ${second[0].status} ${JSON.stringify(String(second[0].content))}`);
     }
+    const afterFirst = g('rev-parse', OVERLAY_BASE_REF);
     replayUpdate(install, c3, second, BACKUP_2);
-    if (read(dir, FILE) === want3 && g('rev-parse', overlayBaseRefForBackup(BACKUP_2)) === c2) {
+    if (read(dir, FILE) === MERGED3 && g('rev-parse', overlayBaseRefForBackup(BACKUP_2)) === afterFirst) {
       pass('the replaced base is paired with the backup branch for rollback');
     } else {
       fail('second update did not pair the previous base');
     }
 
-    // 4. Upstream edits the locally edited line: a conflict, reported with
-    //    markers, and nothing in the worktree changes.
+    // 4. A file the update kept at its local version keeps its old base, so
+    //    the upstream change it skipped is not read as a local revert later.
+    const kept = nextOverlayBase(
+      [{ file: FILE, base: g('rev-parse', `${c2}:${FILE}`) }], new Set([FILE]), c3, { git: g },
+    );
+    const received = nextOverlayBase(
+      [{ file: FILE, base: g('rev-parse', `${c2}:${FILE}`) }], new Set(), c3, { git: g },
+    );
+    if (kept.get(FILE) === g('rev-parse', `${c2}:${FILE}`) && received.get(FILE) === g('rev-parse', `${c3}:${FILE}`)) {
+      pass('per-file base: advances only for a file that received the target');
+    } else {
+      fail(`per-file base: kept ${kept.get(FILE)}, received ${received.get(FILE)}`);
+    }
+
+    // 5. Upstream edits the locally edited line: a conflict, with markers,
+    //    and nothing in the worktree changes.
     const before = read(dir, FILE);
-    const third = mergeSystemOverlays([FILE], c4, { root: dir });
-    const text = String(third[0].content);
-    if (third[0].status === 'conflict' && third[0].conflicts === 1
+    const [third] = mergeSystemOverlays([FILE], c4, { root: dir });
+    const text = String(third.content);
+    if (third.status === 'conflict' && third.conflicts === 1
         && text.includes('<<<<<<< yours') && text.includes('||||||| previous upstream')
         && text.includes('>>>>>>> new upstream') && text.includes('G local') && text.includes('G up4')) {
       pass('conflict: diff3 markers name all three sides');
     } else {
-      fail(`conflict not reported: ${third[0].status} ${JSON.stringify(text)}`);
+      fail(`conflict not reported: ${third.status} ${JSON.stringify(text)}`);
     }
     if (read(dir, FILE) === before) pass('conflict: the local file is untouched');
     else fail('a conflicting merge changed the local file');
 
-    // 5. Rollback restores the base the rolled-back update replaced; the
-    //    update that first recorded one leaves nothing to restore.
-    if (restoreOverlayBase(BACKUP_2, { git: g }) === c2 && g('rev-parse', OVERLAY_BASE_REF) === c2) {
+    //    The run records the conflict. Unchanged, the file conflicts again;
+    //    with markers left in, the update says so; resolved, the resolution
+    //    is taken as merged with v4 instead of conflicting again.
+    const pending = { [FILE]: { local: third.local, upstream: third.upstream } };
+    const [again] = mergeSystemOverlays([FILE], c4, { root: dir, pending });
+    if (again.status === 'conflict' && again.content !== undefined) pass('an unresolved conflict conflicts again');
+    else fail(`unresolved conflict: ${again.status}`);
+    write(dir, FILE, text);
+    const [markers] = mergeSystemOverlays([FILE], c4, { root: dir, pending });
+    if (markers.status === 'conflict' && markers.content === undefined && /conflict markers/.test(markers.reason)) {
+      pass('a file still holding conflict markers is reported, not merged');
+    } else {
+      fail(`markers left in: ${JSON.stringify(markers)}`);
+    }
+    write(dir, FILE, RESOLVED4);
+    const [resolved] = mergeSystemOverlays([FILE], c4, { root: dir, pending });
+    if (resolved.status === 'merged' && String(resolved.content) === RESOLVED4) {
+      pass('a resolved conflict is accepted on the next run, without --force');
+    } else {
+      fail(`resolved conflict: ${resolved.status} ${JSON.stringify(String(resolved.content))}`);
+    }
+    const [forced] = mergeSystemOverlays([FILE], c4, { root: dir, planOnly: true });
+    if (forced.status === 'changed' && forced.content === undefined) pass('--force plans without running a merge');
+    else fail(`planOnly: ${JSON.stringify(forced)}`);
+    write(dir, FILE, MERGED3);
+
+    // 6. Rollback restores the base each backup replaced, including "none
+    //    yet"; a backup with no pair predates overlays and removes the ref.
+    if (restoreOverlayBase(BACKUP_2, { git: g }) === afterFirst && g('rev-parse', OVERLAY_BASE_REF) === afterFirst) {
       pass('rollback puts back the previous merge base');
     } else {
       fail('rollback did not restore the paired base');
     }
-    if (restoreOverlayBase(BACKUP, { git: g }) === null
-        && g('for-each-ref', OVERLAY_BASE_REF) === '') {
-      pass('rollback past the first recorded base removes the ref');
+    restoreOverlayBase(BACKUP_1, { git: g });
+    if (overlayBaseBlob(FILE, c4, { git: g }) === g('rev-parse', `${c1}:${FILE}`)) {
+      pass('rollback to "no base yet" returns to history, which skips merged update commits');
     } else {
-      fail('rollback with no pair must delete OVERLAY_BASE_REF');
+      fail(`after rollback to the first backup: ${overlayBaseBlob(FILE, c4, { git: g })}`);
     }
-
-    // 6. With no ref, history answers: an update commit that merged an
-    //    overlay into the file is skipped, so the base is upstream's blob.
-    const fallback = overlayBaseBlob(FILE, c4, { git: g });
-    if (fallback === g('rev-parse', `${commits[0]}:${FILE}`)) {
-      pass('history fallback skips update commits that merged an overlay');
+    if (restoreOverlayBase(BACKUP_3, { git: g }) === null && g('for-each-ref', OVERLAY_BASE_REF) === '') {
+      pass('a backup with no pair removes the ref');
     } else {
-      fail(`history fallback returned ${fallback}`);
+      fail('a backup with no pair must delete OVERLAY_BASE_REF');
+    }
+    const failing = (...args) => {
+      if (args[0] === 'update-ref') throw new Error('cannot lock ref');
+      return g(...args);
+    };
+    if (threw(() => restoreOverlayBase(BACKUP_2, { git: failing }))?.message === 'cannot lock ref') {
+      pass('a failed base write is reported, not taken for a missing pair');
+    } else {
+      fail('restoreOverlayBase must throw when it cannot write the ref');
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -217,7 +290,6 @@ console.log('\n🧪 Testing local system-file overlays (#4326)...');
   const { dir, g, commits } = install;
   const [, c2, c3] = commits;
   try {
-    // A pre-overlay update: plain checkout, plain message, no ref recorded.
     g('checkout', c2, '--', 'sys/');
     g('commit', '-qm', 'chore: auto-update system files to v2');
     write(dir, FILE, MERGED2);
@@ -232,13 +304,12 @@ console.log('\n🧪 Testing local system-file overlays (#4326)...');
   }
 }
 
-// ── 8. Line endings, missing sides, and the bootstrap copy ──
+// ── 8. Line endings, missing sides ──
 {
   const install = makeInstall([V1, V2]);
   const { dir, g, commits } = install;
   const [, c2] = commits;
   try {
-    // A CRLF checkout must not read as a change to every line.
     g('config', 'core.autocrlf', 'true');
     write(dir, FILE, LOCAL1.replace(/\n/g, '\r\n'));
     const [crlf] = mergeSystemOverlays([FILE], c2, { root: dir });
@@ -279,25 +350,94 @@ console.log('\n🧪 Testing local system-file overlays (#4326)...');
     } else {
       fail(`upstream deletion: ${JSON.stringify(dropped)}`);
     }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
-    // The bootstrap checkout already replaced the file; the parent's copy
-    // holds the install's version.
+// ── 9-10. Where an overlaid updater file's local version comes from ──
+{
+  const install = makeInstall([V1, V2]);
+  const { dir, g, commits } = install;
+  const [, c2] = commits;
+  try {
+    // 9. A parent that knows overlays copies the file into the run directory
+    //    and lists it; the child merges from that copy.
+    const runDir = join(overlayArtifactRoot(dir), BACKUP_1);
     write(dir, FILE, LOCAL1);
-    copyFileSync(join(dir, FILE), join(dir, `${FILE}.bak`));
+    saveOverlayArtifact(runDir, FILE, { from: join(dir, FILE) });
     g('checkout', c2, '--', FILE);
-    const sources = new Map([[FILE, join(dir, `${FILE}.bak`)]]);
-    const [boot] = mergeSystemOverlays([FILE], c2, { root: dir, localSources: sources });
-    if (boot.status === 'merged' && String(boot.content) === MERGED2) {
+    const listed = bootstrapOverlaySources([FILE, 'sys/other.txt'], {
+      handoff: JSON.stringify([FILE]), runDir, backupBranch: BACKUP_1, targetRef: c2, root: dir,
+    });
+    const [boot] = mergeSystemOverlays([FILE], c2, { root: dir, localSources: listed });
+    if (listed.size === 1 && listed.get(FILE) === join(runDir, 'sys', 'a.txt')
+        && boot.status === 'merged' && String(boot.content) === MERGED2) {
       pass('an overlaid updater file merges from the copy saved before the bootstrap checkout');
     } else {
-      fail(`bootstrap source: ${boot.status} ${JSON.stringify(String(boot.content))}`);
+      fail(`handoff: ${JSON.stringify([...listed])} ${boot.status}`);
+    }
+
+    // 10. A parent from before overlays passes nothing but saved <file>.bak
+    //     (#2337). Only a copy this run wrote is used.
+    copyFileSync(join(runDir, 'sys', 'a.txt'), join(dir, `${FILE}.bak`));
+    const fresh = bootstrapOverlaySources([FILE], { runDir, backupBranch: BACKUP_1, targetRef: c2, root: dir });
+    if (fresh.get(FILE) === join(dir, 'sys', 'a.txt.bak')) pass('without a handoff, a .bak this run wrote is the local version');
+    else fail(`legacy parent: ${JSON.stringify([...fresh])}`);
+    const past = new Date('2025-06-01T00:00:00Z');
+    utimesSync(join(dir, `${FILE}.bak`), past, past);
+    const stale = bootstrapOverlaySources([FILE], { runDir, backupBranch: BACKUP_1, targetRef: c2, root: dir });
+    if (stale.size === 0) pass('an older .bak is never taken for this run\'s copy');
+    else fail('a .bak older than the run must be ignored');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 11-13. Recovery files live under the git dir and are never replaced ──
+{
+  const { dir, g } = makeUpdaterRepo({ prefix: 'co-overlay-artifacts-', includeRoot: true });
+  try {
+    const root = overlayArtifactRoot(dir);
+    if (root.startsWith(join(dir, '.git'))) pass('overlay artifacts live inside the git directory');
+    else fail(`artifact root outside .git: ${root}`);
+
+    const runDir = join(root, BACKUP_1);
+    const merge = saveOverlayArtifact(runDir, FILE, { content: 'x\n', suffix: '.merge' });
+    const again = threw(() => saveOverlayArtifact(runDir, FILE, { content: 'y\n', suffix: '.merge' }));
+    if (merge === join(runDir, 'sys', 'a.txt.merge') && again && readFileSync(merge, 'utf-8') === 'x\n') {
+      pass('an artifact is created exclusively, never replacing an existing file');
+    } else {
+      fail(`exclusive creation: ${merge} ${again?.message}`);
+    }
+
+    writeOverlayPending(root, { [FILE]: { local: 'a'.repeat(40), upstream: 'b'.repeat(40) } });
+    const roundTrip = readOverlayPending(root);
+    writeOverlayPending(root, {});
+    if (roundTrip[FILE]?.upstream === 'b'.repeat(40) && Object.keys(readOverlayPending(root)).length === 0) {
+      pass('pending conflicts are recorded and cleared');
+    } else {
+      fail(`pending round trip: ${JSON.stringify(roundTrip)}`);
+    }
+
+    // 13. A run directory goes when its backup branch goes.
+    write(dir, 'x.txt', 'x\n');
+    g('add', 'x.txt');
+    g('commit', '-qm', 'x');
+    g('branch', BACKUP_2);
+    mkdirSync(join(root, BACKUP_2), { recursive: true });
+    const pruned = pruneOverlayRuns({ root: dir, git: g });
+    if (JSON.stringify(pruned) === JSON.stringify([BACKUP_1]) && existsSync(join(root, BACKUP_2)) && !existsSync(runDir)) {
+      pass('run directories are pruned with their backup branches');
+    } else {
+      fail(`prune: ${JSON.stringify(pruned)}`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
-// ── 9. The commit names merged files; a plain update keeps its subject ──
+// ── 14. The commit names merged files; a plain update keeps its subject ──
 {
   const plain = updateCommitMessage('1.2.3');
   const merged = updateCommitMessage('1.2.3', ['b.mjs', 'a.mjs']);
@@ -309,40 +449,57 @@ console.log('\n🧪 Testing local system-file overlays (#4326)...');
   }
 }
 
-// ── 10. apply() calls the helpers in the order the guarantees need ──
+// ── 15. apply() calls the helpers in the order the guarantees need ──
 {
   const source = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8');
   const body = source.slice(source.indexOf('async function apply() {'), source.indexOf('function rollback() {'));
   const at = (needle, from = 0) => body.indexOf(needle, from);
-  const bootstrapSave = at('const overlayBootstrap = reexecFiles.filter(');
-  const bootstrapCheckout = at("git('--literal-pathspecs', 'checkout', targetCommit, '--', ...reexecFiles)");
-  const sourcesEnv = at('CAREER_OPS_UPDATE_OVERLAY_SOURCES: JSON.stringify(overlaySources)');
+
+  const targetPair = at("git('update-ref', pairedTargetRef, targetCommit)");
+  const basePair = at('pairOverlayBase(backupBranch)', targetPair);
+  const dataRoot = at('dataRoot = getCareerOpsRoot()', basePair);
+  const bootstrapCopy = at('saveOverlayArtifact(overlayRunDir, file, { from: source })', dataRoot);
+  const copyFailStop = at('Could not save your overlaid', bootstrapCopy);
+  const bootstrapCheckout = at("git('--literal-pathspecs', 'checkout', targetCommit, '--', ...reexecFiles)", copyFailStop);
+  const copyRestore = at('for (const { file, copy } of overlayCopies)', bootstrapCheckout);
+  if (targetPair !== -1 && basePair > targetPair && dataRoot > basePair && bootstrapCopy > dataRoot
+      && copyFailStop > bootstrapCopy && bootstrapCheckout > copyFailStop && copyRestore > bootstrapCheckout) {
+    pass('parent: pairs the base, reads the data root, copies overlays (or stops) before its checkout, restores them on failure');
+  } else {
+    fail(`parent order broken: ${JSON.stringify({ targetPair, basePair, dataRoot, bootstrapCopy, copyFailStop, bootstrapCheckout, copyRestore })}`);
+  }
+
   const plan = at('mergeSystemOverlays(overlayFiles, targetCommit');
-  const conflictStop = at('throw new Error(`Overlay merge conflict', plan);
-  const localEdits = at('locallyModifiedSystemFiles(updatePaths, targetCommit)', plan);
-  const checkout = at('checkoutSystemPathsBatched(', plan);
+  const bootstrapStop = at('Overlaid updater file(s) cannot be merged', plan);
+  const localEdits = at('locallyModifiedSystemFiles(updatePaths, targetCommit)', bootstrapStop);
+  const configured = at('snapshotConfiguredTemplateVariantsAcrossProfiles(', localEdits);
+  const conflictStop = at('throw new Error(`Overlay merge conflict', configured);
+  const checkout = at('checkoutSystemPathsBatched(', conflictStop);
   const writeMerged = at('for (const { file, content } of overlayMerges)', checkout);
-  const commit = at('updateCommitMessage(remote, overlayMerges', writeMerged);
-  const record = at('recordOverlayBase(targetCommit, backupBranch)', commit);
-  if (bootstrapSave !== -1 && bootstrapCheckout > bootstrapSave && sourcesEnv > bootstrapCheckout) {
-    pass('the parent saves overlaid updater files before its bootstrap checkout');
+  const writeRestore = at('restoreAfterFailedUpdate(mergePathLists(updated, batchAttempted)', writeMerged);
+  const commit = at('updateCommitMessage(remote, overlayMerges', writeRestore);
+  const record = at('writeOverlayBase(nextOverlayBase(overlayResults, preservedSet, targetCommit))', commit);
+  if (plan !== -1 && bootstrapStop > plan && localEdits > bootstrapStop && configured > localEdits
+      && conflictStop > configured && checkout > conflictStop && writeMerged > checkout
+      && writeRestore > writeMerged && commit > writeRestore && record > commit) {
+    pass('child: plan, stop, keep configured templates, stop on conflict, check out, write (or restore), commit, record');
   } else {
-    fail('overlaid updater files must be saved before the bootstrap checkout');
+    fail(`child order broken: ${JSON.stringify({ plan, bootstrapStop, localEdits, configured, conflictStop, checkout, writeMerged, writeRestore, commit, record })}`);
   }
-  if (plan !== -1 && conflictStop > plan && localEdits > conflictStop && checkout > localEdits
-      && writeMerged > checkout && commit > writeMerged && record > commit) {
-    pass('apply(): plan, stop on conflict, check out, write merges, commit, record the base');
-  } else {
-    fail(`apply() order broken: ${JSON.stringify({ plan, conflictStop, localEdits, checkout, writeMerged, commit, record })}`);
-  }
-  if (/if \(authenticatedReexec\) \{\s*try \{\s*bootstrapOverlays = JSON\.parse\(process\.env\.CAREER_OPS_UPDATE_OVERLAY_SOURCES/.test(body)) {
-    pass('the child trusts the overlay sources only from an authenticated parent');
+  if (/planOnly: updateForce/.test(body)) pass('--force skips running merges');
+  else fail('mergeSystemOverlays must get planOnly: updateForce');
+  if (/handoff: authenticatedReexec \? process\.env\.CAREER_OPS_UPDATE_OVERLAY_SOURCES : undefined/.test(body)) {
+    pass('the child trusts the overlay handoff only from an authenticated parent');
   } else {
     fail('CAREER_OPS_UPDATE_OVERLAY_SOURCES must be read only under authenticatedReexec');
   }
+
   const rollbackBody = source.slice(source.indexOf('function rollback() {'));
-  if (rollbackBody.indexOf('restoreOverlayBase(latest)') !== -1) pass('rollback restores the overlay base');
-  else fail('rollback must call restoreOverlayBase');
+  if (/try \{\s*restoreOverlayBase\(latest\);\s*\} catch/.test(rollbackBody) && rollbackBody.includes('Rollback incomplete. ${summary} The overlay merge base')) {
+    pass('rollback restores the overlay base and reports a failure to');
+  } else {
+    fail('rollback must call restoreOverlayBase and report its failure');
+  }
   if (readFileSync(join(ROOT, '.gitignore'), 'utf-8').split(/\r?\n/).includes(SYSTEM_OVERLAY_FILE)) {
     pass(`${SYSTEM_OVERLAY_FILE} is gitignored`);
   } else {
