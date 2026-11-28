@@ -175,12 +175,21 @@ const DEFAULT_CV_PATH = join(DATA_ROOT, 'cv.md');
 // number must be OF there: a story's "40-person team" is not verified by a
 // cv.md "40%", however close the two sit to the word "team".
 
+// A count as prose writes it: plain digits, or digits grouped in threes by
+// commas ("1,200"). The group is read whole, so "1,200 employees" is the claim
+// 1200, never 200. NOT_MID_NUMBER keeps a claim from starting inside a longer
+// figure (the "200" of "1,200", the "5%" of "0.5%" or "12,5%").
+const COUNT = String.raw`(?:\d{1,3}(?:,\d{3})+|\d+)`;
+const NOT_MID_NUMBER = String.raw`(?<![\d.,])`;
+/** The value of a matched count: thousands separators dropped. */
+const countValue = (text) => parseFloat(String(text).replace(/,/g, ''));
+
 const CLAIM_PATTERNS = [
   // "cut costs 40%" / "improved completion 12.5%"
   {
     kind: 'percent',
-    re: /\d+(?:\.\d+)?%/g,
-    values: (m) => [parseFloat(m[0])],
+    re: new RegExp(String.raw`${NOT_MID_NUMBER}${COUNT}(?:\.\d+)?%`, 'g'),
+    values: (m) => [countValue(m[0])],
     units: () => ['%'],
   },
   // "500+ employees", "50+ courses" — number, literal +, a following word.
@@ -190,30 +199,30 @@ const CLAIM_PATTERNS = [
   // unit cv.md has to count in.
   {
     kind: 'plus-noun',
-    re: /\b(\d+)\+\s+([a-zA-Z]+)/g,
-    values: (m) => [parseFloat(m[1])],
+    re: new RegExp(String.raw`${NOT_MID_NUMBER}\b(${COUNT})\+\s+([a-zA-Z]+)`, 'g'),
+    values: (m) => [countValue(m[1])],
     units: (m) => [normalizeUnit(m[2])],
   },
   // "8 hours to 2 hours", "8 hrs -> 2 hrs" — the classic before/after
   // automation-story shape. Both endpoints must match cv.md for `existing`.
   {
     kind: 'hour-range',
-    re: /\b(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)\s*(?:→|->|to)\s*(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)\b/gi,
-    values: (m) => [parseFloat(m[1]), parseFloat(m[2])],
+    re: new RegExp(String.raw`${NOT_MID_NUMBER}\b(${COUNT}(?:\.\d+)?)\s*(?:hours?|hrs?)\s*(?:→|->|to)\s*(${COUNT}(?:\.\d+)?)\s*(?:hours?|hrs?)\b`, 'gi'),
+    values: (m) => [countValue(m[1]), countValue(m[2])],
     units: () => ['hour', 'hour'],
   },
   // "15-person team", "6-member panel"
   {
     kind: 'scale-hyphen',
-    re: /\b(\d+)-(person|member)\b/gi,
-    values: (m) => [parseFloat(m[1])],
+    re: new RegExp(String.raw`${NOT_MID_NUMBER}\b(${COUNT})-(person|member)\b`, 'gi'),
+    values: (m) => [countValue(m[1])],
     units: (m) => [normalizeUnit(m[2])],
   },
   // "50 students", "200 employees", "12 instructors"
   {
     kind: 'scale-noun',
-    re: /\b(\d+)\s+(students?|employees?|people|staff|learners?|instructors?|departments?|cohorts?)\b/gi,
-    values: (m) => [parseFloat(m[1])],
+    re: new RegExp(String.raw`${NOT_MID_NUMBER}\b(${COUNT})\s+(students?|employees?|people|staff|learners?|instructors?|departments?|cohorts?)\b`, 'gi'),
+    values: (m) => [countValue(m[1])],
     units: (m) => [normalizeUnit(m[2])],
   },
 ];
@@ -260,7 +269,7 @@ function unitAfter(text, end) {
 // purpose: it finds the candidates, and buildCvNumberContexts() records the
 // unit and sentence each one sits in, so a claim counts as `existing` only
 // against an occurrence of the same number counting the same thing.
-const NUMBER_SCAN_RE = /\d+(?:\.\d+)?/g;
+const NUMBER_SCAN_RE = new RegExp(String.raw`${COUNT}(?:\.\d+)?`, 'g');
 
 // Filtered out of context-word overlap so common connective words don't
 // manufacture a false supportedByResume match.
@@ -398,7 +407,7 @@ function extractNumbers(text) {
   const out = new Set();
   let m;
   const re = new RegExp(NUMBER_SCAN_RE);
-  while ((m = re.exec(text)) !== null) out.add(parseFloat(m[0]));
+  while ((m = re.exec(text)) !== null) out.add(countValue(m[0]));
   return out;
 }
 
@@ -420,7 +429,7 @@ function buildCvNumberContexts(cvText) {
   const re = new RegExp(NUMBER_SCAN_RE);
   let m;
   while ((m = re.exec(cvText)) !== null) {
-    const value = parseFloat(m[0]);
+    const value = countValue(m[0]);
     const end = m.index + m[0].length;
     const occurrence = {
       unit: unitAfter(cvText, end),
