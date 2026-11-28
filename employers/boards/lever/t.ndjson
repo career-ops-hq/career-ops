@@ -69,7 +69,7 @@
 {"ats":"lever","region":"us","board":"toku","careers_url":"https://jobs.lever.co/toku","name":"Toku","source":"web-index:wayback@2026-11-12","contribution":"2026-11-17-santifer","added":"2026-11-17"}
 {"ats":"lever","region":"us","board":"tomjames","careers_url":"https://jobs.lever.co/tomjames","name":"Tom James Company","source":"web-index:wayback@2026-11-12","contribution":"2026-11-16-santifer","added":"2026-11-16"}
 {"ats":"lever","region":"eu","board":"tomtom","careers_url":"https://jobs.eu.lever.co/tomtom","name":"TomTom","source":"web-index:wayback@2026-11-12","contribution":"2026-11-16-santifer","added":"2026-11-16"}
-{"ats":"lever","region":"us","board":"tonic","careers_url":"https://jobs.lever.co/tonic","name":"Tonic","source":"web-index:wayback@2026-11-12","contribution":"2026-11-18-santifer.9","added":"2026-11-18"}
+{"ats":"lever","region":"us","board":"tonic","careers_url":"https://jobs.lever.co/tonic","name":"Tonic","source":"web-index:wayback@2026-11-12","contribution":"2026-11-18-santifer.9","added":"2026-11-18","retired":true,"retired_reason":"gone"}
 {"ats":"lever","region":"us","board":"tonkean","careers_url":"https://jobs.lever.co/tonkean","name":"Tonkean","source":"web-index:wayback@2026-11-12","contribution":"2026-11-16-santifer","added":"2026-11-16"}
 {"ats":"lever","region":"us","board":"too-lost","careers_url":"https://jobs.lever.co/too-lost","name":"Too Lost","source":"web-index:wayback@2026-11-12","contribution":"2026-11-16-santifer","added":"2026-11-16"}
 {"ats":"lever","region":"us","board":"topazlabs","careers_url":"https://jobs.lever.co/topazlabs","name":"Topaz Labs","source":"web-index:wayback@2026-11-12","contribution":"2026-11-16-santifer","added":"2026-11-16"}
@@ -84,7 +84,7 @@
 {"ats":"lever","region":"us","board":"traackr","careers_url":"https://jobs.lever.co/traackr","name":"Traackr","source":"web-index:wayback@2026-11-12","contribution":"2026-11-14-santifer","added":"2026-11-14"}
 {"ats":"lever","region":"us","board":"trackoff","careers_url":"https://jobs.lever.co/trackoff","name":"TrackOFF","source":"web-index:wayback@2026-11-12","contribution":"2026-11-18-santifer.9","added":"2026-11-18"}
 {"ats":"lever","region":"us","board":"tracktik","careers_url":"https://jobs.lever.co/tracktik","name":"Trackforce","source":"web-index:wayback@2026-11-12","contribution":"2026-11-16-santifer","added":"2026-11-16"}
-{"ats":"lever","region":"us","board":"trackvfx","careers_url":"https://jobs.lever.co/trackvfx","name":"Track VFX","source":"web-index:wayback@2026-11-12","contribution":"2026-11-18-santifer.9","added":"2026-11-18"}
+{"ats":"lever","region":"us","board":"trackvfx","careers_url":"https://jobs.lever.co/trackvfx","name":"Track VFX","source":"web-index:wayback@2026-11-12","contribution":"2026-11-18-santifer.9","added":"2026-11-18","retired":true,"retired_reason":"gone"}
 {"ats":"lever","region":"eu","board":"tradelink","careers_url":"https://jobs.eu.lever.co/tradelink","name":"TradeLink","source":"web-index:wayback@2026-11-12","contribution":"2026-11-16-santifer","added":"2026-11-16"}
 {"ats":"lever","region":"us","board":"trailappliances","careers_url":"https://jobs.lever.co/trailappliances","name":"Trail Appliances","source":"web-index:wayback@2026-11-12","contribution":"2026-11-16-santifer","added":"2026-11-16"}
 {"ats":"lever","region":"us","board":"traildsoftware","careers_url":"https://jobs.lever.co/traildsoftware","name":"Traild","source":"web-index:wayback@2026-11-12","contribution":"2026-11-16-santifer","added":"2026-11-16"}
