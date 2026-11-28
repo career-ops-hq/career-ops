@@ -26,7 +26,7 @@ import { basename, resolve, dirname, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
-import { flagValue } from './lib/cli-flags.mjs';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -45,7 +45,20 @@ const ALLOWED_HOSTS = new Set([
 
 // ── CLI args ─────────────────────────────────────────────────────────
 
+const PREPARE_FLAGS = ['--url', '--pdf', '--cover', '--help', '-h'];
+const PREPARE_USAGE = `Usage:
+  node prepare-application.mjs --url <apply_url> --pdf <pdf_path> [--cover <cover_txt>]
+  node prepare-application.mjs --help
+
+Prints the form values for a Greenhouse, Ashby, or Lever application.
+Nothing is submitted.`;
+
 const args = process.argv.slice(2);
+validateFlags(args, PREPARE_FLAGS, PREPARE_USAGE, {
+  valueFlags: ['--url', '--pdf', '--cover'],
+  requireOperand: true,
+  usageOnError: true,
+});
 const get = (flag) => flagValue(args, flag);
 
 const applyUrl  = get('--url');
@@ -53,7 +66,7 @@ const pdfPath   = get('--pdf');
 const coverPath = get('--cover');
 
 if (!applyUrl || !pdfPath) {
-  console.error('Usage: node prepare-application.mjs --url <apply_url> --pdf <pdf_path> [--cover <cover_txt>]');
+  console.error(PREPARE_USAGE);
   process.exit(1);
 }
 
