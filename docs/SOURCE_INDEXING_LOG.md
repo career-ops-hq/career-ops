@@ -325,6 +325,31 @@ Startup jobs. The provider reads Wellfound in two ways: the jobs page of one com
 
 ---
 
+## net-empregos.com
+
+| | |
+|---|---|
+| **Proposed by** | @SalvadorCorreia in issue [#7827](https://github.com/career-ops-hq/career-ops/issues/7827) (not the operator) |
+| **Provider** | `providers/netempregos.mjs` |
+| **PR** | this PR · issue [#7827](https://github.com/career-ops-hq/career-ops/issues/7827) |
+| **Status** | Proposed |
+
+A Portuguese job board for every sector. Its listing pages are server-rendered HTML, 18 cards a page, walked with `page=N`: the category and area pages (`/empregos-portugal-informatica-programacao.asp?categoria=5&zona=0`) and the search (`/pesquisa-empregos.asp?chaves=...`). The provider reads the listing URL a user copies from the site. The pages are ISO-8859-1, so this PR also lets `fetchText` decode a named charset (`opts.charset`); without it every accented letter arrives as U+FFFD. The RSS feed (`/rss.asp`) holds only the newest 1,000 offers of the whole board (on 2026-11-26, the last 17 hours), so the provider does not use it.
+
+**Rule 1 (real listings, identifiable employer, free for candidates).** Every card has an employer line. In the programming category on 2026-11-26, 2 of 807 named no employer ("Anónimo", "Confidencial"); on the first three pages of the Lisbon listing for all categories, 4 of 54 ("Confidencial"). The provider counts those under `no_employer` and does not return them. Offers are free to read without an account, and the site's terms (section 11) state that its services are free for every user. The posting page shows the application email or link only to signed-in candidates (a free account), as on Computrabajo: in the page's script the link button opens the login form, and the email button asks `/2get_email_x.asp` for the address and opens the login form when that answers `login-registo`. In a sample of 8 programming offers, 5 apply through a link to the employer's site or applicant tracking system and 3 by email.
+
+**Rule 2 (canonical URL).** The listing card links only the Net-Empregos posting page (`https://www.net-empregos.com/<id>/<slug>/`), and the provider uses it. An external application link, when there is one, is on that page behind a Net-Empregos redirect (`redirect.net-empregos.com/redirect.asp?ref=<id>&lnk=...`) and opens only for signed-in candidates.
+
+**Rule 3 (complete inventory, no paid placement).** Employers can buy featured ads ("Oferta em Destaque"), which the site shows first on page 1 of a listing. They are the same cards as the rest and are not repeated further on. Walking every page of the programming category on 2026-11-26 read 807 cards in 45 pages, the "807 ofertas encontradas" the page states (801 distinct: 6 moved to the next page as new ads arrived during the walk). The provider walks every page up to `max_pages`, warns when the cap cuts a listing short, and leaves ranking to the scanner.
+
+**Rule 4 (operator declared).** Cenário Virtual, Unipessoal Lda (NIF 508040175, Funchal), per the site's privacy policy and terms of use; the footer reads "Net-Empregos | Cenário Virtual Lda". The proposer is not the operator but a candidate using the board.
+
+**Rule 5 (aggregation stays in core).** Employers publish their offers on the site (`empresa.net-empregos.com`, "Publicar Oferta"). None of the 8 sampled offers led to another job board. The provider reads only net-empregos.com.
+
+**Rule 6 (read what is public).** The listing pages read without signing in, and no CAPTCHA appeared. `www.net-empregos.com/robots.txt` (read 2026-11-26) states no `Crawl-delay` and, under `User-agent: *`, disallows `/pesquisa-empregos.asp?*chaves=` and `/*?*chaves=`, so a search URL with keywords is disallowed and the category and area pages are not. Under rule 6 since 2026-11-08, `robots.txt` is not a stop for a provider reading on the job seeker's machine. On 2026-11-26 the site answered every page with its candidate login page (HTTP 200) for about 26 minutes after a walk of about 50 pages at 250 ms, which followed about 60 earlier requests that hour, most of them 1.5 s apart. The provider therefore reads one page at a time, 1.5 s apart, by default at most 50 pages a listing, and stops with a named error when it gets the login page, rather than reading past it. Walks of 47 and 20 pages at that pace were served in full. The terms (section 8) limit access to the offers to active job search, which is what the provider is for. No request from the operator not to be read was found in the issues.
+
+---
+
 ## itjobs.pt
 
 | | |

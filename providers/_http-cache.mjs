@@ -99,7 +99,12 @@ function cacheKey(method, url, opts, body) {
   // The cap is part of the request. A smaller maxBytes must not be answered
   // with a body saved under a larger one.
   const maxBytes = opts.maxBytes == null ? '' : String(opts.maxBytes);
-  return createHash('sha256').update(`${method}\n${url}\n${headerMaterial(opts.headers)}\n${maxBytes}\n${body}`).digest('hex');
+  const key = createHash('sha256').update(`${method}\n${url}\n${headerMaterial(opts.headers)}\n${maxBytes}\n${body}`).digest('hex');
+  // So is the charset the body is decoded with. It is hashed with the key
+  // above as a separate field, so no request body can end in the same text,
+  // and only when set, so the keys of every UTF-8 request stay what they were.
+  if (!opts.charset) return key;
+  return createHash('sha256').update(JSON.stringify([key, String(opts.charset)])).digest('hex');
 }
 
 function isFresh(entry, store) {
