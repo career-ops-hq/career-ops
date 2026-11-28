@@ -651,3 +651,236 @@ test('a malformed copy that differs only in whitespace does not make the page am
   const out = jdFromPageHtml(`<html><script>{${valid},${malformed}}</script></html>`);
   assert.ok(out);
 });
+
+// #7507: when the headless worker's WebFetch is intercepted, the platform needs its own
+// read of a plain server-rendered page. Opt-in only: the default stays structured-data-only.
+const PLAIN = `<html><body><nav>Home Careers Login</nav><main><h1>Staff Engineer</h1><p>${BODY}</p></main></body></html>`;
+
+test('fetchJdFromPage ignores visible text unless visibleFallback is asked for', async () => {
+  const net = stubNetwork(() => html(PLAIN));
+  try {
+    assert.equal(await fetchJdFromPage('https://careers.example.com/job/1'), null);
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback returns the visible posting text of a plain page', async () => {
+  const net = stubNetwork(() => html(PLAIN));
+  try {
+    const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+    assert.ok(jd);
+    assert.equal(jd.method, 'visible-text');
+    assert.match(jd.text, /production services/);
+    assert.doesNotMatch(jd.text, /<[a-z]/);
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback refuses a stub page under the word floor', async () => {
+  const net = stubNetwork(() => html('<html><body><main>Staff Engineer Apply now</main></body></html>'));
+  try {
+    assert.equal(await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true }), null);
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback never scores a closed posting', async () => {
+  const closed = `<html><body><main><p>This job is no longer available.</p><p>${BODY}</p></main></body></html>`;
+  const net = stubNetwork(() => html(closed));
+  try {
+    const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+    assert.ok(!jd || jd.closed === true, 'closed evidence wins over visible text');
+    assert.ok(!jd || jd.text === '');
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback drops the doctype and prefers the <main> region over page chrome', async () => {
+  const doc = `<!DOCTYPE html><html><head><title>Jobs</title></head><body><nav>Main menu Contact us Help Login</nav><main><h1>Staff Engineer</h1><p>${BODY}</p></main><footer>Privacy Terms</footer></body></html>`;
+  const net = stubNetwork(() => html(doc));
+  try {
+    const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+    assert.ok(jd);
+    assert.doesNotMatch(jd.text, /doctype/i);
+    assert.doesNotMatch(jd.text, /Main menu|Privacy Terms/);
+    assert.match(jd.text, /Staff Engineer/);
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback ignores a <main> inside a comment, template or hidden container', async () => {
+  const doc = `<html><body><!-- <main>OLD COMMENTED MAIN</main> --><template><main>TEMPLATE MAIN</main></template><div hidden><main>HIDDEN MAIN</main></div><nav>Site menu Login</nav><main><h1>Staff Engineer</h1><p>${BODY}</p></main><footer>Privacy Terms</footer></body></html>`;
+  const net = stubNetwork(() => html(doc));
+  try {
+    const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+    assert.ok(jd);
+    assert.match(jd.text, /production services/);
+    assert.doesNotMatch(jd.text, /COMMENTED MAIN|TEMPLATE MAIN|HIDDEN MAIN/);
+    assert.doesNotMatch(jd.text, /Site menu|Privacy Terms/, 'the one visible <main> still scopes the region');
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback marks text from a page longer than the scan cap as partial', async () => {
+  const doc = `<html><body><main><h1>Staff Engineer</h1><p>${BODY}</p></main>${'<p>filler</p>'.repeat(90_000)}</body></html>`;
+  assert.ok(doc.length > 1_000_000);
+  const net = stubNetwork(() => html(doc));
+  try {
+    const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+    assert.ok(jd);
+    assert.match(jd.text, /Job description truncated here/);
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback does not end the <main> region at a </main> inside a script string', async () => {
+  const doc = `<html><body><main><h1>Staff Engineer</h1><p>${BODY}</p><script>const layout = "</main>";</script><p>Additional requirements: ZEBRAQUOKKA</p></main><footer>Privacy Terms</footer></body></html>`;
+  const net = stubNetwork(() => html(doc));
+  try {
+    const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+    assert.ok(jd);
+    assert.match(jd.text, /ZEBRAQUOKKA/, 'text after the script string is still part of the region');
+    assert.doesNotMatch(jd.text, /Privacy Terms/);
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback does not end the <main> region at a </main> inside a comment', async () => {
+  const doc = `<html><body><main><h1>Staff Engineer</h1><p>${BODY}</p><!-- </main> --><p>Additional requirements: ZEBRAQUOKKA</p></main></body></html>`;
+  const net = stubNetwork(() => html(doc));
+  try {
+    const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+    assert.ok(jd);
+    assert.match(jd.text, /ZEBRAQUOKKA/);
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback leaves hidden descendants out of the returned text', async () => {
+  const doc = `<html><body><main><h1>Staff Engineer</h1><p>${BODY}</p><div hidden>HIDDENATTR <div>nested</div> more</div><span aria-hidden="true">ARIAHIDDEN</span><p style="display:none">DISPLAYNONE</p><p>Visible closing line</p></main></body></html>`;
+  const net = stubNetwork(() => html(doc));
+  try {
+    const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+    assert.ok(jd);
+    assert.doesNotMatch(jd.text, /HIDDENATTR|DISPLAYNONE|nested/);
+    assert.match(jd.text, /ARIAHIDDEN/, 'aria-hidden hides from screen readers only, not from the page');
+    assert.match(jd.text, /Visible closing line/);
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback does not return a hidden body as the JD', async () => {
+  const doc = `<html><body><main><h1>Engineer</h1><div hidden>${BODY}</div><p>Loading</p></main></body></html>`;
+  const net = stubNetwork(() => html(doc));
+  try {
+    assert.equal(await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true }), null);
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback scans hostile markup in linear time', { timeout: 20_000 }, async () => {
+  const hostile = {
+    'unclosed openers': '<a '.repeat(300_000),
+    'distinct hidden names': Array.from({ length: 20_000 }, (_, i) => `<q${i} hidden></q${i}>`).join(''),
+    'unclosed hidden openers': '<div hidden>'.repeat(80_000),
+    'distinct unclosed hidden names': Array.from({ length: 50_000 }, (_, i) => `<q${i} hidden>`).join(''),
+  };
+  for (const [name, junk] of Object.entries(hostile)) {
+    const doc = `<html><body><main><p>${BODY}</p></main>${junk}</body></html>`;
+    const net = stubNetwork(() => html(doc));
+    try {
+      const t = Date.now();
+      const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+      assert.ok(jd, name);
+      assert.ok(Date.now() - t < 3000, `${name} took ${Date.now() - t}ms`);
+    } finally { net.restore(); }
+  }
+});
+
+test('fetchJdFromPage visibleFallback keeps the <main> region when a script string holds a <script> tag', async () => {
+  const doc = `<html><body><nav>Site menu Login</nav><main><h1>Staff Engineer</h1><p>${BODY}</p><script>document.write('<script src=x><\\/script>');</script><p>Additional requirements: ZEBRAQUOKKA</p></main><footer>Privacy Terms</footer></body></html>`;
+  const net = stubNetwork(() => html(doc));
+  try {
+    const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+    assert.ok(jd);
+    assert.match(jd.text, /ZEBRAQUOKKA/);
+    assert.doesNotMatch(jd.text, /Site menu|Privacy Terms/, 'the region still scopes the text');
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback: an unclosed hidden element hides only itself', async () => {
+  const doc = `<html><body><main><h1>Staff Engineer</h1><p hidden>HIDDENLEAD<p>${BODY}</p><p>Closing line ZEBRAQUOKKA</p></main></body></html>`;
+  const net = stubNetwork(() => html(doc));
+  try {
+    const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+    assert.ok(jd);
+    assert.match(jd.text, /ZEBRAQUOKKA/);
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback: "hidden" in a class or label value does not hide text', async () => {
+  const doc = `<html><body><main><h1>Staff Engineer</h1><p>${BODY}</p><div class="flex hidden lg:block">DESKTOPONLY</div><p aria-label="no hidden fees">LABELLED</p><div class="x" hidden>REALLYHIDDEN</div><div style="display: none">NONE</div></main></body></html>`;
+  const net = stubNetwork(() => html(doc));
+  try {
+    const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+    assert.ok(jd);
+    assert.match(jd.text, /DESKTOPONLY/);
+    assert.match(jd.text, /LABELLED/);
+    assert.doesNotMatch(jd.text, /REALLYHIDDEN|NONE/);
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback: a tag in a comment or script string inside a hidden element does not move its end', async () => {
+  const wrap = (inner) => `<html><body><div id="wrap"><div hidden>${inner}<p>Sign in</p></div><section><p>${BODY}</p><p>JOBMARKER</p></section></div><footer>f</footer></body></html>`;
+  for (const inner of ['<!-- <div class="old"> -->', `<script>tpl='<div>'</script>`]) {
+    const net = stubNetwork(() => html(wrap(inner)));
+    try {
+      const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+      assert.ok(jd, inner);
+      assert.match(jd.text, /JOBMARKER/, inner);
+      assert.doesNotMatch(jd.text, /Sign in/, inner);
+    } finally { net.restore(); }
+  }
+  const leak = `<html><body><main><p>${BODY}</p><div hidden>SECRET<!-- </div> -->S2</div><p>END</p></main></body></html>`;
+  const net = stubNetwork(() => html(leak));
+  try {
+    const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+    assert.ok(jd);
+    assert.doesNotMatch(jd.text, /SECRET|S2/);
+    assert.match(jd.text, /END/);
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback: a hidden element written <tag hidden/> stays open like a browser reads it', async () => {
+  for (const tag of ['div', 'b', 'em', 'custom-el']) {
+    const doc = `<html><body><main><p>${BODY}</p><${tag} hidden/>SECRETSLASH</${tag}><p>END</p></main></body></html>`;
+    const net = stubNetwork(() => html(doc));
+    try {
+      const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+      assert.ok(jd, tag);
+      assert.doesNotMatch(jd.text, /SECRETSLASH/, tag);
+      assert.match(jd.text, /END/, tag);
+    } finally { net.restore(); }
+  }
+});
+
+test('fetchJdFromPage visibleFallback: a self-closed SVG element does not hide what follows it', async () => {
+  const doc = `<html><body><main><p>${BODY}</p><svg><g hidden/></svg><p>END</p></main></body></html>`;
+  const net = stubNetwork(() => html(doc));
+  try {
+    const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+    assert.ok(jd);
+    assert.match(jd.text, /END/);
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback: a template that never closes hides its content even when its own scan spends the budget', { timeout: 20_000 }, async () => {
+  const names = Array.from({ length: 8 }, (_, i) => `<q${i} hidden>`).join('');
+  const doc = `<html><body><main><p>${BODY}</p>${names}<template>TPLSECRET<p>${'filler '.repeat(40_000)}</p></main></body></html>`;
+  const net = stubNetwork(() => html(doc));
+  try {
+    const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+    assert.ok(jd);
+    assert.doesNotMatch(jd.text, /TPLSECRET/);
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback: a spent scan budget does not let a <template> swallow the page', { timeout: 20_000 }, async () => {
+  const names = Array.from({ length: 400 }, (_, i) => `<q${i} hidden>`).join('');
+  const doc = `<html><body><main><p>${BODY}</p>${names}<template>T</template><p>VISIBLE_END</p></main></body></html>`;
+  const net = stubNetwork(() => html(doc));
+  try {
+    const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+    assert.ok(jd);
+    assert.match(jd.text, /VISIBLE_END/);
+  } finally { net.restore(); }
+});

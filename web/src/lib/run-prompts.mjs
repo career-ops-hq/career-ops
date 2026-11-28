@@ -205,6 +205,29 @@ ${JSON.stringify({ posting_text: jd })}`;
 }
 
 /**
+ * What the user is told when a posting could not be read (#7507). Built from the posting's site
+ * only, never from posting content, so it is our own fixed text. It names no tools, hooks or tool
+ * discovery: the person needs what happened, whether it is a known problem, and what to do next.
+ *
+ * @param {string} input the posting URL
+ * @returns {string}
+ */
+export function unreadablePostingMessage(input) {
+  let host = "";
+  try { host = new URL(String(input)).hostname.toLowerCase(); } catch { /* not a URL: generic message */ }
+  let why = "The page could not be downloaded in a form the app can read.";
+  if (/(^|\.)(myworkdayjobs|myworkdaysite)\.com$/.test(host)) {
+    why = "This employer posts jobs on Workday, which blocks the way this app downloads pages (a Cloudflare check). This is a known issue in the career-ops project (#7182).";
+  }
+  return `The app could not read this job posting, so nothing was scored. ${why}\n\nWhat you can do:\n- Option 1: If you were evaluating several postings at once, try this one on its own.\n- Option 2: Evaluate it from your command-line tool instead (for example /career-ops, then paste the job text).\n- Option 3: If your AI tool has a plugin or hook that blocks web fetches, turn it off for this run.`;
+}
+
+/** The worker's instruction for a posting it could not read, with the exact message to give. */
+function unreadablePostingStep(input) {
+  return `If you cannot read the posting at all (the fetch is denied, blocked or fails), stop before scoring and use this as the message of your stop, translated into the user's output language and otherwise unchanged. Do not mention or name tools, hooks, plugins, tool discovery or search in that message: ${JSON.stringify(unreadablePostingMessage(input))}`;
+}
+
+/**
  * The posting-access step when the page's own JobPosting data says the posting
  * closed (validThrough in the past). The worker would otherwise WebFetch the
  * URL and could score a stale posting whose visible page still shows the JD.
@@ -341,7 +364,7 @@ ${JSON.stringify({ url: input })}`;
 ${evaluationInstructions}
 
 POSTING INPUT
-${prefetchedJd ? prefetchedJdStep(prefetchedJd) : closedEvidence ? closedPostingStep(closedEvidence) : `Use WebFetch to read the posting (you are headless — Playwright is unavailable), and mark the report header "Verification: unconfirmed (batch mode)". If it returns a login/consent wall, a partial page shell, a 404, an expired ad, a paywall, a bot challenge, or a different job, stop before scoring and ask for the job text. Do not emit a report envelope for inaccessible postings.`}
+${prefetchedJd ? prefetchedJdStep(prefetchedJd) : closedEvidence ? closedPostingStep(closedEvidence) : `Use WebFetch to read the posting (you are headless — Playwright is unavailable), and mark the report header "Verification: unconfirmed (batch mode)". If it returns a login/consent wall, a partial page shell, a 404, an expired ad, a paywall, a bot challenge, or a different job, stop before scoring and ask for the job text. Do not emit a report envelope for inaccessible postings. ${unreadablePostingStep(input)}`}
 
 ${mem}${unattendedAmbiguityStep}
 OUTPUT: Do NOT save or edit any file, run scripts, or allocate report numbers. Output exactly one complete selected report between a line containing only \`<<report-md>>\` and a line containing only \`<</report-md>>\`. The platform saves it. Include the canonical Machine Summary and full verbatim JD archive. Never submit an application, fill forms, or contact anyone.
@@ -359,7 +382,9 @@ ${postingInput}`;
 
    ${prefetchedJd ? prefetchedJdStep(prefetchedJd) : closedEvidence ? closedPostingStep(closedEvidence) : `Use WebFetch to read the posting (you are headless — Playwright is unavailable), and mark the report header "Verification: unconfirmed (batch mode)".
 
-   **If WebFetch does not return the posting itself — a login/consent wall, a partial page shell with no job description, a 404 or expired ad, a paywall, a bot challenge, or a page whose text is not this job — this is the mode file's "posting appears closed" case: STOP BEFORE BLOCK A and do not generate an evaluation, a report or a CV.** That rule is the mode's, not this prompt's; modes/pipeline.md states the same thing for extraction — never treat a login wall or partial shell as a verified JD. Instead, say which URL you fetched and what came back, so the user can paste the job text themselves. A scored report about a login screen looks exactly like a scored report about the job, and a run that reports it could not read the posting is a correct outcome.`}
+   **If WebFetch does not return the posting itself — a login/consent wall, a partial page shell with no job description, a 404 or expired ad, a paywall, a bot challenge, or a page whose text is not this job — this is the mode file's "posting appears closed" case: STOP BEFORE BLOCK A and do not generate an evaluation, a report or a CV.** That rule is the mode's, not this prompt's; modes/pipeline.md states the same thing for extraction — never treat a login wall or partial shell as a verified JD. Instead, say which URL you fetched and what came back, so the user can paste the job text themselves. A scored report about a login screen looks exactly like a scored report about the job, and a run that reports it could not read the posting is a correct outcome.
+
+   ${unreadablePostingStep(input)}`}
 
 ${mem}${unattendedAmbiguityStep}2. ${REPORT_ENVELOPE_INSTRUCTION}
 

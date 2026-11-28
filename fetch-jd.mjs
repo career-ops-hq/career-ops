@@ -44,15 +44,18 @@ async function main() {
   const args = process.argv.slice(2);
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`Usage:
-  node fetch-jd.mjs <url>
+  node fetch-jd.mjs <url> [--visible]
   node fetch-jd.mjs --help
 
 Options:
+  --visible   After the API and JSON-LD tiers miss, accept the page's visible text
+              when it is posting-sized (for callers whose own WebFetch is blocked)
   --help, -h  Print this usage block and exit`);
     process.exit(0);
   }
 
-  const url = args[0];
+  const url = args.find((a) => !a.startsWith('--'));
+  const visible = args.includes('--visible');
 
   if (!url) {
     console.error('usage: node fetch-jd.mjs <url>');
@@ -63,7 +66,7 @@ Options:
   // template-driven boards no API covers (Phenom, bespoke sites) whose visible
   // HTML carries no JD at all.
   const result = (await fetchJdViaKnownApi(url, TEXT_CAP, TIMEOUT_MS))
-    ?? (await fetchJdFromPage(url, TEXT_CAP, TIMEOUT_MS));
+    ?? (await fetchJdFromPage(url, TEXT_CAP, TIMEOUT_MS, { visibleFallback: visible }));
   // No stderr, by design: the caller's browser/WebFetch fallback is the
   // intended next step, and warning on every non-covered host would make the
   // normal path look broken.

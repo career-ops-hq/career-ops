@@ -784,3 +784,48 @@ test("buildPrompt: prefetched text wins over a closure note, and neither changes
   const plain = buildPrompt({ kind: "evaluate", input: PREFETCH_URL, memory: "", today: "2026-08-04", closedEvidence: null });
   assert.match(plain, /Use WebFetch to read the posting/);
 });
+
+// ── #7507: a clear message when the posting cannot be read ──────────────────
+
+import { unreadablePostingMessage } from "../../src/lib/run-prompts.mjs";
+
+test("unreadablePostingMessage: a Workday posting names the known Cloudflare issue", () => {
+  const m = unreadablePostingMessage("https://acme.wd1.myworkdayjobs.com/careers/job/Remote/Analyst_JR1");
+  assert.match(m, /Workday/);
+  assert.match(m, /#7182/);
+  assert.match(m, /paste the job text/i);
+  assert.match(m, /Option 1/);
+});
+
+test("unreadablePostingMessage: any other site gets the generic message and the alternatives", () => {
+  const m = unreadablePostingMessage("https://careers.example.com/job/1");
+  assert.match(m, /could not read this job posting/i);
+  assert.match(m, /paste the job text/i);
+  assert.match(m, /command-line tool|\/career-ops/);
+  for (const n of [1, 2, 3]) assert.match(m, new RegExp(`^- Option ${n}: `, "m"), `option ${n} on its own line`);
+  assert.match(m, /Option 1: [^\n]*on its own/);
+  assert.match(m, /Option 3: [^\n]*plugin or hook/);
+  assert.doesNotMatch(m, /chat|assistant/i, "the built-in chat cannot take pasted text yet (#3768)");
+  assert.doesNotMatch(m, /#7182|Dayforce|Workday/);
+});
+
+test("unreadablePostingMessage: never names tools, hooks or tool discovery, and fits the gate's length limit", () => {
+  for (const u of ["https://a.wd5.myworkdayjobs.com/x/job/y", "https://careers.example.com/1", "not a url"]) {
+    const m = unreadablePostingMessage(u);
+    assert.doesNotMatch(m, /ToolSearch|ctx_|ctx-|WebFetch|Playwright/);
+    assert.ok(m.length > 0 && m.length <= 1000, `${u}: ${m.length}`);
+  }
+});
+
+test("buildPrompt: when the posting was not prefetched, the worker is told what to say if it cannot read it", () => {
+  for (const extra of [{}, { evaluationInstructions: "Read the instructions file." }]) {
+    const prompt = buildPrompt({ kind: "evaluate", input: "https://acme.wd1.myworkdayjobs.com/c/job/R/A_JR1", memory: "", today: "2026-08-04", ...extra });
+    assert.match(prompt, /#7182/, JSON.stringify(extra));
+    assert.match(prompt, /do not (mention|name)[^.]*tool/i, "no tool internals in the user-facing message");
+  }
+});
+
+test("buildPrompt: a prefetched posting carries no unreadable-posting message", () => {
+  const prompt = buildPrompt({ kind: "evaluate", input: "https://acme.wd1.myworkdayjobs.com/c/job/R/A_JR1", memory: "", today: "2026-08-04", prefetchedJd: "A real posting text. ".repeat(40) });
+  assert.doesNotMatch(prompt, /#7182/);
+});

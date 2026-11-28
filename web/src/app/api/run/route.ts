@@ -216,6 +216,7 @@ export async function POST(req: Request) {
   // the prompt inside the same try so preparation failures release it too. It is
   // taken before the JD prefetch, so a row delete cannot land in that window.
   const writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
+  const prefetchStartedAt = Date.now();
   let child;
   let instructionFile: ReturnType<typeof writeEvaluationInstructions> | undefined;
   let spill: ReturnType<typeof spillOversizedPrompt> | undefined;
@@ -382,7 +383,10 @@ export async function POST(req: Request) {
       // routinely run past it — and the SIGTERM then surfaced as "didn't save a
       // report" (see the close handler), blaming the CLI for a limit we imposed
       // (#3124). 780s leaves ~20s under maxDuration for a graceful shutdown.
-      const killMs = killMsForKind(kind);
+      // The route's maxDuration clock started before the JD prefetch (server read
+      // plus browser read can take a minute), so the worker gets what is left.
+      // The 60s floor keeps a slow prefetch from starving the worker outright.
+      const killMs = Math.max(killMsForKind(kind) - (Date.now() - prefetchStartedAt), 60_000);
       // Set by the killer so the close handler can tell "we timed it out" apart
       // from "the CLI exited on its own" — different failures, different message.
       let killedByTimeout = false;
@@ -615,7 +619,7 @@ export async function POST(req: Request) {
         if (killedByTimeout) {
           send({
             type: "error",
-            msg: timeoutMessage(killMs, kind),
+            msg: timeoutMessage(killMsForKind(kind), kind),
           });
           return close();
         }
