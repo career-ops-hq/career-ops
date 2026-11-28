@@ -271,9 +271,34 @@ try {
     const { ctx, calls } = recordingCtx(() => hydration([], 0));
     let msg = '';
     await provider.fetch({ name: 'Apple', careers_url: 'https://jobs.apple.com/en-us/search', ...(apple ? { apple } : {}) }, ctx).catch((e) => { msg = e.message; });
-    /needs a non-empty apple\.queries or apple\.teams/.test(msg) && calls.length === 0
+    /needs apple\.full_board: true or a non-empty apple\.queries or apple\.teams/.test(msg) && calls.length === 0
       ? pass(`apple.fetch() rejects ${JSON.stringify(apple ?? null)} with a clear message and no request`)
       : fail(`apple no-config ${JSON.stringify(apple ?? null)}: msg=${JSON.stringify(msg)} requests=${calls.length}`);
+  }
+  // full_board: one unsearched walk of the location, read to Apple's own total,
+  // with its own (larger) page ceiling as the default.
+  {
+    const { ctx, calls } = recordingCtx((c) => {
+      const pageNo = Number(new URL(c.url).searchParams.get('page') || 1);
+      const rows = pageNo <= 2 ? Array.from({ length: 20 }, (_, i) => row(String(pageNo * 100 + i), `Role ${pageNo}-${i}`)) : [row('999', 'Last Role')];
+      return hydration(rows, 41);
+    });
+    const jobs = await provider.fetch({ ...ENTRY, apple: { full_board: true } }, ctx);
+    jobs.length === 41 && calls.length === 3 && calls.every((c) => !c.url.includes('search=') && !c.url.includes('team=')) && !jobs.truncated
+      ? pass('apple full_board walks the whole location unsearched, to the end, without a max_pages setting')
+      : fail(`apple full_board: ${jobs.length} jobs, ${calls.length} requests, truncated=${JSON.stringify(jobs.truncated)}`);
+
+    const { ctx: endless, calls: endlessCalls } = recordingCtx(() => hydration(Array.from({ length: 20 }, (_, i) => row(String(i), `R${i}`)), 100000));
+    await provider.fetch({ ...ENTRY, max_pages: 9999, apple: { full_board: true } }, endless);
+    endlessCalls.length === 300
+      ? pass('apple full_board clamps max_pages to its own ceiling (300)')
+      : fail(`apple full_board max_pages=9999 made ${endlessCalls.length} requests, expected 300`);
+
+    const { ctx: probe, calls: probeCalls } = recordingCtx(() => hydration(Array.from({ length: 20 }, (_, i) => row(String(i), `R${i}`)), 100000));
+    await provider.fetch({ ...ENTRY, apple: { full_board: true } }, { ...probe, maxPages: 1 });
+    probeCalls.length === 1
+      ? pass('apple full_board is still one request under a verify-portals probe')
+      : fail(`apple full_board probe made ${probeCalls.length} requests`);
   }
   {
     const { ctx, calls } = recordingCtx(() => hydration([row('7', 'Team Role')], 1));
