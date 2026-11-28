@@ -36,6 +36,13 @@ test('a --dir that does not exist exits 1 and names it', () => {
   assert.doesNotMatch(r.stdout, /No interviews recorded/);
 });
 
+test('an empty --dir exits 1 instead of digesting the default folder', () => {
+  const r = run('--dir', '');
+  assert.equal(r.status, 1, describeSpawn(r));
+  assert.match(r.stderr, /--dir requires a value/);
+  assert.doesNotMatch(r.stdout, /Weekly Interview Digest/);
+});
+
 test('control: an existing empty --dir, and the absent default, still print the digest', () => {
   for (const args of [['--dir', sessions], []]) {
     const r = run(...args);
