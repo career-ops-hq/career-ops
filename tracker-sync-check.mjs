@@ -778,6 +778,25 @@ if (isMainModule(import.meta.url)) {
     runSelfTest();
   }
 
+  // An explicit --apps-file or --interviews-file names the files to compare, so
+  // one that does not exist is an error. Read as empty, it reported "no
+  // mismatches" at exit 0 for a file that was never read. An empty value (a
+  // shell variable that expanded to nothing) is refused too, rather than read
+  // as the flag being absent. Only the defaults may be absent. Same rule as
+  // rejection-latency (#7840) and process-quality (#7781).
+  for (const flag of ['--apps-file', '--interviews-file']) {
+    const value = flagValue(process.argv.slice(2), flag);
+    if (value === undefined) continue;
+    if (value === '') {
+      console.error(`tracker-sync-check: ${flag} requires a path`);
+      process.exit(1);
+    }
+    if (!existsSync(value)) {
+      console.error(`tracker-sync-check: ${flag} not found: ${value}`);
+      process.exit(1);
+    }
+  }
+
   const result = checkTrackerSync({ appsFile: APPS_FILE, interviewsFile: INTERVIEWS_FILE });
 
   if (summaryMode) {
