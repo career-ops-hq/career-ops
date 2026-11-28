@@ -19,7 +19,7 @@ import { spawnSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail, NODE, ROOT, rmSync, hermeticGitEnv } from './helpers.mjs';
-import { parseWorktreeList, worktreeUpdateTarget } from '../update-system.mjs';
+import { parseWorktreeList, worktreeUpdateTarget, resolveTargetRef } from '../update-system.mjs';
 
 console.log('\n🧪 Testing updater worktree redirect...');
 
@@ -202,6 +202,194 @@ function runUpdater(cwd, args, env) {
       pass('untracked files in the main checkout do not trip the dirty-checkout refusal');
     } else {
       fail(`apply with only untracked files exited ${res.status}, stderr ${JSON.stringify(res.stderr.slice(0, 300))}`);
+    }
+  } finally {
+    rmSync(fx.base, { recursive: true, force: true });
+  }
+}
+
+// ── 6. Interactive update mode instructions contract (#7092) ──
+{
+  const updateMd = readFileSync(join(ROOT, 'modes', 'update.md'), 'utf-8');
+
+  // Step 1 handles worktree-without-main status
+  if (updateMd.includes('worktree-without-main')) {
+    pass('Step 1 handles worktree-without-main status');
+  } else {
+    fail('Step 1 does not handle worktree-without-main status');
+  }
+
+  // Target checkout resolution described for worktree, normal checkout, and opt-out
+  if (updateMd.includes('TARGET_DIR') && updateMd.includes('worktree list') && updateMd.includes('CAREER_OPS_UPDATE_IN_WORKTREE')) {
+    pass('modes/update.md describes TARGET_DIR resolution from git worktree list');
+  } else {
+    fail('modes/update.md does not describe TARGET_DIR resolution from git worktree list');
+  }
+
+  // Step 2 diff and fetch use TARGET_DIR
+  if (updateMd.includes('git -C "$TARGET_DIR" fetch') && updateMd.includes('git -C "$TARGET_DIR" diff HEAD..FETCH_HEAD')) {
+    pass('Step 2 fetch and diff use TARGET_DIR');
+  } else {
+    fail('Step 2 fetch and diff do not use TARGET_DIR');
+  }
+
+  // Step 4.1 captures PRE_UPDATE_REF in TARGET_DIR
+  if (/PRE_UPDATE_REF=\$\(git -C ["']?\$TARGET_DIR["']? rev-parse HEAD\)/.test(updateMd)) {
+    pass('Step 4.1 captures PRE_UPDATE_REF in TARGET_DIR');
+  } else {
+    fail('Step 4.1 does not capture PRE_UPDATE_REF in TARGET_DIR');
+  }
+
+  // Step 4.6 runs doctor and verify-pipeline in TARGET_DIR
+  if (updateMd.includes('in `TARGET_DIR`') && updateMd.includes('node doctor.mjs') && updateMd.includes('node verify-pipeline.mjs')) {
+    pass('Step 4.6 runs doctor and verify-pipeline in TARGET_DIR');
+  } else {
+    fail('Step 4.6 does not run doctor and verify-pipeline in TARGET_DIR');
+  }
+
+  // Doctor is a gate; verify-pipeline is informational
+  if (updateMd.includes('treat validation as failed') && updateMd.includes('treat it as informational only')) {
+    pass('Step 4.6 keeps doctor as gate and verify-pipeline as informational');
+  } else {
+    fail('Step 4.6 does not keep doctor as gate and verify-pipeline as informational');
+  }
+}
+
+// ── 7. Target checkout preview and baseline in linked worktree layout (#7092) ──
+{
+  const fx = makeFixture();
+  try {
+    const mainHead = fx.g(fx.main, 'rev-parse', 'HEAD');
+
+    // Make a commit in the linked worktree so wt HEAD differs from main HEAD
+    writeFileSync(join(fx.wt, 'local-branch-file.txt'), 'feature work\n');
+    fx.g(fx.wt, 'add', 'local-branch-file.txt');
+    fx.g(fx.wt, 'commit', '-qm', 'branch work');
+    const wtHead = fx.g(fx.wt, 'rev-parse', 'HEAD');
+
+    if (mainHead === wtHead) {
+      fail('fixture setup failed: main HEAD and wt HEAD should differ');
+    }
+
+    // Resolving target checkout from wt points to main
+    const target = worktreeUpdateTarget(fx.wt);
+    if (target && same(target.path, fx.main)) {
+      pass('worktreeUpdateTarget from linked worktree resolves to main checkout');
+    } else {
+      fail(`expected target.path to be ${fx.main}, got ${JSON.stringify(target)}`);
+    }
+
+    // Capturing PRE_UPDATE_REF using target checkout vs calling worktree
+    const targetBaseline = fx.g(target.path, 'rev-parse', 'HEAD');
+    const callerBaseline = fx.g(fx.wt, 'rev-parse', 'HEAD');
+    if (targetBaseline === mainHead && targetBaseline !== callerBaseline) {
+      pass('PRE_UPDATE_REF in target checkout captures main HEAD, not caller worktree HEAD');
+    } else {
+      fail(`targetBaseline (${targetBaseline}) should match mainHead (${mainHead}) and differ from callerBaseline (${callerBaseline})`);
+    }
+
+    // Normal checkout targets itself
+    const normalTarget = worktreeUpdateTarget(fx.main);
+    if (normalTarget === null) {
+      pass('normal checkout has no redirection (targets itself)');
+    } else {
+      fail(`expected normalTarget to be null, got ${JSON.stringify(normalTarget)}`);
+    }
+
+    // Missing target checkout reports worktree-without-main
+    fx.g(fx.main, 'checkout', '-q', '-b', 'other');
+    const check = runUpdater(fx.wt, ['check'], fx.env);
+    let checkJson;
+    try { checkJson = JSON.parse(check.stdout); } catch { checkJson = {}; }
+    if (check.status === 0 && checkJson.status === 'worktree-without-main' && checkJson.detail?.includes('no checkout has \'main\'')) {
+      pass('check in linked worktree without main returns worktree-without-main with actionable detail');
+    } else {
+      fail(`check without main failed: ${check.stdout}`);
+    }
+  } finally {
+    rmSync(fx.base, { recursive: true, force: true });
+  }
+}
+
+// ── 8. Preview and install must describe the same update ──
+{
+  const updateMd = readFileSync(join(ROOT, 'modes', 'update.md'), 'utf-8');
+  const checkCommand = updateMd.match(/Run `(node update-system\.mjs check[^`]+)`/)?.[1] || '';
+  const applyCommand = updateMd.match(/Run `(node update-system\.mjs apply[^`]+)`/)?.[1] || '';
+  if (checkCommand.includes('--channel "$UPDATE_CHANNEL"') &&
+      applyCommand.includes('--channel "$UPDATE_CHANNEL"') &&
+      updateMd.includes('`--channel VALUE` or `--channel=VALUE` wins over `CAREER_OPS_UPDATE_CHANNEL`') &&
+      updateMd.includes('if neither is set, use `release`') &&
+      updateMd.includes('Do not silently substitute `release`') &&
+      updateMd.includes('`main` when `UPDATE_CHANNEL=main`') &&
+      updateMd.includes('`career-ops-v{remote}` when `UPDATE_CHANNEL=release`')) {
+    pass('check, preview and apply share the explicit channel, defaulting to release');
+  } else {
+    fail('check, preview and apply must share the explicit channel, defaulting to release');
+  }
+
+  // Resolve the actual documented command arguments without a shell or network.
+  // This catches a main preview paired with a default-release check/apply.
+  for (const channel of ['release', 'main']) {
+    const argvFor = command => (command.match(/"[^"]*"|\S+/g) || [])
+      .map(arg => arg.replace(/^"|"$/g, '').replace('$UPDATE_CHANNEL', channel));
+    const ctx = { curlGet: async () => JSON.stringify({ tag_name: 'career-ops-v1.40.0' }) };
+    const checkRef = await resolveTargetRef(argvFor(checkCommand), {}, ctx);
+    const applyRef = await resolveTargetRef(argvFor(applyCommand), {}, ctx);
+    const previewRef = channel === 'main' ? 'main' : 'career-ops-v1.40.0';
+    if (checkRef === previewRef && applyRef === previewRef) {
+      pass(`${channel} documented commands resolve the same ref as the preview`);
+    } else {
+      fail(`${channel} preview ${previewRef} differs from check ${checkRef} or apply ${applyRef}`);
+    }
+  }
+
+  // Both flag forms and the environment handoff are supported by the updater.
+  // Keep these controls beside the documentation contract so it cannot narrow
+  // channel selection to only one spelling or silently mask a bad request.
+  for (const [args, env, expected] of [
+    [[], {}, 'career-ops-v1.40.0'],
+    [['--channel', 'main'], {}, 'main'],
+    [['--channel=main'], {}, 'main'],
+    [[], { CAREER_OPS_UPDATE_CHANNEL: 'main' }, 'main'],
+    [['--channel=release'], { CAREER_OPS_UPDATE_CHANNEL: 'main' }, 'career-ops-v1.40.0'],
+  ]) {
+    const ctx = { curlGet: async () => JSON.stringify({ tag_name: 'career-ops-v1.40.0' }) };
+    const actual = await resolveTargetRef(['node', 'update-system.mjs', 'check', ...args], env, ctx);
+    if (actual === expected) pass(`channel selection ${JSON.stringify(args)} with ${JSON.stringify(env)} resolves ${expected}`);
+    else fail(`channel selection resolved ${actual}, expected ${expected}`);
+  }
+  let fetchedInvalidChannel = false;
+  try {
+    await resolveTargetRef(['node', 'update-system.mjs', 'check', '--channel=mian'], {}, {
+      curlGet: async () => { fetchedInvalidChannel = true; return null; },
+    });
+    fail('invalid explicit channel must stop instead of defaulting to release');
+  } catch (err) {
+    if (!fetchedInvalidChannel && err.message.includes('Unknown --channel')) pass('invalid explicit channel stops before network access');
+    else fail(`unexpected invalid-channel behavior: ${err.message}`);
+  }
+
+  const previewCommand = updateMd.split('\n').find(line => line.startsWith('git -C "$TARGET_DIR" diff HEAD..FETCH_HEAD --stat')) || '';
+  if (previewCommand.includes("'*.mjs'")) {
+    pass('preview keeps the script wildcard literal for Git, not the calling shell');
+  } else {
+    fail('preview must quote the script wildcard so the caller cannot expand it');
+  }
+
+  // The target can contain a root script absent from the calling worktree.
+  // A literal Git pathspec includes it even though caller-side expansion cannot.
+  const fx = makeFixture();
+  try {
+    const before = fx.g(fx.main, 'rev-parse', 'HEAD');
+    writeFileSync(join(fx.main, 'target-only.mjs'), '// target script\n');
+    fx.g(fx.main, 'add', 'target-only.mjs');
+    fx.g(fx.main, 'commit', '-qm', 'target-only script');
+    const changed = fx.g(fx.wt, '-C', fx.main, 'diff', `${before}..HEAD`, '--name-only', '--', '*.mjs');
+    if (!existsSync(join(fx.wt, 'target-only.mjs')) && changed.split(/\r?\n/).includes('target-only.mjs')) {
+      pass('literal preview pathspec includes a target script missing from the caller');
+    } else {
+      fail('literal preview pathspec omitted a target-only script');
     }
   } finally {
     rmSync(fx.base, { recursive: true, force: true });
