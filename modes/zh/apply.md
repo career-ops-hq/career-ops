@@ -178,7 +178,7 @@
 
    - **退出码 0** → 标准输出中的 JSON 就是之前回答的基础快照。`null` 表示报告中没有这一部分，按全新的申请处理。
    - **非零退出码** → 这一部分有内容无法读取，严格模式拒绝了它，并在标准错误中列出每一行无法读取的内容。不要退回去把这一部分当作普通文本阅读，也不要在不完整的基础上继续：被悄悄丢掉的回答，看起来就像候选人从没回答过；被误吸收的内容，会破坏候选人确实给过的回答。把这些行展示给候选人，问他是先修复报告，还是不带这些受影响的回答继续。
-   - **Section H**（`## H) Draft Application Answers`，在评估时、看到任何表单之前起草）有自己的读取器，因为它的正文只是一种约定，不是本仓库写入的固定格式：
+   - **Section H**（`## H) Draft Application Answers (draft)`，在评估时、看到任何表单之前起草）有自己的读取器，因为它的正文只是一种约定，不是本仓库写入的固定格式。读取器先按结尾的 `(draft)` 标记查找这一部分，所以翻译过的标题也能找到；标记出现之前写的报告，则按英文名称或 `H)` 字母查找：
 
      ```bash
      node application-answers.mjs --report reports/NNN-company-role-date.md --read-draft
@@ -433,6 +433,12 @@ node application-answers.mjs --report reports/NNN-company-role-date.md --input a
 - **现象：** 用程序设置 Workday 文本字段的值（不经过真实按键），字段看起来已经填好，但在 Workday 的校验看来是空的：React 的 `onChange` 从未触发，所以点 Save 时，一个看起来已经填好的字段会报"必填"。是/否下拉框的选项顺序也会因问题而异，所以按位置点击可能选错答案（例如在 *are you authorized to work?* 上选成 "No"）。
 - **助手：** 对必填文本字段，用真实按键**输入**（聚焦 → 全选 → 输入），或者在 Save、Next、Continue 或 Submit 之前核实每个值都已被记录。在每一步的 Save、Next、Continue 或 Submit 之前，执行步骤 7b 的必填项检查：Workday 会为每段经历区块添加一个必填的 `Role Description`，在区块出现之前看不到，否则会每个区块各报一个校验错误。按步骤 4b 的来源填写：身份和联系方式用 `config/profile.yml`（地址区块常常要往下滚才能看到），雇主、职位名称、日期和职位描述用定制简历。对下拉框，使用**输入查找**（打开 → 输入选项文字 → 确认高亮项），而不是按位置点击，并核实每个选择。
 - **候选人：** 在 Save/Submit 之前检查填好的步骤，尤其是工作许可/担保类下拉框，以及任何 EEO/法律声明。
+
+### Workday — 直接的 `/apply` 链接可能在职位仍开放时返回 404（#6417）
+
+- **现象：** 直接指向 `.../job/<slug>/apply` 的链接（常见于带有 `utm_*`/`source=` 参数的 LinkedIn 推广帖子）显示 "Sorry, the page you are looking for doesn't exist"。同一个 URL 去掉 `/apply` 后能载入完整的 JD。`check-liveness.mjs` 检查的是传给它的 URL，它的 Workday API 路径会保留 `/apply`，所以一个仍开放的职位可能被判定为已过期。
+- **助手：** 不要把职位记录为已关闭。先去掉 `/apply` 后缀和查询字符串（`utm_*`、`source=`），再运行存活检查，从这个职位页面 URL 打开职位，并使用页面自己的 Apply 按钮。如果这个职位页面也不存在了，说明职位已关闭，按正常的已关闭职位流程处理。
+- **候选人：** 如果在自己的浏览器中遇到这个 404，给他职位页面的 URL，让他从那里开始。
 
 ### SuccessFactors 系列 — 上传的简历可能与系统存储的档案悄悄不一致（#1870）
 

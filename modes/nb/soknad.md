@@ -183,7 +183,7 @@ Før du lager svar, les den matchende reportens funn om midlertidig ansettelse i
 
    - **Exit 0** → JSON-en på stdout er grunnlaget av tidligere svar. `null` betyr at reporten ikke har seksjonen; behandle søknaden som ny.
    - **Exit forskjellig fra 0** → seksjonen er delvis uleselig, og streng modus avviste den og navnga hver uleselig linje på stderr. Fall IKKE tilbake til å lese seksjonen som prosa, og fortsett IKKE med et delvis grunnlag -- et svar som forsvinner stille, ser ut som et svar kandidaten aldri ga, og et som blir slukt, ødelegger et svar kandidaten ga. Vis kandidaten de navngitte linjene, og spør om reporten skal rettes først eller om du skal fortsette uten de berørte svarene.
-   - En **Section H** (`## H) Utkast til svar i søknadsskjemaet`, laget under evalueringen før noe skjema var sett) har sin egen leser, fordi innholdet er en konvensjon og ikke et format dette repoet skriver:
+   - En **Section H** (`## H) Utkast til svar i søknadsskjemaet (draft)`, laget under evalueringen før noe skjema var sett) har sin egen leser, fordi innholdet er en konvensjon og ikke et format dette repoet skriver. Leseren finner blokken på `(draft)`-merket på slutten av overskriften først, så en oversatt overskrift blir fortsatt funnet; reporter skrevet før merket fantes, blir funnet på det engelske navnet eller bokstaven `H)`:
 
      ```bash
      node application-answers.mjs --report reports/NNN-company-role-date.md --read-draft
@@ -507,6 +507,12 @@ Testet i felten på ~12 Playwright-styrte søknader (Ashby, Greenhouse, Lever, W
 - **Symptom:** Å sette verdien i et Workday-tekstfelt programmatisk (uten ekte tastetrykk) gjør feltet synlig utfylt, men tomt for Workdays validering -- React sin `onChange` utløses aldri, så Lagre gir "obligatorisk" på et synlig utfylt felt. Ja/Nei-lister endrer også rekkefølgen på alternativene per spørsmål, så et klikk etter posisjon kan velge feil svar.
 - **Agent:** For obligatoriske tekstfelt, **skriv** med ekte tastetrykk (fokus → merk alt → skriv), eller bekreft hver verdi før Lagre, Neste, Fortsett eller Send. Kjør sjekken av obligatoriske felt i Trinn 7b på hvert steg. Fyll ut fra kildene i Trinn 4b. For nedtrekkslister, bruk **skriv for å søke** (åpne → skriv alternativets tekst → bekreft markeringen) i stedet for klikk etter posisjon, og bekreft hvert valg.
 - **Kandidat:** Går gjennom det utfylte steget -- særlig lister om arbeidstillatelse og juridiske erklæringer -- før Lagre/Send.
+
+### Workday — en direkte `/apply`-lenke kan gi 404 mens annonsen er aktiv (#6417)
+
+- **Symptom:** En lenke som går rett til `.../job/<slug>/apply`, ofte fra et sponset LinkedIn-innlegg med `utm_*`/`source=`-parametere, viser "Sorry, the page you are looking for doesn't exist". Den samme URL-en uten `/apply` laster hele annonsen. `check-liveness.mjs` sjekker URL-en den får, og Workday-API-stien beholder `/apply`, så en aktiv annonse kan komme tilbake som utløpt.
+- **Agent:** Ikke registrer annonsen som stengt. Fjern `/apply`-endelsen og spørrestrengen (`utm_*`, `source=`) først, kjør så liveness-sjekken og åpne annonsen fra den annonse-URL-en, og bruk sidens egen Søk-knapp. Hvis også den annonsen er borte, er den stengt, og vanlig håndtering av stengte annonser gjelder.
+- **Kandidat:** Hvis kandidaten får 404 i sin egen nettleser, gi annonse-URL-en å starte fra i stedet.
 
 ### SuccessFactors-familien — opplastet CV kan stille avvike fra den lagrede profilen (#1870)
 
