@@ -21,6 +21,7 @@ Mode tương tác dành cho lúc ứng viên đang điền form ứng tuyển tr
 4b. TAILORED   → Xác định CV đã điều chỉnh cho báo cáo đó; nó, không phải cv.md, là nguồn cho các trường kinh nghiệm
 5. PREFLIGHT   → Xác nhận tin còn mở + form là tin của báo cáo (**Posting identity**: cùng nhà tuyển dụng, cùng tin; chức danh đổi thì sang Bước 3) trước khi soạn
 5b. PRE-SCAN   → Quét trang tìm câu hỏi loại trực tiếp (bằng cấp, kinh nghiệm, quyền làm việc/visa, bảo lãnh, mức lương sàn)
+5e. FIXED TERM → Trước khi soạn, nhắc thông tin thời hạn hợp đồng mà JD nêu tường minh (chỉ nhắc, rồi tiếp tục)
 6. ANALYZE     → Xác định MỌI câu hỏi đang hiển thị trong form
 7. GENERATE    → Với mỗi câu hỏi, tạo câu trả lời cá nhân hóa
 7b. SWEEP      → Liệt kê các ô bắt buộc của bước hiện tại và xác nhận từng ô không rỗng trước khi Save/Next/Continue/Submit
@@ -88,6 +89,19 @@ Chức danh không thuộc danh tính. Tin được đổi tên sau khi đánh g
 
 **Các kiểm tra theo khu vực pháp lý (Bước 5c/5d trong `modes/apply.md`):** kiểm tra nội dung bị cấm (`templates/jurisdiction-prohibited-content.yml`) và kiểm tra yêu cầu tình trạng nhập cư (`templates/immigration-status-requirements.yml`) đều là bảng tra theo khu vực. Hiện hai bảng chưa có dòng cho Việt Nam, nên với khu vực Việt Nam hai bước này bỏ qua một cách im lặng. Khi có dòng khớp, áp dụng đúng quy tắc trong `modes/apply.md`: chỉ cảnh báo, không tự trả lời hay tự bỏ qua, không bao giờ khẳng định nhà tuyển dụng vi phạm luật.
 
+## Bước 5e — Nhắc về hợp đồng có thời hạn (#4534)
+
+Trước khi soạn câu trả lời, đọc loại hợp đồng ở Block A và kết luận về thời hạn ở Block G (nếu có) của báo cáo khớp, cùng phần JD đang hiển thị. Nếu một trong hai nêu rõ đây là vị trí có thời hạn, ví dụ `HĐLĐ xác định thời hạn`, `hợp đồng 12 tháng`, `18 month contract`, `6-month contract`, `fixed-term`, `fixed-term contract position`, `temporary position/role/assignment` hoặc `term position`, đưa ra một lời nhắc trước câu trả lời đầu tiên:
+
+> ℹ️ **Nhắc về vị trí có thời hạn:** [Viết bằng {language.output}: trích nguyên văn cụm từ nêu thời hạn và giữ nguyên thời hạn được ghi. Nói rõ vị trí này có giới hạn thời gian, rồi gợi ý xác nhận khả năng gia hạn, phúc lợi, điều khoản kết thúc hợp đồng/thời gian báo trước, và tổng đãi ngộ có tính đến thời hạn hữu hạn hay không. Nếu bàn đến lương, chỉ nói rằng vị trí có thời hạn có thể dùng cơ cấu đãi ngộ khác, và cần kiểm tra mức tham chiếu hiện tại của thị trường và vai trò này trước khi chọn con số neo.]
+
+**Quy tắc bắt buộc:**
+
+- Chỉ dựa trên cụm từ có mặt tường minh: không bao giờ suy ra thời hạn từ một chữ "hợp đồng"/"contract" đứng riêng hay `contract position` không kèm thời hạn, kể cả khi nó nói về hợp đồng với khách hàng, quản lý hợp đồng, luật hợp đồng hay tư cách nhà thầu.
+- Nhắc một lần rồi tiếp tục ngay. Không bao giờ tự trả lời hay sửa ô nào trong form, không chặn hay can ngăn việc ứng tuyển, và không đòi ứng viên xác nhận.
+- Không bao giờ bịa ra thời hạn, tỷ lệ phụ trội, mức giá thị trường, quyền lợi, quy định trợ cấp thôi việc/báo trước hay kết luận pháp lý. Đây là lời nhắc về thời hạn vị trí và gợi ý đàm phán, không phải tư vấn pháp lý.
+- Nếu báo cáo đã có cùng lời nhắc này, không lặp lại toàn văn; nhắc một dòng lúc ứng tuyển, kèm liên kết/tham chiếu tới mục đó trong báo cáo.
+
 ## Bước 1 — Phát hiện tin
 
 **Với Playwright:** Chạy `node apply-scope.mjs launch-options`, mở tin trong cửa sổ đó, rồi đọc tiêu đề, URL và nội dung hiển thị.
@@ -110,7 +124,7 @@ Chức danh không thuộc danh tính. Tin được đổi tên sau khi đánh g
 
    - **Exit 0** → JSON trên stdout là bản nền của các câu trả lời trước đó. `null` nghĩa là báo cáo không có mục này; coi như đơn mới.
    - **Exit khác 0** → mục bị đọc một phần và chế độ strict từ chối, nêu từng dòng không đọc được trên stderr. KHÔNG quay về đọc như văn xuôi và KHÔNG tiếp tục với bản nền thiếu. Cho ứng viên xem các dòng bị nêu và hỏi sửa báo cáo trước hay tiếp tục không có các câu trả lời đó.
-   - **Block H** (`## H) Draft Application Answers`, soạn lúc đánh giá khi chưa thấy form) có bộ đọc riêng:
+   - **Block H** (`## H) Draft Application Answers (draft)`, soạn lúc đánh giá khi chưa thấy form) có bộ đọc riêng. Bộ đọc tìm khối theo dấu `(draft)` ở cuối tiêu đề trước, nên tiêu đề đã dịch vẫn tìm được; báo cáo viết trước khi có dấu này được tìm theo tên tiếng Anh hoặc chữ `H)`:
 
      ```bash
      node application-answers.mjs --report reports/NNN-company-role-date.md --read-draft
