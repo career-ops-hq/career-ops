@@ -965,6 +965,14 @@ if (isMainModule(import.meta.url)) {
     valueFlags: ['--story-bank', '--cv'],
     requireOperand: true,
   });
+  // validateFlags accepts `--cv ""` as an operand, and `|| DEFAULT_*_PATH`
+  // would then quietly swap in the default file.
+  for (const flag of ['--story-bank', '--cv']) {
+    if (flagValue(args, flag) === '') {
+      console.error(`Error: ${flag} requires a value`);
+      process.exit(1);
+    }
+  }
   if (selfTestMode) {
     runSelfTest();
   } else {
