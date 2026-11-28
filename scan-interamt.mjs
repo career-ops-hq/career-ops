@@ -20,17 +20,19 @@
 
 import { chromium } from './lib/hardened-chromium.mjs';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { loadYaml } from './lib/yaml-document.mjs';
 import {
   appendToPipeline,
   appendToScanHistory,
   appendUnrecordedToScanHistory,
+  atomicWriteFile,
   BROWSER_PROCESS_ENV,
   DATA_ROOT as SCAN_DATA_ROOT,
   PORTALS_PATH,
   SCAN_HISTORY_PATH,
 } from './scan.mjs';
+import { withPipelineLock } from './pipeline-lock.mjs';
 import { createAdmissionGate } from './lib/admission-gate.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -130,8 +132,39 @@ function parseDE(str) {
   return new Date(`${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}T00:00:00Z`);
 }
 
-// Returns the most recent first_seen date for 'interamt' portal entries, or null
-function loadLastScanDate() {
+// Marker for the last run that searched every configured keyword (not just
+// the ones it got through before dying). scan-history rows are flushed after
+// EACH keyword (#2789-style crash safety), so a run killed after keyword 1
+// already has today's date on disk for that keyword alone; reading the max
+// first_seen from those rows would hand the next run a floor that silently
+// skips postings under keywords 2..N as "already scanned through today" when
+// they were never searched. The floor only advances once the whole sweep
+// finishes.
+export const SWEEP_STATE_PATH = join(DATA_ROOT, 'data', 'interamt-sweep-state.json');
+
+export function recordSweepComplete(date) {
+  mkdirSync(dirname(SWEEP_STATE_PATH), { recursive: true });
+  atomicWriteFile(SWEEP_STATE_PATH, JSON.stringify({ lastCompleteSweep: date }) + '\n');
+}
+
+// A --keyword run only ever searches one keyword, never the full configured
+// list, so it must never advance the marker either — doing so would move the
+// floor past postings the other keywords never saw.
+export function shouldAdvanceSweepMarker({ dryRun, singleKeyword }) {
+  return !dryRun && !singleKeyword;
+}
+
+// Returns the date floor for the "already scanned" check, or null.
+export function loadLastScanDate() {
+  if (existsSync(SWEEP_STATE_PATH)) {
+    try {
+      const { lastCompleteSweep } = JSON.parse(readFileSync(SWEEP_STATE_PATH, 'utf-8'));
+      const d = new Date(`${lastCompleteSweep}T00:00:00Z`);
+      if (!isNaN(d)) return d;
+    } catch { /* corrupt/missing marker — fall back below */ }
+  }
+  // Pre-marker fallback (upgrades from before this fix, or a corrupt marker
+  // file): best-effort floor from the max first_seen interamt row on disk.
   if (!existsSync(SCAN_HISTORY)) return null;
   let latest = null;
   scanHistoryDataLines(readFileSync(SCAN_HISTORY, 'utf-8')).forEach(line => {
@@ -360,6 +393,23 @@ async function main() {
           if (lastScanDate && pubDate && pubDate < lastScanDate) { dateSkipped.push(canonical); continue; }
           newOffers.push(canonical);
         }
+
+        // Flushed after every keyword, not batched to the end of the run: each
+        // keyword is its own real browser navigation, and a kill mid-sweep used
+        // to lose every already-scanned keyword's results because nothing was
+        // written until the whole loop finished. appendToPipeline/
+        // appendToScanHistory/appendUnrecordedToScanHistory all dedup against
+        // what's already on disk, so calling them again next keyword with the
+        // same accumulated arrays plus new entries is safe — already-written
+        // rows are simply skipped.
+        if (!DRY_RUN) {
+          if (newOffers.length > 0) await appendToPipeline(newOffers);
+          if (newOffers.length > 0) await appendToScanHistory(newOffers, date, 'added');
+          await appendUnrecordedToScanHistory(titleSkipped, date, 'skipped_title');
+          await appendUnrecordedToScanHistory(locationSkipped, date, 'skipped_location');
+          await appendUnrecordedToScanHistory(dateSkipped, date, 'skipped_date');
+          await appendUnrecordedToScanHistory(dupeSkipped, date, 'skipped_dup');
+        }
       } catch (err) {
         process.stdout.write(`ERROR\n`);
         errors.push({ keyword: kw, error: err.message });
@@ -370,15 +420,15 @@ async function main() {
     await browser.close();
   }
 
-  if (!DRY_RUN) {
-    if (newOffers.length > 0) await appendToPipeline(newOffers);
-    if (newOffers.length > 0) await appendToScanHistory(newOffers, date, 'added');
-    // Every search hands the same skipped postings back, so each is recorded
-    // once per status, not once per run (#2695, as scan.mjs records its own).
-    await appendUnrecordedToScanHistory(titleSkipped, date, 'skipped_title');
-    await appendUnrecordedToScanHistory(locationSkipped, date, 'skipped_location');
-    await appendUnrecordedToScanHistory(dateSkipped, date, 'skipped_date');
-    await appendUnrecordedToScanHistory(dupeSkipped, date, 'skipped_dup');
+  // Writes now happen per-keyword inside the loop above, not here — each
+  // completed keyword already flushed everything accumulated so far.
+
+  // Reaching here means every keyword in `keywords` was attempted (a
+  // per-keyword error is caught above and the loop moves on), so the
+  // date-floor marker can advance now. A run killed mid-sweep never reaches
+  // this line, so the floor stays where the last full sweep left it.
+  if (shouldAdvanceSweepMarker({ dryRun: DRY_RUN, singleKeyword: SINGLE_KEYWORD })) {
+    await withPipelineLock(SWEEP_STATE_PATH, () => recordSweepComplete(date));
   }
 
   // Summary
