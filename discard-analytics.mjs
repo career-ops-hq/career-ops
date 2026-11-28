@@ -204,6 +204,13 @@ if (isMainModule(import.meta.url)) {
   }
   const sinceDate = sinceArg?.trim() ?? null;
   const customLog = argValue('--log');
+  // `--log ""` (a shell variable that expanded to nothing) passes
+  // requireOperand, which refuses only `--log=` and a swallowed flag. Read as
+  // absent, it analyzed data/discard.log in place of the log asked for.
+  if (customLog === '') {
+    console.error(`Error: --log requires a value\n${USAGE}`);
+    process.exit(1);
+  }
 
   const logFile = customLog || join(getCareerOpsRoot(), 'data/discard.log');
   let logStat = null;
