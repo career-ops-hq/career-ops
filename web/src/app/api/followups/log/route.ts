@@ -76,7 +76,7 @@ export async function POST(req: Request) {
 
   const file = followupsLogPath();
   try {
-    return await withFollowupsWrite(() => {
+    return await withFollowupsWrite(file, () => {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       let existing = "";
       if (fs.existsSync(file)) existing = fs.readFileSync(file, "utf8");
@@ -124,7 +124,7 @@ export async function DELETE(req: Request) {
   const file = followupsLogPath();
   if (!fs.existsSync(file)) return Response.json({ error: "no follow-up log" }, { status: 404 });
   try {
-    return await withFollowupsWrite(() => {
+    return await withFollowupsWrite(file, () => {
       const lines = fs.readFileSync(file, "utf8").split("\n");
       const idx = lines.findIndex((line) => {
         if (!line.startsWith("|")) return false;

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { withFollowupsLock, FollowupsBusyError } from "@/lib/core/followups-lock";
 import { followupsEnabledFromProfile } from "@/lib/followups-setting.mjs";
@@ -10,8 +11,13 @@ export { FollowupsBusyError };
 
 // Server-only helpers shared by the follow-ups API routes (log + override).
 
-/** data/follow-ups.md — the follow-up log + next-date pins (user layer). */
+/** Follow-up log and next-date pins (user layer). */
 export function followupsLogPath(): string {
+  const override = process.env.CAREER_OPS_FOLLOWUPS;
+  if (override) {
+    // Cadence runs from the code root, so its relative override starts there.
+    return path.resolve(resolveCodeRoot(process.cwd(), process.env), override);
+  }
   return path.join(careerOpsRoot(), "data", "follow-ups.md");
 }
 
@@ -51,8 +57,8 @@ export function withLogLock<T>(fn: () => T | Promise<T>): Promise<T> {
 // browser tabs would contend on the cross-process lock — one wins, the other
 // eats the timeout and a 409 — for a race the free in-process queue already
 // resolves.
-export function withFollowupsWrite<T>(fn: () => T | Promise<T>): Promise<T> {
-  return withLogLock(() => withFollowupsLock(followupsLogPath(), fn));
+export function withFollowupsWrite<T>(file: string, fn: () => T | Promise<T>): Promise<T> {
+  return withLogLock(() => withFollowupsLock(file, fn));
 }
 
 // Map a throw from withFollowupsWrite onto an HTTP response, consistently across
