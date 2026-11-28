@@ -49,6 +49,7 @@ import { resolveColumns, parseTrackerRow, extractTrackerReportNumbers } from './
 import { normalizeStatus } from './followup-cadence.mjs';
 import { parseStatusLogStages, recoverFunnelStages } from './funnel-stages.mjs';
 import { findCaptureForReport } from './jd-capture.mjs';
+import { NEXT_REPORT_SECTION_RE } from './lib/jd-archive-section.mjs';
 import { extractSkills } from './skill-extract.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { validateFlags, flagValue, hasFlag, safeIntFlag } from './lib/cli-flags.mjs';
@@ -205,7 +206,10 @@ export function jdFromReport(reportText) {
   const m = JD_HEADING.exec(text);
   if (!m) return '';
   const rest = text.slice(m.index + m[0].length);
-  const next = rest.search(/^##[ \t]/m);
+  // Ends at the next report section, not at any `## ` line: a posting pasted
+  // verbatim keeps its own `## Requirements` heading, and cutting there lost
+  // the terms under it (or the whole JD, when the text above was short).
+  const next = rest.search(NEXT_REPORT_SECTION_RE);
   const body = stripHtmlComments(next === -1 ? rest : rest.slice(0, next), '').trim();
   return body.length >= MIN_JD_CHARS ? body : '';
 }
