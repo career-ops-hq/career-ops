@@ -80,7 +80,8 @@ export function atsVendorOf(rawUrl) {
     return null;
   }
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
-  const host = parsed.hostname.toLowerCase();
+  // A trailing root-label dot leaves a fully-qualified hostname unchanged.
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, '');
   if (!host) return null;
   return ATS_HOST_PATTERNS.find(({ test }) => test(host))?.id ?? host;
 }
