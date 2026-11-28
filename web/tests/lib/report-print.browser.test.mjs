@@ -8,6 +8,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
 import { findPhrase, readPdfPages } from "../helpers/report-print-pdf.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const url = process.env.REPORT_PRINT_TEST_URL;
 const root = process.env.REPORT_PRINT_TEST_ROOT;
@@ -29,7 +30,7 @@ test("A printed report shows its content without app chrome in either theme", { 
   assert.ok(relative && !relative.startsWith("..") && !path.isAbsolute(relative));
   assert.equal(fs.readFileSync(path.join(root, ".inline-status-fixture"), "utf8").trim(), "fictional-only");
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
 
   for (const theme of ["light", "dark"]) {

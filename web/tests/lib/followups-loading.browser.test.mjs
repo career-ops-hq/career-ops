@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const url = process.env.FOLLOWUPS_LOADING_TEST_URL;
 const root = process.env.FOLLOWUPS_LOADING_TEST_ROOT;
@@ -24,7 +25,7 @@ test("Follow-ups holds the table's place while the cadence loads", {
   assert.match(initial, /\| Fixture Beta \| Designer \| 3\.8\/5 \| Applied \|/);
 
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const errors = [];

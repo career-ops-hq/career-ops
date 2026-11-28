@@ -5,13 +5,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const url = process.env.ACCESSIBLE_NAMES_TEST_URL;
 test("visible labels are part of accessible names, and shell content sits in landmarks", { skip: liveServerSkip("ACCESSIBLE_NAMES_TEST_URL"), timeout: 120_000 }, async (t) => {
   const origin = new URL(url);
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const unexpected = [];
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });

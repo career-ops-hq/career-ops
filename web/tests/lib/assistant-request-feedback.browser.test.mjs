@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const url = process.env.ASSISTANT_FEEDBACK_TEST_URL;
 test("request feedback is transition-only, quiet when closed and user-navigated", { skip: liveServerSkip("ASSISTANT_FEEDBACK_TEST_URL"), timeout: 120_000 }, async (t) => {
@@ -30,7 +31,7 @@ test("request feedback is transition-only, quiet when closed and user-navigated"
   await new Promise((resolve) => fixture.listen(0, "127.0.0.1", resolve));
   t.after(() => { replies.forEach((r) => r.end()); worker?.end(); fixture.closeAllConnections(); fixture.close(); });
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage();
   const cdp = await page.context().newCDPSession(page);

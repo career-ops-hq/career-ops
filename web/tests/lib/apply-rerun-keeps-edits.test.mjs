@@ -11,6 +11,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import "../helpers/web-ts-alias-loader.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(join(here, "../fixtures/apply-rerun-salary.html"));
@@ -27,7 +28,7 @@ test("a second fill keeps a salary the person changed by hand", async () => {
   });
   let browser;
   try {
-    browser = await chromium.launch({ channel: "chrome", headless: true });
+    browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
     const page = await browser.newPage();
     await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: "domcontentloaded" });
     const { extractForm } = await import("../../src/lib/apply/extract.ts");

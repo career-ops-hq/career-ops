@@ -15,6 +15,7 @@ import { after, before, test } from "node:test";
 import { chromium } from "playwright-core";
 import { toolRequired } from "../../../tests/required-tools.mjs";
 import "../helpers/web-ts-alias-loader.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const { extractForm } = await import("../../src/lib/apply/extract.ts");
 const { tryApplyTrigger } = await import("../../src/lib/apply/diagnose.ts");
@@ -55,7 +56,7 @@ let browser;
 let launchError;
 before(async () => {
   try {
-    browser = await chromium.launch({ channel: "chrome", headless: true });
+    browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   } catch (e) {
     launchError = e;
   }

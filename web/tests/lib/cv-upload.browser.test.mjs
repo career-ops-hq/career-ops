@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 test("import PDF and TeX, review, back up and persist cv.md without leaving the editor", {
   skip: liveServerSkip("CV_UPLOAD_TEST_URL", "CV_UPLOAD_TEST_ROOT"), timeout: 90000,
@@ -19,7 +20,7 @@ test("import PDF and TeX, review, back up and persist cv.md without leaving the 
   const cv = path.join(root, "cv.md");
   const initial = fs.readFileSync(cv, "utf8");
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage();
   const errors = [];

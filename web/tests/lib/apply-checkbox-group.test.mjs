@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import { toolRequired } from "../../../tests/required-tools.mjs";
 import "../helpers/web-ts-alias-loader.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(join(here, "../fixtures/apply-checkbox-group.html"));
@@ -29,7 +30,7 @@ test("a checkbox group keeps the legend, and one consent box stays alone", async
   let browser;
   try {
     try {
-      browser = await chromium.launch({ channel: "chrome", headless: true });
+      browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       if (toolRequired("browser")) throw err;

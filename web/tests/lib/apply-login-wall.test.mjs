@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import "../helpers/web-ts-alias-loader.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -34,7 +35,7 @@ test("a password box is a login wall and stays blank", async (t) => {
   const { fillSession, isApplicationFormFn } = await import("../../src/lib/apply/session.ts");
   let browser;
   try {
-    browser = await chromium.launch({ channel: "chrome", headless: true });
+    browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     t.skip(`system Chrome did not launch (${reason})`);

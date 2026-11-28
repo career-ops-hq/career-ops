@@ -16,7 +16,10 @@
 // from SUITES fails the run too, so a new one cannot be left out silently.
 //
 // The suites launch Chrome with `channel: "chrome"` (Google Chrome, not
-// Playwright's bundled Chromium); GitHub's ubuntu-latest image ships it.
+// Playwright's bundled Chromium); GitHub's ubuntu-latest image ships it. On your
+// own machine that opens your installed Chrome once per suite: set
+// CAREER_OPS_TEST_BROWSER_CHANNEL=bundled to use Playwright's bundled Chromium
+// instead (tests/helpers/browser-channel.mjs; `npx playwright install chromium`).
 //
 //   node tests/browser-suites.mjs                 # every suite
 //   node tests/browser-suites.mjs inbox-undo      # suites whose name contains it

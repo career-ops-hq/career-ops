@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const url = process.env.CV_STUDIO_UNDO_TEST_URL;
 const root = process.env.CV_STUDIO_UNDO_TEST_ROOT;
@@ -20,7 +21,7 @@ test("undo puts a hidden bullet back and the saved edits do not keep the hide", 
   assert.match(fs.readFileSync(path.join(root, "cv.md"), "utf8"), /Not a real candidate/);
 
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const errors = [];
@@ -88,7 +89,7 @@ test("undo then leaving keeps the restored edits after the older hide lands", {
   assert.match(fs.readFileSync(path.join(root, "cv.md"), "utf8"), /Not a real candidate/);
 
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const errors = [];

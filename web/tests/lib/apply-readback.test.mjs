@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readbackIssues, showPrefilledBanner, withoutReadbackIssues } from "../../src/lib/apply/prefilled-banner.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtureHtml = readFileSync(join(here, "../fixtures/apply-readback.html"), "utf8");
@@ -175,7 +176,7 @@ test("a wrong radio and an unread combobox are not a successful read-back", { sk
 
   const { chromium } = await import("playwright-core");
   const { verifyFill } = await import("../../src/lib/apply/diagnose.ts");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${port}/apply-readback.html`);

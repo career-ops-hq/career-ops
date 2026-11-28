@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const url = process.env.CV_EDITOR_KEEP_TEST_URL;
 const root = process.env.CV_EDITOR_KEEP_TEST_ROOT;
@@ -21,7 +22,7 @@ test("an edit to the CV stays on disk after leaving the page, and the status doe
   assert.match(original, /Not a real candidate/);
 
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const errors = [];

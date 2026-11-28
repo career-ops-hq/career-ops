@@ -7,6 +7,7 @@ import path from "node:path";
 import test from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
 import { TRACKER_OVERSCAN, trackerWindow } from "../../src/lib/tracker-window.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const url = process.env.PIPELINE_WINDOW_TEST_URL;
 const root = process.env.PIPELINE_WINDOW_TEST_ROOT;
@@ -19,7 +20,7 @@ test("the pipeline table mounts a window of a long tracker", { skip: liveServerS
   assert.equal(fs.readFileSync(path.join(root, ".tracker-window-fixture"), "utf8").trim(), "fictional-only");
 
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   const errors = [];
@@ -74,7 +75,7 @@ test("an off-screen save failure moves the window, and the error row does not se
   const initial = fs.readFileSync(tracker, "utf8");
 
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   const errors = [];
@@ -171,7 +172,7 @@ test("j/k and Shift-click reach rows outside the window", { skip: liveServerSkip
   const initial = fs.readFileSync(tracker, "utf8");
 
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   const errors = [];

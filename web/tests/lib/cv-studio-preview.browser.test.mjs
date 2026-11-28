@@ -3,13 +3,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { liveServerSkip } from "../helpers/live-server.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 test("CV Studio live preview bolds markdown and keeps the date and contact line on the page", { skip: liveServerSkip("CV_STUDIO_PREVIEW_TEST_URL"), timeout: 120_000 }, async (t) => {
   const url = process.env.CV_STUDIO_PREVIEW_TEST_URL;
   const origin = new URL(url);
   assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
   const { chromium } = await import("playwright-core");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = [];

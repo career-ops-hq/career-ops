@@ -12,6 +12,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import "../helpers/web-ts-alias-loader.mjs";
+import { testBrowserChannel } from "../helpers/browser-channel.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(join(here, "../fixtures/apply-unlabeled-radios.html"));
@@ -27,7 +28,7 @@ test("unlabeled radios check Yes, and labeled radios keep their words", async (t
     server.listen(PORT, "127.0.0.1", resolve);
   });
   t.after(() => new Promise((resolve) => server.close(resolve)));
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  const browser = await chromium.launch({ channel: testBrowserChannel(), headless: true });
   try {
     const page = await browser.newPage();
     await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: "domcontentloaded" });
