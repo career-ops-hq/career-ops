@@ -114,25 +114,38 @@ if (QUICK) {
           fail(`${rel}: could not be rendered with a headline (${String(e.stderr || e.message).split('\n')[0]})`);
           continue;
         }
-        const page = await browser.newPage();
-        try {
-          await page.setContent(readFileSync(htmlPath, 'utf8'));
-          writeFileSync(pdfPath, Buffer.from(await page.pdf({ format: 'Letter', printBackground: true })));
-        } finally {
-          await page.close();
-        }
-        let text;
-        try {
-          text = execFileSync(pdftotext, ['-layout', pdfPath, '-'], { encoding: 'utf8' });
-        } catch (e) {
-          fail(`${rel}: pdftotext could not read the rendered PDF (${String(e.stderr || e.message).split('\n')[0]})`);
-          continue;
-        }
-        if (headlineIntact(text)) {
-          pass(`${rel} keeps the headline whole in the PDF text layer`);
-        } else {
-          const line = text.split('\n').find((l) => /DATA|ANALYST|ENGINEER/i.test(l)) ?? text.slice(0, 80);
-          fail(`${rel} fragments the headline in the PDF text layer: ${JSON.stringify(line.trim())}`);
+        const html = readFileSync(htmlPath, 'utf8');
+        // A template's tracking is judged under two conditions, because which
+        // faces a machine has decides the glyph advances: the template's own
+        // stack, and a sans fallback for the hosts (CI included) that lack the
+        // named faces. The leadership template fragments at 0.12em under both;
+        // the executive template's serif stack survives 0.14em on a Mac while
+        // the same value fragments under its fallback — the failure CI caught
+        // after a local run passed.
+        for (const [condition, override] of [
+          ['own fonts', null],
+          ['sans fallback', `body { font-family: "Liberation Sans", Arial, 'DejaVu Sans', sans-serif !important; }`],
+        ]) {
+          const page = await browser.newPage();
+          try {
+            await page.setContent(override ? html.replace('</style>', `${override}\n  </style>`) : html);
+            writeFileSync(pdfPath, Buffer.from(await page.pdf({ format: 'Letter', printBackground: true })));
+          } finally {
+            await page.close();
+          }
+          let text;
+          try {
+            text = execFileSync(pdftotext, ['-layout', pdfPath, '-'], { encoding: 'utf8' });
+          } catch (e) {
+            fail(`${rel} (${condition}): pdftotext could not read the rendered PDF (${String(e.stderr || e.message).split('\n')[0]})`);
+            continue;
+          }
+          if (headlineIntact(text)) {
+            pass(`${rel} keeps the headline whole in the PDF text layer (${condition})`);
+          } else {
+            const line = text.split('\n').find((l) => /DATA|ANALYST|ENGINEER/i.test(l)) ?? text.slice(0, 80);
+            fail(`${rel} fragments the headline in the PDF text layer (${condition}): ${JSON.stringify(line.trim())}`);
+          }
         }
       }
     }
