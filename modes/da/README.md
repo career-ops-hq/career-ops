@@ -42,9 +42,9 @@ Denne første iteration dækker de fire modes med størst effekt:
 | Fil | Oversat fra | Rolle |
 |-----|-------------|-------|
 | `_shared.md` | `modes/_shared.md` (EN) | Delt kontekst, arketyper, globale regler, særtræk ved det danske marked |
-| `oferta.md` | `modes/oferta.md` (ES) | Fuld evaluering af et opslag (Blok A-H) |
+| `oferta.md` | `modes/oferta.md` (EN) | Fuld evaluering af et opslag (Blok A-H) |
 | `apply.md` | `modes/apply.md` (EN) | Live-assistent til udfyldelse af ansøgningsformularer |
-| `pipeline.md` | `modes/pipeline.md` (ES) | URL-indbakke / Second Brain til indsamlede opslag |
+| `pipeline.md` | `modes/pipeline.md` (EN) | URL-indbakke / Second Brain til indsamlede opslag |
 
 De øvrige modes (`scan`, `batch`, `pdf`, `tracker`, `auto-pipeline`, `deep`, `contacto`, `ofertas`, `project`, `training`) forbliver på EN/ES. Deres indhold er primært tooling, stier og kommandoer -- det skal forblive sproguafhængigt.
 

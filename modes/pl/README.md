@@ -42,9 +42,9 @@ Ta pierwsza iteracja obejmuje cztery tryby o najwyższym wpływie:
 | Plik | Przetłumaczony z | Rola |
 |---------|----------------|------|
 | `_shared.md` | `modes/_shared.md` (EN) | Wspólny kontekst, archetypy, reguły globalne, specyfika polskiego rynku |
-| `oferta.md` | `modes/oferta.md` (ES) | Pełna ocena oferty (Bloki A-H) |
+| `oferta.md` | `modes/oferta.md` (EN) | Pełna ocena oferty (Bloki A-H) |
 | `aplikuj.md` | `modes/apply.md` (EN) | Asystent na żywo do wypełniania formularzy aplikacyjnych |
-| `pipeline.md` | `modes/pipeline.md` (ES) | Inbox URL-i / Second Brain dla zebranych ofert |
+| `pipeline.md` | `modes/pipeline.md` (EN) | Inbox URL-i / Second Brain dla zebranych ofert |
 
 Pozostałe tryby (`scan`, `batch`, `pdf`, `tracker`, `auto-pipeline`, `deep`, `contacto`, `ofertas`, `project`, `training`) zostają w EN/ES. Ich treść to głównie tooling, ścieżki i komendy -- musi pozostać niezależna od języka.
 

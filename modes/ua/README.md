@@ -48,9 +48,9 @@ language:
 | Файл                | Оригінал                       | Призначення                                                             |
 | ------------------- | ------------------------------ | ----------------------------------------------------------------------- |
 | `_shared.md`        | `modes/_shared.md` (EN)        | Спільний контекст, архетипи, глобальні правила, специфіка ринку України |
-| `oferta.md`         | `modes/oferta.md` (ES)         | Повна оцінка вакансії (блоки A-H)                                       |
-| `apply.md`          | `modes/apply.md` (ES)          | Асистент заповнення форм відгуків                                       |
-| `pipeline.md`       | `modes/pipeline.md` (ES)       | Черга URL-ів / Second Brain для зібраних вакансій                       |
+| `oferta.md`         | `modes/oferta.md` (EN)         | Повна оцінка вакансії (блоки A-H)                                       |
+| `apply.md`          | `modes/apply.md` (EN)          | Асистент заповнення форм відгуків                                       |
+| `pipeline.md`       | `modes/pipeline.md` (EN)       | Черга URL-ів / Second Brain для зібраних вакансій                       |
 | `interview-prep.md` | `modes/interview-prep.md` (EN) | Підготовка до співбесіди                                                |
 
 Решта режимів (`scan`, `batch`, `pdf`, `tracker`, `auto-pipeline`, `deep`, `contacto`, `ofertas`, `project`, `training`) залишаються на EN/ES. Їхній вміст — переважно tooling, шляхи та команди — не залежить від мови.

@@ -46,9 +46,9 @@ language:
 | File | Translated From | Purpose |
 |------|-----------------|---------|
 | `_shared.md` | `modes/_shared.md` (EN) | Shared context, archetypes, global rules, India market specifics |
-| `naukri.md` | `modes/oferta.md` (ES) | Single job offer का complete evaluation (Blocks A-H) |
+| `naukri.md` | `modes/oferta.md` (EN) | Single job offer का complete evaluation (Blocks A-H) |
 | `aavedan.md` | `modes/apply.md` (EN) | Application form के लिए live assistant |
-| `pipeline.md` | `modes/pipeline.md` (ES) | URL inbox / collected offers के लिए second brain |
+| `pipeline.md` | `modes/pipeline.md` (EN) | URL inbox / collected offers के लिए second brain |
 
 बाकी modes (`scan`, `batch`, `pdf`, `tracker`, `auto-pipeline`, `deep`, `contacto`, `ofertas`, `project`, `training`) EN/ES originals से काम करते रहते हैं — उनकी content mostly tooling, paths, और configuration commands हैं जो language-independent रहनी चाहिए।
 

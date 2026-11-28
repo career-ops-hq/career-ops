@@ -35,16 +35,16 @@ language:
   modes_dir: modes/tr
 ```
 
-Ardından ilk oturumda Claude'a bu ayarı hatırlat ("profile.yml'e baktım, `language.modes_dir` ayarlanmış"). Bundan sonra Claude otomatik olarak Türkçe modları kullanır.
+career-ops yönlendiricisi her oturumda `config/profile.yml` içindeki `language.modes_dir` değerini okur ve `modes/tr/` altındaki modları kendisi yükler. Ajana bunu hatırlatman gerekmez.
 
 ## Mevcut Modlar
 
 | Dosya | Kaynak | Amaç |
 |-------|--------|------|
 | `_shared.md` | `modes/_shared.md` (EN) | Paylaşılan bağlam, arketipler, global kurallar, Türkiye piyasa özelinde terimler |
-| `is-ilani.md` | `modes/oferta.md` (ES) | Tek bir ilanın tam değerlendirmesi (Bloklar A-H) |
+| `is-ilani.md` | `modes/oferta.md` (EN) | Tek bir ilanın tam değerlendirmesi (Bloklar A-H) |
 | `basvuru.md` | `modes/apply.md` (EN) | Başvuru formu için canlı asistan |
-| `pipeline.md` | `modes/pipeline.md` (ES) | URL gelen kutusu / biriktirilmiş ilanlar için ikinci beyin |
+| `pipeline.md` | `modes/pipeline.md` (EN) | URL gelen kutusu / biriktirilmiş ilanlar için ikinci beyin |
 | `project.md` | `modes/project.md` (EN) | Portfolyo projesi değerlendirmesi |
 | `training.md` | `modes/training.md` (EN) | Eğitim ve kurs değerlendirmesi |
 | `tracker.md` | `modes/tracker.md` (EN) | Başvuru takipçisi |

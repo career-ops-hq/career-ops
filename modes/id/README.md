@@ -42,9 +42,9 @@ Iterasi pertama ini mencakup empat mode berdampak tertinggi:
 | File | Diterjemahkan dari | Peran |
 |------|--------------------|-------|
 | `_shared.md` | `modes/_shared.md` (EN) | Konteks bersama, arketipe, aturan global, kekhususan pasar Indonesia |
-| `lowongan.md` | `modes/oferta.md` (ES) | Evaluasi lengkap sebuah lowongan (Blok A-H) |
+| `lowongan.md` | `modes/oferta.md` (EN) | Evaluasi lengkap sebuah lowongan (Blok A-H) |
 | `melamar.md` | `modes/apply.md` (EN) | Asisten live untuk mengisi formulir lamaran |
-| `pipeline.md` | `modes/pipeline.md` (ES) | Inbox URL / Second Brain untuk lowongan yang dikumpulkan |
+| `pipeline.md` | `modes/pipeline.md` (EN) | Inbox URL / Second Brain untuk lowongan yang dikumpulkan |
 
 Mode lain (`scan`, `batch`, `pdf`, `tracker`, `auto-pipeline`, `deep`, `contacto`, `ofertas`, `project`, `training`) tetap dalam EN/ES. Isinya sebagian besar tooling, path, dan perintah -- harus tetap independen dari bahasa.
 

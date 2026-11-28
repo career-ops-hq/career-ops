@@ -42,9 +42,9 @@ Questa prima iterazione copre le quattro modalità a più alto impatto:
 | File | Tradotto da | Ruolo |
 |------|-------------|-------|
 | `_shared.md` | `modes/_shared.md` (EN) | Contesto condiviso, archetipi, regole globali, specificità del mercato italiano |
-| `annuncio.md` | `modes/oferta.md` (ES) | Valutazione completa di un annuncio di lavoro (Blocchi A-H) |
+| `annuncio.md` | `modes/oferta.md` (EN) | Valutazione completa di un annuncio di lavoro (Blocchi A-H) |
 | `candidarsi.md` | `modes/apply.md` (EN) | Assistente live per compilare i moduli di candidatura |
-| `pipeline.md` | `modes/pipeline.md` (ES) | Inbox di URL / Second Brain per gli annunci raccolti |
+| `pipeline.md` | `modes/pipeline.md` (EN) | Inbox di URL / Second Brain per gli annunci raccolti |
 
 Le altre modalità (`scan`, `batch`, `pdf`, `tracker`, `auto-pipeline`, `deep`, `contacto`, `ofertas`, `project`, `training`) rimangono in inglese/spagnolo. Il loro contenuto riguarda principalmente il tooling, i percorsi e i comandi, e deve rimanere indipendente dalla lingua.
 
