@@ -84,6 +84,64 @@ test('a failed stream exits 1 with its error and nothing after it, without calli
   assert.doesNotMatch(result.stdout, /CAREER-OPS EVALUATION/);
 });
 
+test('a 200 SSE error frame that quotes the API key is redacted before it is printed', () => {
+  const key = 'sk-synthetic-secret-value-1234567890';
+  const result = runEval({
+    apiKey: key,
+    preloadBody: `${SSE}
+const answer = () => sse(event({ choices: [{ delta: { content: 'Partial' }, finish_reason: null }] })
+  + event({ error: { message: 'bad request: key ${key} is not valid' } }));`,
+  });
+  assert.equal(result.status, 1, describeSpawn(result));
+  assert.doesNotMatch(result.stderr, /sk-synthetic-secret-value-1234567890/, 'the key must not reach stderr');
+  assert.match(result.stderr, /\[REDACTED\]/);
+});
+
+test('a key that straddles the 300-character cut does not leak as a fragment', () => {
+  const key = 'sk-synthetic-secret-value-1234567890';
+  const prefix = 'x'.repeat(269);
+  const result = runEval({
+    apiKey: key,
+    preloadBody: `${SSE}
+const answer = () => sse(event({ choices: [{ delta: { content: 'Partial' }, finish_reason: null }] })
+  + event({ error: { message: '${prefix}${key}' } }));`,
+  });
+  assert.equal(result.status, 1, describeSpawn(result));
+  assert.doesNotMatch(result.stderr, new RegExp(key.slice(0, 20)), 'a truncated key fragment must not reach stderr');
+  assert.doesNotMatch(result.stderr, /sk-synthetic-secret-value-1234567890/, 'the whole key must not reach stderr');
+  assert.match(result.stderr, /\[REDACTED\]/);
+});
+
+test('a malformed SSE payload that begins with the key does not leak its prefix', () => {
+  const key = 'sk-synthetic-secret-value-1234567890';
+  const result = runEval({
+    apiKey: key,
+    // JSON.parse quotes the first characters of the input it refused, which the
+    // catch-level redaction cannot match once only a prefix is left.
+    preloadBody: `${SSE}
+const answer = () => sse('data: ${key} not json\\n\\n');`,
+  });
+  assert.equal(result.status, 1, describeSpawn(result));
+  assert.match(result.stderr, /API call failed:/, describeSpawn(result));
+  assert.doesNotMatch(result.stderr, new RegExp(key.slice(0, 10)), 'a key prefix quoted by JSON.parse must not reach stderr');
+  assert.doesNotMatch(result.stderr, /sk-synthetic-secret-value-1234567890/, 'the whole key must not reach stderr');
+});
+
+test('a key that collides with a field value does not corrupt a successful stream', () => {
+  // Rewriting the payload before JSON.parse turned a valid finish_reason of "stop"
+  // into "[REDACTED]" whenever the key was that word, and the run then refused a
+  // completed evaluation.
+  const result = runEval({
+    apiKey: 'stop',
+    preloadBody: `${SSE}
+const answer = () => sse(event({ choices: [{ delta: { content: 'Short evaluation.' }, finish_reason: null }] })
+  + event({ choices: [{ delta: {}, finish_reason: 'stop' }] }));`,
+  });
+  assert.equal(result.status, 0, describeSpawn(result));
+  assert.doesNotMatch(result.stderr, /finish_reason/);
+  assert.match(result.stdout, /CAREER-OPS EVALUATION/);
+});
+
 test('a stream record over the size cap exits 1, without calling process.exit', () => {
   // The case that aborted ollama-eval.mjs on every run on the affected Windows
   // Node versions: tests/evaluator-stream-integrity.test.mjs runs it for both.
