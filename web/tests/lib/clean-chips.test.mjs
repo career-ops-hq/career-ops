@@ -79,6 +79,18 @@ test("deduplication (case-insensitive): 'Afghanistan, Afghanistan, ALBANIA, alba
   assert.deepEqual(cleanChips(parts), ["Afghanistan", "ALBANIA"]);
 });
 
+test("deduplication folds Unicode-equivalent spellings (NFC vs NFD)", () => {
+  assert.deepEqual(cleanChips(["café", "cafe\u0301"]), ["café"]);
+});
+
+test("deduplication folds case variants that normalize to the same character", () => {
+  assert.deepEqual(cleanChips(["\u01f0", "J\u030c"]), ["\u01f0"]);
+});
+
+test("deduplication folds compatibility equivalents before lowercasing", () => {
+  assert.deepEqual(cleanChips(["𝐀", "a"]), ["𝐀"]);
+});
+
 test("multi-word entries preserved: 'Costa Rica, South Africa, United States' → 3 chips", () => {
   const parts = split("Costa Rica, South Africa, United States");
   assert.deepEqual(cleanChips(parts), ["Costa Rica", "South Africa", "United States"]);
