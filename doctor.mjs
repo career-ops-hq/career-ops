@@ -1329,8 +1329,41 @@ function checkEnvFileProfile(root) {
   };
 }
 
+// A setup YAML that is present but that the runtime loader cannot parse, as a
+// failing check, or null. Every reader goes through loadYaml, so this rejects
+// exactly what a scan or an evaluation would: malformed syntax and a stream of
+// several documents. An empty or comment-only file parses (to null) and is
+// left to the empty-file warning. Parser messages, reasons and snippets can
+// quote file content (even an unknown alias or tag name), so only fixed text
+// and the numeric line and column are reported.
+function invalidYamlPrereq(root, prereq) {
+  const { path } = prereq;
+  if (!path.endsWith('.yml') || !prereqPresent(root, prereq)) return null;
+  let source;
+  try {
+    source = readFileSync(prereqFile(root, prereq), 'utf-8');
+  } catch {
+    return { pass: false, label: `${path}: YAML file could not be read`, fix: [`Check that ${path} is a readable file`] };
+  }
+  try {
+    loadYaml(source);
+    return null;
+  } catch (err) {
+    // js-yaml's fixed reason for a `---` stream; it carries no position.
+    if (err?.reason === 'expected a single document in the stream, but found more') {
+      return { pass: false, label: `${path}: invalid YAML (expected a single document)`, fix: [`Keep ${path} to one YAML document (no second \`---\`)`] };
+    }
+    const { line, column } = err?.mark || {};
+    const position = Number.isInteger(line) && line >= 0 && Number.isInteger(column) && column >= 0
+      ? ` (line ${line + 1}, column ${column + 1})` : '';
+    return { pass: false, label: `${path}: invalid YAML${position}`, fix: [`Fix the YAML syntax in ${path}${position ? ' at that position' : ''}`] };
+  }
+}
+
 function checkPrereq(prereq) {
   const { path, fix } = prereq;
+  const invalid = invalidYamlPrereq(projectRoot, prereq);
+  if (invalid) return invalid;
   if (emptyYamlPrereqs(projectRoot).includes(prereq)) {
     return { warn: true, label: `${path} ${EMPTY_YAML_REASON}; ${prereq.emptyImpact}`, fix };
   }
@@ -1680,6 +1713,8 @@ async function main() {
   const userLayerWritable = !pluginInstall || pluginInstall.pass;
 
   const playwrightCheck = await checkPlaywright(browserProcessEnv);
+  const prereqChecks = new Map(USER_LAYER_PREREQS.map((prereq) => [prereq.path, checkPrereq(prereq)]));
+  const profileParses = prereqChecks.get('config/profile.yml').pass !== false;
 
   const checks = [
     checkNodeVersion(),
@@ -1694,11 +1729,16 @@ async function main() {
       ? []
       : await checkRemotePageBrowser({ probe: { projectRoot, processEnv: browserProcessEnv }, bundledCheckPassed: playwrightCheck.pass === true })),
     checkPlaywrightMcp(process.cwd(), activeCli),
-    checkScanExtractor(projectRoot),
-    ...USER_LAYER_PREREQS.map(checkPrereq),
+    // An unparseable profile falls back to MCP in the runtime loader; that is
+    // not a successful configuration check when diagnosing a broken file.
+    profileParses && checkScanExtractor(projectRoot),
+    ...prereqChecks.values(),
     checkFonts(),
     checkPersonalization(projectRoot),
-    checkProfileShape(projectRoot),
+    // The shape check quotes the parser's message for a profile that does not
+    // parse, and that message can carry file content (an alias or tag name).
+    // The prereq line above already reports the broken file, by position only.
+    profileParses && checkProfileShape(projectRoot),
     checkTitleFilterConflicts(projectRoot),
     checkCvShape(projectRoot),
     checkUserTemplates(projectRoot),
@@ -1712,7 +1752,7 @@ async function main() {
   ].filter(Boolean);
 
   // Network-bound portals.yml reachability probe — only under --strict.
-  if (STRICT) {
+  if (STRICT && prereqChecks.get('portals.yml').pass !== false) {
     checks.push(await checkPortalSlugs(projectRoot));
   }
 
@@ -1999,6 +2039,7 @@ function onboardingState(root) {
   const cvShape = checkCvShape(root);
   const userTemplates = checkUserTemplates(root);
   const envFileProfile = checkEnvFileProfile(root);
+  const invalidYaml = USER_LAYER_PREREQS.map((prereq) => invalidYamlPrereq(root, prereq)).filter(Boolean);
   const warnings = [
     ...(cliWarning ? [cliWarning] : []),
     ...(pluginInstall && !pluginInstall.pass ? [`${pluginInstall.label}\n→ ${pluginInstall.fix}`] : []),
@@ -2008,6 +2049,7 @@ function onboardingState(root) {
     ...(cvShape?.warn ? [`${cvShape.label}\n→ ${[].concat(cvShape.fix || []).join('\n  ')}`] : []),
     ...(userTemplates?.warn ? [`${userTemplates.label}\n→ ${[].concat(userTemplates.fix || []).join('\n  ')}`] : []),
     ...(envFileProfile ? [`${envFileProfile.label}\n→ ${envFileProfile.fix.join('\n  ')}`] : []),
+    ...invalidYaml.map((check) => check.label),
     ...unpersonalized.map((u) => `${u.path} ${u.reason} — ${u.impact}\n→ Personalize it from cv.md before running evaluations.`),
   ];
 
