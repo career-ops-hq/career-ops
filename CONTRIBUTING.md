@@ -269,6 +269,48 @@ it.
 `tests/required-tools-declared.test.mjs` fails a suite that launches Chromium
 without declaring it.
 
+### Optional pre-commit hook
+
+`npm run hooks:install` points this clone's `core.hooksPath` at `.githooks/`.
+If `core.hooksPath` already names another directory, the install stops rather
+than switch those hooks off; `npm run hooks:install -- --force` replaces it and
+prints the command that restores the old value. After that, every
+`git commit` runs a few checks that take about two seconds in total:
+
+| Check | What fails it |
+|---|---|
+| `paths` | A staged user-layer file (the list `no-user-data.yml` blocks), a CV or resume at the repo root, or a `.env` file |
+| `secrets` | A common credential format (GitHub, AWS, Anthropic, OpenAI, OpenRouter, Google, Slack, Stripe or npm token, or a private key) on an added line |
+| `whitespace` | `git diff --cached --check`, skipping Markdown, where two trailing spaces are a line break |
+| `gofmt` | An unformatted staged `dashboard/*.go` file. Skipped when `gofmt` is not on `PATH` |
+| `coverage` | `validate-system-paths-coverage.mjs` |
+| `lint` | `npm run lint`, when a `.mjs` file is staged. It reads the working tree, so an unstaged fix can hide a syntax error in the staged copy |
+
+The hook is opt-in, and `npm install` never enables it. CI runs `lint`,
+`coverage`, `gofmt` (through the dashboard's Go tests) and the user-layer part
+of `paths` (`no-user-data.yml`) on every PR. CI does not scan for secrets,
+whitespace errors, a root-level CV or a `.env` file. Only the hook catches
+those, so a commit made with `--no-verify` reaches the PR unchecked for them.
+`CAREER_OPS_HOOK_SKIP=lint,coverage
+git commit …` skips the named checks for one commit, and `git commit
+--no-verify` skips all of them. For a test that has to hold a fake key, end the
+line with `pragma: allowlist secret`. To turn the hook off again, run
+`git config --unset core.hooksPath`.
+
+### Recommended git settings
+
+None of these is required. Each one saves time on a repository that merges
+as often as this one:
+
+```bash
+git config rerere.enabled true          # replay a conflict resolution you already made
+git config merge.conflictStyle zdiff3   # show the common ancestor in conflict markers (git 2.35+)
+git config fetch.prune true             # drop remote branches deleted upstream
+git config core.longpaths true          # Windows only: allow paths over 260 characters
+```
+
+Add `--global` to apply a setting to every repository on your machine.
+
 ### Checking translated mode structure
 
 Run `node i18n-drift.mjs --lang tr` (repeat `--lang` for several languages),

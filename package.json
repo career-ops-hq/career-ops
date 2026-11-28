@@ -16,6 +16,7 @@
     "or:apply": "node openrouter-runner.mjs apply",
     "verify": "node verify-pipeline.mjs",
     "lint": "node scripts/check-syntax.mjs",
+    "hooks:install": "node .githooks/install.mjs",
     "normalize": "node normalize-statuses.mjs",
     "dedup": "node dedup-tracker.mjs",
     "fix-report-links": "node fix-report-links.mjs",
