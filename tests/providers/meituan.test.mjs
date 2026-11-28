@@ -142,6 +142,11 @@ try {
     },
   }));
   const pagedJobs = await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL, keywords: ['AI'] }, paged.ctx);
+  if (JSON.stringify(pagedJobs.queryScope) === JSON.stringify({ config: 'keywords', queries: ['AI'] })) {
+    pass('meituan.fetch() reports a board read through keywords only (1 keyword) as keyword-scoped (#7315)');
+  } else {
+    fail(`meituan.fetch() keywords ['AI']: queryScope = ${JSON.stringify(pagedJobs.queryScope)}`);
+  }
   if (pagedJobs.length === 150 && paged.calls.length === 2) {
     pass('meituan.fetch() paginates until totalCount is exhausted (150 posts → 2 requests)');
   } else {
@@ -175,6 +180,11 @@ try {
     data: { page: { totalCount: 1 }, list: [mkJob(42, '重复岗位')] },
   }));
   const overlapJobs = await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL, keywords: ['AI', '大模型'] }, overlap.ctx);
+  if (JSON.stringify(overlapJobs.queryScope) === JSON.stringify({ config: 'keywords', queries: ['AI', '大模型'] })) {
+    pass('meituan.fetch() reports a board read through keywords only (2 keywords) as keyword-scoped (#7315)');
+  } else {
+    fail(`meituan.fetch() keywords ['AI', '大模型']: queryScope = ${JSON.stringify(overlapJobs.queryScope)}`);
+  }
   if (overlapJobs.length === 1 && overlap.calls.length === 2 && overlap.sleeps.length === 1) {
     pass('meituan.fetch() dedupes across keywords and paces the keyword switch');
   } else {
@@ -256,6 +266,20 @@ try {
     return { data: { page: { totalCount: 1 }, list: [mkJob(7, '幸存岗位')] } };
   });
   const blipJobs = await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL, keywords: ['AI', '大模型'] }, blip.ctx);
+  // The scope names the keywords the run reached, not the ones a failure kept it from:
+  // the blank (whole-board) query after the failure was never sent.
+  const reached = mkCtx(({ keywords }) => {
+    if (keywords === '大模型') throw new Error('HTTP 503');
+    return { data: { page: { totalCount: 1 }, list: [mkJob(7, '幸存岗位')] } };
+  });
+  const { result: reachedJobs } = await captureConsoleErrors(() =>
+    meituan.fetch({ name: '美团', careers_url: MEITUAN_URL, keywords: ['AI', '大模型', 'Agent', ''] }, reached.ctx));
+  if (reachedJobs.truncated?.reason === 'fetch-error'
+      && JSON.stringify(reachedJobs.queryScope) === JSON.stringify({ config: 'keywords', queries: ['AI', '大模型'] })) {
+    pass('meituan.fetch() scopes a partly read board to the keywords it reached');
+  } else {
+    fail(`meituan.fetch() partial scope: truncated = ${JSON.stringify(reachedJobs.truncated)}, queryScope = ${JSON.stringify(reachedJobs.queryScope)}`);
+  }
   if (blipJobs.length === 1 && blipJobs[0].title === '幸存岗位') {
     pass('meituan.fetch() keeps already-collected jobs when a later request fails');
   } else {
