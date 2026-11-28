@@ -98,6 +98,13 @@ try {
     ['https://www.paylocity.com/careers', 'www.paylocity.com'],
     ['https://www.rippling.com/careers', 'www.rippling.com'],
     ['https://www.workable.com/careers', 'www.workable.com'],
+    // A fully-qualified host with the root-label dot is the same host, so it
+    // still routes to its provider (and an unknown host keeps that dot off the
+    // label). A doubled trailing dot is not an alias and stays in the long tail.
+    ['https://jobs.lever.co./acme/id', 'lever'],
+    ['https://acme.wd5.myworkdayjobs.com./Careers/job/X/R1', 'workday'],
+    ['https://careers.example.com./jobs/1', 'careers.example.com'],
+    ['https://jobs.lever.co../acme/id', 'jobs.lever.co.'],
   ];
   for (const [url, expected] of cases) assert.equal(atsVendorOf(url), expected, url);
   for (const invalid of ['', null, 'not a url', 'file:///tmp/jobs']) assert.equal(atsVendorOf(invalid), null);
