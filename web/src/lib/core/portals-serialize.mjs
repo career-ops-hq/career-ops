@@ -29,7 +29,8 @@ function block(key, items) {
  * @returns {string}
  */
 export function serializePortals(f) {
-  let out = "# Ephemeral Explorer filters — generated per-search, safe to delete.\n";
+  const header = "# Ephemeral Explorer filters — generated per-search, safe to delete.\n";
+  let out = header;
   if (f.positive.length || f.negative.length) {
     out += "title_filter:\n";
     out += block("positive", f.positive);
@@ -42,5 +43,8 @@ export function serializePortals(f) {
     out += block("allow", f.allow);
     out += block("block", f.block);
   }
+  // js-yaml 5 rejects a comment-only file, so writeTempPortals cannot overlay
+  // a workplace_policy on an all-empty filter set unless a document exists.
+  if (out === header) out += "{}\n";
   return out;
 }

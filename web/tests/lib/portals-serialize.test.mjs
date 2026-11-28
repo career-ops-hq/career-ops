@@ -14,6 +14,14 @@ import { serializePortals } from "../../src/lib/core/portals-serialize.mjs";
 
 const empty = { positive: [], negative: [], allow: [], block: [], alwaysAllow: [], blockHard: [] };
 
+test("an all-empty filter set is still a YAML document", () => {
+  // writeTempPortals parses this text to overlay a saved workplace_policy. A
+  // header-only file has no YAML document, so js-yaml 5 throws before the
+  // policy can be merged and an unfiltered Discover run fails (#7891).
+  const text = serializePortals(empty);
+  assert.deepEqual(yaml.load(text), {});
+});
+
 test("block_hard is written under location_filter", () => {
   const doc = yaml.load(serializePortals({ ...empty, blockHard: ["usa", "brazil"] }));
   assert.deepEqual(doc.location_filter.block_hard, ["usa", "brazil"]);
