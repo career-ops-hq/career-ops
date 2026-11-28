@@ -28,7 +28,7 @@ import { FollowupsTableRowsSkeleton } from "@/components/page-loading-skeletons"
 import { startRouteProgress } from "@/components/route-progress";
 import { selectUpcomingFollowups } from "@/lib/core/followup-view.mjs";
 import { followupsSummarySlot } from "@/lib/followups-summary-slot.mjs";
-import { FOLLOWUPS_NETWORK_ERROR, followupsAfterRefreshFailure } from "@/lib/followups-refresh.mjs";
+import { FOLLOWUPS_NETWORK_ERROR, followupsAfterRefreshFailure, followupsAfterServerError } from "@/lib/followups-refresh.mjs";
 
 // The /followups tracker: WHO needs a nudge today, HOW urgent, WHEN the next
 // touch is due, and the permanent history of every follow-up sent. The verdict
@@ -86,6 +86,7 @@ type CadenceResponse = {
   entries: CadenceEntry[];
   upcoming?: CadenceEntry[];
   refreshFailed?: boolean;
+  error?: string;
 };
 
 export function FollowupsView() {
@@ -102,11 +103,11 @@ export function FollowupsView() {
 
   const refetch = useCallback(() => {
     fetch("/api/followups?full=1")
-      .then((r) => {
-        if (!r.ok) throw new Error(String(r.status));
-        return r.json();
+      .then(async (r) => {
+        if (!r.ok) return setData(followupsAfterServerError(await r.json().catch(() => null)));
+        const d: CadenceResponse = await r.json();
+        setData({ ...d, refreshFailed: false });
       })
-      .then((d: CadenceResponse) => setData({ ...d, refreshFailed: false }))
       .catch(() => setData((current) => followupsAfterRefreshFailure(current)));
   }, []);
   useEffect(refetch, [refetch]);
@@ -205,7 +206,7 @@ export function FollowupsView() {
   ) : data.refreshFailed && !meta ? (
     "Couldn't refresh"
   ) : !data.available || !meta ? (
-    "Cadence unavailable"
+    data.error ? "Cadence failed" : "Cadence unavailable"
   ) : (
     <>
       <span className="tabular-nums">{meta.actionable}</span> active ·{" "}
@@ -273,7 +274,11 @@ export function FollowupsView() {
       )}
 
       {data && !data.available && !data.refreshFailed ? (
-        <EmptyPanel title="Cadence unavailable" body="The cadence engine (followup-cadence.mjs) returned nothing — check that the core scripts are present." />
+        data.error ? (
+          <EmptyPanel title="Cadence failed" body={`The cadence engine (followup-cadence.mjs) failed: ${data.error}`} />
+        ) : (
+          <EmptyPanel title="Cadence unavailable" body="The cadence engine (followup-cadence.mjs) was not found — check that the core scripts are present." />
+        )
       ) : refreshWithoutAList ? null : data && !isPending && filtered.length === 0 ? (
         filtering ? (
           <EmptyPanel title="No matches" body="Try a different urgency filter or clear the search." />

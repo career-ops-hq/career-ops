@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { FOLLOWUPS_NETWORK_ERROR, followupsAfterRefreshFailure } from "../../src/lib/followups-refresh.mjs";
+import { FOLLOWUPS_NETWORK_ERROR, followupsAfterRefreshFailure, followupsAfterServerError } from "../../src/lib/followups-refresh.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const view = readFileSync(join(root, "src/components/followups/followups-view.tsx"), "utf8");
@@ -32,4 +32,16 @@ test("a failed follow-ups refresh keeps the list and names a network error", () 
   assert.match(view, /refreshWithoutAList/);
   assert.match(view, /data\?\.refreshFailed && !meta && entries\.length === 0/);
   assert.doesNotMatch(view, /refreshFailed && filtered\.length === 0/);
+});
+
+test("a failed cadence run shows the server's reason instead of the missing-script panel", () => {
+  const next = followupsAfterServerError({ error: "tracker unreadable: EACCES" });
+  assert.equal(next.available, false);
+  assert.equal(next.error, "tracker unreadable: EACCES");
+  assert.deepEqual(next.entries, []);
+  // A body with no error (a proxy's HTML 502) still reads as a failure
+  assert.equal(followupsAfterServerError(null).error, "The follow-ups request failed.");
+
+  assert.match(view, /if \(!r\.ok\) return setData\(followupsAfterServerError\(/);
+  assert.match(view, /data\.error \? \(\s*<EmptyPanel title="Cadence failed"/);
 });

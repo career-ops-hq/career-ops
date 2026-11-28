@@ -13,3 +13,10 @@ export function followupsAfterRefreshFailure(current) {
     refreshFailed: true,
   };
 }
+
+// The cadence run failed on the server. Show the reason it gave, which a
+// missing script and a dropped request never have.
+export function followupsAfterServerError(body) {
+  const error = typeof body?.error === "string" && body.error ? body.error : "The follow-ups request failed.";
+  return { available: false, metadata: null, entries: [], upcoming: [], error };
+}
