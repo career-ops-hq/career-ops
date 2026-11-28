@@ -156,3 +156,8 @@ test("a refused save keeps a removed name omitted", () => {
   assert.deepEqual(omissionAfterAttempt(["Gone"], "Gone", false), ["Gone"]);
   assert.deepEqual(omissionAfterAttempt(["Gone", "Other"], "Gone", true), ["Other"]);
 });
+
+test("a saved view can sort by the applied column (#7853)", () => {
+  const view = normalizeView({ name: "Sent", tab: "applied", q: "", min: null, sort: "applied", dir: -1 });
+  assert.equal(view.sort, "applied");
+});

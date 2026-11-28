@@ -205,3 +205,18 @@ test('a decimal-comma score reads as a decimal', { skip: skipTs }, () => {
   const rows = [row(1, '2026-09-18', { score: '4.1/5' }), row(2, '2026-09-18', { score: '4,2/5' })];
   assert.deepEqual(names(sortRows(rows, { key: 'score', dir: -1 }, scoreNum)), ['Role 2', 'Role 1']);
 });
+
+// The applied column (#7853): most rows were evaluated and never sent, so most
+// have no application date. Those rows sort after the dated ones in both
+// directions, and dated ties still break on the row number.
+test('rows with no application date sort last, both directions', () => {
+  const rows = [
+    row(1, '2026-09-01'),
+    row(2, '2026-09-01', { appliedDate: '2026-09-10' }),
+    row(3, '2026-09-01', { appliedDate: '2026-09-05' }),
+    row(4, '2026-09-01', { appliedDate: '' }),
+    row(5, '2026-09-01', { appliedDate: '2026-09-10' }),
+  ];
+  assert.deepEqual(names(sortRows(rows, { key: 'applied', dir: -1 }, scoreNum)), ['Role 5', 'Role 2', 'Role 3', 'Role 4', 'Role 1']);
+  assert.deepEqual(names(sortRows(rows, { key: 'applied', dir: 1 }, scoreNum)), ['Role 3', 'Role 2', 'Role 5', 'Role 1', 'Role 4']);
+});

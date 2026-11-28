@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { pdfReadyReportNumbers, pipelineSummary, readTrackerShape, withCloseDates, type InboxJob } from "@/lib/career-ops";
+import { pdfReadyReportNumbers, pipelineSummary, readTrackerShape, withAppliedDates, withCloseDates, type InboxJob } from "@/lib/career-ops";
 import { reportNumberFromCell } from "@/lib/apply/cv-selection.mjs";
 import { pendingInbox } from "@/lib/inbox-pending.mjs";
 import { PipelineView } from "@/components/pipeline-view";
@@ -15,7 +15,7 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
   const { tab } = await searchParams;
   const onInbox = pipelineTab(tab) === "INBOX";
   const summary = pipelineSummary();
-  const applications = await withCloseDates(summary.applications);
+  const applications = await withAppliedDates(await withCloseDates(summary.applications));
   const { inbox } = summary;
   const pending = pendingInbox(inbox);
   const fitted = onInbox ? withInboxFit(pending) : null;

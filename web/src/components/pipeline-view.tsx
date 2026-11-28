@@ -37,7 +37,10 @@ import { pipelineFindRolesHref } from "@/lib/scan-on-load.mjs";
 type Tab = (typeof PIPELINE_TABS)[number];
 type SavedView = NonNullable<ReturnType<typeof normalizeView>>;
 
-const SORT_KEYS = ["tracker", "company", "role", "score", "status", "date"] as const;
+const SORT_KEYS = ["tracker", "company", "role", "score", "status", "date", "applied"] as const;
+// Two date columns need names that say which date. The keys stay as they are,
+// since saved views and URLs carry them.
+const COLUMN_LABELS: Partial<Record<(typeof SORT_KEYS)[number], string>> = { date: "evaluated", applied: "applied" };
 const VIEWS_KEY = "career-ops:pipeline-views";
 const REMOVAL_WARNING = "This removal is not saved yet. Reloading brings the view back.";
 type SortKey = (typeof SORT_KEYS)[number];
@@ -968,7 +971,7 @@ export function PipelineView({
           <table
             aria-label="Tracked applications"
             aria-rowcount={filtered.length + 1}
-            className="w-full min-w-[44rem] text-sm min-[1440px]:table-fixed min-[1440px]:[&_th:nth-child(1)]:w-11 min-[1440px]:[&_th:nth-child(2)]:w-[4.5rem] min-[1440px]:[&_th:nth-child(3)]:w-[26%] min-[1440px]:[&_th:nth-child(4)]:w-[32%] min-[1440px]:[&_th:nth-child(5)]:w-[5.5rem] min-[1440px]:[&_th:nth-child(6)]:w-[14rem] min-[1440px]:[&_th:nth-child(7)]:w-[6.75rem] min-[1440px]:[&_th:nth-child(8)]:w-[4.75rem]"
+            className="w-full min-w-[44rem] text-sm min-[1440px]:table-fixed min-[1440px]:[&_th:nth-child(1)]:w-11 min-[1440px]:[&_th:nth-child(2)]:w-[4.5rem] min-[1440px]:[&_th:nth-child(3)]:w-[26%] min-[1440px]:[&_th:nth-child(4)]:w-[28%] min-[1440px]:[&_th:nth-child(5)]:w-[5.5rem] min-[1440px]:[&_th:nth-child(6)]:w-[14rem] min-[1440px]:[&_th:nth-child(7)]:w-[6.75rem] min-[1440px]:[&_th:nth-child(8)]:w-[6.75rem] min-[1440px]:[&_th:nth-child(9)]:w-[4.75rem]"
           >
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
               <tr aria-rowindex={1}>
@@ -986,7 +989,7 @@ export function PipelineView({
                     aria-sort={sort.key === k ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
                     className={cn(
                       "whitespace-nowrap px-4 py-2.5 font-medium",
-                      k === "date" && "hidden lg:table-cell",
+                      (k === "date" || k === "applied") && "hidden lg:table-cell",
                     )}
                   >
                     <button
@@ -994,7 +997,7 @@ export function PipelineView({
                       className="inline-flex cursor-pointer select-none items-center gap-1 uppercase tracking-wide hover:text-foreground"
                       onClick={() => setParams({ sort: k, dir: sort.key === k ? sort.dir * -1 : -1 })}
                     >
-                      {k}
+                      {COLUMN_LABELS[k] ?? k}
                       <ChevronsUpDown aria-hidden="true" className="size-3" />
                     </button>
                   </th>
@@ -1171,6 +1174,7 @@ const TrackerRow = memo(function TrackerRow({
         />
       </td>
       <td className="hidden whitespace-nowrap px-4 py-3 text-faint tabular-nums lg:table-cell">{r.date}</td>
+      <td className="hidden whitespace-nowrap px-4 py-3 text-faint tabular-nums lg:table-cell">{r.appliedDate || "—"}</td>
       <td className="whitespace-nowrap px-4 py-3">
         {hasCv ? (
           <a

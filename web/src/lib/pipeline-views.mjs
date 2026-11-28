@@ -2,7 +2,7 @@ import { pipelineTab } from "./pipeline-navigation.mjs";
 
 export const VIEW_LIMIT = 8;
 export const SCORE_FLOORS = [3.5, 4, 4.2];
-export const PIPELINE_SORT_KEYS = ["tracker", "company", "role", "score", "status", "date"];
+export const PIPELINE_SORT_KEYS = ["tracker", "company", "role", "score", "status", "date", "applied"];
 
 /** @param {unknown} input */
 export function normalizeView(input) {

@@ -12,6 +12,7 @@ import { resolveCodeRoot, resolveRootScript } from "@/lib/core/code-root.mjs";
 import { classifyTracker, parseApplications } from "@/lib/tracker-table.mjs";
 import { awaitingAge } from "@/lib/home/awaiting-age.mjs";
 import { parseStatusLog } from "@/lib/pipeline-sankey.mjs";
+import { appliedDatesByRow } from "@/lib/application-dates.mjs";
 // Pipeline rows are parsed in a plain .mjs for the same reason as
 // tracker-table.mjs: so `node --test` can exercise the real parser.
 import { parseInbox, splitLines } from "@/lib/pipeline-table.mjs";
@@ -206,6 +207,41 @@ export async function withCloseDates(applications: Application[]): Promise<Appli
   });
 }
 
+type AppliedDateModule = {
+  statusLogAppliedDates: (text: string) => Map<number, string>;
+  resolveAppliedDate: (app: Application, statusLogDate: string | null) => { appliedDate: string | null; appDateSource: string };
+};
+
+let appliedDateModule: AppliedDateModule | null = null;
+
+async function loadAppliedDateModule(): Promise<AppliedDateModule | null> {
+  if (appliedDateModule) return appliedDateModule;
+  const file = path.join(
+    /* turbopackIgnore: true */ resolveCodeRoot(process.cwd(), process.env),
+    "followup-cadence.mjs",
+  );
+  try {
+    const mod = (await import(/* webpackIgnore: true */ pathToFileURL(file).href)) as Partial<AppliedDateModule>;
+    if (typeof mod.statusLogAppliedDates !== "function" || typeof mod.resolveAppliedDate !== "function") return null;
+    appliedDateModule = mod as AppliedDateModule;
+    return appliedDateModule;
+  } catch {
+    return null;
+  }
+}
+
+/** Join each row's application date, kept apart from its evaluation date
+ *  (`date`). Read by the core's own rules, the ones the follow-up report uses:
+ *  see application-dates.mjs. A row with no recorded application gets "". A
+ *  missing core module leaves the rows unchanged, so the column shows "—".
+ *  Success is cached. A failed import is not. */
+export async function withAppliedDates(applications: Application[]): Promise<Application[]> {
+  const mod = await loadAppliedDateModule();
+  if (!mod) return applications;
+  const dates = appliedDatesByRow(applications, readApplicationStatusLog(), mod);
+  return applications.map((app) => ({ ...app, appliedDate: dates.get(app.n) ?? "" }));
+}
+
 type PostingFactsModule = {
   postingFactsIndex: (scanHistory: string, livenessLog: string) => Map<string, unknown>;
   postingFactsForUrl: (index: Map<string, unknown>, url: string) => unknown;
@@ -255,7 +291,10 @@ export async function readAwaitingAges(
 
 export type Application = {
   n: string;
+  /** Day the role was evaluated and entered in the tracker. */
   date: string;
+  /** Day the application was sent, from the status log or an `applied` note. "" when none is recorded. Absent until `withAppliedDates()` runs. */
+  appliedDate?: string;
   company: string;
   /** Intermediary channel (#1596): agency/recruiter firm, "—" for direct, "" when the tracker has no Via column. */
   via: string;
