@@ -55,6 +55,7 @@ test("Hermes is blocked for write-capable run kinds", () => {
   assert.equal(isCliAllowedForCapabilities("hermes", capabilitiesFor("pdf")), true, "Hermes must remain available for pdf/read-only runs");
   assert.equal(isCliAllowedForCapabilities("hermes", capabilitiesFor("research")), true, "Hermes must remain available for research runs");
   assert.equal(isCliAllowedForCapabilities("hermes", capabilitiesFor("evaluate")), true, "evaluate no longer writes, so Hermes may run it");
+  assert.equal(isCliAllowedForCapabilities("hermes", capabilitiesFor("cover")), true, "Hermes must remain available for cover-letter drafting");
   assert.equal(isCliAllowedForCapabilities("hermes", capabilitiesFor("fix-portal")), false, "Hermes must be blocked for fix-portal");
   assert.equal(isCliAllowedForCapabilities("claude", capabilitiesFor("fix-portal")), true, "fenced runtimes must remain available for write-capable runs");
 });

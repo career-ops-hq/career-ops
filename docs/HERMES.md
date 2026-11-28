@@ -105,7 +105,9 @@ The web UI can run Hermes in one-shot mode for explicitly non-writing workers:
 hermes chat -q "<prompt>" --oneshot -Q --no-restore-cwd
 ```
 
-This returns one plain-text answer without resuming an unrelated session. The worker inherits Hermes's configured tools, approvals, memory, and project-context rules. In the web UI, Hermes is supported only for explicitly non-writing workers such as research and PDF drafting; career-ops rejects Hermes for evaluation and portal-repair workers because no verified Hermes permission adapter exists. Hermes is not supported by batch ranking (`--cli hermes` exits with an error); batch ranking remains a separate workflow and writes only its own guarded annotations. Do not use Hermes for unattended mutation workflows.
+This returns one plain-text answer without resuming an unrelated session. The worker inherits Hermes's configured tools, approvals, memory, and project-context rules. Career-ops has no verified per-worker permission adapter for Hermes, so it applies no additional tool or approval restrictions.
+
+The web UI allows Hermes for evaluation, research, CV drafting, and cover-letter drafting. The evaluation worker returns its report in the reply, and the web backend saves it. The web UI rejects Hermes for write-capable workers such as portal repair. Batch ranking rejects `--cli hermes`. Do not use Hermes for unattended mutation workflows.
 
 The interactive workflow remains available for tasks that benefit from session continuity.
 
