@@ -178,9 +178,10 @@ function loadRow(appsFile, appNum) {
   if (!existsSync(appsFile)) planError('BAD_PLAN', `tracker not found at ${appsFile}`);
   const lines = readFileSync(appsFile, 'utf8').split('\n');
   const colmap = resolveColumns(lines);
-  const row = lines.map((line) => parseTrackerRow(line, colmap)).find((item) => item?.num === appNum);
-  if (!row) planError('BAD_PLAN', `application #${appNum} is not in the tracker`);
-  return row;
+  const rows = lines.map((line) => parseTrackerRow(line, colmap)).filter((item) => item?.num === appNum);
+  if (rows.length === 0) planError('BAD_PLAN', `application #${appNum} is not in the tracker`);
+  if (rows.length > 1) planError('BAD_PLAN', `application #${appNum} appears more than once in the tracker`);
+  return rows[0];
 }
 
 function appendDealbreakerNote(appNum, status, sentence, root, { dryRun = false } = {}) {

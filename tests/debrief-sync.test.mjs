@@ -140,6 +140,25 @@ const fullArgs = [
   const root = freshRoot();
   try {
     writeFixture(root);
+    const tracker = join(root, 'data', 'applications.md');
+    writeFileSync(tracker, readFileSync(tracker, 'utf8')
+      + '| 7 | 2026-01-06 | Contoso | Designer | 4.1/5 | Interview | — | — | |\n');
+    const before = snapshot(root);
+    const result = run(root, ['--app', '7', '--contact-name', 'Fictional Interviewer', '--next', FUTURE]);
+    check('an ambiguous application number leaves contacts and follow-ups unchanged', () => {
+      assert.equal(result.status, 1, describeSpawn(result));
+      assert.match(result.stderr, /application #7 appears more than once in the tracker/);
+      assert.deepEqual(snapshot(root), before);
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+{
+  const root = freshRoot();
+  try {
+    writeFixture(root);
     const before = summary(root, 'followup-cadence.mjs', ['--summary']);
     check('an overdue pin is OVERDUE before the debrief command', () => {
       assert.equal(before.status, 0, describeSpawn(before));
