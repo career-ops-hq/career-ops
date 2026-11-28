@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createWorkerFeedback, workerIdentity, workerState, workerDetailsLabel, workerBatchSummary } from "../../src/lib/worker-feedback.mjs";
+import { createWorkerFeedback, workerIdentity, workerDetailsLabel, workerBatchSummary } from "../../src/lib/worker-feedback.mjs";
 
 const job = (id, status = "done", title = "Evaluate · FixtureCo", subtitle = "Engineer") => ({ id, title, subtitle, status });
 function fixture() {
@@ -20,8 +20,6 @@ test("task identity includes role; detail names exclude ticking progress", () =>
   assert.equal(workerIdentity({ title: "Draft CV" }), "Draft CV");
   assert.equal(workerDetailsLabel(task), "Open worker: Evaluate · FixtureCo · Engineer — Running");
   assert.equal(workerDetailsLabel({ ...task, elapsed: 60, steps: ["Write"] }), workerDetailsLabel(task));
-  assert.equal(workerState("done"), "Completed");
-  assert.equal(workerState("error"), "Failed");
 });
 
 test("batch outcomes distinguish failures, active work and unavailable history", () => {
@@ -87,7 +85,6 @@ test("an explicit gate is announced as needing review, never completed or failed
   const f = fixture();
   f.feedback.push(job("gate", "gated"));
   f.flush();
-  assert.equal(workerState("gated"), "Needs review");
   assert.equal(workerDetailsLabel(job("gate", "gated")), "Open worker: Evaluate · FixtureCo · Engineer — Needs review");
   assert.equal(f.notices.at(-1), "Evaluate · FixtureCo · Engineer: needs review.");
   assert.equal(workerBatchSummary([job("done"), job("gate", "gated"), job("bad", "error")]), "1 completed, 1 needs review, 1 failed");

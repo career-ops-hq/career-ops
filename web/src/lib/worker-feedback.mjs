@@ -7,11 +7,6 @@ export function workerIdentity(job) {
   return [job.title, job.subtitle].filter(Boolean).join(" · ");
 }
 
-/** @param {string} status */
-export function workerState(status) {
-  return status === "gated" ? "Needs review" : status === "done" ? "Completed" : status === "error" ? "Failed" : "Running";
-}
-
 /** Stable during timer/tool updates; includes the visible task identity. @param {Worker} job */
 export function workerDetailsLabel(job) {
   return `Open worker: ${workerIdentity(job)} — ${jobStateLabel(job)}`;
