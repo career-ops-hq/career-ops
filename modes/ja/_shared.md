@@ -46,7 +46,7 @@
 
 ## スコアリングシステム
 
-評価は 6 ブロック（A-F）と 1-5 の global score で行う：
+評価は 5 つの dimension をスコアリングし、1 つの 1-5 の global score に統合する。（これらは scoring dimensions であり、レポートのブロックではない。レポート構成は A-H で、`modes/ja/kyujin.md` に定義されている。）
 
 | Dimension | 測定する内容 |
 |-----------|-------------|
@@ -55,7 +55,7 @@
 | Comp | 給与 vs 市場（5=上位四分位、1=大幅に下回る） |
 | Cultural signals | 企業文化、成長性、安定性、remote policy |
 | Red flags | ブロッカー、警告（negative adjustments） |
-| **Global** | 上記の weighted average |
+| **Global** | 上記 5 つの dimension を統合した総合判断（計算式なし） |
 
 **Score interpretation:**
 - 4.5+ → 強いマッチ、今すぐ応募を推奨

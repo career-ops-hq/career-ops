@@ -42,7 +42,7 @@
 
 ## Sistema de Pontuação
 
-A avaliação usa 6 blocos (A-F) com uma nota global de 1-5:
+A avaliação pontua cinco dimensões, integradas em uma única nota global de 1-5. (Estas são as dimensões de pontuação, não os blocos do relatório; a estrutura do relatório é A-H e está em `modes/pt/oferta.md`.)
 
 | Dimensão | O que mede |
 |----------|------------|
@@ -51,7 +51,7 @@ A avaliação usa 6 blocos (A-F) com uma nota global de 1-5:
 | Remuneração | Salário vs mercado (5=quartil superior, 1=bem abaixo) |
 | Sinais culturais | Cultura da empresa, crescimento, estabilidade, política de trabalho remoto |
 | Red flags | Bloqueadores, alertas (ajustes negativos) |
-| **Global** | Média ponderada dos itens acima |
+| **Global** | Julgamento holístico que integra as cinco dimensões acima (sem fórmula aritmética) |
 
 **Interpretação da nota:**
 - 4.5+ → Match forte, recomendado aplicar imediatamente
@@ -105,7 +105,7 @@ O skill trata TODAS as vagas-alvo com o mesmo cuidado. Nenhuma é primária ou s
 Use a narrativa de transição de `config/profile.yml` para enquadrar TODO o conteúdo:
 - **Em PDF Summaries:** Construir a ponte do passado para o futuro — "Aplico as mesmas [habilidades] agora em [domínio do JD]."
 - **Em histórias STAR:** Referenciar proof points de `article-digest.md`.
-- **Em respostas rascunho (Bloco G):** A narrativa de transição vai na primeira resposta.
+- **Em respostas rascunho (Bloco H):** A narrativa de transição vai na primeira resposta.
 - **Quando a vaga menciona "empreendedor", "ownership", "builder", "end-to-end":** Esse é o diferencial número 1. Aumentar peso de match.
 
 ### Vantagem Transversal

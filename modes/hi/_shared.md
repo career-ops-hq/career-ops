@@ -86,7 +86,7 @@
 सभी content को frame करने के लिए `config/profile.yml` से transition narrative उपयोग करें:
 - **PDF summaries में:** पास्ट और future के बीच bridge बनाएं — "अब उन्हीं [skills] को [offer के domain] में apply कर रहे हैं।"
 - **STAR stories में:** `article-digest.md` के proof points का संदर्भ लें।
-- **Draft responses (Block G) में:** पहले response में transition narrative डालें।
+- **Draft responses (Block H) में:** पहले response में transition narrative डालें।
 - **जब offer "entrepreneurial", "autonomy", "builder", "end-to-end" mention करे:** यह differentiator #1 है। Match weight बढ़ाएं।
 
 ### Cross-cutting advantage
