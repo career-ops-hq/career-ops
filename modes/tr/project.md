@@ -1,9 +1,8 @@
 # Mod: project — Portfolyo Projesi Değerlendirmesi
 
 **URL:** {project-url}
-**Meşruiyet:** {Yüksek Güven | Dikkatli İlerle | Şüpheli}
 
-6 boyutlu puanlama matrisi (1–5):
+6 boyutlu puanlama matrisi (1–5). "Hedef roller", `modes/_profile.md` içindeki Kuzey Yıldızı ve arketiplerdir; "JD becerisi", bu rollerin ilanlarının istediği bir beceri anlamına gelir.
 
 | Boyut | Ağırlık | 5 = ... | 1 = ... |
 |-----------|------|---------|---------|

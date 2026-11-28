@@ -19,7 +19,9 @@ Adayın sorduğu her kurs/sertifika için 6 boyutu değerlendirin:
 
 ## Öncelik
 
-"Üretim düzeyinde yapay zeka" (production-grade AI) konusunda güvenilirliği artıran eğitimler:
+Adayın CV'si ile `modes/_profile.md` içindeki hedef rolleri arasındaki boşlukları kapatan eğitimlere öncelik ver. Boşlukları `node upskill.mjs` çıktısından al: bu komut, adayın değerlendirme raporlarında adı geçen boşlukları sıralar ve `cv.md` ya da `config/profile.yml` içinde zaten bulunan becerileri dışarıda bırakır. Boşluk haritası olmadığında bile 0 koduyla çıkar, bu yüzden JSON çıktısını oku: `error` döndürürse (takipçi yok veya puanlanmış rapor sayısı 5'ten az) ya da `gaps` listesi boşsa, bunun yerine `modes/_profile.md` içinde adı geçen boşlukları kullan.
+
+Örneğin üretim ortamındaki yapay zeka platformu rollerini hedefleyen bir aday şu sıralamayı yapar:
 1. LLM değerlendirmesi ve testi
 2. Gözlemlenebilirlik (Observability) ve izleme
 3. Maliyet/güvenilirlik dengeleri
