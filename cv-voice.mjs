@@ -35,6 +35,10 @@ export const BANNED_PHRASES = [
 const EM_DASH = '\u2014';
 const EN_DASH = '\u2013';
 
+const CONNECTOR_REGEX = /\b(resulting in|thereby|by utilizing|by leveraging|enabling seamless)\b/i;
+const BULLET_VERB_ED_REGEX = /^[-*+]\s+(?:[A-Z][a-z]+ed|Built)\b/;
+const BULLET_PREFIX_REGEX = /^[-*+]\s+/;
+
 function norm(text) {
   return String(text).toLowerCase().replace(/\s+/g, ' ').trim();
 }
@@ -55,8 +59,9 @@ function linesOf(text) {
     // "Name — CV" separator, which the candidate never wrote.
     .replace(/<head[\s>][\s\S]*?<\/head>/gi, '\n')
     .replace(/<!--[\s\S]*?-->/g, '\n')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(?:p|li|h\d|div|tr|section|article)>/gi, '\n');
+    .replace(/<li\b[^>]*>/gi, '\n- ')
+    .replace(/<\/(?:p|li|h\d|div|tr|section|article)>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n');
   return stripMarkup(broken, { keepLineBreaks: true })
     .split(/\n+/)
     // stripMarkup turns each block tag into ". ", so a printed line starts with
@@ -64,7 +69,7 @@ function linesOf(text) {
     // and in the letter were two different lines, and the answer's own dash
     // was still reported.
     .map((line) => line.replace(/^(?:\.\s+)+/, '').replace(/\s+/g, ' ').trim())
-    .filter(Boolean);
+    .filter((line) => line && line !== '.');
 }
 
 // The PDF path prints a long dash as "-", a curly quote as a straight one, and
@@ -149,7 +154,7 @@ export function candidateOwnWords(root) {
 /**
  * @param {string} generated
  * @param {string} source
- * @returns {{kind: 'banned-phrase'|'em-dash'|'invented-number', value: string}[]}
+ * @returns {{kind: 'banned-phrase'|'em-dash'|'invented-number'|'connector'|'bullet-verb-ed', value: string}[]}
  */
 export function voiceIssues(generated, source) {
   const sourceText = String(source ?? '');
@@ -164,10 +169,16 @@ export function voiceIssues(generated, source) {
     const key = `${kind}:${value.toLowerCase()}`;
     if (seen.has(key)) return;
     seen.add(key);
-    issues.push({ kind, value });
+    issues.push({
+      kind,
+      value,
+      toString() { return this.value; },
+    });
   };
 
-  for (const line of linesOf(generated)) {
+  const genLines = linesOf(generated);
+
+  for (const line of genLines) {
     // A whole source line counts at any length, so a copied "2021–2024" stays.
     // A fragment has to be long enough, and it has to sit inside one source
     // line. Searching the collapsed CV would join "best" and "practices".
@@ -183,6 +194,26 @@ export function voiceIssues(generated, source) {
       if (!hasPhrase(wording, phrase)) continue;
       if (hasPhrase(sourcePhrases, phrase)) continue;
       push('banned-phrase', phrase);
+    }
+  }
+
+  // 1. Robotic connector phrasing ("resulting in", "thereby", etc.)
+  const connectorHits = genLines.filter((l) => CONNECTOR_REGEX.test(l));
+  if (connectorHits.length > 0) {
+    push('connector', `Found ${connectorHits.length} template connector(s) ("resulting in", "thereby", etc.)`);
+  }
+
+  // 2. Four or more consecutive bullets starting with "<Verb>ed ..."
+  let edStreak = 0;
+  for (const line of genLines) {
+    if (BULLET_VERB_ED_REGEX.test(line)) {
+      edStreak += 1;
+      if (edStreak >= 4) {
+        push('bullet-verb-ed', '4+ consecutive bullets start with "<Verb>ed ..."; vary bullet structure');
+        break;
+      }
+    } else if (BULLET_PREFIX_REGEX.test(line)) {
+      edStreak = 0;
     }
   }
 
