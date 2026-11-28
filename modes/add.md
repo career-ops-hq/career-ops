@@ -22,6 +22,7 @@ preview it, and — after you confirm — append it to `cv.md` and (for projects
 `$mode` after `add` is the source. Accept any of:
 - a **GitHub repo URL** (`github.com/<owner>/<repo>`)
 - a **paper / publication link** (arXiv, DOI, journal, personal page)
+- a **certification / credential link** (Credly, Coursera, cloud provider, etc.)
 - a **project / portfolio page URL**
 - **plain text** the user pastes describing the work
 
@@ -74,15 +75,18 @@ If no source was given, ask the user for one.
 |------------|------------|
 | a code project / repo / tool | `Projects` |
 | a paper / publication / preprint | `Publications` (create if absent) |
+| a certification / credential | `Certifications` (create if absent) |
 | an internship / job / role | `Work Experience` |
-| a talk / course / certification | `Education` (or ask if unclear) |
+| a talk / academic course | `Education` (or ask if unclear) |
 
 `add-entry.mjs` creates the section heading if it doesn't exist yet, so a new
-`## Publications` is fine.
+`## Publications` or `## Certifications` is fine.
 
 ## Payload schema (input to `add-entry.mjs`)
 
 Both keys optional; provide at least one. `articleDigest` is for projects only.
+For `Certifications`, format `entry` as a single bullet matching `cv.md`
+(e.g., `- **<Certification Name>** (<Issuer>, <Date>) — <verification URL or credential ID if provided>`).
 
 ```json
 {
