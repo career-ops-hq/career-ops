@@ -100,15 +100,15 @@ export function parseCvMarkdown(markdown) {
   while ((match = sectionRegex.exec(markdown)) !== null) {
     sections.push({
       title: match[1].trim(),
+      start: match.index,
       index: match.index + match[0].length,
     });
   }
 
   for (let i = 0; i < sections.length; i++) {
     const current = sections[i];
-    const endIndex = (i + 1 < sections.length) ? markdown.indexOf('\n## ', current.index) : markdown.length;
-    const actualEnd = endIndex === -1 ? markdown.length : endIndex;
-    const body = markdown.slice(current.index, actualEnd).trim();
+    const endIndex = (i + 1 < sections.length) ? sections[i + 1].start : markdown.length;
+    const body = markdown.slice(current.index, endIndex).trim();
     const titleLower = current.title.toLowerCase();
 
     if (titleLower.includes('summary')) {

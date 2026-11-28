@@ -42,6 +42,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
   const [md, setMd] = useState("");
   const [seed, setSeed] = useState<CvSeed | null>(null);
   const [err, setErr] = useState("");
+  const [showConfigLink, setShowConfigLink] = useState(false);
   const [saveErr, setSaveErr] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const baseRef = useRef<{ content: string; exists: boolean } | null>(null);
@@ -88,6 +89,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
     }
     setWaitingForBase(true);
     setTrace("Reading the CV already on this machine…");
+    setShowConfigLink(false);
     setPhase("parsing");
   }, []);
   useEffect(() => {
@@ -107,6 +109,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
 
   // Stream the ingest, parsing markers live.
   const runStream = useCallback(async (init: RequestInit) => {
+    setShowConfigLink(false);
     setPhase("parsing");
     setTrace("Reading your CV…");
     setErr("");
@@ -120,7 +123,8 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
       const r = await fetch("/api/cv/ingest", { ...init, signal: abort.signal });
       const failure = await ingestErrorMessage(r);
       if (failure) {
-        setErr(r.status === 404 ? "needs-cli" : failure);
+        setErr(failure.message);
+        setShowConfigLink(failure.configLink === true);
         setPhase("error");
         return;
       }
@@ -167,6 +171,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
   const ingestText = (text: string) => {
     const trimmed = text.trim();
     if (!trimmed) {
+      setShowConfigLink(false);
       setErr("That looks empty — paste your CV instead.");
       setPhase("error");
       return;
@@ -186,6 +191,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
   const ingestFile = (file: File) => {
     const error = cvUploadError(file);
     if (error) {
+      setShowConfigLink(false);
       setErr(error);
       setPhase("error");
       return;
@@ -196,6 +202,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
         .text()
         .then((t) => {
           if (!t.trim()) {
+            setShowConfigLink(false);
             setErr("That file looks empty — paste your CV instead.");
             setPhase("error");
             return;
@@ -205,6 +212,7 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
           enterReview();
         })
         .catch(() => {
+          setShowConfigLink(false);
           setErr("Couldn't read that file — paste your CV instead.");
           setPhase("error");
         });
@@ -323,20 +331,13 @@ export function CvIngest({ onSaved, onSavingChange, variant = "onboarding" }: { 
             </button>
           </div>
         </div>
-        {phase === "error" &&
-          (err === "needs-cli" ? (
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-[13px] text-amber-800 dark:text-amber-300">
-              <AlertTriangle className="size-3.5 shrink-0" />
-              <span>To convert a PDF, TeX or Word file, connect an AI CLI in Config. Paste or drop .md / .txt to start without one.</span>
-              <Link href="/config" className="ml-auto inline-flex items-center gap-1 rounded-md bg-amber-500/20 px-2.5 py-1 font-medium text-amber-800 transition hover:bg-amber-500/30 dark:text-amber-200">
-                Connect your AI CLI <ArrowRight className="size-3.5" />
-              </Link>
-            </div>
-          ) : (
-            <p role="alert" className="flex items-center gap-1.5 text-[13px] text-amber-800 dark:text-amber-400">
-              <AlertTriangle className="size-3.5 shrink-0" /> {err}
-            </p>
-          ))}
+        {phase === "error" && (
+          <p role="alert" className="flex flex-wrap items-center gap-1.5 text-[13px] text-amber-800 dark:text-amber-400">
+            <AlertTriangle className="size-3.5 shrink-0" /> {err}
+            {showConfigLink && <Link href="/config" className="font-medium underline">Connect your AI CLI</Link>}
+            {showConfigLink && <span>Drop a .md or .txt file to continue without a CLI.</span>}
+          </p>
+        )}
       </div>
     );
   }

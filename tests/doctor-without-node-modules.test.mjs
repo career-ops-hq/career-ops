@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -11,17 +11,34 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SHIPPED_FILES = spawnSync('git', ['ls-files', '-z', '--', '.', ':!tests', ':!web', ':!docs'], { cwd: ROOT, encoding: 'utf-8' })
   .stdout.split('\0').filter(Boolean);
 
-function doctorCheckout(t, { packageJson, nodeModules }) {
-  const dir = mkdtempSync(join(tmpdir(), 'co-doctor-no-deps-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10 }));
-  for (const file of SHIPPED_FILES) {
-    if (file === 'package.json') continue;
-    mkdirSync(dirname(join(dir, file)), { recursive: true });
-    copyFileSync(join(ROOT, file), join(dir, file));
+// One copy of the shipped tree for the whole file: copying all of it per test
+// was most of this suite's time on Windows, and doctor never writes to it.
+// Each test sets only what differs, package.json and the node_modules link.
+let checkout = null;
+let linked = false;
+after(() => { if (checkout) rmSync(checkout, { recursive: true, force: true, maxRetries: 10 }); });
+
+function doctorCheckout({ packageJson, nodeModules }) {
+  if (!checkout) {
+    checkout = mkdtempSync(join(tmpdir(), 'co-doctor-no-deps-'));
+    for (const file of SHIPPED_FILES) {
+      if (file === 'package.json') continue;
+      mkdirSync(dirname(join(checkout, file)), { recursive: true });
+      copyFileSync(join(ROOT, file), join(checkout, file));
+    }
   }
-  if (packageJson) writeFileSync(join(dir, 'package.json'), packageJson);
-  if (nodeModules) assert.equal(linkNodeModules(dir), null);
-  return dir;
+  if (nodeModules && !linked) {
+    assert.equal(linkNodeModules(checkout), null);
+    linked = true;
+  } else if (!nodeModules && linked) {
+    // A link to the repo's tree, or a directory of per-package links when the
+    // packages are inherited (tests/helpers.mjs). rmSync follows no link either way.
+    rmSync(join(checkout, 'node_modules'), { recursive: true, force: true });
+    linked = false;
+  }
+  rmSync(join(checkout, 'package.json'), { force: true });
+  if (packageJson) writeFileSync(join(checkout, 'package.json'), packageJson);
+  return checkout;
 }
 
 function runDoctor(dir, args) {
@@ -37,8 +54,8 @@ const realPackageJson = readFileSync(join(ROOT, 'package.json'), 'utf8');
 for (const args of [[], ['--json']]) {
   const mode = args.join(' ') || '(human run)';
 
-  test(`doctor ${mode} names the package it needs when package.json is missing`, (t) => {
-    const run = runDoctor(doctorCheckout(t, { packageJson: null }), args);
+  test(`doctor ${mode} names the package it needs when package.json is missing`, () => {
+    const run = runDoctor(doctorCheckout({ packageJson: null }), args);
     assert.equal(run.status, 1, run.output);
     assert.doesNotMatch(run.output, /ENOENT|ERR_MODULE_NOT_FOUND/);
     assert.match(run.output, /dependencies are not installed in .* \(missing: [\w@\/.-]+\)/);
@@ -46,10 +63,10 @@ for (const args of [[], ['--json']]) {
   });
 }
 
-test('doctor --json still reports when only a package doctor does not load is missing', (t) => {
+test('doctor --json still reports when only a package doctor does not load is missing', () => {
   const manifest = JSON.parse(realPackageJson);
   manifest.dependencies = { ...manifest.dependencies, 'career-ops-test-absent': '1.0.0' };
-  const dir = doctorCheckout(t, { packageJson: JSON.stringify(manifest), nodeModules: true });
+  const dir = doctorCheckout({ packageJson: JSON.stringify(manifest), nodeModules: true });
   const json = runDoctor(dir, ['--json']);
   assert.equal(json.status, 0, json.output);
   assert.doesNotThrow(() => JSON.parse(json.stdout), json.output);
@@ -57,8 +74,8 @@ test('doctor --json still reports when only a package doctor does not load is mi
   assert.match(human.output, /Dependencies missing: career-ops-test-absent/);
 });
 
-test('doctor reports a missing package.json as a failed check when packages are installed', (t) => {
-  const run = runDoctor(doctorCheckout(t, { packageJson: null, nodeModules: true }), []);
+test('doctor reports a missing package.json as a failed check when packages are installed', () => {
+  const run = runDoctor(doctorCheckout({ packageJson: null, nodeModules: true }), []);
   assert.doesNotMatch(run.output, /^Error: ENOENT/m);
   assert.match(run.output, /Dependencies could not be checked: package.json unreadable/);
 });

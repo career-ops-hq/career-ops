@@ -279,6 +279,11 @@ try {
     },
   }));
   const pagedJobs = await mokahr.fetch({ name: 'Example Labs', careers_url: MOKA_URL, keywords: ['AI'] }, paged.ctx);
+  if (JSON.stringify(pagedJobs.queryScope) === JSON.stringify({ config: 'keywords', queries: ['AI'] })) {
+    pass('mokahr.fetch() reports a board read through keywords only (1 keyword) as keyword-scoped (#7315)');
+  } else {
+    fail(`mokahr.fetch() keywords ['AI']: queryScope = ${JSON.stringify(pagedJobs.queryScope)}`);
+  }
   if (pagedJobs.length === 70 && paged.calls.length === 2) {
     pass('mokahr.fetch() paginates via offset until a page returns fewer than 50 jobs (70 posts → 2 requests)');
   } else {
@@ -361,6 +366,11 @@ try {
 
   const overlap = mkCtx(() => ({ success: true, data: { jobStats: { total: 0 }, jobs: [mkJob('dup', '重复岗位')] } }));
   const overlapJobs = await mokahr.fetch({ name: 'Example Labs', careers_url: MOKA_URL, keywords: ['AI', '大模型'] }, overlap.ctx);
+  if (JSON.stringify(overlapJobs.queryScope) === JSON.stringify({ config: 'keywords', queries: ['AI', '大模型'] })) {
+    pass('mokahr.fetch() reports a board read through keywords only (2 keywords) as keyword-scoped (#7315)');
+  } else {
+    fail(`mokahr.fetch() keywords ['AI', '大模型']: queryScope = ${JSON.stringify(overlapJobs.queryScope)}`);
+  }
   if (overlapJobs.length === 1 && overlap.calls.length === 2 && overlap.sleeps.length === 1) {
     pass('mokahr.fetch() dedupes across keywords and paces the keyword switch');
   } else {
@@ -389,6 +399,19 @@ try {
     return { success: true, data: { jobStats: { total: 0 }, jobs: [mkJob('e7', '幸存岗位')] } };
   });
   const blipJobs = await mokahr.fetch({ name: 'Example Labs', careers_url: MOKA_URL, keywords: ['AI', '大模型'] }, blip.ctx);
+  // The scope names the keywords the run reached, not the ones a failure kept it from:
+  // the blank (whole-board) query after the failure was never sent.
+  const reached = mkCtx(({ keyword }) => {
+    if (keyword === '大模型') throw new Error('HTTP 503');
+    return { success: true, data: { jobStats: { total: 0 }, jobs: [mkJob('e7', '幸存岗位')] } };
+  });
+  const reachedJobs = await mokahr.fetch({ name: 'Example Labs', careers_url: MOKA_URL, keywords: ['AI', '大模型', 'Agent', ''] }, reached.ctx);
+  if (reachedJobs.truncated?.reason === 'fetch-error'
+      && JSON.stringify(reachedJobs.queryScope) === JSON.stringify({ config: 'keywords', queries: ['AI', '大模型'] })) {
+    pass('mokahr.fetch() scopes a partly read board to the keywords it reached');
+  } else {
+    fail(`mokahr.fetch() partial scope: truncated = ${JSON.stringify(reachedJobs.truncated)}, queryScope = ${JSON.stringify(reachedJobs.queryScope)}`);
+  }
   if (blipJobs.length === 1 && blipJobs[0].title === '幸存岗位') {
     pass('mokahr.fetch() keeps already-collected jobs when a later request fails');
   } else {

@@ -279,6 +279,8 @@ function coverSandbox() {
   // project default while its CV keeps the user's configured size.
   copyFileSync(join(ROOT, 'lib', 'output-names.mjs'), join(dir, 'lib', 'output-names.mjs'));
   copyFileSync(join(ROOT, 'lib', 'page-format.mjs'), join(dir, 'lib', 'page-format.mjs'));
+  // lib/cv-section-aliases.mjs holds the section-title table generate-pdf.mjs imports.
+  copyFileSync(join(ROOT, 'lib', 'cv-section-aliases.mjs'), join(dir, 'lib', 'cv-section-aliases.mjs'));
   copyFileSync(
     join(ROOT, 'templates', 'cover-letter-template.html'),
     join(dir, 'templates', 'cover-letter-template.html'),

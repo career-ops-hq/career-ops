@@ -527,8 +527,11 @@ function scanMarkdownLinks(value) {
         break;
       }
     }
-    if (labelEnd === -1 || value[labelEnd + 1] !== '(') {
-      cursor = labelStart + 1;
+    // Any opener inside this label reaches the same closing bracket.
+    // Once we exhaust the cell, there is no later complete label to try.
+    if (labelEnd === -1) break;
+    if (value[labelEnd + 1] !== '(') {
+      cursor = labelEnd + 1;
       continue;
     }
 
@@ -545,7 +548,9 @@ function scanMarkdownLinks(value) {
       }
     }
     if (linkEnd === -1) {
-      cursor = labelStart + 1;
+      // Retry from after the label so a valid link inside a malformed
+      // destination can still be found.
+      cursor = labelEnd + 1;
       continue;
     }
 

@@ -3,7 +3,7 @@
 
 import { sleep } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
-import { markTruncated } from '../lib/board-truncation.mjs';
+import { markKeywordScope, markTruncated } from '../lib/board-truncation.mjs';
 
 // Meituan careers provider — posts to the public zhaopin.meituan.com JSON API
 // (no auth, no browser, no special headers). Verified 2026-07 by capturing the
@@ -133,7 +133,7 @@ export default {
     /** @type {'source-reports-more' | 'page-cap' | null} */
     let partialReason = null;
 
-    for (const keyword of keywords) {
+    for (const [keywordIndex, keyword] of keywords.entries()) {
       let total = 0;
 
       for (let pageNo = 1; pageNo <= maxPages; pageNo++) {
@@ -162,7 +162,7 @@ export default {
             console.error(`  ⚠ meituan: keyword "${keyword}" page ${pageNo} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
             // The rest of the board was never read: the result says so, so scan.mjs
             // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
-            return markTruncated([...seen.values()], partialReason ?? 'fetch-error', { fetched: seen.size });
+            return markKeywordScope(markTruncated([...seen.values()], partialReason ?? 'fetch-error', { fetched: seen.size }), 'keywords', keywords.slice(0, keywordIndex + 1));
           }
           const parsed = parseMeituanResponse(json, entry.name || '美团');
           succeededOnce = true;
@@ -197,6 +197,6 @@ export default {
 
     const result = [...seen.values()];
     if (partialReason) markTruncated(result, partialReason, { fetched: result.length });
-    return result;
+    return markKeywordScope(result, 'keywords', keywords);
   },
 };

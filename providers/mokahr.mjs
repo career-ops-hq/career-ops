@@ -82,7 +82,7 @@ import { createDecipheriv } from 'crypto';
 import { sleep } from './_http.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
-import { markTruncated } from '../lib/board-truncation.mjs';
+import { markKeywordScope, markTruncated } from '../lib/board-truncation.mjs';
 
 const API_PATH = '/api/outer/ats-apply/website/jobs/v2';
 // Explicit allowlist, not a `*.mokahr.com` wildcard: hire-r1-ats.mokahr.com is a
@@ -241,7 +241,7 @@ export default {
     let firstRequest = true;
     let succeededOnce = false;
 
-    for (const keyword of keywords) {
+    for (const [keywordIndex, keyword] of keywords.entries()) {
       for (let page = 1; page <= maxPages; page++) {
         if (firstRequest) firstRequest = false;
         else await sleep(INTER_PAGE_DELAY_MS, ctx);
@@ -267,7 +267,7 @@ export default {
           console.error(`  ⚠ mokahr: keyword "${keyword}" page ${page} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
           // The rest of the board was never read: the result says so, so scan.mjs
           // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
-          return markTruncated([...seen.values()], 'fetch-error', { fetched: seen.size });
+          return markKeywordScope(markTruncated([...seen.values()], 'fetch-error', { fetched: seen.size }), 'keywords', keywords.slice(0, keywordIndex + 1));
         }
 
         let decrypted;
@@ -281,7 +281,7 @@ export default {
           console.error(`  ⚠ mokahr: keyword "${keyword}" page ${page} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
           // The rest of the board was never read: the result says so, so scan.mjs
           // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
-          return markTruncated([...seen.values()], 'fetch-error', { fetched: seen.size });
+          return markKeywordScope(markTruncated([...seen.values()], 'fetch-error', { fetched: seen.size }), 'keywords', keywords.slice(0, keywordIndex + 1));
         }
 
         succeededOnce = true;
@@ -300,6 +300,6 @@ export default {
       }
     }
 
-    return [...seen.values()];
+    return markKeywordScope([...seen.values()], 'keywords', keywords);
   },
 };

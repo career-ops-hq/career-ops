@@ -11,6 +11,9 @@
 //
 // Run:  node --test tests/generate-pdf-atomic-write.test.mjs
 
+// helpers.mjs first: it pins the data root to a sandbox, so the render's
+// pdf-index.tsv row never lands in the real data/.
+import './helpers.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';

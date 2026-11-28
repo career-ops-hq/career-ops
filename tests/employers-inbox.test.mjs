@@ -10,7 +10,7 @@
 //
 // Run:  node --test tests/employers-inbox.test.mjs
 
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -31,20 +31,32 @@ const run = (cwd, args = [], env = {}) => spawnSync(process.execPath, [VALIDATOR
 const DATE = '2026-11-10';
 const TODAY = employerRegistryToday();
 
-/** A scratch checkout with a copy of the real registry and the given inbox files. */
-function withInbox(files, body) {
-  const dir = mkdtempSync(join(tmpdir(), 'co-employers-inbox-'));
-  try {
-    copyEmployerRegistry(dir);
-    mkdirSync(join(dir, INBOX_DIR), { recursive: true });
-    for (const [name, content] of Object.entries(files)) {
-      const text = typeof content === 'string' ? content : `${content.map((l) => (typeof l === 'string' ? l : JSON.stringify(l))).join('\n')}\n`;
-      writeFileSync(join(dir, INBOX_DIR, name), text);
-    }
-    return body(dir);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
+// One copy of the real registry for the whole file: copying all of it per test
+// was most of this suite's time on Windows. The validator only reads it (this
+// file never passes --write-changelog), so each test gets a fresh inbox/ and
+// nothing else.
+let registryCopy = null;
+after(() => { if (registryCopy) rmSync(registryCopy, { recursive: true, force: true, maxRetries: 10 }); });
+
+/** The shared registry copy, with no inbox/. */
+function registryWithoutInbox() {
+  if (!registryCopy) {
+    registryCopy = mkdtempSync(join(tmpdir(), 'co-employers-inbox-'));
+    copyEmployerRegistry(registryCopy);
   }
+  rmSync(join(registryCopy, INBOX_DIR), { recursive: true, force: true });
+  return registryCopy;
+}
+
+/** The shared registry copy with the given inbox files. */
+function withInbox(files, body) {
+  const dir = registryWithoutInbox();
+  mkdirSync(join(dir, INBOX_DIR), { recursive: true });
+  for (const [name, content] of Object.entries(files)) {
+    const text = typeof content === 'string' ? content : `${content.map((l) => (typeof l === 'string' ? l : JSON.stringify(l))).join('\n')}\n`;
+    writeFileSync(join(dir, INBOX_DIR, name), text);
+  }
+  return body(dir);
 }
 const validate = (dir) => validateRegistry({ root: dir, today: TODAY });
 const at = (findings) => findings.map((f) => `${f.file.replace(`${INBOX_DIR}/`, '')}:${f.line}: ${f.message}`);
@@ -198,14 +210,9 @@ test('the registry without inbox/ is valid: the directory is optional', () => {
   // A copy with no inbox/ at all. The real tree has one while contributions wait, and
   // its files carry the dates they were made on, which TODAY (read from boards/ and
   // contributions/ only) knows nothing of.
-  const dir = mkdtempSync(join(tmpdir(), 'co-employers-inbox-'));
-  try {
-    copyEmployerRegistry(dir);
-    assert.equal(existsSync(join(dir, INBOX_DIR)), false);
-    assert.deepEqual(validate(dir).errors, []);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  const dir = registryWithoutInbox();
+  assert.equal(existsSync(join(dir, INBOX_DIR)), false);
+  assert.deepEqual(validate(dir).errors, []);
 });
 
 test('bad lines are errors on their own line, and the rest of the file is still read', () => withInbox({

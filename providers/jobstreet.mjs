@@ -269,6 +269,24 @@ function buildSearchUrl(origin, params) {
 }
 
 /** @type {Provider} */
+/**
+ * Reject a search response that lacks the `data` array, so a changed or
+ * failing API never reads as an empty board.
+ * @param {unknown} json - Parsed search response.
+ */
+function assertJobstreetEnvelope(json) {
+  if (Array.isArray(/** @type {any} */ (json)?.data)) return;
+  const got =
+    json && typeof json === "object"
+      ? Object.keys(json).join(", ")
+      : json === null
+        ? "null"
+        : typeof json;
+  throw new Error(
+    `jobstreet: unexpected response — expected data[], got: [${got}]`,
+  );
+}
+
 export default {
   id: "jobstreet",
 
@@ -339,20 +357,19 @@ export default {
         json = /** @type {any} */ (
           await fetchJsonWithRetry(ctx, searchUrl, { redirect: "error" })
         );
+        assertJobstreetEnvelope(json);
       } catch (err) {
         // A health probe's budget errors must propagate unchanged. In a real
         // scan, keep earlier pages but make the partial result conspicuous.
         if (page === 1 || probing) throw err;
         console.warn(
-          `jobstreet: page ${page} failed after retries — ${err instanceof Error ? err.message : String(err)}`,
+          `jobstreet: page ${page} failed — ${err instanceof Error ? err.message : String(err)}`,
         );
         stopReason = "fetch-error";
         break;
       }
 
-      // Preserve the existing envelope behavior; response validation is a
-      // separate concern from this pagination completeness fix.
-      const data = Array.isArray(json?.data) ? json.data : [];
+      const data = json.data;
       if (data.length === 0) break;
 
       if (Number.isSafeInteger(json?.totalCount) && json.totalCount >= 0) {

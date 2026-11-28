@@ -17,9 +17,7 @@
 //   2. doctor.mjs end to end: the reproduction from the issue, run for real.
 //   3. A scan of the tracked sources: a hand-built profile path is the defect
 //      class, so a new one fails here instead of surviving until someone notices
-//      two files disagree. The PENDING list names modules a later change in this
-//      series migrates; an entry that no longer matches is itself a failure, so
-//      the list cannot outlive the work it tracks.
+//      two files disagree.
 import { pass, fail, rmSync, ROOT, NODE } from './helpers.mjs';
 import { trackedFiles } from '../lib/mjs-files.mjs';
 import { spawnSync } from 'child_process';
@@ -316,7 +314,6 @@ try {
   // web/ resolves its own root and carries its own helper; this scan is the
   // core's. career-profile.mjs reads data/career-profile.yml, a different file.
   const EXEMPT = new Set(['path-resolver.mjs', 'career-profile.mjs']);
-  const PENDING = new Set([]);
   const HAND_BUILT = [
     /(?<!delete\s)process\.env\.CAREER_OPS_PROFILE(?!\s*=[^=])/,   // a read; deleting it (doctor.mjs, undoing a .env load) is not a path
     /\b(?:join|resolve)\([^\n]*['"](?:config\/)?profile\.yml['"]/,
@@ -343,16 +340,11 @@ try {
     ? pass(`scanned ${sources.length} tracked core sources for a hand-built profile path`)
     : fail(`profile-path scan read only ${sources.length} sources; the file listing is broken, not the code`);
 
-  const unexpected = [...flagged].filter(([rel]) => !EXEMPT.has(rel) && !PENDING.has(rel));
+  const unexpected = [...flagged].filter(([rel]) => !EXEMPT.has(rel));
   unexpected.length === 0
-    ? pass('no module outside the pending list builds its own profile.yml path')
+    ? pass('no module outside the resolver builds its own profile.yml path')
     : fail(`profile.yml path built by hand instead of getProfilePath(): ${unexpected
         .map(([rel, hits]) => `${rel}:${hits.map((h) => h.n).join(',')}`).join('; ')}`);
-
-  const stale = [...PENDING].filter((rel) => !flagged.has(rel));
-  stale.length === 0
-    ? pass('every module on the pending list still builds its own path (the list is current)')
-    : fail(`pending list names modules that no longer build a profile path by hand; remove them: ${stale.join(', ')}`);
 } finally {
   restoreEnv();
   rmSync(scratch, { recursive: true, force: true });

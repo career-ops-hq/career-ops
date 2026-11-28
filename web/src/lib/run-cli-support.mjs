@@ -126,9 +126,9 @@ export function isFatalClaudeStderr(line) {
 /**
  * Fallback classifier for a CLI with no `stderrIsFatal` of its own.
  *
- * Only claude and codex define one, so SIX of the eight entries in KNOWN reach
- * this path — including every runtime people pick to spend less than they would
- * on those two.
+ * Only claude and codex define one, so every other entry in KNOWN reaches this
+ * path — including every runtime people pick to spend less than they would on
+ * those two.
  *
  * The terms are ANCHORED. Unanchored, `auth` matched inside ordinary words and a
  * successful run got reported as failed because a word appeared:

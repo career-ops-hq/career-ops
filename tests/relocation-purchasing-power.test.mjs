@@ -175,7 +175,7 @@ function withTempFile(content, fn) {
 }
 
 test('ad hoc --relocation mode: --posting-location-file resolves the same jurisdiction as --posting-location with the same text', () => {
-  withTempFile('Halifax, NS', (file) => {
+  withTempFile('Halifax, NS\n', (file) => {
     const r = run([
       '--relocation', '--gross', '60000',
       '--posting-location-file', file,

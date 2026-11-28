@@ -10,8 +10,8 @@
 // showing the raw top entries regardless of urgency. This module is the one
 // place that decision is made, so the route and any future consumer agree.
 //
-// Plain .mjs (not .ts) so the root test suite can import it without a build,
-// mirroring followup-seed.mjs.
+// Plain .mjs (not .ts) so web/tests/lib/followup-view.test.mjs can import it
+// without a build, mirroring followup-seed.mjs.
 
 const DUE_URGENCIES = new Set(["urgent", "overdue"]);
 

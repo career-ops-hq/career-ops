@@ -61,25 +61,6 @@ check('freshly verified row produces no findings',
   verdict.rowsChecked === 1 && verdict.findings.length === 0 && verdict.warnings.length === 0,
   JSON.stringify(verdict));
 
-// --- synthetic fixtures for the cases (patterns mirror the signal's examples) ---
-const unpaidRe = /\bunpaid\b|stipend[- ]only|\bvolunteer\b/i;
-const schoolRe = /for course credit|co-?op placement|enrolled in an approved program/i;
-const fixtures = {
-  unpaid: 'Example Widgets Ltd. Marketing Intern, Toronto. This is an unpaid internship for six months.',
-  stipendOnly: 'Sample Media Inc. Content Trainee, Ottawa. Stipend-only position; no salary.',
-  credit: 'Placeholder University Lab. Research Assistant, Hamilton. Co-op placement through your school, for course credit.',
-  silent: 'Placeholder Software Corp. Support Analyst, Hamilton. Join a friendly team. Hybrid. Competitive benefits.',
-  paid: 'Example Logistics Inc. Intern, London. Paid internship, $20 per hour.',
-};
-check('fixture: unpaid internship matches the unpaid pattern', unpaidRe.test(fixtures.unpaid), 'no match');
-check('fixture: stipend-only matches the unpaid pattern', unpaidRe.test(fixtures.stipendOnly), 'no match');
-check('fixture: credit-bearing placement matches the school pattern and not the unpaid one',
-  schoolRe.test(fixtures.credit) && !unpaidRe.test(fixtures.credit), 'wrong classification');
-check('fixture: silent JD matches neither pattern (no output)',
-  !unpaidRe.test(fixtures.silent) && !schoolRe.test(fixtures.silent), 'unexpected match');
-check('fixture: paid internship matches neither pattern (no output)',
-  !unpaidRe.test(fixtures.paid) && !schoolRe.test(fixtures.paid), 'unexpected match');
-
 // --- signal behaviour contract ---
 const signal = read('modes', 'oferta-signals', '20-unpaid-placement.md');
 check('signal handles unpaid, school-placement and silent outcomes',

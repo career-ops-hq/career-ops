@@ -26,7 +26,7 @@
 import { randomUUID } from 'crypto';
 import { sleep } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
-import { markTruncated } from '../lib/board-truncation.mjs';
+import { markKeywordScope, markTruncated } from '../lib/board-truncation.mjs';
 
 const API_HOST = 'talent.alibaba.com';
 const API = `https://${API_HOST}/position/search`;
@@ -145,7 +145,7 @@ export default {
     let partialReason = null;
     let succeededOnce = false;
 
-    for (const keyword of keywords) {
+    for (const [keywordIndex, keyword] of keywords.entries()) {
       for (let page = 1; page <= maxPages; page++) {
         if (firstRequest) firstRequest = false;
         else await sleep(INTER_PAGE_DELAY_MS, ctx);
@@ -175,7 +175,7 @@ export default {
           console.error(`  ⚠ alibaba: keyword "${keyword}" page ${page} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
           // The rest of the board was never read: the result says so, so scan.mjs
           // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
-          return markTruncated([...seen.values()], partialReason ?? 'fetch-error', { fetched: seen.size });
+          return markKeywordScope(markTruncated([...seen.values()], partialReason ?? 'fetch-error', { fetched: seen.size }), 'keywords', keywords.slice(0, keywordIndex + 1));
         }
         succeededOnce = true;
         const { jobs, total, rawCount } = parseAlibabaResponse(json, entry.name || '阿里巴巴');
@@ -204,6 +204,6 @@ export default {
     // A keyword max_pages cut is a page-cap stop: the warning above says so, and
     // the result does too, so scan.mjs logs the board partial (lib/board-truncation.mjs).
     if (partialReason) markTruncated(result, partialReason, { fetched: result.length });
-    return result;
+    return markKeywordScope(result, 'keywords', keywords);
   },
 };

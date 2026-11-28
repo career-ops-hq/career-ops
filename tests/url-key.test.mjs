@@ -73,6 +73,12 @@ ok('a language query inside the fragment keeps two versions apart', () => {
     'https://jobs.example.com/careers#/jobs/123?lang=en',
     'https://jobs.example.com/careers#/jobs/123?lang=de'), 'distinct');
 });
+ok('a fragment language param is recognized regardless of its query-name case', () => {
+  const en = 'https://jobs.example.com/careers#/jobs/123?Lang=en';
+  const de = 'https://jobs.example.com/careers#/jobs/123?Lang=de';
+  assert.notEqual(normalizeUrl(en), normalizeUrl(de));
+  assert.equal(normalizeUrl(en), normalizeUrl('https://jobs.example.com/careers#/jobs/123?lang=en'));
+});
 ok('lang in the fragment and lang in the query name the same job', () => {
   assert.equal(postingUrlRelation(
     'https://jobs.example.com/careers#/jobs/123?lang=en',
