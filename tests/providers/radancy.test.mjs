@@ -68,6 +68,8 @@ try {
   else fail(`radancy.fetch() natural HTML end was marked: ${JSON.stringify(radJobs.truncated)}`);
   if (radSeen[0]?.endsWith('?p=1') && radSeen[1]?.endsWith('?p=2')) pass('radancy.fetch() pages via ?p=N (1-based)');
   else fail(`radancy.fetch() paged wrong: ${JSON.stringify(radSeen)}`);
+  if (radJobs[0]?.requisitionId === '40548453568' && radJobs[1]?.requisitionId === '40546200896') pass('radancy.fetch() attaches requisitionId from row.id');
+  else fail(`radancy.fetch() missing requisitionId: ${JSON.stringify(radJobs[0])}`);
 
   // fetch — a mid-scan failure preserves jobs already collected, never
   // discards earlier pages.
