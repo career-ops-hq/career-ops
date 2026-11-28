@@ -28,7 +28,7 @@ console.log('\nCV templates — the headline survives the PDF text layer');
 // tokeniser has to find are what the assertion checks; a template that renames
 // or drops the slot renders no headline and is reported as such.
 const HEADLINE = 'Data Analyst & BI Engineer';
-const HEADLINE_WORDS = ['DATA', 'ANALYST', 'ENGINEER'];
+const HEADLINE_WORDS = ['DATA', 'ANALYST', 'BI', 'ENGINEER'];
 const PAYLOAD = {
   candidate: { name: 'Alex Rivera', title: HEADLINE, email: 'alex@example.com' },
   summary: 'Summary text.',
@@ -36,12 +36,15 @@ const PAYLOAD = {
 
 // A headline is intact when each of its words appears whole in the extracted
 // text. Adjacent elements run together in the text layer, so the words are
-// searched as substrings: the fragmenting this test exists for splits one word
-// into several ("D ATA A N A LY S T"), which leaves no run of the whole word
-// anywhere, while the neighbouring name and contact line stay whole.
+// searched with letter boundaries rather than whitespace: the fragmenting this
+// test exists for splits one word into several ("D ATA A N A LY S T"), which
+// leaves no run of the whole word anywhere, while the neighbouring name and
+// contact line stay whole. Boundaries matter for the short word — a plain
+// substring search for "BI" is also satisfied by a summary that says "BILLING",
+// so a fragmented "B I ENGINEER" would slip through.
 function headlineIntact(text) {
   const flat = text.toUpperCase();
-  return HEADLINE_WORDS.every((word) => flat.includes(word));
+  return HEADLINE_WORDS.every((word) => new RegExp(`(^|[^A-Z])${word}([^A-Z]|$)`).test(flat));
 }
 
 // Locate pdftotext. Absent, the check reports itself as unavailable rather than
@@ -69,16 +72,27 @@ function findPdftotext() {
   }
 }
 
-// Every template that ships the slot build-cv-html.mjs fills with the headline.
-// A template with the CSS but no slot renders no headline, and one with the slot
-// but no CSS renders it unstyled; either way there is nothing to break.
-const templates = listTree(join(ROOT, 'templates'), { match: /\.html$/ })
-  .filter((file) => {
-    const src = readFileSync(file, 'utf8');
-    return src.includes('{{TITLE_BLOCK}}') && /\.header-title\s*\{/.test(src);
-  });
+// Every template that styles a headline. A template carrying the slot but no
+// .header-title rule renders the headline unstyled, and one carrying the rule
+// but no slot drops it from the CV entirely — the second is the more serious
+// failure, and filtering only for templates that have both would let a template
+// lose its slot and leave the suite green. So the two halves are collected
+// separately: the stroke against dropped/again-unstyled headlines, and an
+// explicit finding for the slotless rule.
+const allTemplates = listTree(join(ROOT, 'templates'), { match: /\.html$/ });
+const styled = allTemplates
+  .map((file) => ({ file, src: readFileSync(file, 'utf8') }))
+  .filter(({ src }) => /\.header-title\s*\{/.test(src));
+const templates = styled.filter(({ src }) => src.includes('{{TITLE_BLOCK}}')).map(({ file }) => file);
 
 if (templates.length === 0) fail('no template renders a .header-title headline');
+
+// A template that styles a headline but no longer fills the slot ships a CV
+// with no headline at all. Reported per template rather than silently excluded.
+for (const { file, src } of styled) {
+  if (src.includes('{{TITLE_BLOCK}}')) continue;
+  fail(`${file.slice(ROOT.length + 1)} styles .header-title but no longer fills {{TITLE_BLOCK}}, so its CV renders no headline`);
+}
 
 const pdftotext = QUICK ? null : findPdftotext();
 
