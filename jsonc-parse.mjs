@@ -44,6 +44,7 @@ export function stripJsoncSyntax(source) {
       continue;
     }
     if (comment === 'block') {
+      if (char === '\n') out += char;
       if (char === '*' && next === '/') {
         comment = null;
         index++;
