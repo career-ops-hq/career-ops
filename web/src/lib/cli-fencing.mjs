@@ -39,20 +39,23 @@ import { verifyClaudeArgs } from "./claude-invocation.mjs";
 const CODEX_READ_ONLY = "read-only";
 const CODEX_WORKSPACE_WRITE = "workspace-write";
 
+const WRITE_REFUSED_CLIS = new Set(["hermes", "kimi"]);
+
 /**
- * Refuse Hermes for workers that write. This is a check by name, outside FENCERS,
- * and it covers Hermes alone: every other runtime passes, including the ones
- * absent from FENCERS, which still run write-capable workers with their default
- * access (fencingReport reports them as unfenced). Hermes is limited to workers
+ * Refuse Hermes and Kimi for workers that write. This is a check by name, outside
+ * FENCERS, and it covers those two alone: every other runtime passes, including the
+ * ones absent from FENCERS, which still run write-capable workers with their default
+ * access (fencingReport reports them as unfenced). Both are limited to workers
  * whose capability record has `writes: false` because career-ops has no verified
- * way to translate that record into Hermes's own approval/sandbox controls.
+ * way to translate that record into their own approval/sandbox controls, and
+ * `kimi -p` approves file writes and shell commands without asking.
  *
  * @param {string} cliId
  * @param {import("./worker-capabilities.mjs").Capabilities} capabilities
  * @returns {boolean}
  */
 export function isCliAllowedForCapabilities(cliId, { writes }) {
-  return cliId !== "hermes" || !writes;
+  return !writes || !WRITE_REFUSED_CLIS.has(cliId);
 }
 
 

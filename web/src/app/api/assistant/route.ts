@@ -10,6 +10,7 @@ import { buildSystemPreamble } from "@/lib/assistant-preamble.mjs";
 import { CAPS } from "@/lib/worker-capabilities.mjs";
 import { scopeFrom } from "@/lib/claude-invocation.mjs";
 import { fencingReport } from "@/lib/cli-fencing.mjs";
+import { kimiStderrErrors } from "@/lib/run-cli-support.mjs";
 
 // Deny list DERIVED, never hand-written: every one of the six advisor argvs
 // that spelled its own omitted MultiEdit, which --permission-mode acceptEdits
@@ -236,6 +237,11 @@ export async function POST(req: Request) {
       });
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
+        if (cliId === "kimi") {
+          const errors = kimiStderrErrors(s);
+          if (errors) safeEnqueue(`\n[${spec.name}] ${errors}\n`);
+          return;
+        }
         if (/error|not found|denied|fatal/i.test(s)) {
           safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`);
         }

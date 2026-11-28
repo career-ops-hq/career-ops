@@ -12,7 +12,7 @@ Career-ops is AI-agnostic and runs on several command-line agent tools. The core
 | Antigravity CLI | `AGENTS.md` | Interactive: `agy` (then `/career-ops`). Headless: `agy -p "prompt"`. Batch: not supported by `batch/batch-runner.sh` yet, see [Antigravity CLI and batch](#antigravity-cli-and-batch) |
 | Grok Build CLI | `AGENTS.md` | Interactive: `grok` (then `/career-ops`). Headless/Batch: `grok -p "prompt"` |
 | Qwen | `AGENTS.md` | Interactive: `qwen`. Headless/Batch: `qwen -p "prompt"` |
-| Kimi | `KIMI.md` | Interactive: `kimi` |
+| Kimi Code CLI | `KIMI.md` | Interactive: `kimi`. Web read-only workers: `kimi -p "prompt"`. Batch: unsupported. See [Kimi Code CLI](#kimi-code-cli) |
 | GitHub Copilot CLI | `AGENTS.md` | Headless/Batch: `copilot -p "prompt"` |
 | Gemini | `GEMINI.md` | Legacy wrapper redirecting to `AGENTS.md` (transitioned to Antigravity CLI). |
 | Hermes Agent | `AGENTS.md` | Interactive: `hermes` (then ask for a career-ops task). Web read-only workers: `hermes chat -q "prompt" --oneshot -Q --no-restore-cwd`. Batch ranking: unsupported. |
@@ -28,6 +28,14 @@ Career-ops is AI-agnostic and runs on several command-line agent tools. The core
 Two more things the next attempt will meet: a denied action still exits 0 (the result JSON lists it under `denied_actions`), so the runner has to treat a missing report or TSV as a failure, and on Windows the system prompt plus the job is too long for one `-p` argument ("Argument list too long"), so the task has to go through a file like the one Grok uses.
 
 If `agy` later gets a permission check that covers the whole command line, [#7527](https://github.com/career-ops-hq/career-ops/issues/7527) is the place to pick this up again.
+
+## Kimi Code CLI
+
+The web UI runs Kimi Code CLI through its one-shot mode, `kimi -p "prompt"`, and adds `--output-format stream-json` when it parses the run's events. That mode never asks before a tool call: file writes and shell commands are approved automatically, and only the `deny` rules in your own Kimi `config.toml` still apply. career-ops has no verified way to pass a per-worker restriction to Kimi, so the web refuses it for any worker whose capability record has `writes: true` and runs the other kinds with a notice that Kimi cannot be permission-restricted.
+
+The workers Kimi is allowed to run are not filesystem-sandboxed. "Read-only" describes what career-ops asks the worker to do, not something it enforces: Kimi runs with your user account's access, in the career-ops data folder, and can still write files or run shell commands if the model decides to. Add `deny` rules to your Kimi `config.toml` if you need a hard limit.
+
+The official installer puts the binary in `~/.kimi-code/bin` (`%USERPROFILE%\.kimi-code\bin` on Windows); career-ops looks there as well as on `PATH`. `batch/batch-runner.sh` does not support Kimi.
 
 ## Hermes Agent
 

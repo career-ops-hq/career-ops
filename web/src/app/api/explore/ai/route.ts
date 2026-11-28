@@ -10,6 +10,7 @@ import { makeKnownOfferFilter } from "@/lib/explore-ai";
 import { CAPS } from "@/lib/worker-capabilities.mjs";
 import { scopeFrom } from "@/lib/claude-invocation.mjs";
 import { fencingReport } from "@/lib/cli-fencing.mjs";
+import { kimiStderrErrors } from "@/lib/run-cli-support.mjs";
 import { codexFencingSupported } from "@/lib/cli-fencing-probe.mjs";
 import { spillOversizedPrompt } from "@/lib/oversized-prompt.mjs";
 import { readJsonObject } from "@/lib/json-body";
@@ -360,6 +361,11 @@ export async function POST(req: Request) {
           return;
         }
 
+        if (cliId === "kimi") {
+          const errors = kimiStderrErrors(s);
+          if (errors) safeEnqueue(`\n[${spec.name}] ${errors}\n`);
+          return;
+        }
         if (/error|not found|denied|fatal/i.test(s)) {
           safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`);
         }

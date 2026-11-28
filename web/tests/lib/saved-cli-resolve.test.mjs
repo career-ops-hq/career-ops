@@ -191,3 +191,38 @@ test("a Config save made while /api/clis is pending is not overwritten by the fa
   assert.equal(savedCliId(store), "codex", "the newer Config save survives");
   assert.deepEqual(calls, [["opencode", "claude"]]);
 });
+
+test("a saved Kimi Code CLI pick that is still installed is kept", async () => {
+  const store = stubEnv({
+    saved: "kimi",
+    clis: [
+      { id: "claude", installed: true },
+      { id: "kimi", installed: true },
+    ],
+  });
+  assert.equal(await resolveCliId(), "kimi");
+  assert.equal(savedCliId(store), "kimi");
+});
+
+test("a sole installed Kimi Code CLI is picked and persisted when nothing is saved", async () => {
+  const store = stubEnv({
+    clis: [
+      { id: "claude", installed: false },
+      { id: "kimi", installed: true },
+    ],
+  });
+  assert.equal(await resolveCliId(), "kimi");
+  assert.equal(savedCliId(store), "kimi");
+});
+
+test("a saved Kimi Code CLI pick that was uninstalled is replaced", async () => {
+  const store = stubEnv({
+    saved: "kimi",
+    clis: [
+      { id: "codex", installed: true },
+      { id: "kimi", installed: false },
+    ],
+  });
+  assert.equal(await resolveCliId(), "codex");
+  assert.equal(savedCliId(store), "codex");
+});
