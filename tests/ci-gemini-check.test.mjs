@@ -64,7 +64,7 @@ if (process.env.CAREER_OPS_GEMINI_GATE_CHILD !== '1') {
 // Run a live API check only when explicitly requested with CAREER_OPS_LIVE_GEMINI=1.
 test('Gemini AI Integration Smoke Test', { skip: !isLiveGeminiCheckEnabled() }, async () => {
   const apiKey = process.env.GEMINI_API_KEY;
-  const modelName = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+  const modelName = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
   
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({

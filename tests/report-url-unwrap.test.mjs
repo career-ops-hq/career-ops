@@ -13,7 +13,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail, ROOT, NODE, rmSync } from './helpers.mjs';
-import { unwrapReportUrlToken } from '../tracker-parse.mjs';
+import { TSV_ADDITION_HEADER, unwrapReportUrlToken } from '../tracker-parse.mjs';
 import { normalizeUrl } from '../url-key.mjs';
 
 console.log('\nReport URL token unwrap (angle brackets + trailing punctuation)');
@@ -82,7 +82,8 @@ for (const [input, expected] of cases) {
 
     writeFileSync(
       join(work, 'adds/002.tsv'),
-      '2\t2026-10-02\tAcme\tData Analyst\tEvaluated\t4.0/5\t❌\t[2](reports/002-acme-2026-10-02.md)\tre\t\thttps://boards.greenhouse.io/acme/jobs/123\n',
+      `${TSV_ADDITION_HEADER}\turl\n`
+        + '2\t2026-10-02\tAcme\tData Analyst\tEvaluated\t4.0/5\t❌\t[2](reports/002-acme-2026-10-02.md)\tre\thttps://boards.greenhouse.io/acme/jobs/123\n',
     );
     writeFileSync(
       join(work, 'reports/002-acme-2026-10-02.md'),
@@ -101,10 +102,8 @@ for (const [input, expected] of cases) {
       timeout: 30000,
     });
     const rows = readFileSync(join(work, 'applications.md'), 'utf8').split('\n').filter((l) => /^\| \d+/.test(l));
-    if (rows.length === 1 && /🔄1 updated|updated/.test(mergeOut)) {
+    if (rows.length === 1 && rows[0].includes('Data Analyst') && /🔄1 updated/.test(mergeOut)) {
       pass('after a clean backfill, a same-URL addition updates instead of adding a duplicate row');
-    } else if (rows.length === 1) {
-      pass('after a clean backfill, a same-URL addition keeps a single tracker row');
     } else {
       fail(`same-URL addition produced ${rows.length} rows after backfill:\n${rows.join('\n')}\n${mergeOut}`);
     }

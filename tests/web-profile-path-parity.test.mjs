@@ -9,10 +9,9 @@
 // web/tests/, because web-ci.yml runs `npm ci` inside web/ only and is not a
 // required check, while test-all.mjs runs on every PR.
 //
-// The contract is asserted directly (first block below), and, once the core's
-// getProfilePath() is present (Part 1 of #5026), the mirror is also compared with
-// the core helper itself wherever the two contracts agree (second block), with the
-// places they differ on purpose pinned on both sides:
+// The contract is asserted directly (first block below), and the mirror is also
+// compared with the core helper itself wherever the two contracts agree (second
+// block), with the places they differ on purpose pinned on both sides:
 //   - no root argument semantics are the web's "derived data root" case, where
 //     the CAREER_OPS_PROFILE override (trimmed; blank counts as unset) wins;
 //   - an explicit root names <root>/config/profile.yml and the override does
@@ -30,6 +29,7 @@
 // the root it passes.
 
 import { pass, fail, ROOT } from './helpers.mjs';
+import { getProfilePath as coreGetProfilePath } from '../path-resolver.mjs';
 import { existsSync } from 'fs';
 import { join, resolve } from 'path';
 import { pathToFileURL } from 'url';
@@ -67,18 +67,13 @@ if (!existsSync(join(ROOT, 'web'))) {
 
 // ---------------------------------------------------------------------------
 // The mirror against the core helper itself, where the contracts agree.
-// Part 1 of #5026 adds getProfilePath() to path-resolver.mjs; before it lands
-// there is nothing to compare, and that is said out loud rather than passed over.
 
 console.log('\nprofile path — web mirror against the core helper');
 
-const core = await import(pathToFileURL(join(ROOT, 'path-resolver.mjs')).href);
 if (!existsSync(join(ROOT, 'web'))) {
   pass('core comparison skipped: no web/ in this checkout');
 } else if (!existsSync(MIRROR)) {
   fail('web profile-path mirror is missing; nothing to compare with the core helper');
-} else if (typeof core.getProfilePath !== 'function') {
-  pass('core comparison skipped: path-resolver.mjs has no getProfilePath yet (Part 1 of #5026)');
 } else {
   const { getProfilePath: web } = await import(pathToFileURL(MIRROR).href);
   const { mkdirSync, mkdtempSync, realpathSync, rmSync } = await import('fs');
@@ -106,12 +101,12 @@ if (!existsSync(join(ROOT, 'web'))) {
       ['a blank override', ' \t '],
     ];
     for (const [label, profile] of agree) {
-      const fromCore = withCore(profile, dataRoot, () => core.getProfilePath());
+      const fromCore = withCore(profile, dataRoot, () => coreGetProfilePath());
       const fromWeb = web(dataRoot, { env: profile === undefined ? {} : { CAREER_OPS_PROFILE: profile } });
       if (fromCore === fromWeb) pass(`web mirror equals core getProfilePath() for ${label}`);
       else fail(`web mirror and core getProfilePath() differ for ${label}: web ${fromWeb}, core ${fromCore}`);
     }
-    const coreExplicit = withCore(elsewhere, dataRoot, () => core.getProfilePath(dataRoot));
+    const coreExplicit = withCore(elsewhere, dataRoot, () => coreGetProfilePath(dataRoot));
     const webExplicit = web(dataRoot, { explicitRoot: true, env: { CAREER_OPS_PROFILE: elsewhere } });
     if (coreExplicit === webExplicit) pass('web explicitRoot equals core getProfilePath(rootDir): the override does not redirect an explicit root');
     else fail(`explicit-root semantics differ: web ${webExplicit}, core ${coreExplicit}`);
@@ -121,7 +116,7 @@ if (!existsSync(join(ROOT, 'web'))) {
     // the root it passes. Both are pinned, so neither drifts unnoticed.
     const cwd = join(dataRoot, 'elsewhere');
     mkdirSync(cwd, { recursive: true });
-    const relCore = withCore('profiles/me.yml', cwd, () => core.getProfilePath());
+    const relCore = withCore('profiles/me.yml', cwd, () => coreGetProfilePath());
     const relWeb = web(dataRoot, { env: { CAREER_OPS_PROFILE: 'profiles/me.yml' } });
     if (relCore === join(cwd, 'profiles', 'me.yml') && relWeb === join(dataRoot, 'profiles', 'me.yml')) {
       pass('a relative override differs on purpose: core resolves it against the cwd, the web against the root it passes');
