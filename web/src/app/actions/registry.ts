@@ -361,7 +361,7 @@ const ACTIONS: Record<string, ActionDef> = {
   },
 
   // Propose the user's PERSONALIZATION (modes/_profile.md: archetypes, framing,
-  // exit narrative, comp/location policy) → on confirm, section-safe write.
+  // natural level, exit narrative, comp/location policy) → on confirm, section-safe write.
   // This is the fourth onboarding prerequisite; without it doctor keeps warning
   // that evaluations score against the template author's targeting.
   setPersonalization: {

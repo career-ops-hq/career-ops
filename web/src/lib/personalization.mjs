@@ -5,7 +5,7 @@
 // web could already write three of them (cv.md via the CV editor,
 // config/profile.yml + portals.yml via the confirm-gated setProfile). The
 // fourth, modes/_profile.md, only ever received appended "web notes" — its
-// eight structured sections (archetypes, framing, narrative, comp, location…)
+// nine structured sections (archetypes, framing, level, narrative, comp, location…)
 // stayed identical to the shipped template, so doctor kept warning that
 // "evaluations score against the template author's targeting, not yours".
 // This module fills exactly those sections, by heading, and nothing else.
@@ -21,10 +21,11 @@
 // it must stay free of node:fs. The merge and the file access live in
 // personalization-file.mjs.
 
-/** The eight template sections, in template order. `id` is the API/JSON key. */
+/** The nine template sections, in template order. `id` is the API/JSON key. */
 export const SECTIONS = [
   { id: "targetRoles", heading: "## Your Target Roles" },
   { id: "adaptiveFraming", heading: "## Your Adaptive Framing" },
+  { id: "naturalLevel", heading: "## Your Natural Level & Company-Stage Calibration" },
   { id: "exitNarrative", heading: "## Your Exit Narrative" },
   { id: "crossCuttingAdvantage", heading: "## Your Cross-cutting Advantage" },
   { id: "portfolio", heading: "## Your Portfolio / Demo" },
@@ -62,6 +63,13 @@ export function coercePersonalization(raw) {
       .slice(0, 8);
     if (rows.length) out.adaptiveFraming = rows;
   }
+  if (Array.isArray(raw.naturalLevel)) {
+    const rows = raw.naturalLevel
+      .map((r) => (r && typeof r === "object" ? { stage: str(r.stage, 80), title: str(r.title, 120), why: str(r.why, 200) } : null))
+      .filter((r) => r && r.stage && r.title)
+      .slice(0, 6);
+    if (rows.length) out.naturalLevel = rows;
+  }
   const exit = str(raw.exitNarrative, 1200);
   if (exit) out.exitNarrative = exit;
   const cross = str(raw.crossCuttingAdvantage, 600);
@@ -95,6 +103,12 @@ export function renderSection(id, value) {
         "| If the role is... | Emphasize about you... | Proof point sources |",
         "|-------------------|------------------------|---------------------|",
         ...value.map((r) => `| ${cell(r.role)} | ${cell(r.emphasize)} | ${cell(r.proof) || "cv.md"} |`),
+      ].join("\n");
+    case "naturalLevel":
+      return [
+        "| Company stage | Title that fits you | Why (your evidence) |",
+        "|---------------|---------------------|---------------------|",
+        ...value.map((r) => `| ${cell(r.stage)} | ${cell(r.title)} | ${cell(r.why)} |`),
       ].join("\n");
     case "exitNarrative":
     case "crossCuttingAdvantage":

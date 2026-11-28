@@ -7,7 +7,7 @@ import { PREREQS } from "@/lib/home/onboarding-checklist.mjs";
 import { setupPanelLabel, setupPanelMode } from "@/lib/home/setup-panel.mjs";
 
 // The "profile that grows while you talk": a live checklist of the four setup
-// prerequisites plus the eight personalization sections, read from the same
+// prerequisites plus the nine personalization sections, read from the same
 // two signals the assistant gets (/api/doctor and /api/personalization) — never
 // a parallel notion of "done". Refetches after every confirmed write
 // (co-onboarding-changed) and after every finished worker (co-job-done), so a
