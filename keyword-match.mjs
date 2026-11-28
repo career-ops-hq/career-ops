@@ -35,6 +35,7 @@ export { resolveUserPath };
 import { extractSkills } from './skill-extract.mjs';
 import { collapseMarkdownLinks } from './verify-cv-facts.mjs';
 import { headingText, normalizePandocLine, toPlainText } from './lib/cv-markdown.mjs';
+import { NEXT_REPORT_SECTION_RE } from './lib/jd-archive-section.mjs';
 
 // A normal path stays readable. A space or other shell syntax is quoted so the
 // example stays one argument.
@@ -554,18 +555,27 @@ export function extractKeywords(reportText) {
 
 /**
  * The report's archived job description: the text under
- * `## Job Description (archived verbatim)` up to the next level-2 heading, or
+ * `## Job Description (archived verbatim)` up to the next report section, or
  * the `jds/` file that section points to (modes/oferta.md, JD archival).
+ *
+ * The section ends at a known report heading (NEXT_REPORT_SECTION_RE, the
+ * boundary check-jd-archive.mjs uses), not at any `## ` line: a posting pasted
+ * verbatim keeps its own `## Requirements` or `## Responsibilities` headings,
+ * and cutting there dropped every skill listed under them.
  *
  * @param {string} reportText - Full report markdown.
  * @param {string} root - Directory that holds `jds/`.
  * @returns {string} The JD text, or '' when the report has no archive.
  */
 export function archivedJdText(reportText, root) {
-  const m = /^## Job Description\b[^\n]*\n([\s\S]*?)(?=^##\s|(?![\s\S]))/m.exec(String(reportText || ''));
+  const text = String(reportText || '');
+  const m = /^## Job Description\b[^\n]*\n/m.exec(text);
   if (!m) return '';
-  const section = m[1].trim();
-  if (!/^See jds\/\S+ for the full archive\b/.test(section)) return m[1];
+  const rest = text.slice(m.index + m[0].length);
+  const end = rest.search(NEXT_REPORT_SECTION_RE);
+  const body = end === -1 ? rest : rest.slice(0, end);
+  const section = body.trim();
+  if (!/^See jds\/\S+ for the full archive\b/.test(section)) return body;
   const pointer = /^See (jds\/[A-Za-z0-9][\w.-]*) for the full archive\b/.exec(section);
   if (!pointer) return '';
   const jdPath = join(root, pointer[1]);
