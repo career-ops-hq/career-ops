@@ -68,7 +68,7 @@ test('Explore add preserves a valid posting date in pipeline and scan history', 
   fs.copyFileSync(todayPath, path.join(tmp, 'lib', 'local-today.mjs'));
 
   const original = fs.readFileSync(sourcePath, 'utf8');
-  const alias = 'import { careerOpsRoot, rootScript } from "@/lib/career-ops";';
+  const alias = 'import { careerOpsRoot, portalsConfigPath, rootScript } from "@/lib/career-ops";';
   const profileAlias = 'import { coreProfileEnv } from "@/lib/core/profile-path.mjs";';
   const codeRootAlias = 'import { resolveCodeRoot } from "@/lib/core/code-root.mjs";';
   for (const a of [alias, codeRootAlias, profileAlias]) {
@@ -78,6 +78,7 @@ test('Explore add preserves a valid posting date in pipeline and scan history', 
   assert.match(original, /export function addOffersToPipeline\(/);
   const shim = `const careerOpsRoot = () => ${JSON.stringify(tmp)};\n`
     + `const resolveCodeRoot = () => ${JSON.stringify(tmp)};\n`
+    + `import { portalsConfigPath } from ${JSON.stringify(pathToFileURL(path.join(repo, 'web/src/lib/portals-config.mjs')).href)};\n`
     + `const rootScript = (name) => {\n`
     + `  if (name !== "scan") throw new Error("Unexpected script name: " + name);\n`
     + `  return ${JSON.stringify(scanPath)};\n};`;
