@@ -109,7 +109,7 @@ ok('with no capture, the posting is archived from the URL column, keyed by repor
 // the same slug: outcome.mjs's own slugify() turned such a name into 'unknown',
 // which no capture carries, so the posting was never found, and every run asked
 // archive-posting for it again.
-const { captureSlug } = await import(pathToFileURL(join(ROOT, 'jd-capture.mjs')).href);
+const { captureSlug, captureIdentity } = await import(pathToFileURL(join(ROOT, 'jd-capture.mjs')).href);
 for (const [company, role] of [['株式会社アクメ', 'エンジニア'], ['Яндекс', 'Инженер']]) {
   ok(`a capture for ${company} is found under the slug archive-posting wrote`, () => {
     const name = `014-2026-10-01_${captureSlug(company)}_${captureSlug(role)}_0123456789abcdef.pdf`;
@@ -134,4 +134,47 @@ ok('a capture filed under unknown is found for the ? placeholder employer', () =
   );
   assert.strictEqual(read('posting.pdf'), '%PDF capture for report 15', 'the unknown capture must be the archived posting');
   assert.deepStrictEqual(archiveCalls, [], 'a capture was found, so nothing is re-archived');
+});
+
+const otherUrl = 'https://job-boards.greenhouse.io/acme/jobs/101';
+const appliedUrl = 'https://job-boards.greenhouse.io/acme/jobs/102';
+const reportlessRow = (url) =>
+  `| 12 | 2026-10-01 | Acme | Platform Engineer | — | Applied | ❌ | — | applied | ${url} |`;
+
+ok('a reportless row does not take a same-company capture keyed to another report', () => {
+  const { read, archiveCalls } = outcome(
+    [row(5, 12, otherUrl), reportlessRow(appliedUrl)],
+    { [`012-2026-10-01_acme_platform-engineer_${captureIdentity(otherUrl)}.pdf`]: '%PDF another application' },
+    12,
+  );
+  assert.strictEqual(read('posting.pdf'), null, 'another application’s archive was copied');
+  const urlField = read('posting_missing.md').split('\n').find((line) => line.startsWith('- **URL**: '));
+  assert.strictEqual(urlField, `- **URL**: ${appliedUrl}`);
+  assert.strictEqual(archiveCalls.length, 1);
+  assert.strictEqual(archiveCalls[0][0], appliedUrl);
+  assert.ok(!archiveCalls[0].some((arg) => arg.startsWith('--report=')), 'a tracker number must not be written as a report number');
+});
+
+ok('a reportless row links the capture of its URL without a report prefix', () => {
+  const { read, archiveCalls } = outcome(
+    [row(5, 12, otherUrl), reportlessRow(appliedUrl)],
+    {
+      [`012-2026-10-01_acme_platform-engineer_${captureIdentity(otherUrl)}.pdf`]: '%PDF another application',
+      [`2026-10-01_acme_platform-engineer_${captureIdentity(appliedUrl)}.pdf`]: '%PDF the applied posting',
+    },
+    12,
+  );
+  assert.strictEqual(read('posting.pdf'), '%PDF the applied posting');
+  assert.deepStrictEqual(archiveCalls, []);
+});
+
+ok('a reportless row with no URL does not use a numeric match as posting evidence', () => {
+  const { read, archiveCalls } = outcome(
+    [row(5, 12, otherUrl), reportlessRow('')],
+    { [`012-2026-10-01_acme_platform-engineer_${captureIdentity(otherUrl)}.pdf`]: '%PDF another application' },
+    12,
+  );
+  assert.strictEqual(read('posting.pdf'), null);
+  assert.match(read('posting_missing.md') ?? '', /None provided/);
+  assert.deepStrictEqual(archiveCalls, []);
 });
