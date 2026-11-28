@@ -139,6 +139,27 @@ test('a second import of the same file adds nothing', () => {
   });
 });
 
+test('confirm preserves distinct imported applications whose titles fuzzy-match', () => {
+  const csv = [
+    'Company,Job Position,Status,Date Applied',
+    'Northwind Accounts,Corporate Relationship Account Manager Paris,Applied,2026-10-01',
+    'Northwind Accounts,Corporate Relationship Account Manager London,Interviewing,2026-10-12',
+  ].join('\n');
+  withRoot({ csv, tracker: null }, (fx) => {
+    const result = run(fx, ['--confirm']);
+    assert.equal(result.status, 0, describeSpawn(result));
+    const fields = () => rowsOf(readFileSync(fx.trackerPath, 'utf8'))
+      .map((row) => [row[2], row[4], row[6]]);
+    const expected = [
+      ['2026-10-01', 'Corporate Relationship Account Manager Paris', 'Applied'],
+      ['2026-10-12', 'Corporate Relationship Account Manager London', 'Interview'],
+    ];
+    assert.deepEqual(fields(), expected);
+    assert.equal(run(fx, ['--confirm']).status, 0);
+    assert.deepEqual(fields(), expected);
+  });
+});
+
 test('--confirm leaves no reservation or addition file behind', () => {
   withRoot({}, (fx) => {
     assert.equal(run(fx, ['--confirm']).status, 0);
@@ -333,7 +354,7 @@ test('a row merge refuses keeps its file and number and fails the import', () =>
       // import's overrides set: it carries the root and the script's full path.
       const retry = /then run:\n {2}(.+)\n/.exec(result.stderr)?.[1];
       assert.ok(retry, describeSpawn(result));
-      assert.match(retry, new RegExp(`^CAREER_OPS_ROOT=${ARG} CAREER_OPS_ADDITIONS=${ARG} node ${ARG}$`));
+      assert.match(retry, new RegExp(`^CAREER_OPS_ROOT=${ARG} CAREER_OPS_ADDITIONS=${ARG} CAREER_OPS_MERGE_CSV_IMPORT=1 node ${ARG}$`));
       assert.match(retry, /merge-tracker\.mjs'?$/);
       rerunFromElsewhere(fx, retry);
     } finally {

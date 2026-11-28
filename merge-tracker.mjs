@@ -402,6 +402,7 @@ export async function mergeTracker(options = {}) {
   const MERGE_HOLD_MS = options.holdMs || 0;
   const MERGE_READY_IPC = Boolean(options.readyIpc);
   const ALLOW_HEADERLESS = Boolean(flags.allowHeaderless);
+  const csvImport = options.csvImport === true;
 
   const TRACKER_LOCK_DIR = options.lockDir ?? trackerLockDirFor(APPS_FILE);
 
@@ -2076,6 +2077,22 @@ export async function mergeTracker(options = {}) {
         if (duplicate) dupReason = 'url';
       }
 
+      // Imports already classified distinct applications by exact identity.
+      // Recheck that key under the tracker lock and leave any existing row intact.
+      if (csvImport) {
+        const alreadyTracked = duplicate || existingApps.find((app) => {
+          const appUrl = normalizeUrl(postingUrl(app));
+          return !(addUrl && appUrl)
+            && normalizeTextKey(app.company) === normalizeTextKey(addition.company)
+            && normalizeTextKey(app.role) === normalizeTextKey(addition.role);
+        });
+        if (alreadyTracked) {
+          console.log(`⏭️  Skipping ${file}: application already tracked as #${alreadyTracked.num}`);
+          skipped++;
+          continue;
+        }
+      }
+
       // Guard the report/num/fuzzy fallback against collapsing distinct postings.
       //
       // ONLY TWO PRESENT-AND-DIFFERENT KEYS ARE EVIDENCE. A key that is absent on
@@ -2178,7 +2195,7 @@ export async function mergeTracker(options = {}) {
       // (Cogir Senior Living)" — different enough that tier 1's company guard
       // refused the match, so a second tracker row was appended pointing at the
       // exact same report file. A same-file match here needs no such guard.
-      if (!duplicate) {
+      if (!csvImport && !duplicate) {
         const addPath = resolveReportPath(addition.report);
         if (addPath) {
           // addPath is already a confirmed file, so an existing row whose link
@@ -2190,7 +2207,7 @@ export async function mergeTracker(options = {}) {
         }
       }
 
-      if (!duplicate && reportNum) {
+      if (!csvImport && !duplicate && reportNum) {
         // Report-number match must also confirm company (#912). Report-file
         // sequence and tracker-row sequence are independent, so the same number
         // appearing for two different companies is sequence drift, not a duplicate.
@@ -2236,7 +2253,7 @@ export async function mergeTracker(options = {}) {
         return true;
       };
 
-      if (!duplicate) {
+      if (!csvImport && !duplicate) {
         // Exact entry number match — but only when the company also matches.
         // The TSV `num` doubles as the tracker row id, yet report-file numbering
         // and tracker-row numbering can drift out of sync (e.g. reports maxed at
@@ -2259,7 +2276,7 @@ export async function mergeTracker(options = {}) {
         );
       }
 
-      if (!duplicate) {
+      if (!csvImport && !duplicate) {
         // Company + role fuzzy match
         // Two passes, exact company first. With a single find() the wider
         // corporate-form comparison (#3665) let an EARLIER "Acme Technologies" row
@@ -2735,6 +2752,7 @@ if (isMainModule(import.meta.url)) {
     // merge run by hand after a batch, with the data root elsewhere, read only a
     // file that never exists and merged rows the runner had refused.
     batchStateFile: process.env.CAREER_OPS_BATCH_STATE || undefined,
+    csvImport: process.env.CAREER_OPS_MERGE_CSV_IMPORT === '1',
     pdfIndexFile: resolvePdfIndexPath(appsFile),
     lockDir: trackerLockDirFor(appsFile),
     lock: {

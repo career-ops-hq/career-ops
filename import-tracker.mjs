@@ -339,7 +339,7 @@ function retryCommand(additionsDir, env = process.env) {
       return `${name}=${shellQuote(target)} `;
     })
     .join('');
-  return `${overrides}CAREER_OPS_ADDITIONS=${shellQuote(additionsDir)} node ${shellQuote(join(CODE_ROOT, 'merge-tracker.mjs'))}`;
+  return `${overrides}CAREER_OPS_ADDITIONS=${shellQuote(additionsDir)} CAREER_OPS_MERGE_CSV_IMPORT=1 node ${shellQuote(join(CODE_ROOT, 'merge-tracker.mjs'))}`;
 }
 
 async function writeImport(entries, { colmap }) {
@@ -361,7 +361,7 @@ async function writeImport(entries, { colmap }) {
     }
     const merge = spawnSync(process.execPath, [join(CODE_ROOT, 'merge-tracker.mjs')], {
       stdio: 'inherit',
-      env: { ...process.env, CAREER_OPS_ADDITIONS: additionsDir },
+      env: { ...process.env, CAREER_OPS_ADDITIONS: additionsDir, CAREER_OPS_MERGE_CSV_IMPORT: '1' },
     });
     // merge-tracker leaves a TSV it refused (or could not apply) where it was,
     // and a refusal alone still exits 0. Those rows are not in the tracker, so
