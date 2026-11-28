@@ -31,7 +31,7 @@ If `agy` later gets a permission check that covers the whole command line, [#752
 
 ## Hermes Agent
 
-Hermes runs the same pipeline as every other CLI here. Trust the checkout once with `hermes skills trust` before interactive use. The web UI uses Hermes's one-shot mode (`hermes chat -q ... --oneshot -Q --no-restore-cwd`) only for explicitly non-writing workers; evaluation and portal-repair workers reject it because no verified Hermes permission adapter exists. Batch ranking does not support Hermes. Hermes project-context scanning still applies; see [`docs/HERMES.md`](HERMES.md) for its rules and limitations.
+Trust the checkout once with `hermes skills trust` before interactive use. The web UI uses Hermes's one-shot mode for evaluation, research, CV drafting, and cover-letter drafting. The web backend saves evaluation reports. Workers inherit the tools and approvals configured in Hermes because career-ops has no verified per-worker permission adapter. The web UI rejects Hermes for portal repair, and batch ranking does not support it. See [the Hermes guide](HERMES.md#headless-workers) for invocation and project-context details.
 
 ## Pi
 
