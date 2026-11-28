@@ -175,6 +175,7 @@ language:
 | Wants to discover CV competencies they forgot to write down | `expand` |
 | Evaluates a course/cert | `training` |
 | Evaluates portfolio project | `project` |
+| Wants project ideas that would close a specific JD's skill gaps | `ideas` — runs `upskill.mjs --url-text` for a zero-LLM gap list, proposes small buildable ideas tied to each gap, scores them with `project`'s own matrix; never writes `cv.md`/`article-digest.md`/`config/profile.yml` |
 | Asks about application status | `tracker` |
 | Fills out application form | `apply` |
 | Searches for new offers | `scan` |
