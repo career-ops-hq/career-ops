@@ -191,3 +191,11 @@ contribution does not edit this file: maintainers regenerate it on main with
 - 2026-11-24 `2026-11-24-santifer.97` (283 boards, source `web-index:commoncrawl@2026-11-22`): Hosts from the Common Crawl URL index (Common Crawl terms of use)
 - 2026-11-24 `2026-11-24-santifer.98` (223 boards, source `web-index:commoncrawl@2026-11-22`): Sites from the Common Crawl URL index, CC-MAIN-2026-34, -39 and -43 (Common Crawl terms of use)
 - 2026-11-24 `2026-11-24-santifer.99` (179 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
+- 2026-11-27 `2026-11-27-santifer` (24 boards, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
+- 2026-11-27 `2026-11-27-santifer.2` (2 boards, source `web-index:wayback@2026-11-12`): Found by the project's discoverer in a public web index
+- 2026-11-27 `2026-11-27-santifer.3` (17 boards, source `ats-directory`): open-jobs, repository elliottdehn/open-jobs, CC0-1.0: https://github.com/elliottdehn/open-jobs
+- 2026-11-27 `2026-11-27-santifer.4` (9 boards, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
+- 2026-11-27 `2026-11-27-santifer.5` (7 boards, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
+- 2026-11-27 `2026-11-27-santifer.6` (2 boards, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
+- 2026-11-27 `2026-11-27-santifer.7` (1 board, source `web-index:openai-web-search@2026-11-17`): Found with an assistant's web search
+- 2026-11-27 `2026-11-27-santifer.9` (1 board, source `ats-directory`): ats-directory, repository moonie0201/ats-directory, CC0-1.0: https://github.com/moonie0201/ats-directory
