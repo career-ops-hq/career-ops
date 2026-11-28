@@ -7,6 +7,7 @@ import { CANONICAL_STATES, statusDot } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import { isStaleRowError, saveStatus } from "@/lib/pipeline-status.mjs";
 import { appliedWriteAllowed, statusEditAction } from "@/lib/applied-confirm.mjs";
+import { savedLabel, statusFeedback } from "@/lib/status-feedback.mjs";
 
 // Status writeback control. Updates the existing tracker row (status cell) via
 // /api/status — never adds rows. Reverts on failure; confirms with the
@@ -30,7 +31,7 @@ export function StatusSelect(props: StatusSelectProps) {
 
 function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, heldSave, onHeldSave }: StatusSelectProps) {
   const [status, setStatus] = useState(current);
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState<ReturnType<typeof statusFeedback> | null>(null);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState("");
@@ -95,17 +96,18 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
     saving.current = true;
     setStatus(next);
     setBusy(true);
-    setSaved(false);
+    setSaved(null);
     setError("");
     // Record the attempt before the request, so a scroll that unmounts this
     // editor still has the chosen status and can show a later failure.
     onHeldSave?.({ type: "start", status: next });
     try {
-      const confirmed = await saveStatus(n, prev, next);
-      if (!confirmed) {
+      const result = await saveStatus(n, prev, next);
+      if (!result) {
         onHeldSave?.({ type: "clear" });
         return;
       }
+      const confirmed = result.status;
       // A filter or the row window may unmount this editor while the write is
       // in flight. Still refresh; the parent's callback captures identity,
       // never row position. Disabling a focused select can move focus to body.
@@ -115,12 +117,17 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
       if (onSaved) onSaved(confirmed, restoreFocus);
       else router.refresh();
       onHeldSave?.({ type: "clear" });
+      // On a list tab the row can leave the tab it was in (Evaluated to Applied
+      // from the EVALUATED tab), which unmounts this editor: the follow-up
+      // date then shows only where the editor stays, the detail page and ALL.
       if (!mounted.current) return;
       setStatus(confirmed);
       setEditing(false);
-      setSaved(true);
+      // The CLI seeds the follow-up itself on a move to Applied (#3470) and
+      // reports it. Saying the date admits what was scheduled for the user.
+      setSaved(statusFeedback(result.followupSeeded));
       if (savedTimer.current) clearTimeout(savedTimer.current);
-      savedTimer.current = setTimeout(() => setSaved(false), 2000);
+      savedTimer.current = setTimeout(() => setSaved(null), 4000);
       if (inline && restoreFocus) {
         requestAnimationFrame(() => pencil.current?.focus());
       }
@@ -235,7 +242,7 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
         {inline && savingNow && <span role="status" className="shrink-0 text-xs text-faint">saving…</span>}
         {inline && saved && (
           <span role="status" className="inline-flex shrink-0 animate-terminal-popup items-center gap-1 text-xs font-medium text-brand-text">
-            <Check aria-hidden="true" className="size-3" /> saved
+            <Check aria-hidden="true" className="size-3" /> {savedLabel(saved)}
           </span>
         )}
       </span>
@@ -253,7 +260,8 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
       {!inline && savingNow && <span role="status" className="text-xs text-faint">saving…</span>}
       {!inline && saved && (
         <span role="status" className="animate-terminal-popup inline-flex items-center gap-1 text-xs font-medium text-brand-text">
-          <Check aria-hidden="true" className="size-3" /> saved
+          <Check aria-hidden="true" className="size-3" />
+          {savedLabel(saved)}
         </span>
       )}
       {errorShown && <span id={`${id}-error`} role="alert" className="basis-full whitespace-normal text-xs text-red-700 dark:text-red-400">{errorShown}</span>}

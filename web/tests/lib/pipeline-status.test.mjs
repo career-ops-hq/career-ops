@@ -44,7 +44,7 @@ test("same-value selection never writes", async () => {
 });
 
 test("save uses the existing row-number contract and requires confirmed success", async () => {
-  const status = await saveStatus("11", "Evaluated", "Applied", async (url, options) => {
+  const saved = await saveStatus("11", "Evaluated", "Applied", async (url, options) => {
     assert.equal(url, "/api/status");
     assert.equal(options.method, "POST");
     // The status on screen travels with the save as the expectation, so a row
@@ -53,7 +53,13 @@ test("save uses the existing row-number contract and requires confirmed success"
     assert.equal(options.headers["Content-Type"], "application/json");
     return Response.json({ ok: true, status: "Applied", changed: true, statusLogged: true });
   });
-  assert.equal(status, "Applied");
+  assert.equal(saved.status, "Applied");
+});
+
+test("save hands back the follow-up the route reports", async () => {
+  const followupSeeded = { seeded: true, nextDate: "2026-09-09" };
+  const saved = await saveStatus("11", "Evaluated", "Applied", async () => Response.json({ ok: true, status: "Applied", changed: true, followupSeeded }));
+  assert.deepEqual(saved.followupSeeded, followupSeeded);
 });
 
 test("a row with no displayed status sends no expectation", async () => {
@@ -85,7 +91,7 @@ test("an ordinary failure stays an ordinary failure", async () => {
 });
 
 test("unchanged-but-confirmed success is accepted", async () => {
-  assert.equal(await saveStatus("11", "Evaluated", "Applied", async () => Response.json({ ok: true, status: "Applied", changed: false })), "Applied");
+  assert.equal((await saveStatus("11", "Evaluated", "Applied", async () => Response.json({ ok: true, status: "Applied", changed: false }))).status, "Applied");
 });
 
 for (const code of [400, 404, 409, 503, 504]) {

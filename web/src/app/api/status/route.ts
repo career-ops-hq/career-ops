@@ -181,12 +181,30 @@ async function writeStatus(n: unknown, canon: string | null, expect: string | nu
     return Response.json({ error: "status update returned no result" }, { status: 500 });
   }
 
-  // Response shape is unchanged for existing callers; `changed` and
-  // `statusLogged` are additive.
+  // Response shape is unchanged for existing callers; `changed`,
+  // `statusLogged` and `followupSeeded` are additive.
+  //
+  // followupSeeded is forwarded rather than recomputed: since #3470 the CLI
+  // seeds the follow-up itself on a transition into Applied, so the web
+  // inherits the behaviour by delegating and has nothing of its own to do
+  // here. Only the fields the feedback reads are picked: on a failed seed the
+  // CLI adds `error` with err.message, which can carry an absolute path, and
+  // this route keeps those out of response bodies (see the stderr branches
+  // above). The raw error stays in the CLI output.
+  const seed = parsed.followupSeeded as { seeded?: unknown; nextDate?: unknown; reason?: unknown } | null | undefined;
   return Response.json({
     ok: true,
     status: canon ?? parsed.newStatus,
     changed: parsed.changed === true,
     statusLogged: parsed.statusLogged === true,
+    ...(seed && typeof seed === "object"
+      ? {
+          followupSeeded: {
+            seeded: seed.seeded === true,
+            nextDate: typeof seed.nextDate === "string" ? seed.nextDate : null,
+            ...(typeof seed.reason === "string" ? { reason: seed.reason } : {}),
+          },
+        }
+      : {}),
   });
 }
