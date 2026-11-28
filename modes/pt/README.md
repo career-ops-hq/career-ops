@@ -50,9 +50,9 @@ Esta primeira iteração cobre os quatro modos com maior impacto:
 | Arquivo | Traduzido de | Finalidade |
 |---------|-------------|------------|
 | `_shared.md` | `modes/_shared.md` (EN) | Contexto compartilhado, arquétipos, regras globais, especificidades do mercado BR |
-| `oferta.md` | `modes/oferta.md` (ES) | Avaliação completa de uma vaga (Blocos A-H) |
+| `oferta.md` | `modes/oferta.md` (EN) | Avaliação completa de uma vaga (Blocos A-H) |
 | `aplicar.md` | `modes/apply.md` (EN) | Assistente ao vivo para formulários de candidatura |
-| `pipeline.md` | `modes/pipeline.md` (ES) | Inbox de URLs / Second Brain para vagas acumuladas |
+| `pipeline.md` | `modes/pipeline.md` (EN) | Inbox de URLs / Second Brain para vagas acumuladas |
 
 Os demais modos (`scan`, `batch`, `pdf`, `tracker`, `auto-pipeline`, `deep`, `contacto`, `ofertas`, `project`, `training`) não estão neste PR de propósito. Eles continuam funcionando via os originais em EN/ES, pois seu conteúdo é majoritariamente tooling, caminhos e comandos de configuração — que devem ser independentes de idioma.
 

@@ -52,9 +52,9 @@ Diese erste Iteration deckt die vier Modi mit dem höchsten Hebel ab:
 | Datei | Übersetzt aus | Zweck |
 |-------|---------------|-------|
 | `_shared.md` | `modes/_shared.md` (EN) | Geteilter Kontext, Archetypen, globale Regeln, DACH-Markt-Spezifika |
-| `angebot.md` | `modes/oferta.md` (ES) | Vollständige Bewertung einer einzelnen Stellenanzeige (Blöcke A-H) |
+| `angebot.md` | `modes/oferta.md` (EN) | Vollständige Bewertung einer einzelnen Stellenanzeige (Blöcke A-H) |
 | `bewerben.md` | `modes/apply.md` (EN) | Live-Assistent fürs Bewerbungsformular |
-| `pipeline.md` | `modes/pipeline.md` (ES) | URL-Inbox / Second Brain für gesammelte Stellenanzeigen |
+| `pipeline.md` | `modes/pipeline.md` (EN) | URL-Inbox / Second Brain für gesammelte Stellenanzeigen |
 
 Die übrigen Modi (`scan`, `batch`, `pdf`, `tracker`, `auto-pipeline`, `deep`, `contacto`, `ofertas`, `project`, `training`) sind absichtlich nicht in diesem PR dabei. Sie funktionieren weiter über die EN/ES-Originale, weil ihr Inhalt zu großen Teilen aus Tooling, Pfaden und Konfigurationskommandos besteht — diese sollen sprachunabhängig bleiben.
 

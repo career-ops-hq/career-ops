@@ -42,9 +42,9 @@ language:
 | 파일 | 번역 기준 | 역할 |
 |---------|----------------|------|
 | `_shared.md` | `modes/_shared.md` (EN) | 공통 컨텍스트, archetype, 전역 규칙, 한국 채용 시장 특화 맥락 |
-| `gonggo.md` | `modes/oferta.md` (ES) | 채용 공고 전체 평가 (블록 A-H) |
+| `gonggo.md` | `modes/oferta.md` (EN) | 채용 공고 전체 평가 (블록 A-H) |
 | `jiwon.md` | `modes/apply.md` (EN) | 지원서 입력 폼을 채우는 live assistant |
-| `pipeline.md` | `modes/pipeline.md` (ES) | 수집한 채용 공고 URL inbox / Second Brain |
+| `pipeline.md` | `modes/pipeline.md` (EN) | 수집한 채용 공고 URL inbox / Second Brain |
 
 다른 모드(`scan`, `batch`, `pdf`, `tracker`, `auto-pipeline`, `deep`, `contacto`, `ofertas`, `project`, `training`)는 기존 EN/ES 모드를 그대로 사용합니다. 해당 파일들은 주로 tooling, 경로, 명령어 중심이라 언어와 독립적으로 동작합니다.
 
