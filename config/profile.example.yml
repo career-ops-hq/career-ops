@@ -82,6 +82,16 @@ compensation:
   minimum: "$120K"               # Walk-away number
   location_flexibility: "Remote preferred, 1 week/month on-site possible"
 
+# Recruiters and search firms you want to follow (recruiter-signal.mjs, #7694).
+# Firms come from the shared directory templates/recruiter-firms.yml, filtered by
+# your choice below (an empty list means no limit), plus your own firms.
+# recruiters:
+#   countries: [US]              # ISO 3166-1 alpha-2 codes
+#   sectors: [technology]        # technology, finance, industrial, healthcare, consumer, energy, public, legal, board
+#   levels: [executive]          # executive | management | professional
+#   firms:                       # your own firms, always followed
+#     - { name: "Example Search Partners", countries: [US], sectors: [technology] }
+
 location:
   country: "United States"
   city: "San Francisco"

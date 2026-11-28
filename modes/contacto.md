@@ -82,6 +82,13 @@ short message; otherwise run the LinkedIn power move below.
    - **Sentence 2 (Proof)**: Data that answers their screening questions before they ask them (e.g., "5 years building ML pipelines, currently in Berlin, available immediately")
    - **Sentence 3 (CTA)**: "Happy to share my CV if this aligns with what you're looking for"
 
+   ### Recruiter — Off-market intro (#7694)
+   Use when the target is a search firm, not one posting: the firm posted a role in the candidate's niche that the candidate skipped, or `recruiter-signal.mjs` ranks it as active.
+   - **Sentence 1 (Hook)**: The observed mandate, named plainly ("I saw your search for a {role} in {region}"). Never imply the candidate applied to it.
+   - **Sentence 2 (Fit)**: Target roles, level and region, plus one proof point from `cv.md`, so the recruiter can match the candidate to other mandates.
+   - **Sentence 3 (CTA)**: "Happy to share my CV for your current or upcoming mandates at this level."
+   - **Note**: No salary figure in the message. Offer to save the recruiter to `data/contacts.tsv` with type `recruiter`, as for any contact.
+
    ### Hiring Manager
    - **Sentence 1 (Hook)**: Specific challenge their team is facing (extracted from the JD, company blog, or news)
    - **Sentence 2 (Proof)**: Candidate's greatest quantifiable achievement showing they have solved similar problems

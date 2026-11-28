@@ -683,6 +683,23 @@ node contact-lookup.mjs --self-test
 
 **Exit codes:** `0` on a successful lookup (including zero matches), `1` for a missing `--company`, self-test failure, or an unrecognized flag.
 
+## recruiter-signal
+
+Which recruiters and search firms are hiring in your niche, and which mandates they hold (discussion #7694). Zero-LLM and read-only. You choose which firms to follow in `config/profile.yml` → `recruiters`: `countries` (ISO codes), `sectors` and `levels` filter the shared directory `templates/recruiter-firms.yml` (an empty list means no limit; `global` firms match every country and `generalist` firms every sector), and `firms` adds your own, which are always followed. The directory starts with international firms and grows by pull request, one country at a time: names and public facts only, never a copy of a commercial directory. A posting that adds a branch or country to a firm's name ("Hays Belgium") still matches. A firm also counts as a recruiter when it is the Via of a tracker row, a `recruiter` contact in `data/contacts.tsv` works there, it has a row in `data/mandates.tsv`, or its name reads like a search or staffing firm in English, French, Dutch, German, Spanish, Portuguese, Italian, Swedish, Danish/Norwegian or Polish. For each firm it reports, over the look-back window of `data/scan-history.tsv`: postings seen, postings whose title passes `portals.yml` → `title_filter` (on-target), the last date seen, up to three on-target titles, tracker rows through it, saved contacts there, and its expected / open / closed mandates. Firms are ranked by on-target postings, then open and expected mandates. A firm whose postings never fit you still ranks when it posts at your level: that is the point.
+
+The `scan` mode shows the top five after its summary. When you skip an agency posting, the agent runs `--firm` on that firm and offers once to draft an introduction (`modes/_shared.md` → Skipped agency posting).
+
+```bash
+node recruiter-signal.mjs                       # JSON: firms, window, mandates.tsv quality
+node recruiter-signal.mjs --summary             # ranked table
+node recruiter-signal.mjs --directory --summary # every firm you follow, posting or not
+node recruiter-signal.mjs --firm "Acme Search"  # one firm, counted even if nothing else knows it yet
+node recruiter-signal.mjs --firm-file firm.txt  # same, first line of the file: how the agent passes a name taken from a posting
+node recruiter-signal.mjs --days 180 --top 10   # wider window, first ten firms
+```
+
+**Exit codes:** `0` on success (including no firm found), `1` for an unknown flag or a non-positive `--days` / `--top`.
+
 ## contact-extract
 
 Extract a recruiter or interviewer from a pasted reply, attach the contact to a

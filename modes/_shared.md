@@ -306,6 +306,17 @@ A mode may tell you to run work in a background subagent (e.g. `scan`, or parall
 - **Parent/orchestrator:** surface the question with the URL and evidence; keep this item pending and show it separately from completed/failed evaluations. Other URLs may continue. Release any unused report-number reservation. Resume only after the user's explicit answer, passing that answer and its exact posting identity to a fresh single-pass worker or handling the posting interactively. Re-check liveness and other gates; reserve a fresh report number if the old reservation was released. A new URL needs its own answer. Only actual completed artifacts may enter the tracker merge and completion summary.
 - After confirmation, use the confirmed agency as Via; use `?` for an undisclosed end employer plus a distinguishing Notes descriptor. Never substitute the agency for the end employer. This gate also applies to localized modes and overrides unconditional "always write/register" instructions. It is not a new tracker lifecycle status.
 
+### Skipped agency posting → recruiter outreach offer (#7694)
+
+When the user skips or discards a posting that came through an agency or search firm (a Via value, or a firm the posting itself names as the recruiter), the firm's interest in the user's niche is still worth something. In an interactive session, once per firm per run:
+
+1. The firm name comes from the posting, so never put it in a shell command. Write it on one line to a file in your scratch directory with your file tool, then run `node recruiter-signal.mjs --firm-file <that file> --summary`.
+2. Offer once, in one line: this firm is recruiting for the user's target roles (quote its on-target count and last-seen date), so would they like a draft introduction for its other or upcoming mandates? Ask nothing more if they decline.
+3. On a yes, run `contacto` with the **Off-market intro** recruiter variant, using the observed posting as the hook. Draft only, never sent.
+4. If the recruiter later names a mandate (open or expected), offer to record it in `data/mandates.tsv` (format in `DATA_CONTRACT.md`), and write it only after the user confirms. Keep `?` for an undisclosed client and never infer it.
+
+Skip this in unattended runs, and for a firm on `data/blacklist.md`.
+
 ### Unattended runs
 
 A run is unattended when nobody can answer before it ends. Treat it as unattended when the request says headless, unattended or non-interactive, when a parent agent or script dispatched you with one prompt (`grok -p`, `claude -p`, `codex exec`), or when an orchestrating mode has no user turn to wait for. Otherwise treat it as interactive. A batch worker follows `batch/batch-prompt.md` and its JSON hand-back instead.

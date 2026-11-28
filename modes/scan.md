@@ -457,6 +457,8 @@ New added to pipeline.md: N
 → Run the `pipeline` mode to evaluate the new offers (`/career-ops pipeline` where available, or ask the agent to run `pipeline`).
 ```
 
+**Recruiter signal (#7694):** in an interactive run, after the summary, run `node recruiter-signal.mjs --summary --top 5` and show its list under a `Recruiters active in your niche` heading. It ranks the search firms and agencies that posted roles passing `title_filter`, whether or not those postings fit. Show nothing when it finds no firm. When `config/profile.yml` has no `recruiters` key, offer once to set it: ask which countries, sectors and levels to follow and whether to add firms of their own (for example ones found in a public directory of headhunters), then write only what the user chose under `recruiters`. It is read-only and zero-LLM; never draft or send outreach from it unasked.
+
 **Session title counts:** end the summary with `Title counts: {remaining}/{found}` and the URLs of the postings still counted, so the interactive parent session can rename itself and hand those URLs to `pipeline`. `found` is every posting that passed the scanner's filters plus every search hit taken forward for checking. `remaining` is `found` less each one removed since: a duplicate, a dead or unconfirmed link, a title or location miss. The router's **Session Title** rule (`SKILL.md`, #5303) holds the full definitions. A worker running this mode never renames anything.
 
 ## Managing careers_url
