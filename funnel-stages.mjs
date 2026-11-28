@@ -26,12 +26,15 @@ export function parseStatusLogStages(content) {
     const observations = byNum.get(num);
     if (to === '-') {
       const dropped = observations.pop();
-      if (dropped) retracted.set(num, dropped.to);
+      if (dropped) {
+        if (!retracted.has(num)) retracted.set(num, new Set());
+        retracted.get(num).add(dropped.to.toUpperCase());
+      }
       continue;
     }
     const stale = retracted.get(num);
     retracted.delete(num);
-    const observation = { num, from: from.toUpperCase() === stale?.toUpperCase() ? '-' : from, to };
+    const observation = { num, from: stale?.has(from.toUpperCase()) ? '-' : from, to };
     const corrected = source === 'correction' ? observations.map(o => o.to).lastIndexOf(to) : -1;
     if (corrected === -1) observations.push(observation);
     else observations[corrected] = observation;
