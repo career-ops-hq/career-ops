@@ -114,7 +114,7 @@ export function openProviderIdCache(dir) {
         try {
           mkdirSync(path.dirname(s.file), { recursive: true });
           await withPipelineLock(s.file, () => {
-            const merged = readSliceForSave(s.file);
+            const merged = Object.assign(Object.create(null), readSliceForSave(s.file));
             for (const [key, value] of changes) {
               if (value === DELETED) delete merged[key];
               else merged[key] = value;
