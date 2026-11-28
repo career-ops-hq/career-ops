@@ -199,7 +199,7 @@ Available commands:
   /career-ops expand    → Auto-discover and add missing competencies from profile links
   /career-ops training  → Evaluate course/cert against North Star
   /career-ops project   → Evaluate portfolio project idea
-  /career-ops ideas     → Project ideas that would close a JD's skill gaps
+  /career-ops ideas     → Project & certification ideas (free/paid) for a JD's skill gaps
   /career-ops tracker   → Application status overview
   /career-ops agent-inbox → Queue/drain requests for the next session (data/agent-inbox.md)
   /career-ops apply     → Live application assistant (Playwright from this checkout, does not submit)

@@ -51,7 +51,7 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `upskill.md` | `upskill` | Skill-gap analysis across the evaluated pipeline |
 | `training.md` | `training` | Training & course evaluation |
 | `project.md` | `project` | Portfolio project evaluation |
-| `ideas.md` | `ideas` | Project ideas from a JD's skill gaps |
+| `ideas.md` | `ideas` | Project & certification ideas from a JD's skill gaps |
 | `add.md` | `add` | Add a project, paper, or role to the CV (confirm-before-write) |
 | `expand.md` | `expand` | Discover competencies missing from the CV (confirm-before-write) |
 | `agent-inbox.md` | `agent-inbox` (alias `inbox`) | Queue requests for the next session |
