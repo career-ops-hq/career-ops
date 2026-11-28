@@ -188,3 +188,12 @@ test('npm run star reads the marker from the story bank on disk', () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('story-provenance-check rejects --cv or --story-bank without a path', () => {
+  const script = join(dirname(dirname(fileURLToPath(import.meta.url))), 'story-provenance-check.mjs');
+  for (const args of [['--cv'], ['--cv='], ['--cv', '--summary'], ['--story-bank'], ['--story-bank='], ['--story-bank', '--cv', 'cv.md'], ['--cv', ''], ['--story-bank', ''], ['--cv', '', '--help'], ['--cv', 'cv.md', '--cv', '']]) {
+    const r = spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', timeout: 15_000 });
+    assert.equal(r.status, 1, describeSpawn(r));
+    assert.match(r.stderr, /requires a value/);
+  }
+});

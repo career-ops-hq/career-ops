@@ -696,6 +696,11 @@ function main() {
     console.error('Error: --occurrences requires a value.');
     process.exit(1);
   }
+  const frequencyRaw = flagValue(args, '--frequency');
+  if (hasFlag(args, '--frequency') && !frequencyRaw) {
+    console.error('Error: --frequency requires a value.');
+    process.exit(1);
+  }
 
   if (!existsSync(STORY_BANK_PATH)) {
     console.error(`Error: ${STORY_BANK_PATH} not found.`);
@@ -713,7 +718,7 @@ function main() {
   }
   const wage = wageParsed.value;
 
-  const frequency = flagValue(args, '--frequency') ?? null;
+  const frequency = frequencyRaw ?? null;
   if (frequency && !Object.hasOwn(FREQUENCY_MAP, frequency)) {
     console.error(`Error: --frequency must be one of ${Object.keys(FREQUENCY_MAP).join(', ')}, got "${frequency}"`);
     process.exit(1);

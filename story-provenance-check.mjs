@@ -157,7 +157,7 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { flagValue } from './lib/cli-flags.mjs';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { splitStoryBlocks, isValidStory, getField, STORY_FIELDS } from './lib/story-bank.mjs';
@@ -387,19 +387,6 @@ function extractClaims(body) {
   }
   claims.sort((a, b) => a.index - b.index);
   return claims;
-}
-
-/**
- * Numeric values present anywhere in a text (cv.md), as a Set for O(1) lookup.
- * @param {string} text
- * @returns {Set<number>}
- */
-function extractNumbers(text) {
-  const out = new Set();
-  let m;
-  const re = new RegExp(NUMBER_SCAN_RE);
-  while ((m = re.exec(text)) !== null) out.add(parseFloat(m[0]));
-  return out;
 }
 
 /**
@@ -716,7 +703,7 @@ function diagnose(storyBankExists, cvExists, storyCount, claimCount, storyBankPa
 }
 
 // ── Exports (for test-all.mjs and other consumers) ───────────────────
-export { parseStoryBlocks, malformedEntries, extractClaims, extractNumbers, classifyStoryBank, classifyEntries, diagnose };
+export { parseStoryBlocks, malformedEntries, extractClaims, classifyStoryBank, classifyEntries, diagnose };
 
 // ── CLI ──────────────────────────────────────────────────────────────
 
@@ -971,13 +958,21 @@ const USAGE = `Usage:
   --help, -h   print this and exit`;
 
 if (isMainModule(import.meta.url)) {
-  // BEFORE any work. Unhandled, `--help` fell through to the analysis: this
-  // script printed a full report for it, which is not what the flag asks for
-  // and hides that it was never recognised.
-  if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
-    console.log(USAGE);
-    process.exit(0);
+  // BEFORE any work. Unhandled, `--help` fell through to the analysis and
+  // printed a full report. A bare, empty or option-followed `--cv` /
+  // `--story-bank` fell back to the default file and reported on a file
+  // nobody asked for. validateFlags takes `--cv ""` as an operand, so check
+  // every occurrence for that first, before --help can exit 0.
+  const PATH_FLAGS = ['--story-bank', '--cv'];
+  const emptyPath = args.find((a, i) => PATH_FLAGS.includes(a) && args[i + 1] === '');
+  if (emptyPath) {
+    console.error(`Error: ${emptyPath} requires a value`);
+    process.exit(1);
   }
+  validateFlags(args, ['--summary', '--self-test', ...PATH_FLAGS, '--help', '-h'], USAGE, {
+    valueFlags: PATH_FLAGS,
+    requireOperand: true,
+  });
   if (selfTestMode) {
     runSelfTest();
   } else {

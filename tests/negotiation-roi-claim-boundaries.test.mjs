@@ -117,3 +117,14 @@ test('analyze enforces the safety gate end-to-end on h-word prose and sentence-e
   assert.equal(result.uncalculable.length, 1);
   assert.equal(result.uncalculable[0].claimType, 'percent-reduction');
 });
+
+test('a bare --frequency is a usage error, not an absent flag', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { fileURLToPath } = await import('node:url');
+  const script = fileURLToPath(new URL('../negotiation-roi.mjs', import.meta.url));
+  for (const args of [['--wage', '50', '--frequency'], ['--wage', '50', '--frequency=']]) {
+    const r = spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', timeout: 15_000 });
+    assert.equal(r.status, 1, r.stderr || r.stdout);
+    assert.match(r.stderr, /--frequency requires a value/);
+  }
+});
