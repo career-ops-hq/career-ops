@@ -1,41 +1,42 @@
 /**
- * Read the first transition into Applied for every tracker row.
- * The status ledger records event dates; the tracker Date column records evaluation dates.
+ * The day each tracker row was applied for, kept apart from the day it was
+ * evaluated (the tracker's Date column).
  *
- * @param {string | null | undefined} tsv data/status-log.tsv content
- * @returns {Map<string, string>} tracker number to YYYY-MM-DD application date
+ * The rules are the core's, called rather than copied (#3759 review):
+ *   - `statusLogAppliedDates()` reads data/status-log.tsv with
+ *     funnel-velocity.mjs's ledger rules: state aliases such as `sent`, a later
+ *     `correction` that replaces a date, a `to: -` line that retracts one, and
+ *     lines with too few columns skipped instead of thrown on.
+ *   - `resolveAppliedDate()` reads an `applied YYYY-MM-DD` note through
+ *     `parseAppliedDate()`, which drops a date the note cites about another row
+ *     (#2607), and rejects impossible calendar dates.
+ * The follow-up report makes the same two calls, so a row shows one applied
+ * date in both places.
+ *
+ * One difference is deliberate: when neither source has a date, the core falls
+ * back to the evaluation date (labelled `evaluation-date-fallback`) because
+ * the cadence needs some day to count from. A column headed "applied" must not
+ * show the evaluation date as the application date, so that case is "".
+ *
+ * Plain .mjs with the core module as a parameter, so `node --test` exercises
+ * these rules against the real core without a TypeScript runner.
+ *
+ * @param {Array<{n: string, date?: string, notes?: string}>} applications
+ * @param {string | null | undefined} statusLogText data/status-log.tsv, or null when absent
+ * @param {{
+ *   statusLogAppliedDates: (text: string) => Map<number, string>,
+ *   resolveAppliedDate: (app: any, statusLogDate: string | null) => {appliedDate: string | null, appDateSource: string},
+ * }} core followup-cadence.mjs
+ * @returns {Map<string, string>} tracker row number to YYYY-MM-DD, or "" when unknown
  */
-export function parseApplicationDatesFromStatusLog(tsv) {
-  const applicationDates = new Map();
-  for (const rawLine of String(tsv ?? "").split("\n")) {
-    if (!rawLine || rawLine.startsWith("#")) continue;
-    const [trackerNumber, eventDate, , toStatus] = rawLine.split("\t").map((cell) => cell.trim());
-    if (!/^\d+$/.test(trackerNumber) || !isRealApplicationDate(eventDate)) continue;
-    if (toStatus.toLowerCase() !== "applied" || applicationDates.has(trackerNumber)) continue;
-    applicationDates.set(trackerNumber, eventDate);
+export function appliedDatesByRow(applications, statusLogText, core) {
+  // The ledger keys rows by parsed integer, the tracker by its cell text.
+  const ledger = core.statusLogAppliedDates(statusLogText ?? "");
+  const dates = new Map();
+  for (const app of applications) {
+    const num = /^\d+$/.test(String(app.n ?? "")) ? Number(app.n) : NaN;
+    const { appliedDate, appDateSource } = core.resolveAppliedDate(app, ledger.get(num) ?? null);
+    dates.set(app.n, appDateSource === "evaluation-date-fallback" ? "" : appliedDate ?? "");
   }
-  return applicationDates;
-}
-
-/**
- * Resolve an application's submission date without falling back to its evaluation date.
- * The status ledger wins; notes support installations whose status history predates the ledger.
- *
- * @param {{n: string, notes?: string}} application tracker application
- * @param {Map<string, string>} statusLogDates parsed status-ledger dates
- * @returns {string} YYYY-MM-DD or an empty string when the submission date is unknown
- */
-export function resolveApplicationAppliedDate(application, statusLogDates) {
-  const fromStatusLog = statusLogDates.get(application.n);
-  if (fromStatusLog) return fromStatusLog;
-
-  const match = String(application.notes ?? "").match(/\bapplied\s+~?(\d{4}-\d{2}-\d{2})(?![\w-])/i);
-  return match && isRealApplicationDate(match[1]) ? match[1] : "";
-}
-
-/** True when a value is a real YYYY-MM-DD application date. */
-function isRealApplicationDate(value) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const parsed = new Date(value);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  return dates;
 }

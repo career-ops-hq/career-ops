@@ -66,6 +66,15 @@ export function sortRows(rows, sort, scoreOf, companyLabel = (row) => String(row
       // never reach the row-number tie-break below.
       return av === bv ? 0 : (av - bv) * dir;
     }
+    if (sort.key === 'applied') {
+      // Most rows were evaluated and never sent, so most have no application
+      // date. Those rows sort after every dated row in both directions, the way
+      // an unusable score does, rather than filling the top of an ascending sort.
+      const av = a.appliedDate || '';
+      const bv = b.appliedDate || '';
+      if (!av || !bv) return av === bv ? 0 : av ? -1 : 1;
+      return av.localeCompare(bv) * dir;
+    }
     const aValue = sort.key === 'company' ? companyLabel(a) : a[sort.key] || '';
     const bValue = sort.key === 'company' ? companyLabel(b) : b[sort.key] || '';
     return String(aValue).localeCompare(String(bValue)) * dir;
