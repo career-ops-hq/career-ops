@@ -36,23 +36,27 @@ JSON çıktısını ayrıştır. Şunları içerir:
 
 | Anahtar | İçerik |
 |-----|----------|
-| `metadata` | Toplam giriş, tarih aralığı, analiz tarihi, sonuca göre sayılar |
+| `metadata` | Toplam giriş, tarih aralığı, analiz tarihi, sonuca göre sayılar ve `outcomeRates`: her döküm satırıyla aynı `submitted` / `decided` paydaları üzerinden tüm takipçi |
 | `funnel` | Durum aşamasına göre sayı (evaluated, applied, interview, offer, vb.) |
-| `scoreComparison` | Sonuç grubuna göre ortalama/min/maks puan (positive, negative, self_filtered, pending) |
-| `archetypeBreakdown` | Arketip başına: toplam, positive, negative, self_filtered, dönüşüm oranı |
-| `blockerAnalysis` | En sık görülen Kesin Engeller (hard blockers): coğrafi kısıtlama, stack uyumsuzluğu, kıdem, ofis (onsite) |
-| `remotePolicy` | Politika grubu başına: toplam, positive, negative, dönüşüm oranı |
+| `scoreComparison` | Sonuç grubuna göre ortalama/min/maks puan (positive, awaiting, negative, discarded, self_filtered, pending) |
+| `archetypeBreakdown` | Arketip başına: total, submitted, decided, positive, awaiting, negative, discarded, self_filtered, conversionRate, decidedRate |
+| `blockerAnalysis` | En sık görülen kesin engeller (hard blockers): coğrafi kısıtlama, stack uyumsuzluğu, kıdem, ofis (onsite); her `percentage`, `blockerBase` değerinin bir payıdır |
+| `blockerBase` | Boş olmayan bir gaps dizisi taşıyan girişler; `blockerAnalysis[].percentage` için payda |
+| `remotePolicy` | Politika grubu başına: `archetypeBreakdown` ile aynı sütunlar |
 | `companySizeBreakdown` | Şirket boyutu grubu başına: startup, scaleup, enterprise |
 | `vendorAnalysis` | ATS kanal analizi: satıcı (vendor) başına ilerleme oranı + kapsama (aşağıya bak) |
-| `scoreThreshold` | Önerilen minimum puan + gerekçe |
-| `techStackGaps` | Olumsuz sonuçlardaki en sık görülen teknoloji eksikleri |
+| `viaChannelAnalysis` | Via kanal analizi (#1596): ajans başına ilerleme oranı + ajansa karşı doğrudan toplam (aşağıya bak) |
+| `scoreThreshold` | `recommended` (`sufficientSample` olana kadar null), `observedMinimum`, `sampleSize`, `sufficientSample`, gerekçe |
+| `techStackGaps` | Olumsuz / vazgeçilmiş sonuçlardaki en sık teknoloji eksikleri |
+| `discardReasonStats` | Kullanıcının kaydettiği atlama/vazgeçme gerekçeleri; her `percentage`, `discardReasonBase` değerinin bir payıdır |
+| `discardReasonBase` | Kendini eleyen, vazgeçilen veya olumsuz girişler; `discardReasonStats[].percentage` ve onun öneri eşiği için payda |
 | `recommendations` | Gerekçeleri ve etki düzeyiyle birlikte en iyi 5 eyleme dönüştürülebilir madde |
 
 Eğer komut dosyası `error` döndürürse, hata mesajını göster ve çık.
 
 ### `vendorAnalysis` — nasıl sunulmalı (ÖNEMLİ: nedensel çıkarımlarda temkinli olmak)
 
-`vendorAnalysis`, her raporun `**URL:**` alanından tespit edilen ATS satıcısına göre **gönderilmiş (submitted)** başvuruları gruplandırır (sadece temiz parmak izlerine sahip topluluk ATS'leri: Greenhouse, Lever, Ashby, Workday — beyaz etiketli (white-labeled) ATS'ler URL'den tespit edilemez ve raporlanmayan bir `unknown` grubuna düşer). `advanceRate` = `Responded`/`Interview`/`Offer` aşamasına ulaşanların oranı (tek başına `Applied` sayılmaz).
+`vendorAnalysis`, her raporun `**URL:**` alanından tespit edilen ATS satıcısına göre **gönderilmiş (submitted)** başvuruları gruplandırır (sadece temiz parmak izlerine sahip topluluk ATS'leri: Greenhouse, Lever, Ashby, Workday — beyaz etiketli (white-labeled) ATS'ler URL'den tespit edilemez ve raporlanmayan bir `unknown` grubuna düşer). `advanceRate` = `Responded`/`Assessment`/`Interview`/`Offer` aşamasına ulaşanların oranı (tek başına `Applied` sayılmaz).
 
 Motivasyon: *İşe Alımda Algoritmik Monokültürler* (Bommasani vd., FAccT 2026, [arXiv:2605.27371](https://arxiv.org/abs/2605.27371)) — ortak bir eleyici (screener) aracılığıyla yapılan retler bağımsız değil birbiriyle ilişkilidir, bu nedenle yoğunlaşmış ölü bir kanalın getirisi azalır.
 
@@ -61,6 +65,37 @@ Bunu kullanıcıya anlatırken:
 - `sufficientSample` değerine saygı duy: eğer false ise, satıcıdan sadece bir gözlem olarak bahset ("sonuç çıkarmak için çok az"), asla bir öneri olarak sunma.
 - İstatistiklerin bir alt kümeyi kapsadığını kullanıcının bilmesi için kapsama oranını (`coveragePct`) her zaman belirt.
 - `recommendations` dizisi, eğer biri nitelikleri taşıyorsa zaten `high` etkili kanal eylemini içerir — daha güçlü bir iddia uydurmak yerine bunu kelimesi kelimesine sun.
+
+### `viaChannelAnalysis` — ajans başına ilerleme oranı (#1596)
+
+**Gönderilmiş** başvuruları `Via` kanalına (işe alım uzmanı/ajans firması) göre gruplar; isteğe bağlı Via sütununu gerektirir (#1596). Bu sütunu olmayan takipçiler boş gruplar üretir ve hiçbir iddiada bulunulmaz. `—` satırları `direct` sayılır; `breakdown` her ajansı total/advanced/`advanceRate`/`sufficientSample` ile listeler. Via hücresi *boş* olan gönderilmiş satırlar (eski takipçi veya boş hücre; açık `—` doğrudan işaretinden farklı) iki gruba da girmez ve `unknownVia` içinde sayılır. Sıfırdan farklıysa bunu belirt, böylece kullanıcı ajans/doğrudan ayrımının gönderimlerin bir alt kümesini kapsadığını bilir. Ajans aracılı bir aramada en yüksek etkili karar hangi işe alım uzmanı ilişkilerine yatırım yapılacağıdır; bu analiz hangilerinin gerçekten dönüştüğünü gösterir.
+
+`vendorAnalysis` ile aynı nedensel temkin kuralları geçerlidir: kanal verimini raporla, asla nedensel bir iddiada bulunma; `sufficientSample` değerine saygı duy; güçlü bir ajans *"X üzerinden gelen rollere öncelik ver, dönüşüyor"* demektir, zayıf olan ise bir suçlama değil bir gözlemdir.
+- `recommendations` dizisi, nitelikleri taşıyan biri varsa en iyi dönüşen ajansla ilgili `medium` etkili eylemi zaten içerir; daha güçlü bir iddia uydurmak yerine onu olduğu gibi sun.
+
+### Maaş merceği (isteğe bağlı)
+
+Ücret gözlemleri varsa (rapor `advertised_comp` anahtarları veya `data/salary-observations.tsv` satırları), ek bir mercek olarak `node salary-gap.mjs --summary` çalıştır: (şirket, rol) ve para birimi başına ilan edilen→gerçek kesinti ve istenene ulaşma. Token harcamaz; bu sayıları asla elle yeniden hesaplama. Veri kalitesi bölümüne `sufficientSample` gibi saygı duy: düşük örneklem büyüklükleri öneri değil gözlemdir.
+
+### Şirket Geçmişi merceği (isteğe bağlı)
+
+Ek bir mercek olarak `node company-history.mjs --summary` çalıştır. Token harcamaz.
+
+**Önce her zaman düzen.** Özet, sessiz görünen eskimiş Applied satırlarıyla başlar; herhangi bir karttan önce o listeyi sun. Aşağıdaki kartlardan herhangi bir sonuç çıkarmadan önce kullanıcıya bunları doğrulamasını veya `node set-status.mjs --row <num> <state> --on <response-date>` ile güncellemesini söyle; eskimiş bir takipçi satırı gerçek sessizlikle aynı sinyali üretir.
+
+Ardından kartları önce sessiz olanlar gelecek şekilde sun (betik onları zaten bu sırayla verir).
+
+**Nedensel temkin (zorunlu, `vendorAnalysis` ile aynı duruş):** bu kartlar *senin kendi dosyaların* hakkındaki bilgilerdir; `silent-on-you` gösteren bir şirket "şirket hiç yanıt vermedi" değil, "takipçinde/takiplerinde kayıtlı bir yanıt yok" demektir. Masum açıklamalar yaygındır: yüksek hacimli gelen kutuları, sürekli açık ilanlar, yeniden açılan aramalar veya adayın aldığı ama hiç kaydetmediği bir yanıt. Bilgileri sun (tarihten bu yana N gün sessiz, M takip gönderildi) ve kararı kullanıcıya bırak; bir kartı asla şirket hakkında bir hüküm gibi ifade etme.
+
+### Huni Kalibrasyonu merceği (isteğe bağlı)
+
+Takipçide Applied veya ötesinde satırlar varsa, ek bir mercek olarak `node funnel-velocity.mjs --summary` çalıştır: adayın huni oranları ile aday tarafı piyasa ölçüt aralıkları, tipik ilk yanıt penceresini aşmış süreçteki başvurular ve (`data/status-log.tsv` geçiş biriktirdikten sonra) aşama geçişi başına medyan gün. Token harcamaz; bu sayıları asla elle yeniden hesaplama. Sunum kuralları (bunlar üslup önerisi değil, kesin ZORUNLULUKLARDIR):
+
+- **Aralığın üstündeki oranlar**: cesaretlendirme istenir (bu mercek sessizlik kaygısına karşı vardır), ama betiğin seçim yanlılığı notu MUTLAKA korunmalıdır (hedefli başvuruların toplu platform ortalamalarını geçmesi beklenir). Bu, piyasanın kolaylığını değil, filtre kalitesini doğrular.
+- **Aralığın altındaki oranlar**: kalibrasyon ve tam olarak bir somut eylem (followup moduyla takip uyumu veya patterns Adım 2 ile puan eşiği incelemesi; `config/profile.yml` içinde `follow_ups.enabled` değeri `false` ise takip seçeneğini atla). Aday hakkında asla hüküm verme.
+- **Her ölçüt anımı** yılını ve "yön gösterici" ibaresini taşır; gelen taban değerler hakemli istatistikler değil, işe alım sektörü toplamlarıdır.
+- **n=20 başvurunun altında karşılaştırmalı çarpan iddiası yok.** Betik bunları zaten bastırır; ham sayılardan elle yeniden kurma.
+- **Hız medyanları**: betiğin yazdırdığı sansürlü sayıyı her zaman tekrarla ("n hâlâ bekliyor, hariç tutuldu"); o olmadan yalnızca yanıtlanmış başvurular üzerinden alınan bir medyan hayatta kalan yanlılığı taşır.
 
 ## Adım 1b — Oturum-İçerik Hedefleme Sinyali (İsteğe bağlı)
 
