@@ -333,19 +333,6 @@ try {
     fail(`jobstreet.fetch() PH gave url=${phUrl} jobs=${JSON.stringify(phJobs)}`);
   }
 
-  // fetch() — handles non-array data field
-  const badDataCtx = {
-    transport: 'http',
-    fetchJson: async () => ({ data: null }),
-    fetchText: async () => { throw new Error('should not be called'); },
-  };
-  const badDataJobs = await jobstreet.fetch(
-    { name: 'Jobstreet ID', provider: 'jobstreet', searchKeywords: 'test' },
-    badDataCtx,
-  );
-  if (badDataJobs.length === 0) pass('jobstreet.fetch() handles null data field');
-  else fail(`jobstreet.fetch() should return empty for null data`);
-
 
   // Regression: the API can report far more matches than the legacy 3-page
   // default. This is an OFFLINE synthetic response, not a new live measurement.
@@ -607,6 +594,79 @@ try {
     pass('jobstreet.fetch() warns when full capped pages carry no reported total');
   } else {
     fail('jobstreet.fetch() missed page-cap truncation without totalCount');
+  }
+
+  // A response without a data array is a changed or failing API, not an
+  // empty board: page 1 throws and names what arrived instead.
+  const badEnvelopes = [
+    [{ error: 'boom', status: 500 }, '[error, status]'],
+    [{}, '[]'],
+    [{ data: null }, '[data]'],
+    ['<html>', '[string]'],
+    [null, '[null]'],
+  ];
+  for (const [body, expected] of badEnvelopes) {
+    let envelopeErr;
+    try {
+      await jobstreet.fetch(
+        { name: 'Example Board', provider: 'jobstreet' },
+        { transport: 'http', sleep: async () => {}, fetchJson: async () => body },
+      );
+    } catch (e) {
+      envelopeErr = e;
+    }
+    if (envelopeErr?.message.includes('expected data[]') && envelopeErr.message.includes(expected)) {
+      pass(`jobstreet.fetch() rejects a page-1 response without data[]: ${expected}`);
+    } else {
+      fail(`jobstreet.fetch() accepted ${JSON.stringify(body)} as an empty board: ${envelopeErr?.message}`);
+    }
+  }
+
+  // A malformed later page keeps earlier results and tags them as partial.
+  const envelopeWarnings = [];
+  let envelopeJobs;
+  try {
+    console.warn = (...args) => envelopeWarnings.push(args.join(' '));
+    let calls = 0;
+    envelopeJobs = await jobstreet.fetch(
+      { name: 'Example Board', provider: 'jobstreet', pageSize: 2, max_pages: 3 },
+      {
+        transport: 'http', sleep: async () => {},
+        fetchJson: async () => {
+          calls++;
+          if (calls === 1) return { data: [{ id: '1', title: 'A' }, { id: '2', title: 'B' }], totalCount: 6 };
+          return { error: 'upstream timeout' };
+        },
+      },
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+  if (envelopeJobs.length === 2 && envelopeJobs.jobstreetTruncated?.reason === 'fetch-error'
+      && envelopeWarnings.some(w => w.includes('page 2 failed') && w.includes('[error]'))) {
+    pass('jobstreet.fetch() tags a later page without data[] as a fetch-error truncation');
+  } else {
+    fail(`jobstreet later-page bad envelope read as complete: ${envelopeWarnings.join('; ')}`);
+  }
+
+  // Under a health probe, a malformed later page propagates.
+  let probeEnvelopeErr;
+  try {
+    let calls = 0;
+    await jobstreet.fetch(
+      { name: 'Example Board', provider: 'jobstreet', pageSize: 1, max_pages: 3 },
+      {
+        transport: 'http', maxPages: 2, sleep: async () => {},
+        fetchJson: async () => (++calls === 1 ? { data: [{ id: '1', title: 'A' }], totalCount: 4 } : {}),
+      },
+    );
+  } catch (e) {
+    probeEnvelopeErr = e;
+  }
+  if (probeEnvelopeErr?.message.includes('expected data[]')) {
+    pass('jobstreet.fetch() propagates a later bad envelope during a health probe');
+  } else {
+    fail('jobstreet.fetch() swallowed a bad envelope during a health probe');
   }
 
   // Mocked 429 on page 2 is retried without restarting the first page.
