@@ -66,6 +66,8 @@ copyFileSync(join(ROOT, 'path-resolver.mjs'), join(sandbox, 'path-resolver.mjs')
 mkdirSync(join(sandbox, 'lib'), { recursive: true });
 copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(sandbox, 'lib', 'is-main-module.mjs'));
 copyFileSync(join(ROOT, 'lib', 'page-format.mjs'), join(sandbox, 'lib', 'page-format.mjs'));
+// lib/cv-section-aliases.mjs holds the section-title table generate-pdf.mjs imports.
+copyFileSync(join(ROOT, 'lib', 'cv-section-aliases.mjs'), join(sandbox, 'lib', 'cv-section-aliases.mjs'));
 copyFileSync(join(ROOT, 'lib', 'browser-launch.mjs'), join(sandbox, 'lib', 'browser-launch.mjs'));
 // pipeline-lock.mjs runs the shared lock protocol from lib/dir-lock.mjs (#5358).
 copyFileSync(join(ROOT, 'lib', 'dir-lock.mjs'), join(sandbox, 'lib', 'dir-lock.mjs'));
