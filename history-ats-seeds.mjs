@@ -63,6 +63,7 @@ export function atsBoardUrlOf(rawUrl, vendor = atsVendorOf(rawUrl)) {
   let u;
   try { u = new URL(rawUrl); } catch { return null; }
   if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+  u.hostname = u.hostname.replace(/\.$/, '');
   if (HTTPS_VENDORS.has(vendor)) u.protocol = 'https:';
 
   const parts = u.pathname.split('/').filter(Boolean);

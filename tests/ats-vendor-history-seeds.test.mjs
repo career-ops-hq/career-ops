@@ -131,6 +131,10 @@ try {
     'https://jobs.lever.co/acme',
   );
   assert.equal(
+    atsBoardUrlOf('https://jobs.lever.co./acme/role-id?lever-source=x', 'lever'),
+    'https://jobs.lever.co/acme',
+  );
+  assert.equal(
     atsBoardUrlOf('https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Toronto/Role_R1', 'workday'),
     'https://acme.wd5.myworkdayjobs.com/Careers',
   );
