@@ -44,7 +44,7 @@
 - **LinkedIn**: Login require हो सकता है → `[!]` mark करें और candidate से text paste करने को कहें
 - **PDF**: यदि URL PDF की तरफ point करे, Read tool से directly पढ़ें
 - **`local:` prefix**: Local file पढ़ें। Example: `local:jds/naukri-pm-ai.md` → `jds/naukri-pm-ai.md` पढ़ें
-- **Naukri.com / Instahyre / Cutshort**: Common Indian job portals। Playwright usually cookie banners handle करता है
+- **Naukri.com / Instahyre / Cutshort**: Common Indian job portals। Naukri के page client-side render होते हैं और उसका JSON endpoint `406 recaptcha required` देता है, इसलिए उस पर Playwright/WebFetch attempt न करें। Job-alert email के लिए `node naukri-import.mjs`, link के लिए `node confirm-at-employer.mjs` use करें, और employer का careers page न हो तो candidate से JD text paste करने को कहें (देखें `docs/NAUKRI.md`)
 - **LinkedIn India / Wellfound India**: Well-structured pages। WebFetch often sufficient
 
 ## Automatic Numbering
