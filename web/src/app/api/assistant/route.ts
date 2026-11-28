@@ -10,6 +10,7 @@ import { buildSystemPreamble } from "@/lib/assistant-preamble.mjs";
 import { CAPS } from "@/lib/worker-capabilities.mjs";
 import { scopeFrom } from "@/lib/claude-invocation.mjs";
 import { fencingReport } from "@/lib/cli-fencing.mjs";
+import { createKimiStderrFilter } from "@/lib/run-cli-support.mjs";
 
 // Deny list DERIVED, never hand-written: every one of the six advisor argvs
 // that spelled its own omitted MultiEdit, which --permission-mode acceptEdits
@@ -210,7 +211,10 @@ export async function POST(req: Request) {
 `);
       if (substitution) safeEnqueue(`⚠️ ${substitution}\n\n`);
 
-      child.stdout.on("data", (d: Buffer) => {
+      const kimiStderr = cliId === "kimi" ? createKimiStderrFilter() : null;
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (d: string) => {
         if (closed) return;
         if (!isClaude) {
           emit(d.toString());
@@ -234,8 +238,13 @@ export async function POST(req: Request) {
           }
         }
       });
-      child.stderr.on("data", (d: Buffer) => {
+      child.stderr.on("data", (d: string) => {
         const s = d.toString();
+        if (kimiStderr) {
+          const errors = kimiStderr.push(s);
+          if (errors) safeEnqueue(`\n[${spec.name}] ${errors}\n`);
+          return;
+        }
         if (/error|not found|denied|fatal/i.test(s)) {
           safeEnqueue(`\n[${spec.name}] ${s.trim()}\n`);
         }
@@ -245,6 +254,8 @@ export async function POST(req: Request) {
         safeClose();
       });
       child.on("close", () => {
+        const kimiTail = kimiStderr?.flush();
+        if (kimiTail) safeEnqueue(`\n[${spec.name}] ${kimiTail}\n`);
         if (!emitted) {
           safeEnqueue("_(no output — is the CLI authenticated?)_");
         }

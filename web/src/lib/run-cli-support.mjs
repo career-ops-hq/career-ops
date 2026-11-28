@@ -383,6 +383,79 @@ export function parseGrokEvent(line) {
   return null;
 }
 
+export function kimiStreamArgs(prompt) {
+  return ["--output-format", "stream-json", "-p", prompt];
+}
+
+const KIMI_FATAL_STDERR_RE =
+  /invalid authentication|api key appears to be invalid|insufficient (account )?balance|balance is insufficient|reached your (?:[\w-]+ )+usage limit/i;
+
+export function isFatalKimiStderr(line) {
+  return FATAL_AUTH_STDERR_RE.test(line) || isFatalQuotaStderr(line) || KIMI_FATAL_STDERR_RE.test(line);
+}
+
+export function kimiStderrErrors(chunk) {
+  return String(chunk)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && isFatalKimiStderr(line))
+    .join("\n");
+}
+
+export function createKimiStderrFilter(maxPending = 4096) {
+  let pending = "";
+  return {
+    push(chunk) {
+      pending += String(chunk);
+      const nl = pending.lastIndexOf("\n");
+      let complete = "";
+      if (nl !== -1) {
+        complete = pending.slice(0, nl + 1);
+        pending = pending.slice(nl + 1);
+      }
+      if (pending.length > maxPending) pending = pending.slice(-maxPending);
+      return complete ? kimiStderrErrors(complete) : "";
+    },
+    flush() {
+      const rest = pending;
+      pending = "";
+      return rest ? kimiStderrErrors(rest) : "";
+    },
+  };
+}
+
+function kimiContentText(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((part) => part && typeof part === "object" && part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("");
+}
+
+function kimiToolName(calls) {
+  if (!Array.isArray(calls)) return null;
+  for (const call of calls) {
+    const name = call?.function?.name ?? call?.name;
+    if (typeof name === "string" && name.trim()) return name.trim();
+  }
+  return null;
+}
+
+export function parseKimiEvent(line) {
+  let ev;
+  try {
+    ev = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  if (!ev || typeof ev !== "object" || ev.role !== "assistant") return null;
+  const text = kimiContentText(ev.content);
+  if (text.trim()) return { text: text.endsWith("\n") ? text : `${text}\n` };
+  const tool = kimiToolName(ev.tool_calls);
+  return tool ? { tool } : null;
+}
+
 /**
  * Fold one parsed event's token count into a running total.
  *

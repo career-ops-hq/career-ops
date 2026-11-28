@@ -27,7 +27,7 @@ function knownBins(src) {
 }
 
 /** Binaries docs/SUPPORTED_CLIS.md promises work headlessly. A CLI documented
- *  as interactive-only (Cursor, Kimi) is correctly absent from KNOWN — the web
+ *  as interactive-only (Cursor) is correctly absent from KNOWN — the web
  *  UI drives workers headlessly and has nothing to offer them. */
 function documentedHeadlessBins(md) {
   return new Set([...md.matchAll(/Headless\/Batch:\s*`([A-Za-z0-9_-]+)/g)].map((m) => m[1]));
@@ -60,6 +60,12 @@ test("Grok Build CLI is wired up", () => {
   // reshuffle of the docs table can't quietly drop coverage for it.
   assert.match(src, /id:\s*"grok"/, "KNOWN is missing the grok entry");
   assert.match(src, /bin:\s*"grok"/, "the grok entry must spawn the `grok` binary");
+});
+
+test("Kimi Code CLI is wired up and documented", () => {
+  assert.match(src, /id:\s*"kimi"/, "KNOWN is missing the kimi entry");
+  assert.match(src, /bin:\s*"kimi"/, "the kimi entry must spawn the `kimi` binary");
+  assert.match(md, /\| Kimi Code CLI \|[^\n]*`kimi -p/, "docs/SUPPORTED_CLIS.md must document the kimi -p invocation");
 });
 
 test("no CLI is listed twice", () => {

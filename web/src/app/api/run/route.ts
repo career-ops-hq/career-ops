@@ -78,9 +78,12 @@ export async function POST(req: Request) {
   const cliId = spec.id;
   const substitution = cliSubstitutionNotice(resolved);
   const capabilities = capabilitiesFor(kind);
-  if (!isCliAllowedForCapabilities(cliId, capabilities)) {
+  if (!isCliAllowedForCapabilities(cliId, capabilities, kind)) {
+    const error = capabilities.writes
+      ? `CLI '${cliId}' cannot run write-capable worker '${kind}' without a verified permission adapter.`
+      : `CLI '${cliId}' cannot run worker '${kind}': it cannot be kept from running shell commands.`;
     return new Response(
-      JSON.stringify({ error: `CLI '${cliId}' cannot run write-capable worker '${kind}' without a verified permission adapter.` }),
+      JSON.stringify({ error }),
       { status: 400, headers: { "Content-Type": "application/json" } },
     );
   }

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { codexStreamArgs, isFatalClaudeStderr, isFatalCodexStderr, parseClaudeEvent, parseCodexEvent, parseGrokEvent } from "./run-cli-support.mjs";
+import { codexStreamArgs, isFatalClaudeStderr, isFatalCodexStderr, isFatalKimiStderr, kimiStreamArgs, parseClaudeEvent, parseCodexEvent, parseGrokEvent, parseKimiEvent } from "./run-cli-support.mjs";
 import { installedCliIds, pickUsableCli } from "./cli-pick.mjs";
 import { careerOpsRoot } from "./career-ops";
 import { readRememberedCli } from "./remembered-cli.mjs";
@@ -63,6 +63,7 @@ export const KNOWN: CliSpec[] = [
   { id: "claude", name: "Claude Code", bin: "claude", run: "claude -p", url: "https://claude.ai/code", args: (p) => ["-p", p], parseEvent: parseClaudeEvent, stderrIsFatal: isFatalClaudeStderr },
   { id: "codex", name: "Codex", bin: "codex", run: "codex exec", url: "https://github.com/openai/codex", args: (p) => ["exec", p], streamArgs: codexStreamArgs, parseEvent: parseCodexEvent, stderrIsFatal: isFatalCodexStderr },
   { id: "gemini", name: "Gemini CLI", bin: "gemini", run: "gemini -p", url: "https://github.com/google-gemini/gemini-cli", args: (p) => ["-p", p] },
+  { id: "kimi", name: "Kimi Code CLI", bin: "kimi", run: "kimi -p", url: "https://www.kimi.com/code/docs/en/", args: (p) => ["-p", p], streamArgs: kimiStreamArgs, parseEvent: parseKimiEvent, stderrIsFatal: isFatalKimiStderr },
   { id: "opencode", name: "OpenCode", bin: "opencode", run: "opencode run", url: "https://opencode.ai", args: (p) => ["run", p] },
   { id: "pi", name: "Pi", bin: "pi", run: "pi -p", url: "https://github.com/earendil-works/pi", args: (p) => ["--no-session", "-p", p] },
   { id: "copilot", name: "GitHub Copilot CLI", bin: "copilot", run: "copilot -p", url: "https://docs.github.com/en/copilot/github-copilot-in-the-cli", args: (p) => ["-p", p] },
@@ -85,6 +86,7 @@ function searchDirs(): string[] {
     path.join(home, ".npm-global/bin"),
     path.join(home, ".bun/bin"),
     path.join(home, ".deno/bin"),
+    path.join(home, ".kimi-code/bin"),
     path.join(home, ".opencode/bin"),
     "/opt/homebrew/bin",
     "/usr/local/bin",
