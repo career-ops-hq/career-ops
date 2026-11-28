@@ -53,9 +53,17 @@ function evidenceKey(item) {
   return `${item?.evidence?.source ?? ''}\0${normalizeKey(item?.evidence?.quote ?? '')}`;
 }
 
+const MARKDOWN_HEADING = /^(#{1,6})\s+(.+?)\s*#*$/;
+
+function entityHeadingKey(item) {
+  const quote = item?.evidence?.quote ?? '';
+  const heading = quote.trim().match(MARKDOWN_HEADING);
+  return `${item?.evidence?.source ?? ''}\0${normalizeKey(heading?.[2] ?? quote)}`;
+}
+
 function entityEvidenceKey(entry) {
   const facts = (entry.facts ?? []).map(evidenceKey).sort();
-  return `${evidenceKey(entry)}\0${facts.join('\0')}`;
+  return `${entityHeadingKey(entry)}\0${facts.join('\0')}`;
 }
 
 function classifyHeading(heading) {
@@ -96,7 +104,7 @@ function parseCv(text, source) {
     const lineNo = index + 1;
     const line = raw.trim();
     if (!line) return;
-    const heading = line.match(/^(#{1,6})\s+(.+?)\s*#*$/);
+    const heading = line.match(MARKDOWN_HEADING);
     if (heading) {
       const title = heading[2].trim();
       const found = classifyHeading(title);
@@ -279,37 +287,73 @@ async function doImport(args) {
       const migratedIds = new Set();
       for (const item of approved[key]) {
         if (!('facts' in item)) continue;
-        const identity = entityEvidenceKey(item);
-        const prior = existingItems.find((candidate) => !migratedIds.has(candidate.id) && 'facts' in candidate && entityEvidenceKey(candidate) === identity);
+        // Review can skip the facts that distinguish two same-heading jobs.
+        const original = extracted[key].find((entry) => entry.id === item.id);
+        const identity = entityEvidenceKey(original);
+        const heading = entityHeadingKey(original);
+        const sameHeading = existingItems.filter((candidate) => 'facts' in candidate && entityHeadingKey(candidate) === heading);
+        const exactMatches = sameHeading.filter((candidate) => entityEvidenceKey(candidate) === identity);
+        const [exact] = exactMatches;
+        const factEvidence = new Set(original.facts.map(evidenceKey));
+        const overlapping = sameHeading.filter((candidate) => candidate.facts.some((fact) => factEvidence.has(evidenceKey(fact))));
+        // Content-derived IDs can move between same-heading jobs when facts
+        // are added. Match their evidence before allowing an ID to be reused.
+        const prior = exact ?? (overlapping.length === 1 ? overlapping[0] : undefined);
+        const otherOccurrences = extracted[key].filter((candidate) => candidate !== original && entityHeadingKey(candidate) === heading);
+        const duplicateHeading = sameHeading.length > 1 || otherOccurrences.length > 0;
+        const competingOverlap = !exact && prior && otherOccurrences.some((occurrence) => {
+          const evidence = new Set(occurrence.facts.map(evidenceKey));
+          return prior.facts.some((fact) => evidence.has(evidenceKey(fact)));
+        });
+        if (exactMatches.length > 1 || (!exact && overlapping.length > 1) || (prior && migratedIds.has(prior.id))
+            || competingOverlap
+            || (!prior && duplicateHeading && existingItems.some((candidate) => candidate.id === item.id))) {
+          throw new Error(`Import rejected: ambiguous ${key} identity for "${item.label}"; existing profile was not changed.`);
+        }
         if (!prior) continue;
         reidentified.set(item.id, prior);
         migratedIds.add(prior.id);
       }
       const byId = new Map(existingItems.filter((item) => !migratedIds.has(item.id)).map((item) => [item.id, item]));
+      const targetIds = new Map([...reidentified].map(([id, prior]) => [id, byId.has(id) ? prior.id : id]));
       for (const [id, prior] of reidentified) {
-        const incoming = approved[key].find((item) => item.id === id);
-        const incomingFactsByEvidence = new Map((incoming?.facts ?? []).map((fact) => [evidenceKey(fact), fact]));
-        const facts = (prior.facts ?? []).map((fact) => {
-          const fresh = incomingFactsByEvidence.get(evidenceKey(fact));
-          return fresh ? { ...fact, id: fresh.id } : fact;
-        });
-        byId.set(id, { ...prior, id, facts });
+        const targetId = targetIds.get(id);
+        if (byId.has(targetId)) throw new Error(`Import rejected: ambiguous ${key} identity; existing profile was not changed.`);
+        byId.set(targetId, { ...prior, id: targetId });
       }
+      const occupiedFactIds = new Set(existingItems.flatMap((item) => (item.facts ?? []).map((fact) => fact.id)));
       for (const item of approved[key]) {
-        if (!byId.has(item.id)) byId.set(item.id, item);
-        else if ('facts' in item) {
-          const old = byId.get(item.id);
-          const facts = new Map((old.facts ?? []).map((fact) => [fact.id, fact]));
-          for (const fact of item.facts ?? []) {
-            const existingFact = facts.get(fact.id);
-            facts.set(fact.id, existingFact
-              ? { ...existingFact, ...(editedIds.has(fact.id) ? { text: fact.text } : {}), evidence: fact.evidence, review_status: fact.review_status }
-              : fact);
+        const targetId = targetIds.get(item.id) ?? item.id;
+        if ('facts' in item) {
+          const prior = byId.get(targetId);
+          const old = prior ?? { ...item, id: targetId };
+          const facts = new Map((prior?.facts ?? []).map((fact) => [fact.id, fact]));
+          const factsByEvidence = new Map([...facts.values()].map((fact) => [evidenceKey(fact), fact]));
+          for (const fact of item.facts) {
+            const existingFact = factsByEvidence.get(evidenceKey(fact)) ?? facts.get(fact.id);
+            if (existingFact) {
+              facts.set(existingFact.id, {
+                ...existingFact,
+                ...(editedIds.has(fact.id) ? { text: fact.text } : {}),
+                evidence: fact.evidence,
+                review_status: fact.review_status,
+              });
+              continue;
+            }
+            let id = fact.id;
+            if (occupiedFactIds.has(id)) {
+              const base = stableId(key, fact.evidence.quote, fact.evidence.source, targetId);
+              id = base;
+              for (let suffix = 1; occupiedFactIds.has(id); suffix++) id = `${base}-${suffix}`;
+            }
+            occupiedFactIds.add(id);
+            facts.set(id, { ...fact, id });
           }
-          byId.set(item.id, { ...old, ...(editedIds.has(item.id) ? { label: item.label } : {}), evidence: item.evidence, review_status: item.review_status, facts: [...facts.values()] });
+          byId.set(targetId, { ...old, ...(editedIds.has(item.id) ? { label: item.label } : {}), evidence: item.evidence, review_status: item.review_status, facts: [...facts.values()] });
         }
-        else byId.set(item.id, {
-          ...byId.get(item.id),
+        else if (!byId.has(targetId)) byId.set(targetId, item);
+        else byId.set(targetId, {
+          ...byId.get(targetId),
           ...(editedIds.has(item.id) ? { text: item.text } : {}),
           evidence: item.evidence,
           review_status: item.review_status,
