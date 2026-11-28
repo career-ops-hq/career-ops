@@ -28,7 +28,7 @@ import { normalizeReportLink } from './tracker-links.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { withPipelineLock, LockTimeoutError } from './pipeline-lock.mjs';
-import { writeFileAtomic } from './tracker-utils.mjs';
+import { reportUrlToken, writeFileAtomic } from './tracker-utils.mjs';
 import { sectionKind, processedHeadingFor } from './lib/pipeline-sections.mjs';
 import { normalizeUrl } from './url-key.mjs';
 
@@ -126,16 +126,25 @@ if (DONE.size === 0) {
 
 // ---- report lookup ----
 let reportFiles = [];
-try { reportFiles = readdirSync(REPORTS_DIR).filter(f => f.endsWith('.md')); } catch { /* no reports dir */ }
+try { reportFiles = readdirSync(REPORTS_DIR).filter(f => f.endsWith('.md') && !/^\d+-RESERVED\.md$/.test(f)); } catch { /* no reports dir */ }
 
-function findReportFile(reportNum) {
+function findReportFile(reportNum, postingKey) {
   if (!reportNum || reportNum === '-') return null;
   const n = parseInt(reportNum, 10);
   if (Number.isNaN(n)) return null;
-  return reportFiles.find(f => {
+  const candidates = reportFiles.filter(f => {
     const m = f.match(/^(\d+)-/);
     return m && parseInt(m[1], 10) === n;
-  }) || null;
+  });
+  if (candidates.length <= 1) return candidates[0] ?? null;
+
+  // A shared number alone cannot tell us which report belongs to this posting.
+  try {
+    const matches = candidates.filter(file => urlKey(reportUrlToken(join(REPORTS_DIR, file))) === postingKey);
+    return matches.length === 1 ? matches[0] : null;
+  } catch {
+    return null;
+  }
 }
 
 function readReportField(reportFile, field) {
@@ -266,9 +275,9 @@ function reconcile() {
       continue;
     }
 
-    const reportFile = findReportFile(done.reportNum);
+    const reportFile = findReportFile(done.reportNum, key);
     if (!reportFile) {
-      // No report on disk — leave it in Pendientes rather than write a dead link.
+      // Keep the entry pending until its report can be identified.
       skippedNoReport.push({ url, reportNum: done.reportNum || '?' });
       continue;
     }
@@ -290,7 +299,7 @@ function reconcile() {
   // ---- report & exit early if nothing changed ----
   console.log('=== Reconcile pipeline.md ===');
   for (const s of skippedNoReport) {
-    console.warn(`⚠️  ${s.url} — batch reports report #${s.reportNum} but no reports/${s.reportNum}-*.md found; left in Pendientes.`);
+    console.warn(`⚠️  ${s.url} — could not identify a report for #${s.reportNum}; left in Pendientes.`);
   }
 
   if (removeIdx.size === 0) {
