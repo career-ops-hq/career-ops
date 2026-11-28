@@ -27,6 +27,7 @@
 
 import { intInRange } from './_config-utils.mjs';
 import { employmentTypeField } from './_employment-type.mjs';
+import { workplaceField } from './_workplace-type.mjs';
 import { departmentTeamFields } from './_department-team.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 import { coerceId } from './_ids.mjs';
@@ -266,7 +267,7 @@ export default {
  *
  * SmartRecruiters returns:
  *   { content: [{ id, name, ref, refNumber, language: { code },
- *                 location: { fullLocation?, city?, region?, country?, remote? } }] }
+ *                 location: { fullLocation?, city?, region?, country?, remote?, hybrid? } }] }
  *
  * - requisitionId: `refNumber`, the employer's requisition id. It is stable
  *   across re-releases of one requisition (each re-release gets a new posting
@@ -277,7 +278,14 @@ export default {
  * Both keys are omitted when the payload carries no usable value.
  *
  * - location: prefer `fullLocation`; else assemble from city/region/country
- *   parts (skipping empties); append "Remote" when `location.remote` is true.
+ *   parts (skipping empties); append "Hybrid" when `location.hybrid` is true,
+ *   else "Remote" when `location.remote` is true.
+ * - workplaceType: from the same two flags, which every posting on the boards
+ *   read on 2026-11-27 carried and never set together (Freshworks, ServiceNow,
+ *   Wise, Experian, Canva, BoschGroup, Sixt, Ubisoft2): `hybrid` → hybrid,
+ *   `remote` → remote, both false → onsite. Omitted when either flag is
+ *   missing, so an older payload stays unknown to workplace_filter instead of
+ *   reading as onsite.
  * - url: `j.ref` is an `api.smartrecruiters.com/v1/companies/<slug>/postings/<id>`
  *   URL — rewrite to the public `jobs.smartrecruiters.com/<slug>/<id>-<title-slug>`.
  *   The public site has no `/postings/` segment; carrying it over yields a 404,
@@ -292,7 +300,7 @@ export default {
  * @param {any} json
  * @param {string} companyName
  * @param {string} [companySlug] Already-escaped URL.pathname segment from resolveSlug.
- * @returns {Array<{title: string, url: string, company: string, location: string, id?: string, postingId?: string, requisitionId?: string, language?: string}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, id?: string, postingId?: string, requisitionId?: string, language?: string, workplaceType?: 'remote' | 'hybrid' | 'onsite'}>}
  */
 export function parseSmartRecruitersResponse(json, companyName, companySlug) {
   // { content: [] } is an empty page. Any other envelope ({}, { error }, a bare
@@ -306,8 +314,14 @@ export function parseSmartRecruitersResponse(json, companyName, companySlug) {
   return items.flatMap(j => {
     const loc = j.location || {};
     const fullLocation = loc.fullLocation || [loc.city, loc.region, loc.country].filter(Boolean).join(', ');
-    const remote = loc.remote ? 'Remote' : '';
-    const location = [fullLocation, remote].filter(Boolean).join(', ');
+    // A hybrid posting has remote: false and hybrid: true, so reading `remote`
+    // alone showed it as onsite, and workplace_filter saw no type at all.
+    const workModel = loc.hybrid === true ? 'Hybrid' : loc.remote ? 'Remote' : '';
+    const location = [fullLocation, workModel].filter(Boolean).join(', ');
+    const workplaceType = loc.hybrid === true ? 'hybrid'
+      : loc.remote === true ? 'remote'
+      : loc.remote === false && loc.hybrid === false ? 'onsite'
+      : undefined;
     const slugified = (j.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     let url = '';
     if (typeof j.ref === 'string') {
@@ -354,6 +368,7 @@ export function parseSmartRecruitersResponse(json, companyName, companySlug) {
       ...(requisitionId ? { requisitionId } : {}),
       ...(language ? { language } : {}),
       ...(postedAt !== undefined ? { postedAt } : {}),
+      ...workplaceField(workplaceType),
       // typeOfEmployment.label: "Full-time", "Part-time", "Contract", "Intern".
       // An internship is often labelled "Full-time" with experienceLevel.id
       // "internship" (BoschGroup, 2026-11-22: 18 of the first 100), so that

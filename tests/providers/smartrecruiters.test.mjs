@@ -84,6 +84,49 @@ try {
     fail(`row 1 location = ${JSON.stringify(jobs[1]?.location)}, expected "Paris, France, Remote"`);
   }
 
+  // Work model: live postings carry both location.remote and location.hybrid,
+  // never both true (eight boards, 2026-11-27). A hybrid posting has
+  // remote: false, so reading `remote` alone showed it as onsite and set no
+  // workplaceType, which workplace_filter reads as unknown.
+  const workModel = parseSmartRecruitersResponse({
+    content: [
+      { id: 'h1', name: 'Hybrid Role', location: { city: 'Chennai', country: 'in', remote: false, hybrid: true, fullLocation: 'Chennai, , India' } },
+      { id: 'r1', name: 'Remote Role', location: { city: 'Lisbon', country: 'pt', remote: true, hybrid: false, fullLocation: 'Lisbon, , Portugal' } },
+      { id: 'o1', name: 'Onsite Role', location: { city: 'Berlin', country: 'de', remote: false, hybrid: false, fullLocation: 'Berlin, , Germany' } },
+      { id: 'u1', name: 'Old Shape Role', location: { fullLocation: 'Geneva, Switzerland', remote: false } },
+      { id: 'u2', name: 'No Location Role' },
+    ],
+  }, 'Acme', 'acme');
+  const wt = Object.fromEntries(workModel.map(j => [j.id, j.workplaceType]));
+  if (wt.h1 === 'hybrid' && wt.r1 === 'remote' && wt.o1 === 'onsite') {
+    pass('parseSmartRecruitersResponse sets workplaceType from location.hybrid / location.remote');
+  } else {
+    fail(`workplaceType by id = ${JSON.stringify(wt)}`);
+  }
+  if (!('workplaceType' in workModel[3]) && !('workplaceType' in workModel[4])) {
+    pass('parseSmartRecruitersResponse leaves workplaceType unset when a flag is missing');
+  } else {
+    fail(`old-shape rows got workplaceType ${JSON.stringify([workModel[3].workplaceType, workModel[4].workplaceType])}`);
+  }
+  if (workModel[0].location === 'Chennai, , India, Hybrid' && workModel[1].location === 'Lisbon, , Portugal, Remote'
+      && workModel[2].location === 'Berlin, , Germany') {
+    pass('parseSmartRecruitersResponse appends "Hybrid" to a hybrid posting\'s location');
+  } else {
+    fail(`locations = ${JSON.stringify(workModel.slice(0, 3).map(j => j.location))}`);
+  }
+
+  // End to end with the scanner's filter: the example config's
+  // allow: [remote, hybrid] + include_unknown: false used to drop every
+  // SmartRecruiters posting, remote ones included.
+  const { buildWorkplaceFilter } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const keep = buildWorkplaceFilter({ allow: ['remote', 'hybrid'], include_unknown: false });
+  const kept = workModel.filter(j => keep(j.workplaceType)).map(j => j.id);
+  if (JSON.stringify(kept) === JSON.stringify(['h1', 'r1'])) {
+    pass('workplace_filter allow [remote, hybrid] keeps SmartRecruiters remote and hybrid postings');
+  } else {
+    fail(`workplace_filter kept ${JSON.stringify(kept)}, expected ["h1","r1"]`);
+  }
+
   // The public site is /<slug>/<id>-<title-slug> — NOT /<slug>/postings/<id>.
   // Carrying the API's /postings/ segment over produces a 404 that the liveness
   // checker misreports as an expired posting (#1612).
