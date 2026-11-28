@@ -16,7 +16,7 @@ When the user asks to prep for an interview at a specific company+role, or when 
 
 ## Coffee Chat Cross-Reference (optional, North America-specific)
 
-Before generating prep for a company, check whether the user has a coffee chat note for that company — an off-the-record informational-interview conversation with someone already inside the target company. This is common North American (especially US/CA) job-search practice, grounded in university-career-services norms; other regions may have different or no equivalent informal-networking practice. **This step is additive/opt-in — "if a coffee chat note exists for this company, use it" — never a required step, and never implies every candidate should have coffee chat notes.** If none exists, or the user doesn't do coffee chats, skip this section silently and move on to Step 1.
+Before generating prep for a company, check whether the user has a coffee chat note for that company — an off-the-record informational-interview conversation with someone already inside the target company. This is common North American (especially US/CA) job-search practice, grounded in university-career-services norms; other regions may have different or no equivalent informal-networking practice. **This step is additive/opt-in — "if a coffee chat note exists for this company, use it" — never a required step, and never implies every candidate should have coffee chat notes.** If none exists, or the user doesn't do coffee chats, skip this section silently and continue with the rest of the mode.
 
 **How to get it:** the same pasted-in input pattern the Panel Intel table below already relies on (Step 4, `panel-mixed`) — the user references or pastes the note inline. This mode does not scan the filesystem or any external location for it.
 
@@ -31,7 +31,7 @@ Surface explicitly whether the coffee chat **corroborates** or **contradicts** s
 ## Coffee Chat Cross-Reference
 | Coffee chat signal | Cross-referenced against | Read |
 |---------------------|---------------------------|------|
-| {what the contact said} | {JD line / named interviewer / prior transcript} | Corroborates — {why, e.g. "confirms this is a consistent screening focus, not a one-off tangent"} / Contradicts — {why} |
+| {what the contact said} | {JD line / named interviewer / prior transcript} | Corroborates — {why, e.g. "lines up with a recurring screening focus, not a one-off tangent"} / Contradicts — {why} |
 ```
 
 - **One coffee chat is one data point, not proof.** Use corroborating language ("this is consistent with…", "this lines up with…"), never "confirmed" or "fact" language — unless a second independent source (a second coffee chat, or a matching pattern already recorded across two transcripts) exists for the same claim.
@@ -76,8 +76,8 @@ The first round of most processes is a recruiter / HR screen, not a technical pa
 | Query | What to extract |
 |-------|-----------------|
 | `"{company} {role} salary" site:levels.fyi` and `"{company} {role} salary" site:glassdoor.com/Salary` (run both — `OR` inside a quoted phrase is taken literally by most engines) | Comp ranges (base / equity / bonus) by level |
-| `"{company} interview process site:glassdoor.com"` then manually filter retrieved reviews to those describing the recruiter / HR screen | Process timeline, screening criteria, common screening questions, recruiter behavior |
-| `"{company} site:teamblind.com" comp negotiation OR offer` | Candid comp/leverage details, what recruiters push back on |
+| `"{company} interview process" site:glassdoor.com` then manually filter retrieved reviews to those describing the recruiter / HR screen | Process timeline, screening criteria, common screening questions, recruiter behavior |
+| `"{company}" comp negotiation OR offer site:teamblind.com` | Candid comp/leverage details, what recruiters push back on |
 | `"{company} careers"` + `"{company} benefits"` | Official comp/benefits framing, work-auth/visa policy, location policy |
 
 **Hiring manager / leadership** (motivation, scope alignment, team fit):
@@ -92,9 +92,9 @@ The first round of most processes is a recruiter / HR screen, not a technical pa
 
 | Query | What to extract |
 |-------|-----------------|
-| `"{company} {role} interview questions site:glassdoor.com"` | Actual questions asked, difficulty rating, experience rating, number of rounds, offer/reject ratio |
-| `"{company} {role} interview site:leetcode.com/discuss"` | Specific coding/technical problems, system design topics, round structure |
-| `"{company} interview process site:teamblind.com"` then manually filter retrieved threads to those describing technical rounds | Hiring bar, recent technical interview data points |
+| `"{company} {role} interview questions" site:glassdoor.com` | Actual questions asked, difficulty rating, experience rating, number of rounds, offer/reject ratio |
+| `"{company} {role} interview" site:leetcode.com/discuss` | Specific coding/technical problems, system design topics, round structure |
+| `"{company} interview process" site:teamblind.com` then manually filter retrieved threads to those describing technical rounds | Hiring bar, recent technical interview data points |
 
 If the company is small or obscure and yields few results, broaden: search for the role archetype at similar-stage companies, and note that intel is sparse. Do the recruiter-screen queries even when intel is sparse — comp/logistics data exists for almost every company.
 
@@ -120,16 +120,16 @@ If the company is small or obscure and yields few results, broaden: search for t
 
 If data is insufficient for any field, write "unknown — not enough data" rather than guessing.
 
-**AI-interviewer platforms (#2673):** when `invite-match.mjs`'s `isAIInterviewerPlatform` returns true for the invite/scheduling text — currently only Alex/Apriora, whose host is single-purpose and confirmed AI-led by product design — the candidate talks live to an AI system rather than a human. Append an **AI-Interviewer Notes** block right after Process Overview:
+**AI-interviewer platforms (#2673):** when `invite-match.mjs`'s `isAIInterviewerPlatform` returns true for any round's invite/scheduling text — currently only Alex/Apriora — that round is likely conducted live by an AI system rather than a human. The flag is a heuristic, not proof: Alex also sends Coordinator invites for human-conducted rounds, so an Alex link alone doesn't settle the format. Append one **AI-Interviewer Notes** block right after Process Overview, including when the match comes from a later round's own invite rather than the overview's Platform:
 
 ```markdown
 ## AI-Interviewer Notes
-[Render in {language.output}: state that this round is conducted by an AI interviewer ({platform}), not a human panel, and that prep differs from a human call — no human rapport or reading-the-room is available, so camera eye contact and steady pacing matter more, not less; the AI generates adaptive follow-up questions from the literal content of the candidate's answers, so vague or generic answers get probed harder than with a human interviewer, and specifics beat generalities; reading from a script reads as unnatural to the AI's follow-up generation, so avoid it; and if the call glitches mid-conversation (transcription errors, repeated or looping questions), that is a known issue on some AI-interviewer platforms — documented for Alex/Apriora specifically — not a signal the candidate did something wrong, so the guidance is to stay calm and keep answering normally.]
+[Render in {language.output}: state that the invite for this round points to {platform}, which usually means an AI interviewer rather than a human panel, and advise the candidate to confirm the format with the recruiter, since {platform} also schedules human-conducted rounds; then explain that if the round is AI-led, prep differs from a human call — no human rapport or reading-the-room is available, so camera eye contact and steady pacing matter more, not less; the AI generates adaptive follow-up questions from the literal content of the candidate's answers, so vague or generic answers get probed harder than with a human interviewer, and specifics beat generalities; reading from a script reads as unnatural to the AI's follow-up generation, so avoid it; and if the call glitches mid-conversation (transcription errors, repeated or looping questions), that is a known issue on some AI-interviewer platforms — documented for Alex/Apriora specifically — not a signal the candidate did something wrong, so the guidance is to stay calm and keep answering normally.]
 ```
 
-Skip this block entirely when the platform is human-mediated or not detected.
+Skip this block entirely when no round's invite matches.
 
-**HireVue — detected but modality unconfirmed:** `extractPlatform` detects and names HireVue as a platform, but `isAIInterviewerPlatform` deliberately returns `false` for it: HireVue is multi-modal (on-demand recorded screening, live human-conducted interviews, and a separate AI-led "AI Interviewer" product all share the same domain), and no part of the invite/scheduling text reliably says which one a given round is. Do NOT render the AI-Interviewer Notes block above for a HireVue-only match — that would assert a modality the detection can't confirm. Instead, when Platform resolves to "HireVue", append a shorter, neutral note:
+**HireVue — detected but modality unconfirmed:** `extractPlatform` detects and names HireVue as a platform, but `isAIInterviewerPlatform` deliberately returns `false` for it: HireVue is multi-modal (on-demand recorded screening, live human-conducted interviews, and a separate AI-led "AI Interviewer" product all share the same domain), and no part of the invite/scheduling text reliably says which one a given round is. Do NOT render the AI-Interviewer Notes block above for a HireVue-only match — that would assert a modality the detection can't confirm. Instead, when Platform resolves to "HireVue" for any round (the overview or a later round's own invite), append one shorter, neutral note:
 
 ```markdown
 ## Platform Note
@@ -187,7 +187,7 @@ If round structure is unknown, state that and provide the best available intel o
 
 When a round's Platform is known, add one logistics line to "How to prepare": for a video platform (Zoom / Microsoft Teams / Google Meet), a reminder to check camera, lighting, and background in advance; for Phone, a reminder to confirm a quiet space and good signal. Skip this line when Platform is not stated.
 
-When `isAIInterviewerPlatform` is true for that round's invite text — confirmed AI-led, currently Alex/Apriora only — replace that logistics line with a pointer to the AI-Interviewer Notes block above instead of the video-platform reminder: [Render in {language.output}: "AI-interviewer round ({platform}) — see AI-Interviewer Notes above."]
+When `isAIInterviewerPlatform` is true for that round's invite text — likely AI-led, currently Alex/Apriora only — replace that logistics line with a pointer to the AI-Interviewer Notes block above instead of the video-platform reminder: [Render in {language.output}: "Likely AI-interviewer round ({platform}), confirm the format with the recruiter — see AI-Interviewer Notes above."]
 
 When that round's Platform resolves to "HireVue" (detected, but `isAIInterviewerPlatform` is false — modality unconfirmed), keep the normal video-platform logistics line above and append a short pointer to the Platform Note instead of the AI-Interviewer Notes pointer: [Render in {language.output}: "HireVue round — format (recorded / live human / AI-led) not confirmed from the invite; see Platform Note above."]
 
