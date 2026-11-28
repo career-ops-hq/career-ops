@@ -716,7 +716,23 @@ if (isMainModule(import.meta.url)) {
   const from = flagValue(args, '--from');
   const to = flagValue(args, '--to');
   const dirValue = flagValue(args, '--dir');
+  // `--dir ""` (a shell variable that expanded to nothing) passes
+  // requireOperand, which catches only `--dir=` and a swallowed flag. Read as
+  // absent, it digested the default folder instead of the one asked for.
+  if (dirValue === '') {
+    console.error('Error: --dir requires a value');
+    process.exit(1);
+  }
   const sessionsDir = dirValue ? dirValue : DEFAULT_SESSIONS_DIR;
+  // An explicit --dir names the sessions to digest, so a folder that does not
+  // exist is an error. Read as empty, it printed "No interviews recorded in
+  // this range (interview-prep/sessions/ not found)", naming the default folder
+  // rather than the one given. Only the default may be absent (no sessions yet).
+  // Same rule as rejection-latency (#7840) and process-quality (#7781).
+  if (dirValue && !existsSync(dirValue)) {
+    console.error(`  --dir not found: ${dirValue}`);
+    process.exit(1);
+  }
 
   // `!== undefined`, not truthiness: an explicitly EMPTY bound (`--from=`) is a
   // malformed date the caller typed, not an absent flag. Treating it as absent
