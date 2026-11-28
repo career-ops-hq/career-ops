@@ -18,8 +18,9 @@ proposal becomes a CV line only after it is actually built and run through
 ## Inputs
 
 - A JD: pasted text, a URL, or a report number (reuse that report's `## Job
-  Description (archived verbatim)` section — never re-fetch a live URL when
-  the report already has it archived).
+  Description (archived verbatim)` section, falling back to its `jds/`
+  capture via `jd-capture.mjs` when the report points there instead — never
+  re-fetch a live URL when the report already has it archived).
 - `cv.md` + `config/profile.yml` — via `upskill.mjs`'s own known-skill
   exclusion, so a skill the candidate already has is never proposed as a gap.
 - `modes/_profile.md` — North Star / archetypes, for the "Signal for target
@@ -31,19 +32,22 @@ Never hand-roll a gap list from memory or re-read the JD yourself for this —
 `upskill.mjs` already does the known-skill exclusion correctly and this mode
 must not duplicate or second-guess it.
 
-Resolve the JD text first (pasted text used as-is; a URL fetched the same way
-other modes fetch a JD; a report number read from its archived section).
-Write it to a file with your file tool rather than passing JD text on a
-command line, then run:
+Resolve the JD text first: pasted text used as-is; a URL fetched the same way
+other modes fetch a JD; a report number read from its `## Job Description
+(archived verbatim)` section, falling back to its `jds/` capture (resolved
+via `jd-capture.mjs`) when the report points there instead. Write the text to
+a file with your file tool rather than passing JD text on a command line,
+then run:
 
 ```bash
 node upskill.mjs --url-text <path-to-jd-text-file>
 ```
 
 Parse the JSON: `{ mode: "targeted", gaps, excludedAsKnown, knownSkills }`.
-`gaps` is the list to work from. If it comes back empty, say so plainly — no
-gaps means the JD's required skills already read as covered by the CV, which
-is itself worth telling the candidate.
+`gaps` is the list to work from. If it comes back empty, say so plainly: no
+gaps were found against `upskill.mjs`'s skill extraction. Do not report full
+coverage — the extractor only catches skills in its catalog, so report that
+no gaps were found, not that the candidate covers every requirement.
 
 ## Step 2 — Propose Ideas (LLM)
 

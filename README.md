@@ -390,6 +390,7 @@ All of them share one router, `.agents/skills/career-ops/SKILL.md`, and the same
 | [`upskill`](modes/upskill.md) | Skill-gap analysis across your evaluated reports |
 | [`training`](modes/training.md) | Evaluate a course or certification against your North Star |
 | [`project`](modes/project.md) | Evaluate a portfolio project idea |
+| [`ideas`](modes/ideas.md) | Project ideas that would close a JD's skill gaps |
 
 **System**
 
