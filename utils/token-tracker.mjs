@@ -74,10 +74,12 @@ export const RATES = {
  * @returns {{ prompt_tokens: number, completion_tokens: number, total_tokens: number, cached_tokens: number }}
  */
 export function normalizeOpenAIUsage(usage) {
+  const prompt_tokens = usage?.prompt_tokens ?? 0;
+  const completion_tokens = usage?.completion_tokens ?? 0;
   return {
-    prompt_tokens: usage?.prompt_tokens ?? 0,
-    completion_tokens: usage?.completion_tokens ?? 0,
-    total_tokens: usage?.total_tokens ?? 0,
+    prompt_tokens,
+    completion_tokens,
+    total_tokens: usage?.total_tokens ?? prompt_tokens + completion_tokens,
     cached_tokens: usage?.prompt_tokens_details?.cached_tokens ?? usage?.cached_tokens ?? 0
   };
 }
