@@ -1089,11 +1089,15 @@ export function computeNextFollowupDate(status, appDate, lastFollowupDate, follo
 // requires followupCount >= applied_max_followups) simply never triggers —
 // no error, no guessing, matching the same "absent optional file = pass
 // through" convention used elsewhere in this project.
-export function analyzeFromContent(trackerContent, followupsContent = '', { enabled = true, statusLogContent = '' } = {}) {
+export function analyzeFromContent(trackerContent, followupsContent = '', { enabled = true, statusLogContent = '', today: todayInput = null } = {}) {
+  const evalDate = (todayInput && typeof todayInput === 'string')
+    ? parseDate(todayInput)
+    : (todayInput instanceof Date ? todayInput : null);
+  const now = evalDate || today();
   if (!enabled) {
     return {
       followupsEnabled: false,
-      metadata: { analysisDate: today().toISOString().split('T')[0], totalTracked: 0, actionable: 0, overdue: 0, urgent: 0, cold: 0, waiting: 0, retired: 0 },
+      metadata: { analysisDate: now.toISOString().split('T')[0], totalTracked: 0, actionable: 0, overdue: 0, urgent: 0, cold: 0, waiting: 0, retired: 0 },
       entries: [],
       cadenceConfig: CADENCE,
       cadenceDefaults: DEFAULT_CADENCE,
@@ -1113,7 +1117,7 @@ export function analyzeFromContent(trackerContent, followupsContent = '', { enab
       error: 'No applications found in tracker.',
       noData: true,
       metadata: {
-        analysisDate: today().toISOString().split('T')[0],
+        analysisDate: now.toISOString().split('T')[0],
         totalTracked: 0, actionable: 0, overdue: 0, urgent: 0, cold: 0, waiting: 0, retired: 0,
       },
       entries: [],
@@ -1134,7 +1138,6 @@ export function analyzeFromContent(trackerContent, followupsContent = '', { enab
     followupsByApp.get(fu.appNum).push(fu);
   }
 
-  const now = today();
   const entries = [];
 
   for (const app of apps) {
