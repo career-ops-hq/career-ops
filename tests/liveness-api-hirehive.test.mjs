@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveAtsApi, checkLivenessViaApi, classifyHireHivePosting, isAtsPosting, JD_TEXT_API_ATS } from '../liveness-api.mjs';
-import { fetchJdViaKnownApi, normalizeHireHiveJob } from '../browser-extract.mjs';
+import { fetchJdViaKnownApi, normalizeHireHiveJob } from '../fetch-jd.mjs';
 
 const POSTING = 'https://acme.hirehive.com/backend-engineer-berlin-Ab12Cd';
 const V2 = 'https://acme.hirehive.com/api/v2/jobs/job_Ab12Cd';

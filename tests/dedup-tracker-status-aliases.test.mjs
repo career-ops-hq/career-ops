@@ -169,8 +169,8 @@ const SANDBOX_FILES = [
   'lib/cli-flags.mjs', 'lib/linkedin-url.mjs', 'lib/dir-lock.mjs', 'lib/rename-retry.mjs', 'lib/lock-path.mjs', 'lib/yaml-document.mjs',
   // url-key.mjs reads Himalayas posting ids through the liveness resolver.
   'himalayas-posting.mjs', 'lib/is-main-module.mjs',
-  // himalayas-posting.mjs strips markup with lib/jd-parse.mjs.
-  'lib/jd-parse.mjs',
+  // himalayas-posting.mjs strips markup with lib/jd-parse.mjs, which decodes entities with the shared decoder.
+  'lib/jd-parse.mjs', 'providers/_html-entities.mjs', 'providers/_html-entity-table.mjs',
 ];
 const DUPLICATE_ROWS = [
   '| 1 | 2026-09-01 | Acme | Backend Engineer | 4.5/5 | Evaluated | ❌ | — | first |',

@@ -738,8 +738,8 @@ export function gateUrlJdResult(url, fetchResult, failure = null) {
  * @returns {Promise<JdBody>}
  */
 export async function resolveUrlJdBody(url, { textCap = TEXT_CAP, timeoutMs = TIMEOUT_MS } = {}) {
-  // Dynamic import: browser-extract pulls Playwright via liveness-browser.
-  const { fetchJdViaKnownApi, jdFailure } = await import('./browser-extract.mjs');
+  // Dynamic import: fetch-jd pulls Playwright via liveness-browser.
+  const { fetchJdViaKnownApi, jdFailure } = await import('./fetch-jd.mjs');
   const result = await fetchJdViaKnownApi(url, textCap, timeoutMs);
   const failure = result ? jdFailure(result, textCap) : null;
   return gateUrlJdResult(url, result, failure);
@@ -777,7 +777,7 @@ export async function resolveJdTextFile(textPath, { textCap = TEXT_CAP } = {}) {
       message: `JD text file is empty: ${textPath}`,
     };
   }
-  const { jdFailure } = await import('./browser-extract.mjs');
+  const { jdFailure } = await import('./fetch-jd.mjs');
   const synthetic = { url: textPath, text, bodyText: text, title: '' };
   return gateUrlJdResult(textPath, synthetic, jdFailure(synthetic, textCap));
 }

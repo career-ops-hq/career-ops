@@ -12,7 +12,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fetchJobPage } from '../openrouter-runner.mjs';
-import { normalizeSmartRecruitersJob, normalizeWorkdayJob } from '../browser-extract.mjs';
+import { normalizeSmartRecruitersJob, normalizeWorkdayJob } from '../fetch-jd.mjs';
 
 const URL_ = 'https://boards.greenhouse.io/acme/jobs/48213';
 

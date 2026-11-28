@@ -16,7 +16,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveAtsApi, checkLivenessViaApi, isAtsPosting, JD_TEXT_API_ATS } from '../liveness-api.mjs';
-import { fetchJdViaKnownApi, normalizeHibobJob } from '../browser-extract.mjs';
+import { fetchJdViaKnownApi, normalizeHibobJob } from '../fetch-jd.mjs';
 
 const ID = '0b1c2d3e-0000-4000-8000-000000000001';
 const POSTING = `https://acme.careers.hibob.com/jobs/${ID}`;

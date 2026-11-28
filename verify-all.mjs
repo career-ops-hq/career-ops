@@ -10,7 +10,7 @@
  *            when the file is cv.md itself, since it is the source
  *   - --links: every http(s) URL in the file answers. A 4xx/5xx or no answer
  *            fails; linkedin.com only warns, because it refuses scripts. Each
- *            request carries the same egress guard as lib/jd-page-fetch.mjs:
+ *            request carries the same egress guard as fetch-jd.mjs:
  *            redirects are followed by hand, and every hop is checked as a
  *            literal, by a DNS pre-check, and again at connect time, so a link
  *            that resolves or redirects to a private address is never dialled.
@@ -123,7 +123,7 @@ function checkVoice(path, text, root) {
 }
 
 /**
- * Status of one link, through the egress guard lib/jd-page-fetch.mjs uses:
+ * Status of one link, through the egress guard fetch-jd.mjs uses:
  * redirects followed by hand (at most MAX_REDIRECTS), and on every hop the
  * literal check, the DNS pre-check (validateUrlSecurity) and the connect-time
  * dns.lookup guard (providerFetchContext), so a name that answers
@@ -187,7 +187,7 @@ async function checkLinks(urls) {
   };
   // The connect-time guard lives in the patched dns.lookup, so the patch has
   // to be in place, and a fetch through an untrusted HTTP proxy would hide the
-  // destination from it: fail closed in both cases, as jd-page-fetch does.
+  // destination from it: fail closed in both cases, as fetchJdViaPage does.
   const { dnsLookupPatched } = await import('./providers/_dns-cache.mjs');
   const { providerFetchContext } = await import('./providers/_ip-guard.mjs');
   const { validateUrlSecurity } = await import('./liveness-browser.mjs');

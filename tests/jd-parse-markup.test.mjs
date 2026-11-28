@@ -42,3 +42,14 @@ test('a closer with no ">" is not rescanned for every opener', () => {
   assert.ok(ms < 1000, `took ${Math.round(ms)} ms`);
   assert.equal(out, '</script ', 'the openers are markup; the malformed closer is text');
 });
+
+test('skipElement drops a matching element with its nested contents, keeps the rest', () => {
+  const skipElement = (tag) => /\bgone\b/.test(tag);
+  const html = '<p>before</p><div class="gone"><div>inner</div><script>"</div>"</script>still gone</div><p>after</p>';
+  assert.equal(stripMarkup(html, { skipElement }).replace(/\s+/g, ' ').trim(), 'before after');
+});
+
+test('skipElement on a void or self-closed tag drops only that tag', () => {
+  const skipElement = (tag) => /\bgone\b/.test(tag);
+  assert.equal(stripMarkup('a<img class="gone">b<span class="gone"/>c', { skipElement }).replace(/\s+/g, ' ').trim(), 'a b c');
+});

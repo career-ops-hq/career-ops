@@ -47,8 +47,8 @@
  * "Chinese" below); the figure counts only when experience is named with it.
  */
 
+import { htmlToText } from './lib/jd-parse.mjs';
 import {
-  jdHtmlToText,
   fetchJdViaKnownApi,
   resolveJdApi,
   normalizeAshbyJob,
@@ -56,7 +56,7 @@ import {
   normalizeLeverJob,
   normalizeSmartRecruitersJob,
   normalizeWorkdayJob,
-} from './browser-extract.mjs';
+} from './fetch-jd.mjs';
 import { JD_TEXT_API_ATS, throttleProviderRequest } from './liveness-api.mjs';
 import { fetchJsonWithRetry, makeHttpCtx } from './providers/_http.mjs';
 
@@ -220,7 +220,7 @@ const LIST_MARKER = /^\s*(?:[-*•·]|\d+[.)])(?:\s+|$)/;
 
 /**
  * Plain text for parsing. Provider descriptions arrive as HTML, ATS JD
- * normalizers already return text; both end up as lines. jdHtmlToText writes an
+ * normalizers already return text; both end up as lines. htmlToText writes an
  * <li> as "- ", so `item` holds for either source.
  * @param {string} input
  * @returns {{ text: string, item: boolean }[]}
@@ -228,7 +228,7 @@ const LIST_MARKER = /^\s*(?:[-*•·]|\d+[.)])(?:\s+|$)/;
 function toLines(input) {
   const raw = String(input ?? '');
   // [^<>]: '<a<a<a…' fails each start at once instead of scanning to the end.
-  const text = /<[a-z!/][^<>]*>/i.test(raw) ? jdHtmlToText(raw) : raw;
+  const text = /<[a-z!/][^<>]*>/i.test(raw) ? htmlToText(raw) : raw;
   // Runs of spaces collapse first: the sentence split is quadratic on them.
   // A marker may also end its line: `<li>\n<p>text` and `<li></li>` arrive as a
   // bare "-", and headingKind would take it for a heading and hide the real one
@@ -631,7 +631,7 @@ export function resolveExperienceFilter(block, profileYears) {
 // providers/_http.mjs (SSRF-guarded connect, no redirects, body cap) with its
 // shared retry, which honours Retry-After on a 429. The remaining
 // JD_TEXT_API_ATS entries (an embed hop, an HTML page) use
-// fetchJdViaKnownApi as-is. Normalizers are browser-extract.mjs's own, so
+// fetchJdViaKnownApi as-is. Normalizers are fetch-jd.mjs's own, so
 // fetch-jd.mjs, `browser-extract.mjs jd` and this read the same text.
 const JSON_JD = /** @type {Record<string, (json: any, resolved: any, url: string, cap: number) => {text: string}|null>} */ ({
   greenhouse: (json, _r, url, cap) => normalizeGreenhouseJob(json, url, cap),

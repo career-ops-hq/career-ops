@@ -44,7 +44,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { withJdArchiveSection } from './lib/jd-archive-section.mjs';
 import { locateApplyReport } from './apply-scope.mjs';
 import { classifyLiveness, isUnreadableVerdict, JOB_ID_PATTERN } from './liveness-core.mjs';
-import { fetchJdViaKnownApi } from './browser-extract.mjs';
+import { fetchJdViaKnownApi } from './fetch-jd.mjs';
 import { HYDRATING_CODES, extractApplyControls, postingIdentity } from './liveness-browser.mjs';
 import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
 import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';

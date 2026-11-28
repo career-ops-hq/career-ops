@@ -113,7 +113,7 @@ function tableResolver(table) {
 
 // ── wiring: every third-party launch site uses the hardened chromium ───────
 {
-  const sites = ['archive-posting.mjs', 'batch-evaluate-gemini.mjs', 'browser-extract.mjs', 'check-liveness.mjs',
+  const sites = ['archive-posting.mjs', 'batch-evaluate-gemini.mjs', 'fetch-jd.mjs', 'check-liveness.mjs',
     'openrouter-runner.mjs', 'scan-ats-full.mjs', 'scan-dayforce.mjs', 'scan-interamt.mjs', 'scan-topdev.mjs', 'scan.mjs',
     'upskill.mjs'];
   // `import('playwright').Page` in a JSDoc type is not a runtime import.

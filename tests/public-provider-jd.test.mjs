@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { fetchJdViaKnownApi } from '../browser-extract.mjs';
+import { fetchJdViaKnownApi, TRUNCATION_NOTICE } from '../fetch-jd.mjs';
 import { resolveAtsApi } from '../liveness-api.mjs';
 
 const bamboo = 'https://acme.bamboohr.com/careers/38?source=job-board';
@@ -21,7 +21,7 @@ test('BambooHR JD reads only the requested open job from its tenant detail API',
   });
   assert.equal(resolveAtsApi(bamboo), null);
   assert.deepEqual(await fetchJdViaKnownApi(bamboo), {
-    url: bamboo, title: 'Platform Engineer', text: 'Build & operate services.\n\n- Node.js', ats: 'bamboohr',
+    kind: 'jd', url: bamboo, title: 'Platform Engineer', text: 'Build & operate services.\n\n- Node.js', ats: 'bamboohr',
   });
   opening.jobOpeningStatus = 'Closed';
   assert.equal(await fetchJdViaKnownApi(bamboo), null);
@@ -44,8 +44,7 @@ test('Himalayas JD reuses publisher identity checks and caps the returned descri
   assert.equal(result.ats, 'himalayas');
   assert.equal(result.url, job.applicationLink);
   assert.equal(result.title, job.title);
-  assert.equal(result.text.length, 101);
-  assert.match(result.text, /…$/);
+  assert.ok(result.text.endsWith(TRUNCATION_NOTICE(100)));
   job.guid += '-another';
   assert.equal(await fetchJdViaKnownApi(job.applicationLink), null);
 });

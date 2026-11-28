@@ -13,7 +13,7 @@ console.log('\nbrowser-extract.mjs (unavailable posting vs unrendered page)');
 
 let browser;
 try {
-  const { jdFailure, normalizeJd, readDom } = await import(pathToFileURL(join(ROOT, 'browser-extract.mjs')).href);
+  const { jdFailure, jdFromRenderedPage, readDom } = await import(pathToFileURL(join(ROOT, 'fetch-jd.mjs')).href);
 
   const longJd = 'Responsibilities include analysing product data. '.repeat(10);
 
@@ -34,10 +34,10 @@ try {
   else fail(`a real JD was rejected: ${JSON.stringify(quoting)}`);
 
   // readDom() hands over at most ~4003 chars (2000 head + marker + 2000 tail);
-  // normalizeJd() must not truncate that sample and lose the tail.
+  // jdFromRenderedPage() must not truncate that sample and lose the tail.
   const sample = `${'x'.repeat(2000)}\n…\n${'y'.repeat(1979)}This job is no longer available.`;
-  const tail = normalizeJd({ title: 'T', text: longJd, bodyText: sample }, 'https://x.example/j/5');
-  if (tail.bodyText.includes('no longer available.') && tail.bodyText.length === sample.length) pass('normalizeJd keeps the whole head+tail body sample');
+  const tail = jdFromRenderedPage({ title: 'T', text: longJd, bodyText: sample }, '', 'https://x.example/j/5');
+  if (tail.bodyText.includes('no longer available.') && tail.bodyText.length === sample.length) pass('jdFromRenderedPage keeps the whole head+tail body sample');
   else fail(`body sample was cut: ${tail.bodyText.length} of ${sample.length} chars`);
 
   const { chromium } = await import('playwright');
@@ -51,7 +51,7 @@ try {
     const classify = async (html) => {
       await page.setContent(html);
       const raw = await readDom(page);
-      return jdFailure(normalizeJd(raw, 'https://x.example/job/9'), 12000);
+      return jdFailure(jdFromRenderedPage(raw, await page.content(), 'https://x.example/job/9'), 12000);
     };
 
     // The banner sits in <header>, which readDom() strips from `text`.

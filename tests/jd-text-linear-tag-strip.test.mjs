@@ -30,7 +30,7 @@ import { htmlToText as apifyText } from '../plugins/apify/index.mjs';
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const FILES = [
   'fingerprint-core.mjs', 'keyword-match.mjs', 'scan-local-lib.mjs', 'harvest-buildlist.mjs',
-  'plugins/apify/index.mjs', 'lib/jd-page-fetch.mjs', 'openrouter-runner.mjs',
+  'plugins/apify/index.mjs', 'fetch-jd.mjs', 'openrouter-runner.mjs',
 ];
 const STRIPPERS = [
   ['fingerprint-core normalizeJdText', normalizeJdText],

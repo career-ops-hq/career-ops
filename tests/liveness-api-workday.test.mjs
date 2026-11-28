@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkLivenessViaApi, classifyWorkday403, resolveAtsApi } from '../liveness-api.mjs';
-import { workdayCxsUrl } from '../browser-extract.mjs';
+import { workdayCxsUrl } from '../fetch-jd.mjs';
 
 const posting = 'https://acme.wd3.myworkdayjobs.com/en-US/External/job/Berlin/QA-Engineer_R0419758-1';
 

@@ -928,7 +928,7 @@ if (isMain) {
         // the JD and then throwing `text.matchAll is not a function` downstream
         // (#1894). compactText is the string-in/string-out helper this wants.
         try {
-          const { compactText } = await import('./browser-extract.mjs');
+          const { compactText } = await import('./fetch-jd.mjs');
           targetText = compactText(targetText);
         } catch (e) {}
       } else {

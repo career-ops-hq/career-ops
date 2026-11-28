@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { normalizeWorkableJob, fetchJdViaKnownApi, JD_FETCHERS } from '../browser-extract.mjs';
+import { normalizeWorkableJob, fetchJdViaKnownApi, JD_FETCHERS, TRUNCATION_NOTICE } from '../fetch-jd.mjs';
 import { JD_TEXT_API_ATS } from '../liveness-api.mjs';
 import { describeSpawn } from './helpers/describe-spawn.mjs';
 
@@ -35,8 +35,7 @@ test('normalizer preserves title, ordered labeled sections, cap and excludes chr
   const long = { ...posting, description: '<p>' + 'x'.repeat(4500) + '</p>' };
   assert.match(normalizeWorkableJob(long, 'FIXTURE123', FULL, 20000).text, /REQUIREMENTS_MARKER/);
   const capped = normalizeWorkableJob(long, 'FIXTURE123', FULL, 100).text;
-  assert.equal(capped.length, 101); // existing compactText cap + ellipsis convention
-  assert.ok(capped.endsWith('…'));
+  assert.ok(capped.endsWith(TRUNCATION_NOTICE(100)));
   const optional = normalizeWorkableJob({ ...posting, requirements: null, benefits: '' }, 'FIXTURE123', FULL);
   assert.doesNotMatch(optional.text, /Requirements:|Benefits:/);
 });

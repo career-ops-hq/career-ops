@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { normalizeUltiproJob, fetchJdViaKnownApi, JD_FETCHERS } from '../browser-extract.mjs';
+import { normalizeUltiproJob, fetchJdViaKnownApi, JD_FETCHERS, TRUNCATION_NOTICE } from '../fetch-jd.mjs';
 import { JD_TEXT_API_ATS } from '../liveness-api.mjs';
 import { fetchJdText } from '../jd-years.mjs';
 
@@ -162,8 +162,7 @@ test("no JD from the empty page, the internal-only page, another posting's recor
 
 test('the text cap applies', () => {
   const capped = normalizeUltiproJob(page(record({ Description: `<p>${'word '.repeat(5000)}</p>` })), ID, DETAIL, 400).text;
-  assert.equal(capped.length, 401);
-  assert.ok(capped.endsWith('…'));
+  assert.ok(capped.endsWith(TRUNCATION_NOTICE(400)));
 });
 
 test('fetchJdViaKnownApi makes one request for the posting page, asking for HTML and refusing redirects', async () => {
@@ -183,7 +182,7 @@ test('fetchJdViaKnownApi makes one request for the posting page, asking for HTML
   assert.equal(jd.title, 'Store Associate');
   assert.ok(jd.text.endsWith(BODY));
   const short = await mocked(async () => new Response(page(record())), () => fetchJdViaKnownApi(DETAIL, 60));
-  assert.equal(short.text.length, 61);
+  assert.ok(short.text.endsWith(TRUNCATION_NOTICE(60)));
 });
 
 test('a failed request is a miss, even when the error page carries a record', async () => {

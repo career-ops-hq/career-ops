@@ -12,12 +12,13 @@ console.log('\nbrowser-extract.mjs (config + normalizers)');
 try {
   const mod = await import(pathToFileURL(join(ROOT, 'browser-extract.mjs')).href);
   const { resolveAtsApi, JD_TEXT_API_ATS } = await import(pathToFileURL(join(ROOT, 'liveness-api.mjs')).href);
+  const { resolveExtractorMode, normalizeListing, parseArgs } = mod;
   const {
-    resolveExtractorMode, compactText, normalizeJd, normalizeListing, parseArgs,
-    workdayCxsUrl, jdHtmlToText, normalizeWorkdayJob,
+    compactText, TRUNCATION_NOTICE, jdFromRenderedPage, workdayCxsUrl, normalizeWorkdayJob,
     normalizeAshbyJob, normalizeGreenhouseJob, normalizeLeverJob, normalizeSmartRecruitersJob,
     normalizeZohoJob, fetchJdViaKnownApi, resolveJdApi, JD_FETCHERS,
-  } = mod;
+  } = await import(pathToFileURL(join(ROOT, 'fetch-jd.mjs')).href);
+  const { htmlToText } = await import(pathToFileURL(join(ROOT, 'lib/jd-parse.mjs')).href);
 
   // resolveExtractorMode — default mcp, explicit cli, garbage → mcp, missing → mcp
   const tmp = mkdtempSync(join(tmpdir(), 'career-ops-extractor-'));
@@ -74,52 +75,49 @@ try {
   if (capped.length === 11 && capped.endsWith('…')) pass('compactText caps length and appends an ellipsis');
   else fail(`compactText cap => ${JSON.stringify(capped)}`);
 
-  // normalizeJd — shape { url, title, text }
-  const jd = normalizeJd({ title: '  Senior Go  Engineer ', text: 'Line1\n\n\n\nLine2   end' }, 'https://x/1');
+  // jdFromRenderedPage — shape { url, title, text }
+  const jd = jdFromRenderedPage({ title: '  Senior Go  Engineer ', text: 'Line1\n\n\n\nLine2   end' }, '', 'https://x/1');
   if (jd.url === 'https://x/1' && jd.title === 'Senior Go Engineer' && jd.text === 'Line1\n\nLine2 end') {
-    pass('normalizeJd shapes { url, title, text } and compacts both');
+    pass('jdFromRenderedPage shapes { url, title, text } and compacts both');
   } else {
-    fail(`normalizeJd => ${JSON.stringify(jd)}`);
+    fail(`jdFromRenderedPage => ${JSON.stringify(jd)}`);
   }
 
-  // normalizeJd prefers a schema.org JobPosting from JSON-LD when the page
-  // ships one, over the rendered DOM text — but the comparison must be on
-  // NORMALIZED length, not raw length. Phenom-style chrome ("Apply now / Save
-  // job / Share ...") is mostly repeated newlines: it can out-length a real,
-  // shorter-in-raw-HTML JSON-LD description before whitespace is collapsed,
-  // even though the JSON-LD is clearly the substantive content once both are
-  // normalized. (Regression for the case where raw-length comparison let DOM
-  // chrome win and the JD came out empty.)
+  // A schema.org JobPosting the page ships beats the rendered DOM text — but the
+  // comparison must be on NORMALIZED length, not raw length. Phenom-style chrome
+  // ("Apply now / Save job / Share ...") is mostly repeated newlines: it can
+  // out-length a real, shorter-in-raw-HTML description before whitespace is
+  // collapsed, even though the JobPosting is clearly the substantive content once
+  // both are normalized.
+  const ldPage = (description) => `<html><head><script type="application/ld+json">${JSON.stringify({ '@type': 'JobPosting', title: 'Rust Engineer', description })}</script></head><body></body></html>`;
   const chromeHeavy = 'Apply now\n\n\n\n\n\n\n\nSave job\n\n\n\n\n\n\n\nShare\n\n\n\n\n\n\n\nLocation\n\n\n\n\n\n\n\nBasel\n\n\n\n\n\n\n\nJob ID\n\n\n\n\n\n\n\n2024\n\n\n\n\n\n\n\n';
-  const substantiveLd = '<p>Lead the Rust platform team. Own the roadmap for the core services and mentor five engineers.</p>';
-  const ldWins = normalizeJd({ title: '', text: chromeHeavy, jsonLdDescription: substantiveLd }, 'https://x/1');
-  if (ldWins.text === 'Lead the Rust platform team. Own the roadmap for the core services and mentor five engineers.') {
-    pass('normalizeJd compares normalized (not raw) DOM length, so JSON-LD wins over whitespace-heavy DOM chrome');
+  const sentence = 'Lead the Rust platform team and own the roadmap for the core services, mentoring engineers across the group. ';
+  const ldWins = jdFromRenderedPage({ title: '', text: chromeHeavy }, ldPage(`<p>${sentence.repeat(8)}</p>`), 'https://x/1');
+  if (ldWins.text.includes('Lead the Rust platform team') && ldWins.title === 'Rust Engineer') {
+    pass('jdFromRenderedPage compares normalized (not raw) DOM length, so the JobPosting wins over whitespace-heavy DOM chrome');
   } else {
-    fail(`normalizeJd chrome-vs-ld => ${JSON.stringify(ldWins.text)}`);
+    fail(`jdFromRenderedPage chrome-vs-ld => ${JSON.stringify(ldWins.text)}`);
   }
 
-  // ...and the rule stays "longer wins", not "JSON-LD always wins": a genuinely
-  // longer, substantive DOM text must still beat a short stub JobPosting.
-  const realDomText = 'Full job description with responsibilities, requirements, and a benefits section spanning several sentences.';
-  const stubLd = '<p>Rust Engineer</p>';
-  const domWins = normalizeJd({ title: '', text: realDomText, jsonLdDescription: stubLd }, 'https://x/1');
-  if (domWins.text === realDomText) {
-    pass('normalizeJd keeps the rendered DOM text when the JSON-LD is a shorter stub');
+  // ...and the rule stays "longer wins", not "the JobPosting always wins": a
+  // longer, substantive DOM text must still beat a shorter structured description.
+  const realDomText = 'Full job description with responsibilities, requirements, and a benefits section. '.repeat(30);
+  const domWins = jdFromRenderedPage({ title: '', text: realDomText }, ldPage(`<p>${sentence.repeat(8)}</p>`), 'https://x/1');
+  if (domWins.text === realDomText.trim()) {
+    pass('jdFromRenderedPage keeps the rendered DOM text when the JobPosting is shorter');
   } else {
-    fail(`normalizeJd dom-vs-stub-ld => ${JSON.stringify(domWins.text)}`);
+    fail(`jdFromRenderedPage dom-vs-ld => ${JSON.stringify(domWins.text.slice(0, 60))}`);
   }
 
-  // normalizeJd honors a custom text cap (a long JD is truncated at the cap, not
-  // silently at the 12000 default) while leaving the default behavior unchanged.
+  // A custom text cap truncates at the cap, not silently at the 12000 default.
   const longText = 'y'.repeat(20000);
-  const raised = normalizeJd({ title: 'Role', text: longText }, 'https://x/1', 15000);
-  const defaulted = normalizeJd({ title: 'Role', text: longText }, 'https://x/1');
-  if (raised.text.length === 15001 && raised.text.endsWith('…') &&
-      defaulted.text.length === 12001 && defaulted.text.endsWith('…')) {
-    pass('normalizeJd applies a custom textCap and defaults to the 12000 JD cap');
+  const raised = jdFromRenderedPage({ title: 'Role', text: longText }, '', 'https://x/1', 15000);
+  const defaulted = jdFromRenderedPage({ title: 'Role', text: longText }, '', 'https://x/1');
+  if (raised.text.endsWith(TRUNCATION_NOTICE(15000)) && !raised.text.includes('y'.repeat(15001)) &&
+      defaulted.text.endsWith(TRUNCATION_NOTICE(12000)) && !defaulted.text.includes('y'.repeat(12001))) {
+    pass('jdFromRenderedPage applies a custom textCap and defaults to the 12000 JD cap');
   } else {
-    fail(`normalizeJd textCap => raised=${raised.text.length} default=${defaulted.text.length}`);
+    fail(`jdFromRenderedPage textCap => raised=${raised.text.length} default=${defaulted.text.length}`);
   }
 
   // workdayCxsUrl — Workday posting URLs map to the per-job CXS endpoint;
@@ -152,41 +150,41 @@ try {
     fail('workdayCxsUrl must reject ".." in the job path');
   }
 
-  // jdHtmlToText — block structure survives as newlines, entities decode
+  // htmlToText — block structure survives as newlines, entities decode
   // (including entity-escaped markup), script/style bodies are dropped.
-  const html = jdHtmlToText('<h1>About</h1><p>We build&nbsp;things &amp; ship.</p><style>p{color:red}</style><ul><li>Own the roadmap</li><li>Ship</li></ul><p>Line<br/>break</p>');
+  const html = htmlToText('<h1>About</h1><p>We build&nbsp;things &amp; ship.</p><style>p{color:red}</style><ul><li>Own the roadmap</li><li>Ship</li></ul><p>Line<br/>break</p>');
   if (html === 'About\nWe build things & ship.\n\n- Own the roadmap\n- Ship\nLine\nbreak') {
-    pass('jdHtmlToText keeps block breaks and bullets, decodes entities, drops <style>');
+    pass('htmlToText keeps block breaks and bullets, decodes entities, drops <style>');
   } else {
-    fail(`jdHtmlToText => ${JSON.stringify(html)}`);
+    fail(`htmlToText => ${JSON.stringify(html)}`);
   }
-  const commented = jdHtmlToText('<p>Pay</p><!-- salary < 100000 --><p>Benefits</p>');
+  const commented = htmlToText('<p>Pay</p><!-- salary < 100000 --><p>Benefits</p>');
   if (commented === 'Pay\nBenefits') {
-    pass('jdHtmlToText strips a comment whose body holds an unquoted <');
+    pass('htmlToText strips a comment whose body holds an unquoted <');
   } else {
-    fail(`jdHtmlToText comment => ${JSON.stringify(commented)}`);
+    fail(`htmlToText comment => ${JSON.stringify(commented)}`);
   }
-  if (jdHtmlToText('&lt;p&gt;Escaped &lt;b&gt;markup&lt;/b&gt;&lt;/p&gt;') === 'Escaped markup') {
-    pass('jdHtmlToText double-decodes entity-escaped markup');
+  if (htmlToText('&lt;p&gt;Escaped &lt;b&gt;markup&lt;/b&gt;&lt;/p&gt;') === 'Escaped markup') {
+    pass('htmlToText double-decodes entity-escaped markup');
   } else {
-    fail(`jdHtmlToText escaped => ${JSON.stringify(jdHtmlToText('&lt;p&gt;Escaped &lt;b&gt;markup&lt;/b&gt;&lt;/p&gt;'))}`);
+    fail(`htmlToText escaped => ${JSON.stringify(htmlToText('&lt;p&gt;Escaped &lt;b&gt;markup&lt;/b&gt;&lt;/p&gt;'))}`);
   }
-  const comparison = jdHtmlToText('<p>Teams of &lt; 5 people, &gt; 2 years of experience, &lt;10 engineers and &gt;150k users.</p>');
+  const comparison = htmlToText('<p>Teams of &lt; 5 people, &gt; 2 years of experience, &lt;10 engineers and &gt;150k users.</p>');
   if (comparison === 'Teams of < 5 people, > 2 years of experience, <10 engineers and >150k users.') {
-    pass('jdHtmlToText keeps comparison text between decoded angle brackets');
+    pass('htmlToText keeps comparison text between decoded angle brackets');
   } else {
-    fail(`jdHtmlToText comparison => ${JSON.stringify(comparison)}`);
+    fail(`htmlToText comparison => ${JSON.stringify(comparison)}`);
   }
-  const quotedAttr = jdHtmlToText('<p title="a > b">Text</p>');
+  const quotedAttr = htmlToText('<p title="a > b">Text</p>');
   if (quotedAttr === 'Text') {
-    pass('jdHtmlToText strips a whole tag whose quoted attribute holds an angle bracket');
+    pass('htmlToText strips a whole tag whose quoted attribute holds an angle bracket');
   } else {
-    fail(`jdHtmlToText quoted attribute => ${JSON.stringify(quotedAttr)}`);
+    fail(`htmlToText quoted attribute => ${JSON.stringify(quotedAttr)}`);
   }
-  if (jdHtmlToText(null) === '' && jdHtmlToText('') === '' && jdHtmlToText(42) === '') {
-    pass('jdHtmlToText returns "" for a non-string / empty body');
+  if (htmlToText(null) === '' && htmlToText('') === '' && htmlToText(42) === '') {
+    pass('htmlToText returns "" for a non-string / empty body');
   } else {
-    fail('jdHtmlToText should return "" for non-string input');
+    fail('htmlToText should return "" for non-string input');
   }
 
   // normalizeWorkdayJob — same { url, title, text } contract as the scraped path
@@ -245,7 +243,7 @@ try {
     'https://x/1',
     500,
   );
-  if (wdCapped && wdCapped.text.length <= 501) pass('normalizeWorkdayJob honors the text cap');
+  if (wdCapped && wdCapped.text.endsWith(TRUNCATION_NOTICE(500))) pass('normalizeWorkdayJob honors the text cap');
   else fail(`normalizeWorkdayJob cap => ${wdCapped && wdCapped.text.length}`);
 
   // normalizeAshbyJob — Ashby's public API is ORG-level, so the job is picked
@@ -321,7 +319,7 @@ try {
   else fail(`normalizeAshbyJob nulls => ${JSON.stringify(ashbyNulls)}`);
 
   // normalizeGreenhouseJob — `content` is HTML (often entity-escaped), so it
-  // goes through the same jdHtmlToText pass as Workday's jobDescription.
+  // goes through the same htmlToText pass as Workday's jobDescription.
   const gh = normalizeGreenhouseJob(
     {
       title: 'Backend Engineer',
@@ -532,7 +530,7 @@ try {
     normalizeGreenhouseJob({ title: 'X', content: `<p>${'word '.repeat(5000)}</p>` }, 'https://x/1', 400),
     normalizeLeverJob({ text: 'X', descriptionPlain: 'word '.repeat(5000) }, 'https://x/1', 400),
   ];
-  if (apiCapped.every((v) => v && v.text.length <= 401)) pass('every ATS normalizer honors the text cap');
+  if (apiCapped.every((v) => v && v.text.endsWith(TRUNCATION_NOTICE(400)))) pass('every ATS normalizer honors the text cap');
   else fail(`normalizer caps => ${JSON.stringify(apiCapped.map((v) => v && v.text.length))}`);
 
   // fetchJdViaKnownApi — the dispatch gate is pure: a host outside
