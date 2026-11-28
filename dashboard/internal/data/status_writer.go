@@ -225,7 +225,6 @@ func runStatusWriter(dataRoot string, app model.CareerApplication, status, note 
 		NewStatus       string `json:"newStatus"`
 		Error           string `json:"error"`
 		Code            string `json:"code"`
-		StatusLogged    *bool  `json:"statusLogged"`
 		StatusLogRepair *struct {
 			Repaired bool   `json:"repaired"`
 			Error    string `json:"error"`
@@ -249,13 +248,6 @@ func runStatusWriter(dataRoot string, app model.CareerApplication, status, note 
 	}
 	if parseErr != nil || result.Changed == nil || result.NewStatus == "" {
 		return fmt.Errorf("set-status.mjs returned no valid result; reload to check whether the change was applied")
-	}
-	// A current set-status.mjs fails the command when the ledger cannot be
-	// written, and puts the tracker row back. This branch remains for a writer
-	// that still commits the row and reports statusLogged false.
-	if result.StatusLogged != nil && !*result.StatusLogged {
-		markPending(true, false)
-		return fmt.Errorf("status saved, but status-log append failed: %s", strings.TrimSpace(stderr.String()))
 	}
 	if repair := result.StatusLogRepair; repair != nil && repair.Error != "" {
 		markPending(true, false)
