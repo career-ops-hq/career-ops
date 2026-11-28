@@ -5,7 +5,11 @@
 //   2. Agrupar por `head_sha` en local: un SHA → una decisión, aunque tenga 3 runs (matriz) esperando.
 //   3. Aprobar solo si: la PR está ABIERTA · el run es del `head.sha` ACTUAL de la PR · el autor no es bot ·
 //      la PR no toca `.github/**` ni `package.json`/`package-lock.json` (un run aprobado ejecuta el código del
-//      fork) · pudimos leer sus ficheros (lista vacía = "no pude ver", nunca "inocuo").
+//      fork) · pudimos leer sus ficheros (lista vacía = "no pude ver", nunca "inocuo") · la lista está
+//      COMPLETA (`changedFiles`), porque una lista cortada esconde justo lo que no se revisó y un recuento
+//      desconocido no permite saber si lo está · la lista y el head vienen de la MISMA respuesta de GraphQL
+//      (`headRefOid` + `files`), que es lo único que impide aprobar el SHA A con los ficheros del head B; una
+//      PR con más de una página de ficheros se rechaza en vez de aprobarse a ciegas.
 //   4. Tope 20 aprobaciones por ejecución. El resto se queda para la siguiente pasada (*/30).
 // Env: GITHUB_TOKEN (o CI_APPROVE_TOKEN, ver ci-approve.yml) · GITHUB_REPOSITORY · DRY_RUN · CI_APPROVE_MAX (20)
 
@@ -42,6 +46,47 @@ async function getAll(url) {
     const m = /<([^>]+)>;\s*rel="next"/.exec(link); next = m ? m[1] : null;
   }
   return out;
+}
+
+/** El compare corta en 300 ficheros: una lista de ese tamaño puede venir truncada. */
+export const COMPARE_CAP = 300;
+
+/**
+ * ¿Una respuesta de `compare` ata la lista de ficheros al SHA que se va a aprobar?
+ *
+ * `GET /repos/{owner}/{repo}/compare/{base}...{sha}` lleva el SHA aprobado en la
+ * propia URL, así que los ficheros que devuelve son los de ese commit y no los del
+ * head que haya en el momento de leer. Eso cierra la ventana A→B→A que dejaba
+ * abierta una respuesta de GraphQL: GitHub no documenta que `headRefOid` y `files`
+ * de una misma respuesta vengan del mismo instante, y un contribuidor que empuja y
+ * vuelve al commit anterior podía colar los ficheros de otro head.
+ *
+ * Se rechaza, en vez de aprobar a ciegas, cuando la comparación no está «ahead»,
+ * cuando la lista llegó al tope de 300 (puede estar truncada) o cuando trae menos
+ * ficheros de los que la PR declara. Aprobar a mano sigue disponible.
+ */
+export function compareBinding({ status, files }, { declared }) {
+  if (status !== 'ahead') return { ok: false, why: `la comparación no está «ahead» (${String(status)})` };
+  const list = Array.isArray(files) ? files : [];
+  if (!list.length) return { ok: false, why: 'la comparación no devolvió ficheros' };
+  if (list.length >= COMPARE_CAP) return { ok: false, why: `la lista llegó al tope de ${COMPARE_CAP} ficheros del compare: puede estar truncada` };
+  if (!Number.isInteger(declared) || declared < 0) return { ok: false, why: 'no pude leer cuántos ficheros declara' };
+  if (list.length < declared) return { ok: false, why: `la lista de ficheros está incompleta (${list.length} de ${declared})` };
+  return { ok: true, files: list.map((f) => ({ filename: f.filename })), declared };
+}
+
+/**
+ * Lee los ficheros del SHA del run desde `compare`, con la base de la PR. El
+ * detalle (`GET pulls/{n}`) aporta `changed_files` y el head actual, para que un
+ * push durante la pasada se rechace en vez de aprobar un SHA que ya no es el head.
+ */
+async function compareFilesForHead(prNumber, sha) {
+  const detail = (await rest('GET', `repos/${REPO}/pulls/${prNumber}`)).data;
+  const base = detail?.base?.sha;
+  if (!base) return { ok: false, why: `#${prNumber}: no pude leer la base de la PR` };
+  const { data } = await rest('GET', `repos/${REPO}/compare/${base}...${sha}`);
+  const read = compareBinding(data, { declared: detail?.changed_files });
+  return { ...read, headNow: detail?.head?.sha };
 }
 
 /** Todos los runs `action_required` de pull_request. La API corta en 1000 resultados por búsqueda (23-sep: 1098 retenidos, los 98
@@ -91,6 +136,26 @@ export function decide({ sha, pr, files }) {
   if (pr.head.sha !== sha) return { ok: false, why: `SHA no es el head actual de #${pr.number} (${pr.head.sha.slice(0, 7)})` };
   if (isBot(pr.user)) return { ok: false, why: `autor bot (${pr.user.login})` };
   if (!files || !files.length) return { ok: false, why: `#${pr.number}: no pude leer sus ficheros, no apruebo a ciegas` };
+  // Una lista corta no es una lista limpia. `pulls/{n}/files` tiene tope, así que
+  // un PR grande devuelve menos entradas de las que declara `changed_files`: el
+  // fichero que importa puede estar justo en el tramo que no se leyó. Comparar los
+  // dos números es la única forma de distinguir "no toca nada prohibido" de "no
+  // vi todo lo que toca" (un run aprobado ejecuta el código del fork).
+  //
+  // El número viene del detalle de la PR (`GET pulls/{n}`), no de la lista de PRs
+  // abiertas: esa lista no trae `changed_files`, así que leerlo de ahí dejaba la
+  // comprobación sin efecto. Si el detalle no lo trae, no se aprueba: no saber
+  // cuántos ficheros hay es el caso "no pude ver", no el caso "inocuo".
+  // Solo un entero no negativo cuenta. `Number(null)` y `Number('')` dan 0, que
+  // es finito y pasaria la comparacion: un detalle con `changed_files: null` y
+  // una lista limpia se aprobaria como si el PR no tocara nada.
+  const declared = pr.changed_files;
+  if (!Number.isInteger(declared) || declared < 0) {
+    return { ok: false, why: `#${pr.number}: no pude leer cuántos ficheros declara, no apruebo a ciegas` };
+  }
+  if (files.length < declared) {
+    return { ok: false, why: `#${pr.number}: la lista de ficheros está incompleta (${files.length} de ${declared}), no apruebo a ciegas` };
+  }
   const bad = touchesForbidden(files);
   if (bad.length) return { ok: false, why: `#${pr.number} toca ${bad.slice(0, 3).map((f) => f.filename || f).join(', ')}` };
   return { ok: true, why: `#${pr.number} abierta, head actual, autor ${pr.user.login}, ${files.length} ficheros seguros` };
@@ -121,12 +186,21 @@ export async function main() {
     const pr = bySha.get(sha) || null;
     if (!pr) { orphans++; continue; } // no es el head de ninguna PR abierta (push encima, cerrada o fusionada): nada que aprobar
     let files = [];
-    try { files = await getAll(`repos/${REPO}/pulls/${pr.number}/files`); }
-    catch (e) {
+    let declaredFiles;
+    let headNow;
+    try {
+      // La lista viene de `compare/{base}...{sha}`: el SHA aprobado va en la URL,
+      // así que los ficheros son los de ese commit y no los del head del momento.
+      const read = await compareFilesForHead(pr.number, sha);
+      if (!read.ok) { log(`#${pr.number} ${sha.slice(0, 7)}: no : ${read.why}`); continue; }
+      files = read.files;
+      declaredFiles = read.declared;
+      headNow = read.headNow;
+    } catch (e) {
       if (e.rateLimited) { stop = 'rate'; log(`#${pr.number} ${sha.slice(0, 7)}: límite de tasa de GitHub al leer sus ficheros (${e.status}): se para la pasada; la siguiente lo reintenta`); break; }
       log(`#${pr.number} ${sha.slice(0, 7)}: no pude leer sus ficheros (${e.message.slice(0, 80)}): no apruebo`); continue;
     }
-    const d = decide({ sha, pr, files });
+    const d = decide({ sha, pr: { ...pr, changed_files: declaredFiles, ...(headNow ? { head: { sha: headNow } } : {}) }, files });
     if (!d.ok) { log(`#${pr.number} ${sha.slice(0, 7)}: no : ${d.why}`); continue; }
     tried++;
     let all = true;
