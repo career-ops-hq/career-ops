@@ -509,9 +509,39 @@ const twoPassManifestChecks = [
     pattern: /\b(?:git|runGit)\('checkout',\s*'HEAD',\s*'--'/,
   },
   {
+    // A collision refusal is a verdict about the manifest, not a batch
+    // failure: the per-path loop would write the entries listed before the
+    // colliding one and then refuse the same path, and its restore would
+    // reset those writes — including a pre-update edit whose content already
+    // matched the target, which preserving never flagged.
+    name: 'a batched collision refusal rethrows instead of falling through to the per-path loop',
+    pattern: /\} catch \(err\) \{[\s\S]{0,500}?startsWith\('Cannot check out '\)\) throw err;/,
+  },
+  {
+    // A pre-update edit whose content already matched the target is not
+    // preserved (it does not differ from upstream), so it can sit in
+    // `written`; resetting it to HEAD would destroy an edit the checkout
+    // left byte-identical.
+    name: 'the failed-checkout restore excludes pre-update-dirty paths, not just preserved ones',
+    pattern: /restoreExclusions = mergePathLists\(preservedPaths, \[\.\.\.initialStatusPaths\]\)/,
+  },
+  {
+    name: 'the user-violation abort restores with the same pre-update-dirty exclusions',
+    pattern: /revertPaths\(\[\.\.\.updated\], initialStatusPaths, \{ exclude: restoreExclusions \}\)/,
+  },
+  {
+    // Genuine updater-file edits come back via restoreBootstrapBackups(); an
+    // equal-content edit has no .bak, so the HEAD reset must skip pre-dirty
+    // updater files too.
+    name: 'the self-reexec restore skips pre-update-dirty updater files',
+    pattern: /restoreAfterFailedUpdate\(checkedOutForReexec, initialStatusPaths, \{ what: 'updater file\(s\) loaded to run the new version', exclude: \[\.\.\.initialStatusPaths\] \}\)/,
+  },
+  {
     name: 'apply commit is scoped to expanded update files, not directories (#3504)',
-    // Through commitPathspecs, which keeps the list off argv (#5103).
-    pattern: /commitPathspecs\(`chore: auto-update system files to v\$\{remote\}`,\s*expandedPathsToStage\)/,
+    // Through commitPathspecs, which keeps the list off argv (#5103), with
+    // literal pathspecs so a bracketed filename is never read as a glob at
+    // commit time, matching staging and rollback.
+    pattern: /commitPathspecs\(`chore: auto-update system files to v\$\{remote\}`,\s*expandedPathsToStage,\s*\{\s*literal:\s*true\s*\}\)/,
   },
   {
     name: 'rollback expands backup and target manifests to safe concrete tree files',
@@ -553,11 +583,11 @@ const twoPassManifestChecks = [
   },
   {
     // execFileSync inherits stderr, so an expected per-path skip printed git's
-    // raw pathspec error right before the success banner (#1998).
-    // The trailing spread is the #2337 preserve-exclusions; the property this
+    // raw pathspec error right before the success banner (#1998). The spread is
+    // the fallback's literal expansion specs (#3825 review); the property this
     // pins is the runner (gitQuiet, not git) and the ref, not the arity.
     name: 'per-path checkout pipes stderr so expected skips stay quiet (#1998)',
-    pattern: /gitQuiet\('checkout',\s*targetCommit,\s*'--',\s*path(?:,\s*\.\.\.\w+)?\)/,
+    pattern: /fallbackCheckoutBatched\(\s*fallbackSpecs,\s*targetCommit\s*\)/,
   },
   {
     // #2337: a system file this install edited must be listed and backed up
@@ -604,7 +634,7 @@ const twoPassManifestChecks = [
     // The rethrow sits in a block because the paths already checked out are
     // restored first; the branch must still end in `throw err`.
     name: 'the checkout catch derives absentUpstream only from probeAbsentUpstream (#1998, #3824)',
-    pattern: /const absentUpstream = probeAbsentUpstream\(spec, targetCommit\);\s*if \(!checkoutErrorIsBenign\(err, \{ absentUpstream, preservedState \}\)\) \{[\s\S]{0,1200}?\n\s*throw err;\s*\n\s*\}/,
+    pattern: /const absentUpstream = probeAbsentUpstream\(spec, targetCommit\);\s*if \(!checkoutErrorIsBenign\(err, \{ absentUpstream, preservedState \}\)\) \{[\s\S]{0,2100}?\n\s*throw err;\s*\n\s*\}/,
   },
   {
     name: 'the checkout catch never assigns absentUpstream = true directly (#1998 regression)',
@@ -625,6 +655,13 @@ const twoPassManifestChecks = [
     pattern: /'--diff-filter=A'/,
   },
   {
+    // A persistent write blocker can defeat the restore's own HEAD checkout:
+    // record it, still remove the update's additions, keep restoring the
+    // other paths, and surface the specific error at the end (#3825 review).
+    name: 'revertPaths records a failed HEAD checkout and still cleans additions (#3825)',
+    pattern: /unrestored\.push\(`\$\{pathspec\} \(\$\{String\(err\.message\)/,
+  },
+  {
     // The cleanup must not delete a file the user already had staged before the
     // update ran, only additions the update itself introduced (#2015 review).
     name: 'rollback cleanup skips pre-update staged paths (protectedPaths) (#2015)',
@@ -634,7 +671,9 @@ const twoPassManifestChecks = [
     // The preserved files ride along: a bare `git checkout HEAD -- <dir>` would
     // reset an uncommitted edit the update had kept out of its checkout (#2337).
     name: 'revertPaths receives the pre-update snapshot and the preserved files at its call sites (#2015)',
-    pattern: /revertPaths\(updated, initialStatusPaths, \{ exclude: preservedPaths \}\)/,
+    // restoreExclusions = preservedPaths + every pre-update-dirty path, so the
+    // preserved files still reach the call through it.
+    pattern: /revertPaths\(updated, initialStatusPaths, \{ exclude: restoreExclusions \}\)/,
   },
   {
     // -z output is NUL-delimited/unquoted, so a path with spaces or newlines is

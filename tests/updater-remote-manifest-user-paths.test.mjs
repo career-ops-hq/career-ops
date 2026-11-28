@@ -399,3 +399,52 @@ console.log('\n🧪 Testing manifestProbes (git output -> the rule\'s three ques
     fail('exists() does not resolve against the given root');
   }
 }
+
+{
+  // Given: upstream's manifest names a CASE VARIANT of a declared user file.
+  // On a case-insensitive filesystem the checkout writes the same inode, so
+  // the variant must refuse exactly like the exact spelling.
+  const remote = ['CV.md', 'CONFIG/profile.yml'];
+
+  // When: the manifest is split against the local user layer
+  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS, probes);
+
+  // Then: both variants are refused and never reach the checkout list
+  if (refused.includes('CV.md') && refused.includes('CONFIG/profile.yml') && kept.length === 0) {
+    pass('case variants of user files (CV.md, CONFIG/profile.yml) are refused');
+  } else {
+    fail(`case variants of user files must be refused — kept=${JSON.stringify(kept)}`);
+  }
+}
+
+{
+  // Given: a case-variant directory standing ABOVE a declared user file
+  const remote = ['MODES/'];
+
+  // When: the manifest is split
+  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS, probes);
+
+  // Then: it is refused — the ancestor test folds case in both directions
+  if (refused.includes('MODES/') && kept.length === 0) {
+    pass('a case-variant ancestor of a user path (MODES/) is refused');
+  } else {
+    fail(`a case-variant ancestor of a user path must be refused — kept=${JSON.stringify(kept)}`);
+  }
+}
+
+{
+  // Given: a path that merely SHARES A PREFIX's letters with a user path,
+  // and a system file inside a user directory whose spelling matches exactly
+  const remote = ['cv.md.bak', 'documents/README.md'];
+
+  // When: the manifest is split (documents/README.md is tracked, so the
+  // bounded-claim rule keeps it)
+  const { kept, refused } = rejectUserLayerPaths(remote, USER_PATHS, probes);
+
+  // Then: neither is refused — the fold adds refusals, never segment merges
+  if (kept.includes('cv.md.bak') && kept.includes('documents/README.md') && refused.length === 0) {
+    pass('folding never merges distinct paths (cv.md.bak, documents/README.md kept)');
+  } else {
+    fail(`folding over-refused — refused=${JSON.stringify(refused)}`);
+  }
+}

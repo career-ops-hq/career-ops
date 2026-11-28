@@ -25,6 +25,9 @@
  *                                        # apply and replaced only by apply --force (#2337)
  *   node upgrade-tests.mjs --local-edit-canary # the same leg on an inverted --force
  *                                        # branch must go RED
+ *   node upgrade-tests.mjs --fallback-batch-failure # a failed later fallback batch aborts
+ *   node upgrade-tests.mjs --fallback-persistent-rewrite-blocker # the restore's own HEAD checkout is blocked too
+ *                                        # the update and restores the earlier writes
  */
 import { execFileSync, spawnSync } from 'child_process';
 import { createHash } from 'crypto';
@@ -554,6 +557,7 @@ function localPathsLeg() {
  */
 function userLayerRefusalLeg() {
   const USER_FILE = 'cv.md';
+  const ENV_FILE = '.env';
   const baseSha = git(ROOT, 'rev-parse', 'HEAD');
   const oldTag = newestAncestorTag(baseSha);
   if (!oldTag) { console.error('No release tag is an ancestor of HEAD — fetch tags first (CI: fetch-depth: 0)'); process.exit(1); }
@@ -577,7 +581,11 @@ function userLayerRefusalLeg() {
     git(mirror, 'worktree', 'add', wt, 'main');
     writeFileSync(join(wt, USER_FILE), '# UPSTREAM VERSION — must never land on top of the user\n');
     const manifestFile = injectManifestEntry(wt, USER_FILE);
-    git(wt, 'add', '-f', USER_FILE, manifestFile);
+    // Same poison for .env: newly protected by this change, so the leg pins
+    // its byte-identity through apply and rollback, not just cv.md's.
+    writeFileSync(join(wt, ENV_FILE), 'UPSTREAM_SECRET=must-never-land\n');
+    injectManifestEntry(wt, ENV_FILE);
+    git(wt, 'add', '-f', USER_FILE, ENV_FILE, manifestFile);
     git(wt, '-c', 'user.name=upgrade-tests', '-c', 'user.email=upgrade-tests@career-ops.test', 'commit', '-qm', 'poison: manifest names the user layer');
     const targetSha = git(wt, 'rev-parse', 'HEAD');
     git(mirror, 'worktree', 'remove', '--force', wt);
@@ -592,6 +600,10 @@ function userLayerRefusalLeg() {
     writeFileSync(join(install, USER_FILE), userContent);
     const before = sha256(join(install, USER_FILE));
     const intact = () => existsSync(join(install, USER_FILE)) && sha256(join(install, USER_FILE)) === before;
+    const envContent = 'API_KEY=user-own-secret\n';
+    writeFileSync(join(install, ENV_FILE), envContent);
+    const envBefore = sha256(join(install, ENV_FILE));
+    const envIntact = () => existsSync(join(install, ENV_FILE)) && sha256(join(install, ENV_FILE)) === envBefore;
 
     const applied = run(install, cfg, 'apply', '--confirm');
     ok(applied.exitCode === 0, `apply completes despite the user-layer manifest entry (exit ${applied.exitCode})`);
@@ -599,17 +611,23 @@ function userLayerRefusalLeg() {
       new RegExp(`Refused \\d+ manifest entry\\(ies\\) naming the user layer:[\\s\\S]*\\b${USER_FILE.replace('.', '\\.')}\\b`).test(applied.output),
       `apply refuses the entry out loud (${USER_FILE})`,
     );
+    ok(
+      applied.output.split('\n').some((line) => line.trim() === ENV_FILE),
+      `apply refuses the entry out loud (${ENV_FILE})`,
+    );
     ok(applied.output.includes('Update complete'), 'apply reports the update as complete');
     ok(
       git(install, 'rev-parse', 'HEAD:update-system.mjs') === git(mirror, 'rev-parse', `${targetSha}:update-system.mjs`),
       'the rest of the update landed (updater matches the target)',
     );
     ok(intact(), `user file is byte-identical after apply: ${USER_FILE}`);
+    ok(envIntact(), `user file is byte-identical after apply: ${ENV_FILE}`);
 
     const rolledBack = run(install, cfg, 'rollback');
     ok(rolledBack.exitCode === 0, `rollback of that update succeeds (exit ${rolledBack.exitCode})`);
     ok(rolledBack.output.includes('Rollback complete'), 'rollback reports completion');
     ok(intact(), `user file is byte-identical after rollback: ${USER_FILE}`);
+    ok(envIntact(), `user file is byte-identical after rollback: ${ENV_FILE}`);
     ok(
       git(install, 'status', '--porcelain', '--', USER_FILE).startsWith('??') || git(install, 'status', '--porcelain', '--', USER_FILE) === '',
       `rollback neither staged nor committed ${USER_FILE}`,
@@ -887,6 +905,383 @@ function localEditCanary() {
   process.exit(1);
 }
 
+
+/** Fallback batch-failure leg (#3825 review): when the checkout of a long
+ *  directory expansion fails in a LATER batch, apply must abort the update,
+ *  restore what the earlier batches wrote, and leave the preserved file and
+ *  the user layer byte-identical.
+ *
+ *  Why this exists: fallbackCheckoutBatched() splits a long expansion into
+ *  argv-budgeted git runs, and the helper-level fault test only proves the
+ *  helper THROWS after an earlier batch wrote. The caller contract - apply's
+ *  per-path catch restoring partial batches - is what this leg exercises with
+ *  a real apply against a real install.
+ *
+ *  Poison: the target's manifest claims gen-output/, where it ships ~300
+ *  new files under generated/ (enough that the literal expansion cannot
+ *  ride on one ARGV_BUDGET git call) plus zz-block.md, which sorts after
+ *  them. The install carries gen-output/generated/.gitkeep, a file upstream
+ *  does not ship: it makes the generated/ directory exist and writable, and
+ *  as a locally added file it lands in preservedPaths, which is what forces
+ *  the literal directory expansion in the first place. gen-output/ itself
+ *  is then made unwritable: CREATING zz-block.md fails in the second batch,
+ *  while the first batch's writes inside generated/ succeed.
+ *
+ *  Why a brand-new directory: the blocker must be a CREATE, not a rewrite.
+ *  A blocked rewrite of an existing file (say under modes/pdf/, where
+ *  .gitattributes renormalization rewrites even content-identical files)
+ *  dirties its index entry, and the restore's own `git checkout HEAD --`
+ *  then hits the same unwritable directory and stops before removing the
+ *  earlier batches' additions - a real finding about persistent blockers,
+ *  kept out of this leg's scope. A blocked CREATE leaves nothing behind:
+ *  the restore skips the HEAD checkout entirely (HEAD holds only the
+ *  excluded .gitkeep) and removes the earlier batches' additions, which is
+ *  the caller contract this leg measures. (Blocking lib/ would trip the
+ *  updater's self-bootstrap long before the system-path checkout.) The same
+ *  blocker fails the batched run (which also expands the directory
+ *  literally) and then the fallback's second batch. The writes the restore
+ *  then has to cover can come from EITHER of those runs - the batched run's
+ *  own first batch lands before it fails, and the fallback's first batch
+ *  lands before it fails - so the assertions below measure the combined
+ *  end state (every one of the 300 additions gone from worktree AND index),
+ *  not which run wrote what; the per-run split is only in the apply log.
+ *
+ *  Scope: on POSIX the pre-batching single-call fallback dies at the same
+ *  blocker inside one git call and the same caller catch restores, so this
+ *  leg qualifies the caller contract on the tree under test and is a
+ *  regression guard for it; it does not by itself discriminate the batching
+ *  change on this platform (the argv-size failure it prevents needs a
+ *  command-line limit this runner does not have). On a platform whose chmod
+ *  cannot make a directory unwritable the leg SKIPs rather than running
+ *  vacuously green.
+ */
+function fallbackBatchFailureLeg() {
+  const DIR = 'gen-output/';
+  const GENERATED = 300;
+  const BLOCKER = 'gen-output/zz-block.md';
+  const KEEP = 'gen-output/generated/.gitkeep';
+  const USER_FILE = 'cv.md';
+  const baseSha = git(ROOT, 'rev-parse', 'HEAD');
+  const oldTag = newestAncestorTag(baseSha);
+  if (!oldTag) { console.error('No release tag is an ancestor of HEAD - fetch tags first (CI: fetch-depth: 0)'); process.exit(1); }
+
+  const work = realpathSync(mkdtempSync(join(tmpdir(), 'upgrade-fallbackbatch-')));
+  const failures = [];
+  const ok = (cond, msg) => { console.log(`  ${cond ? 'PASS' : 'FAIL'} [fallback-batch-failure] ${msg}`); if (!cond) failures.push(msg); };
+  const commit = (cwd, msg) => git(cwd, '-c', 'user.name=upgrade-tests', '-c', 'user.email=upgrade-tests@career-ops.test', 'commit', '-qm', msg);
+  const moduleName = (i) => `module-${String(i).padStart(4, '0')}.mjs`;
+
+  try {
+    const mirror = buildMirror(work, baseSha);
+
+    // Poison: the target ships the long generated directory and moves the
+    // file the blocker protects.
+    const wt = join(work, 'poison-wt');
+    git(mirror, 'worktree', 'add', wt, 'main');
+    mkdirSync(join(wt, 'gen-output', 'generated'), { recursive: true });
+    for (let i = 0; i < GENERATED; i++) writeFileSync(join(wt, 'gen-output', 'generated', moduleName(i)), `// UPSTREAM v2 module ${i}\n`);
+    writeFileSync(join(wt, BLOCKER), '# UPSTREAM v2 - only the target ships this file\n');
+    const manifestFile = injectManifestEntry(wt, DIR);
+    git(wt, 'add', '-f', 'gen-output', manifestFile);
+    commit(wt, 'poison: claim a long gen-output/ expansion');
+    const targetSha = git(wt, 'rev-parse', 'HEAD');
+    git(mirror, 'worktree', 'remove', '--force', wt);
+    git(mirror, 'update-ref', 'refs/heads/main', targetSha);
+
+    const cfg = writeGitConfig(work, mirror);
+    const install = join(work, 'install');
+    git(ROOT, 'clone', '--quiet', '--branch', oldTag, ROOT, install);
+    git(install, 'remote', 'set-url', 'origin', CANONICAL);
+    seedFixture(install, { state: fixtureStateFor(oldTag) });
+
+    // The .gitkeep: pre-creates the writable generated/ directory and is the
+    // locally added (hence preserved) file that forces the expansion. Plus a
+    // user-layer sentinel.
+    mkdirSync(join(install, 'gen-output', 'generated'), { recursive: true });
+    writeFileSync(join(install, KEEP), '# generated output lives here\n');
+    writeFileSync(join(install, USER_FILE), '# my CV - no upstream counterpart\n');
+    git(install, 'add', '-f', KEEP);
+    commit(install, 'fork: keep the generated output directory');
+    const keepBefore = sha256(join(install, KEEP));
+    const cvBefore = sha256(join(install, USER_FILE));
+
+    // The blocker: gen-output/ cannot gain or lose entries, so creating
+    // zz-block.md fails, while generated/ (its own directory) stays
+    // writable. Verified empirically: `git --literal-pathspecs checkout
+    // <tree> -- gen-output/zz-block.md` dies with "unable to create file
+    // 'gen-output/zz-block.md': Permission denied".
+    const blockDir = join(install, 'gen-output');
+    chmodSync(blockDir, 0o555);
+    // Platform probe: if this filesystem still lets the owner create a file
+    // here, the blocker blocks nothing and the leg would run vacuously.
+    let blocked = false;
+    try { writeFileSync(join(blockDir, '.chmod-probe'), 'x'); rmSync(join(blockDir, '.chmod-probe')); } catch { blocked = true; }
+    if (!blocked) {
+      chmodSync(blockDir, 0o755);
+      console.log('SKIPPED: chmod 555 does not block writes on this platform - this leg qualified nothing');
+      process.exit(0);
+    }
+
+    let exitCode = 0, output = '';
+    try {
+      output = execFileSync(process.execPath, ['update-system.mjs', 'apply', '--confirm'], {
+        cwd: install, encoding: 'utf-8', timeout: 300000, env: hermeticEnv(cfg),
+      });
+    } catch (e) { exitCode = e.status ?? 1; output = `${e.stdout ?? ''}${e.stderr ?? ''}`; }
+    chmodSync(blockDir, 0o755);
+
+    ok(exitCode !== 0, `apply aborts on the failed batch instead of completing a partial update (exit ${exitCode})`);
+    ok(output.includes(`Update stopped while checking out ${DIR}`), `apply names the path it stopped on (${DIR})`);
+    // The assertion the helper test cannot make: everything the batches
+    // before the failure wrote is gone again - the install's state before
+    // the update had no generated modules at all. Enumerate all of them,
+    // not a sample, and check the index too: a failed `git checkout <tree>
+    // -- <paths>` stages the blobs it wrote, so a worktree-only check would
+    // miss additions that survive as staged entries.
+    const survivors = [];
+    for (let i = 0; i < GENERATED; i++) {
+      if (existsSync(join(install, 'gen-output', 'generated', moduleName(i)))) survivors.push(moduleName(i));
+    }
+    ok(survivors.length === 0, `all ${GENERATED} files the batches before the failure wrote are reverted (${survivors.length} left)`);
+    const staged = git(install, 'status', '--porcelain', '--', 'gen-output/');
+    ok(staged === '', `no staged or dirty entries remain under ${DIR} (index matches the pre-update commit)`);
+    ok(!existsSync(join(install, BLOCKER)), `the blocked file itself never landed: ${BLOCKER}`);
+    ok(existsSync(join(install, KEEP)) && sha256(join(install, KEEP)) === keepBefore, `preserved file under ${DIR} is byte-identical: ${KEEP}`);
+    ok(existsSync(join(install, USER_FILE)) && sha256(join(install, USER_FILE)) === cvBefore, `user layer is byte-identical: ${USER_FILE}`);
+
+    if (failures.length && output) {
+      console.log('  --- apply output tail [fallback-batch-failure] ---');
+      console.log(output.split('\n').slice(-20).join('\n'));
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+
+  console.log(failures.length ? `RED: ${failures.length} failure(s)` : 'GREEN');
+  process.exit(failures.length ? 1 : 0);
+}
+
+
+/** Persistent-rewrite-blocker leg (#3825 review): when the write blocker that
+ *  failed the checkout PERSISTS and involves rewriting an existing file, the
+ *  restore's own `git checkout HEAD --` hits the same blocker. The old
+ *  revertPaths rethrew there: the failed path's additions cleanup never ran
+ *  and every later path was skipped. revertPaths now records the failure,
+ *  still removes the update's additions under the path, keeps restoring the
+ *  remaining paths, and reports the specific error honestly instead of
+ *  claiming a full restore.
+ *
+ *  Poison: same shape as --fallback-batch-failure, but the blocked directory
+ *  is the real modes/pdf/ (already a SYSTEM_PATHS entry, so no manifest
+ *  injection), whose .gitattributes renormalization makes even a
+ *  content-identical hm-audit.md a rewrite on checkout. chmod 555 on
+ *  modes/pdf/ blocks that rewrite ("unable to unlink old
+ *  'modes/pdf/hm-audit.md'"), so the restore's HEAD checkout of modes/pdf/
+ *  fails too. The 300 modules the earlier batches wrote under the writable
+ *  generated/ subdirectory must still be removed from worktree AND index,
+ *  the restore failure must be reported by name, and apply must exit
+ *  non-zero.
+ *
+ *  Scope: same POSIX qualification as --fallback-batch-failure - it guards
+ *  the caller contract on the tree under test and SKIPs where chmod cannot
+ *  make a directory unwritable.
+ */
+function fallbackPersistentRewriteBlockerLeg() {
+  const DIR = 'modes/pdf/';
+  const GENERATED = 300;
+  const BLOCKER = 'modes/pdf/zz-block.md';
+  const KEEP = 'modes/pdf/generated/.gitkeep';
+  const REWRITE = 'modes/pdf/hm-audit.md';
+  const USER_FILE = 'cv.md';
+  const baseSha = git(ROOT, 'rev-parse', 'HEAD');
+  const oldTag = newestAncestorTag(baseSha);
+  if (!oldTag) { console.error('No release tag is an ancestor of HEAD - fetch tags first (CI: fetch-depth: 0)'); process.exit(1); }
+
+  const work = realpathSync(mkdtempSync(join(tmpdir(), 'upgrade-rewriteblock-')));
+  const failures = [];
+  const ok = (cond, msg) => { console.log(`  ${cond ? 'PASS' : 'FAIL'} [fallback-persistent-rewrite-blocker] ${msg}`); if (!cond) failures.push(msg); };
+  const commit = (cwd, msg) => git(cwd, '-c', 'user.name=upgrade-tests', '-c', 'user.email=upgrade-tests@career-ops.test', 'commit', '-qm', msg);
+  const moduleName = (i) => `module-${String(i).padStart(4, '0')}.mjs`;
+
+  try {
+    const mirror = buildMirror(work, baseSha);
+
+    // Poison: the target ships the long generated directory and the blocked
+    // file under the real modes/pdf/.
+    const wt = join(work, 'poison-wt');
+    git(mirror, 'worktree', 'add', wt, 'main');
+    mkdirSync(join(wt, 'modes', 'pdf', 'generated'), { recursive: true });
+    for (let i = 0; i < GENERATED; i++) writeFileSync(join(wt, 'modes', 'pdf', 'generated', moduleName(i)), `// UPSTREAM v2 module ${i}\n`);
+    writeFileSync(join(wt, BLOCKER), '# UPSTREAM v2 - only the target ships this file\n');
+    git(wt, 'add', '-f', 'modes/pdf');
+    commit(wt, 'poison: a long modes/pdf/ expansion behind a persistent blocker');
+    const targetSha = git(wt, 'rev-parse', 'HEAD');
+    git(mirror, 'worktree', 'remove', '--force', wt);
+    git(mirror, 'update-ref', 'refs/heads/main', targetSha);
+
+    const cfg = writeGitConfig(work, mirror);
+    const install = join(work, 'install');
+    git(ROOT, 'clone', '--quiet', '--branch', oldTag, ROOT, install);
+    git(install, 'remote', 'set-url', 'origin', CANONICAL);
+    seedFixture(install, { state: fixtureStateFor(oldTag) });
+
+    // The .gitkeep: pre-creates the writable generated/ directory and is the
+    // locally added (hence preserved) file that forces the expansion. Plus a
+    // user-layer sentinel.
+    mkdirSync(join(install, 'modes', 'pdf', 'generated'), { recursive: true });
+    writeFileSync(join(install, KEEP), '# generated output lives here\n');
+    writeFileSync(join(install, USER_FILE), '# my CV - no upstream counterpart\n');
+    git(install, 'add', '-f', KEEP);
+    commit(install, 'fork: keep the generated output directory');
+    const keepBefore = sha256(join(install, KEEP));
+    const rewriteBefore = sha256(join(install, REWRITE));
+    const cvBefore = sha256(join(install, USER_FILE));
+
+    // The blocker: modes/pdf/ cannot gain or lose entries, so the rewrite of
+    // hm-audit.md and the create of zz-block.md both fail - and so does the
+    // restore's own HEAD checkout of modes/pdf/ (verified empirically on the
+    // pre-cleanup tree: "unable to unlink old 'modes/pdf/hm-audit.md'").
+    const blockDir = join(install, 'modes', 'pdf');
+    chmodSync(blockDir, 0o555);
+    let blocked = false;
+    try { writeFileSync(join(blockDir, '.chmod-probe'), 'x'); rmSync(join(blockDir, '.chmod-probe')); } catch { blocked = true; }
+    if (!blocked) {
+      chmodSync(blockDir, 0o755);
+      console.log('SKIPPED: chmod 555 does not block writes on this platform - this leg qualified nothing');
+      process.exit(0);
+    }
+
+    let exitCode = 0, output = '';
+    try {
+      output = execFileSync(process.execPath, ['update-system.mjs', 'apply', '--confirm'], {
+        cwd: install, encoding: 'utf-8', timeout: 300000, env: hermeticEnv(cfg),
+      });
+    } catch (e) { exitCode = e.status ?? 1; output = `${e.stdout ?? ''}${e.stderr ?? ''}`; }
+    chmodSync(blockDir, 0o755);
+
+    ok(exitCode !== 0, `apply aborts on the failed batch instead of completing a partial update (exit ${exitCode})`);
+    ok(output.includes(`Update stopped while checking out ${DIR}`), `apply names the path it stopped on (${DIR})`);
+    // The cleanup's new observable: the restore's own failure is reported by
+    // name, instead of being rethrown before the additions cleanup ran.
+    ok(output.includes('could not restore from HEAD: modes/pdf ('), `the blocked restore is reported honestly by name (${DIR})`);
+    // The assertion the old code failed: everything the batches before the
+    // failure wrote is gone again even though the restore checkout itself
+    // failed - enumerated in full, and checked in the index too, since a
+    // failed `git checkout <tree> -- <paths>` stages the blobs it wrote.
+    const survivors = [];
+    for (let i = 0; i < GENERATED; i++) {
+      if (existsSync(join(install, 'modes', 'pdf', 'generated', moduleName(i)))) survivors.push(moduleName(i));
+    }
+    ok(survivors.length === 0, `all ${GENERATED} files the batches before the failure wrote are reverted despite the blocked restore (${survivors.length} left)`);
+    const staged = git(install, 'status', '--porcelain', '--', 'modes/pdf/generated/');
+    ok(staged === '', 'no staged or dirty entries remain under modes/pdf/generated/ (index matches the pre-update commit)');
+    ok(!existsSync(join(install, BLOCKER)), `the blocked file itself never landed: ${BLOCKER}`);
+    ok(existsSync(join(install, REWRITE)) && sha256(join(install, REWRITE)) === rewriteBefore, `the file whose rewrite was blocked is byte-identical: ${REWRITE}`);
+    ok(existsSync(join(install, KEEP)) && sha256(join(install, KEEP)) === keepBefore, `preserved file under ${DIR} is byte-identical: ${KEEP}`);
+    ok(existsSync(join(install, USER_FILE)) && sha256(join(install, USER_FILE)) === cvBefore, `user layer is byte-identical: ${USER_FILE}`);
+
+    if (failures.length && output) {
+      console.log('  --- apply output tail [fallback-persistent-rewrite-blocker] ---');
+      console.log(output.split('\n').slice(-20).join('\n'));
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+
+  console.log(failures.length ? `RED: ${failures.length} failure(s)` : 'GREEN');
+  process.exit(failures.length ? 1 : 0);
+}
+
+/** Cross-version collision refusal leg (#7250 review): the target ships as a
+ *  directory what the install holds as a preserved local file. Neither the
+ *  primary batched checkout nor the per-path fallback may write over the
+ *  preserved file or silently skip the shipped directory: apply aborts with
+ *  the honest refusal, and the writable entry the fallback loop checked out
+ *  before reaching the collision is restored.
+ *
+ *  Poison: the target gains two manifest entries - zz-writable/ (a plain new
+ *  directory, which sorts first) and collib (a directory in the target tree).
+ *  The install holds collib as a locally added, committed FILE, so the
+ *  update's preserved list names it exactly and the entry collides.
+ */
+function fallbackCollisionRefusalLeg() {
+  const baseSha = git(ROOT, 'rev-parse', 'HEAD');
+  const oldTag = newestAncestorTag(baseSha);
+  if (!oldTag) { console.error('No release tag is an ancestor of HEAD - fetch tags first (CI: fetch-depth: 0)'); process.exit(1); }
+
+  const work = realpathSync(mkdtempSync(join(tmpdir(), 'upgrade-collision-')));
+  const failures = [];
+  const ok = (cond, msg) => { console.log(`  ${cond ? 'PASS' : 'FAIL'} [fallback-collision-refusal] ${msg}`); if (!cond) failures.push(msg); };
+  const commit = (cwd, msg) => git(cwd, '-c', 'user.name=upgrade-tests', '-c', 'user.email=upgrade-tests@career-ops.test', 'commit', '-qm', msg);
+  const USER_FILE = 'cv.md';
+
+  try {
+    const mirror = buildMirror(work, baseSha);
+    const wt = join(work, 'poison-wt');
+    git(mirror, 'worktree', 'add', wt, 'main');
+    mkdirSync(join(wt, 'zz-writable'), { recursive: true });
+    writeFileSync(join(wt, 'zz-writable', 'new.md'), '# UPSTREAM v2 writable entry\n');
+    mkdirSync(join(wt, 'collib'), { recursive: true });
+    writeFileSync(join(wt, 'collib', 'a.md'), '# UPSTREAM v2 collib directory content\n');
+    // injectManifestEntry() inserts at the top of SYSTEM_PATHS, so the LAST
+    // injection sorts first: the writable entry precedes the colliding one.
+    injectManifestEntry(wt, 'collib');
+    const manifestFile = injectManifestEntry(wt, 'zz-writable/');
+    git(wt, 'add', '-f', 'zz-writable', 'collib', manifestFile);
+    commit(wt, 'poison: a writable entry, then an entry that is a directory over a local file');
+    const targetSha = git(wt, 'rev-parse', 'HEAD');
+    git(mirror, 'worktree', 'remove', '--force', wt);
+    git(mirror, 'update-ref', 'refs/heads/main', targetSha);
+
+    const cfg = writeGitConfig(work, mirror);
+    const install = join(work, 'install');
+    git(ROOT, 'clone', '--quiet', '--branch', oldTag, ROOT, install);
+    git(install, 'remote', 'set-url', 'origin', CANONICAL);
+    seedFixture(install, { state: fixtureStateFor(oldTag) });
+
+    // The install holds collib as a locally added, committed FILE - exactly
+    // preserved once the update claims the entry.
+    writeFileSync(join(install, 'collib'), '# my local collib file\n');
+    writeFileSync(join(install, USER_FILE), '# my CV - no upstream counterpart\n');
+    git(install, 'add', '-f', 'collib');
+    commit(install, 'fork: keep a local collib file');
+    const collibBefore = sha256(join(install, 'collib'));
+    const cvBefore = sha256(join(install, USER_FILE));
+
+    let exitCode = 0, output = '';
+    try {
+      output = execFileSync(process.execPath, ['update-system.mjs', 'apply', '--confirm'], {
+        cwd: install, encoding: 'utf-8', timeout: 300000, env: hermeticEnv(cfg),
+      });
+    } catch (e) { exitCode = e.status ?? 1; output = `${e.stdout ?? ''}${e.stderr ?? ''}`; }
+
+    ok(exitCode !== 0, `apply aborts on the collision instead of completing (exit ${exitCode})`);
+    ok(output.includes('Cannot check out collib'), 'apply reports the collision refusal honestly');
+    // The batched preflight refuses before any checkout runs: no partial
+    // write, no restore churn, and no window in which a pre-update edit among
+    // the earlier entries could be reset to HEAD. The refusal message is the
+    // same one the per-path loop would have named.
+    ok(!output.includes('Update stopped while checking out'), 'the batched refusal aborts before anything is written');
+    ok(!/Restored \d+ system path/.test(output), 'no system-path restore ran, because nothing was written');
+    ok(existsSync(join(install, 'collib')) && sha256(join(install, 'collib')) === collibBefore, 'the preserved local file is byte-identical: collib');
+    ok(!existsSync(join(install, 'collib', 'a.md')), 'the shipped directory content never landed over the local file');
+    ok(!existsSync(join(install, 'zz-writable', 'new.md')), 'the writable entry listed before the collision never landed');
+    const staged = git(install, 'status', '--porcelain', '--', 'zz-writable', 'collib');
+    ok(staged === '', 'no staged or dirty entries remain for the writable entry or the collision');
+    ok(existsSync(join(install, USER_FILE)) && sha256(join(install, USER_FILE)) === cvBefore, `user layer is byte-identical: ${USER_FILE}`);
+
+    if (failures.length && output) {
+      console.log('  --- apply output tail [fallback-collision-refusal] ---');
+      console.log(output.split('\n').slice(-20).join('\n'));
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+
+  console.log(failures.length ? `RED: ${failures.length} failure(s)` : 'GREEN');
+  process.exit(failures.length ? 1 : 0);
+}
+
 if (isMainModule(import.meta.url)) {
   const mode = process.argv[2];
   if (mode === '--pr-gate') prGate();
@@ -896,5 +1291,8 @@ if (isMainModule(import.meta.url)) {
   else if (mode === '--failed-install') failedInstallLeg();
   else if (mode === '--local-edit') localEdit();
   else if (mode === '--local-edit-canary') localEditCanary();
-  else { console.error('Usage: node upgrade-tests.mjs --pr-gate | --canary | --local-paths | --user-layer-refusal | --failed-install | --local-edit | --local-edit-canary'); process.exit(1); }
+  else if (mode === '--fallback-batch-failure') fallbackBatchFailureLeg();
+  else if (mode === '--fallback-persistent-rewrite-blocker') fallbackPersistentRewriteBlockerLeg();
+  else if (mode === '--fallback-collision-refusal') fallbackCollisionRefusalLeg();
+  else { console.error('Usage: node upgrade-tests.mjs --pr-gate | --canary | --local-paths | --user-layer-refusal | --failed-install | --local-edit | --local-edit-canary | --fallback-batch-failure | --fallback-persistent-rewrite-blocker | --fallback-collision-refusal'); process.exit(1); }
 }

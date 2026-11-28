@@ -40,6 +40,7 @@ jobs:
             // settings.json and .claude/hooks/ are project harness config that
             // is not gitignored and may legitimately be committed.
             const USER_PATHS = [
+              /^\.env$/,
               /^cv\.md$/,
               /^config\/profile\.yml$/,
               /^config\/plugins\.yml$/,

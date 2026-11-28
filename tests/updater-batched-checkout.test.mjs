@@ -11,7 +11,8 @@
 
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
-import { pass, fail, makeUpdaterRepo } from './helpers.mjs';
+import assert from 'node:assert/strict';
+import { pass, makeUpdaterRepo } from './helpers.mjs';
 import { planSystemCheckout, checkoutSystemPathsBatched } from '../update-system.mjs';
 
 // update-system.mjs's ARGV_BUDGET: what one git call may put on the command line.
@@ -28,7 +29,13 @@ process.on('exit', () => {
   }
 });
 
-const check = (ok, name, detail = '') => (ok ? pass(name) : fail(detail ? `${name} — ${detail}` : name));
+// Must throw, not only count: run directly this file is one process, and a
+// counted failure left exit 0 (a ❌ list with a green status). The harness
+// contains the throw the same way it contains the guards suite's assert.
+const check = (ok, name, detail = '') => {
+  if (ok) { pass(name); return; }
+  assert.fail(detail ? `${name} — ${detail}` : name);
+};
 
 // --- planning from the tree listing ----------------------------------------
 {
@@ -47,6 +54,15 @@ const check = (ok, name, detail = '') => (ok ? pass(name) : fail(detail ? `${nam
 
   const prefix = planSystemCheckout(['mode/'], [], ['modes/a.md']);
   check(JSON.stringify(prefix.absent) === JSON.stringify(['mode/']), 'a name prefix is not a parent directory', JSON.stringify(prefix));
+
+  // Slashless directory entries: the validators accept the spelling, so the
+  // planner must see the same directory (#7250 review).
+  const slashless = planSystemCheckout(['modes', 'docs'], ['modes/b.md'], upstream);
+  check(JSON.stringify(slashless.checkout) === JSON.stringify(['modes', 'docs']),
+    'a slashless directory entry with upstream content left is checked out', JSON.stringify(slashless));
+  const slashlessKept = planSystemCheckout(['kept'], ['kept/only.md'], upstream);
+  check(JSON.stringify(slashlessKept.preserved) === JSON.stringify(['kept']),
+    'a fully preserved slashless directory entry is skipped', JSON.stringify(slashlessKept));
 }
 
 // --- the batched checkout on a real repo ------------------------------------
@@ -102,6 +118,134 @@ function makeRepo(fileCount) {
   check(readFileSync(join(fx.dir, 'modes', 'pdf.md'), 'utf-8') === 'new pdf\n', 'a directory entry is checked out');
   check(readFileSync(join(fx.dir, 'modes', 'mine.md'), 'utf-8') === 'my edit\n', "the preserved file keeps the user's edit");
   check(!existsSync(join(fx.dir, 'gone')), 'nothing is created for the absent path');
+}
+
+{
+  // Cross-version collision: the target ships `lib` as a FILE while preserved
+  // local content sits under lib/ (a directory in the local layout). Neither
+  // expand (silent skip of the shipped file) nor pass the bare spec through
+  // (overwrite of the preserved files): refuse before any git run (#7250
+  // review). In normal apply the local-edit detector can also list the exact
+  // `lib` here; with a verified listing the collision check still runs before
+  // the pathFullyPreserved skip, so the refusal speaks there too. This
+  // child-only list pins the exported helpers' contract for every caller.
+  const calls = [];
+  let threw = null;
+  try {
+    checkoutSystemPathsBatched(['lib'], ['lib/local.txt'], ['lib'], 'a'.repeat(40), { git: (...a) => { calls.push(a); return ''; } });
+  } catch (err) { threw = err; }
+  check(threw !== null && String(threw.message).includes('Cannot check out lib'),
+    'a target file over preserved local children is refused, not skipped or checked out', String(threw));
+  check(!calls.some((a) => a.includes('checkout')), 'no checkout run happens for the colliding entry');
+}
+
+{
+  // A collision can sit BELOW a clean manifest entry: the target ships
+  // `lib/nested` as a FILE while preserved local content forms a directory
+  // there (lib/nested/local.md). The entry-level check compares shapes at
+  // `lib/` and passes; the write the planner selects would make git delete
+  // the preserved directory. Refuse the entry before any git run (#7250
+  // review), in the same preflight shape as the entry-level collisions.
+  const calls = [];
+  let threw = null;
+  try {
+    checkoutSystemPathsBatched(['lib/'], ['lib/nested/local.md'], ['lib/nested', 'lib/a.mjs'], 'a'.repeat(40), { git: (...a) => { calls.push(a); return ''; } });
+  } catch (err) { threw = err; }
+  check(threw !== null && String(threw.message).includes('Cannot check out lib/'),
+    'a target file below the entry over a preserved local directory is refused', String(threw));
+  check(!calls.some((a) => a.includes('checkout')), 'no checkout run happens for the deep-colliding entry');
+}
+
+{
+  // The inverse below the entry: the target ships files UNDER `lib/blob`
+  // while a preserved local FILE stands at lib/blob. Writing them would make
+  // git replace the preserved file with a directory.
+  const calls = [];
+  let threw = null;
+  try {
+    checkoutSystemPathsBatched(['lib/'], ['lib/blob'], ['lib/blob/x.md', 'lib/a.mjs'], 'a'.repeat(40), { git: (...a) => { calls.push(a); return ''; } });
+  } catch (err) { threw = err; }
+  check(threw !== null && String(threw.message).includes('Cannot check out lib/'),
+    'target files below the entry over a preserved local file are refused', String(threw));
+  check(!calls.some((a) => a.includes('checkout')), 'no checkout run happens for the inverse deep collision');
+}
+
+{
+  // Ordinary siblings still update: preserved local content shares no prefix
+  // with the shipped files, so nothing is refused and every file is written.
+  const calls = [];
+  checkoutSystemPathsBatched(['lib/'], ['lib/nested/local.md'], ['lib/a.mjs', 'lib/b.mjs'], 'a'.repeat(40), { git: (...a) => { calls.push(a); return ''; } });
+  check(calls.some((a) => a.includes('checkout') && a.includes('lib/a.mjs') && a.includes('lib/b.mjs')),
+    'ordinary siblings update beside preserved local content', JSON.stringify(calls));
+}
+
+{
+  // The inverse collision on a real repo: a preserved local FILE stands where
+  // the target ships a DIRECTORY. The refusal must come before git - the
+  // checkout would replace the file's worktree content without asking.
+  const { dir, g } = makeUpdaterRepo({ prefix: 'co-batched-collision-' });
+  fixtures.push(dir);
+  writeFileSync(join(dir, 'lib'), 'shipped file\n');
+  g('add', '-A');
+  g('commit', '-qm', 'installed with lib as a file');
+  const installed = g('rev-parse', 'HEAD');
+  g('rm', '-q', 'lib');
+  mkdirSync(join(dir, 'lib'));
+  writeFileSync(join(dir, 'lib', 'a.md'), 'dir content\n');
+  g('add', '-A');
+  g('commit', '-qm', 'upstream turns lib into a directory');
+  const target = g('rev-parse', 'HEAD');
+  g('checkout', '-q', installed);
+  writeFileSync(join(dir, 'lib'), 'user edit\n');
+  const upstreamFiles = g('ls-tree', '-r', '--name-only', '-z', target).split('\0').filter(Boolean);
+  const plan = planSystemCheckout(['lib'], ['lib'], upstreamFiles);
+  check(JSON.stringify(plan.preserved) !== JSON.stringify(['lib']),
+    'the colliding entry is not reported preserved', JSON.stringify(plan));
+  const calls = [];
+  const git = (...a) => { calls.push(a); return g(...a); };
+  let threw = null;
+  try {
+    checkoutSystemPathsBatched(['lib'], ['lib'], upstreamFiles, target, { git });
+  } catch (err) { threw = err; }
+  check(threw !== null && String(threw.message).includes('Cannot check out lib'),
+    'a target directory over a preserved local file is refused, not silently skipped', String(threw));
+  check(!calls.some((a) => a.includes('checkout')), 'no checkout run happens against the preserved file');
+  check(readFileSync(join(dir, 'lib'), 'utf-8') === 'user edit\n', 'the preserved local file is untouched');
+}
+
+{
+  // Preflight: a collision anywhere in the run refuses before ANY batch
+  // writes, even when a writable entry sorts first — a partial primary write
+  // followed by a refusal would leave the restore to clean up a mix.
+  const fx = makeRepo(3);
+  const calls = [];
+  const git = (...args) => { calls.push(args); return fx.g(...args); };
+  let threw = null;
+  try {
+    checkoutSystemPathsBatched([...fx.files, 'plug'], ['plug/local.txt'], [...fx.upstreamFiles, 'plug'], fx.target, { git });
+  } catch (err) { threw = err; }
+  check(threw !== null && String(threw.message).includes('Cannot check out plug'),
+    'a later colliding entry refuses the whole run', String(threw));
+  check(!calls.some((a) => a.includes('checkout')),
+    'no batch writes anything when a later entry collides (preflight)');
+}
+
+{
+  // The same preservation under the slashless directory spelling: a bare
+  // `git checkout <target> -- modes` would overwrite modes/mine.md (#7250
+  // review), so the entry must expand file by file exactly as `modes/` does.
+  const fx = makeRepo(3);
+  const calls = [];
+  const git = (...args) => { calls.push(args); return fx.g(...args); };
+  const result = checkoutSystemPathsBatched([...fx.files, 'modes'], ['modes/mine.md'], fx.upstreamFiles, fx.target, { git });
+
+  const checkouts = calls.filter((a) => a.includes('checkout'));
+  check(checkouts.some((a) => a.includes('modes/pdf.md')), 'the slashless directory entry is expanded to its files');
+  check(!checkouts.some((a) => a.includes('modes') || a.includes('modes/') || a.includes('modes/mine.md')),
+    'no run carries the bare slashless directory or the preserved file');
+  check(readFileSync(join(fx.dir, 'modes', 'pdf.md'), 'utf-8') === 'new pdf\n', 'the unpreserved file under the slashless entry is checked out');
+  check(readFileSync(join(fx.dir, 'modes', 'mine.md'), 'utf-8') === 'my edit\n', "the preserved file under the slashless entry keeps the user's edit");
+  check(result.updated.includes('modes'), 'the slashless entry is reported updated');
 }
 
 {
