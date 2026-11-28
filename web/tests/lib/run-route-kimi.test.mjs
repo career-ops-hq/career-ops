@@ -141,6 +141,15 @@ test("a Kimi run that printed text but exited nonzero is not recorded as a resul
   assert.ok(events.some((event) => event.type === "error"), JSON.stringify(events));
 });
 
+test("Kimi is refused for the pdf worker before anything spawns", async (t) => {
+  fixtureRoot(t);
+  globalThis.__fakeCliRun = { stdout: [], stderr: [], code: 0 };
+  const response = await post({ kind: "pdf", cliId: "kimi", input: "1" });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /cannot run worker 'pdf': it cannot be kept from running shell commands/);
+  assert.equal(globalThis.__fakeCliRun.spawned, undefined);
+});
+
 test("Kimi is refused for the write-capable portal repair worker before anything spawns", async (t) => {
   fixtureRoot(t);
   globalThis.__fakeCliRun = { stdout: [], stderr: [], code: 0 };

@@ -13,7 +13,7 @@ Headless worker command per CLI:
 | Gemini CLI | `gemini -p "prompt"` |
 | Grok Build CLI | `grok -p "prompt"` |
 | Hermes Agent | `hermes chat -q "prompt" --oneshot -Q --no-restore-cwd` (only explicitly non-writing workers; batch ranking does not support Hermes: see **Hermes workers** below) |
-| Kimi Code CLI | `kimi -p "prompt"` (only explicitly non-writing workers: `kimi -p` approves file writes and shell commands without asking; batch does not support Kimi) |
+| Kimi Code CLI | `kimi -p "prompt"` (only explicitly non-writing workers, and no `pdf` worker: `kimi -p` approves file writes and shell commands without asking; batch does not support Kimi) |
 | Oh My Pi | `omp -p "prompt"` (no `evaluate`, `research`, `cover` or `pdf` worker: see **Oh My Pi workers** below) |
 | **OpenCode** | `opencode run "prompt"` (falls back to `ollama launch opencode -y -- run "prompt"` if `opencode` binary is not in PATH) |
 | Pi | `pi -p --no-approve --no-skills --skill .agents/skills/career-ops "/skill:career-ops <request>"` (Pi 0.79.1+; no `evaluate`, `research`, `cover` or `pdf` worker: see **Pi workers** below) |

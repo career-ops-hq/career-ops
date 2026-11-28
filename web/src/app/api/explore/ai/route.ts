@@ -10,7 +10,7 @@ import { makeKnownOfferFilter } from "@/lib/explore-ai";
 import { CAPS } from "@/lib/worker-capabilities.mjs";
 import { scopeFrom } from "@/lib/claude-invocation.mjs";
 import { fencingReport } from "@/lib/cli-fencing.mjs";
-import { kimiStderrErrors } from "@/lib/run-cli-support.mjs";
+import { createKimiStderrFilter } from "@/lib/run-cli-support.mjs";
 import { codexFencingSupported } from "@/lib/cli-fencing-probe.mjs";
 import { spillOversizedPrompt } from "@/lib/oversized-prompt.mjs";
 import { readJsonObject } from "@/lib/json-body";
@@ -322,7 +322,10 @@ export async function POST(req: Request) {
 `);
       if (substitution) safeEnqueue(`⚠️ ${substitution}\n\n`);
 
-      child.stdout.on("data", (d: Buffer) => {
+      const kimiStderr = cliId === "kimi" ? createKimiStderrFilter() : null;
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (d: string) => {
         if (closed) return;
 
         // Codex's authoritative response is read from codexResultFile after
@@ -350,7 +353,7 @@ export async function POST(req: Request) {
           }
         }
       });
-      child.stderr.on("data", (d: Buffer) => {
+      child.stderr.on("data", (d: string) => {
         const s = d.toString();
 
         if (isCodex) {
@@ -361,8 +364,8 @@ export async function POST(req: Request) {
           return;
         }
 
-        if (cliId === "kimi") {
-          const errors = kimiStderrErrors(s);
+        if (kimiStderr) {
+          const errors = kimiStderr.push(s);
           if (errors) safeEnqueue(`\n[${spec.name}] ${errors}\n`);
           return;
         }
@@ -380,6 +383,8 @@ export async function POST(req: Request) {
 
       child.on("close", (code) => {
         clearTerminationTimers();
+        const kimiTail = kimiStderr?.flush();
+        if (kimiTail) safeEnqueue(`\n[${spec.name}] ${kimiTail}\n`);
         // The worker is gone, so its spilled prompt is no longer needed.
         spill?.cleanup?.();
 

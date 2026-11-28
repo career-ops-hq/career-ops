@@ -31,7 +31,7 @@ If `agy` later gets a permission check that covers the whole command line, [#752
 
 ## Kimi Code CLI
 
-The web UI runs Kimi Code CLI through its one-shot mode, `kimi -p "prompt"`, and adds `--output-format stream-json` when it parses the run's events. That mode never asks before a tool call: file writes and shell commands are approved automatically, and only the `deny` rules in your own Kimi `config.toml` still apply. career-ops has no verified way to pass a per-worker restriction to Kimi, so the web refuses it for any worker whose capability record has `writes: true` and runs the other kinds with a notice that Kimi cannot be permission-restricted.
+The web UI runs Kimi Code CLI through its one-shot mode, `kimi -p "prompt"`, and adds `--output-format stream-json` when it parses the run's events. That mode never asks before a tool call: file writes and shell commands are approved automatically, and only the `deny` rules in your own Kimi `config.toml` still apply. career-ops has no verified way to pass a per-worker restriction to Kimi, so the web refuses it for any worker whose capability record has `writes: true`, and for the `pdf` worker, which must never regain Bash (#2172). It runs the other kinds with a notice that Kimi cannot be permission-restricted.
 
 The workers Kimi is allowed to run are not filesystem-sandboxed. "Read-only" describes what career-ops asks the worker to do, not something it enforces: Kimi runs with your user account's access, in the career-ops data folder, and can still write files or run shell commands if the model decides to. Add `deny` rules to your Kimi `config.toml` if you need a hard limit.
 

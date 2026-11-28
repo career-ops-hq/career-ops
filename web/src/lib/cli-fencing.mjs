@@ -40,6 +40,7 @@ const CODEX_READ_ONLY = "read-only";
 const CODEX_WORKSPACE_WRITE = "workspace-write";
 
 const WRITE_REFUSED_CLIS = new Set(["hermes", "kimi"]);
+const KIND_REFUSED_CLIS = new Map([["kimi", new Set(["pdf"])]]);
 
 /**
  * Refuse Hermes and Kimi for workers that write. This is a check by name, outside
@@ -48,14 +49,17 @@ const WRITE_REFUSED_CLIS = new Set(["hermes", "kimi"]);
  * access (fencingReport reports them as unfenced). Both are limited to workers
  * whose capability record has `writes: false` because career-ops has no verified
  * way to translate that record into their own approval/sandbox controls, and
- * `kimi -p` approves file writes and shell commands without asking.
+ * `kimi -p` approves file writes and shell commands without asking. Kimi is also
+ * refused for `pdf`, which lost Bash in #2172 and must never regain it.
  *
  * @param {string} cliId
  * @param {import("./worker-capabilities.mjs").Capabilities} capabilities
+ * @param {string} [kind]
  * @returns {boolean}
  */
-export function isCliAllowedForCapabilities(cliId, { writes }) {
-  return !writes || !WRITE_REFUSED_CLIS.has(cliId);
+export function isCliAllowedForCapabilities(cliId, { writes }, kind) {
+  if (writes && WRITE_REFUSED_CLIS.has(cliId)) return false;
+  return !KIND_REFUSED_CLIS.get(cliId)?.has(kind);
 }
 
 

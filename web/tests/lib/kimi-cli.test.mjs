@@ -6,6 +6,7 @@ import path from "node:path";
 import "../helpers/web-ts-alias-loader.mjs";
 import {
   codexStreamArgs,
+  createKimiStderrFilter,
   isFatalCodexStderr,
   isFatalGenericStderr,
   isFatalKimiStderr,
@@ -55,11 +56,18 @@ test("Kimi is passed through fencing untouched and reported as unrestricted", ()
   assert.match(report.notice, /^Kimi Code CLI cannot be permission-restricted/);
 });
 
-test("Kimi is refused for write-capable workers and kept for the others", () => {
-  assert.equal(isCliAllowedForCapabilities("kimi", capabilitiesFor("fix-portal")), false);
+test("Kimi is refused for write-capable workers and for pdf, and kept for the others", () => {
+  assert.equal(isCliAllowedForCapabilities("kimi", capabilitiesFor("fix-portal"), "fix-portal"), false);
   assert.equal(isCliAllowedForCapabilities("kimi", { writes: true, network: false }), false);
-  for (const kind of ["pdf", "research", "evaluate", "cover"]) {
-    assert.equal(isCliAllowedForCapabilities("kimi", capabilitiesFor(kind)), true, kind);
+  assert.equal(isCliAllowedForCapabilities("kimi", capabilitiesFor("pdf"), "pdf"), false);
+  for (const kind of ["research", "evaluate", "cover"]) {
+    assert.equal(isCliAllowedForCapabilities("kimi", capabilitiesFor(kind), kind), true, kind);
+  }
+});
+
+test("the pdf refusal is Kimi's alone", () => {
+  for (const cli of KNOWN.filter((c) => c.id !== "kimi")) {
+    assert.equal(isCliAllowedForCapabilities(cli.id, capabilitiesFor("pdf"), "pdf"), true, cli.id);
   }
 });
 
@@ -133,6 +141,28 @@ test("kimiStderrErrors keeps only the actionable lines of a stderr chunk", () =>
   assert.equal(kimiStderrErrors("thinking about the error path\nnot authenticated\r\nUsing tool Shell\n"), "not authenticated");
   assert.equal(kimiStderrErrors("thinking: denied access is a fatal error in prose\n"), "");
   assert.equal(kimiStderrErrors(""), "");
+});
+
+test("the Kimi stderr filter joins a diagnostic split across chunks", () => {
+  const filter = createKimiStderrFilter();
+  assert.equal(filter.push("thinking: reading the posting\nError: Invalid Auth"), "");
+  assert.equal(filter.push("entication\nUsing tool Shell\n"), "Error: Invalid Authentication");
+  assert.equal(filter.flush(), "");
+});
+
+test("the Kimi stderr filter flushes a final line with no newline", () => {
+  const filter = createKimiStderrFilter();
+  assert.equal(filter.push("Your credit balance"), "");
+  assert.equal(filter.push(" is insufficient"), "");
+  assert.equal(filter.flush(), "Your credit balance is insufficient");
+  assert.equal(filter.flush(), "");
+});
+
+test("the Kimi stderr filter keeps a bounded tail of an unterminated line", () => {
+  const filter = createKimiStderrFilter(64);
+  assert.equal(filter.push("x".repeat(10_000)), "");
+  assert.equal(filter.push(" not authenticated"), "");
+  assert.equal(filter.flush(), `${"x".repeat(46)} not authenticated`);
 });
 
 test("the Codex and generic paths are unchanged by the Kimi parser", () => {

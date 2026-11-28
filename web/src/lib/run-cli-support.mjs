@@ -402,6 +402,28 @@ export function kimiStderrErrors(chunk) {
     .join("\n");
 }
 
+export function createKimiStderrFilter(maxPending = 4096) {
+  let pending = "";
+  return {
+    push(chunk) {
+      pending += String(chunk);
+      const nl = pending.lastIndexOf("\n");
+      let complete = "";
+      if (nl !== -1) {
+        complete = pending.slice(0, nl + 1);
+        pending = pending.slice(nl + 1);
+      }
+      if (pending.length > maxPending) pending = pending.slice(-maxPending);
+      return complete ? kimiStderrErrors(complete) : "";
+    },
+    flush() {
+      const rest = pending;
+      pending = "";
+      return rest ? kimiStderrErrors(rest) : "";
+    },
+  };
+}
+
 function kimiContentText(content) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
