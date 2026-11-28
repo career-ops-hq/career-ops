@@ -30,8 +30,8 @@
  * Issue #4181 — github.com/career-ops-hq/career-ops
  */
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -63,9 +63,9 @@ Options:
   --help            This message
 
 Typical loop:
-  node discover-new-companies.mjs --out /tmp/new.yml
-  node discover-ats.mjs --in /tmp/new.yml --summary     # preview, writes nothing
-  node discover-ats.mjs --in /tmp/new.yml --write       # only after you review
+  node discover-new-companies.mjs --out tmp/new.yml
+  node discover-ats.mjs --in tmp/new.yml --summary     # preview, writes nothing
+  node discover-ats.mjs --in tmp/new.yml --write       # only after you review
 `;
 
 const args = process.argv.slice(2);
@@ -238,8 +238,8 @@ if (has('--summary')) {
     if (c.titles.size) console.log(`    e.g. ${[...c.titles][0]}`);
   }
   if (!candidates.length) console.log('  (nothing new — every scanned company is already tracked)');
-  console.log('\nNext: node discover-new-companies.mjs --out /tmp/new.yml');
-  console.log('      node discover-ats.mjs --in /tmp/new.yml --summary');
+  console.log('\nNext: node discover-new-companies.mjs --out tmp/new.yml');
+  console.log('      node discover-ats.mjs --in tmp/new.yml --summary');
 } else if (has('--json')) {
   console.log(JSON.stringify({
     metadata: { candidates: totalBeforeLimit, emitted: candidates.length, blacklistedSkipped: blacklisted.size, sinceDays: SINCE_DAYS, minRows: MIN_ROWS, addedOnly: ADDED_ONLY },
@@ -255,6 +255,10 @@ if (has('--summary')) {
     + `# Feed to: node discover-ats.mjs --in <this file> --summary\n`;
 
   if (OUT_FILE) {
+    // OUT_FILE defaults to tmp/ in --help, but the folder is gitignored scaffolding
+    // that a fresh checkout may not have — create the parent dirs first so the
+    // write below does not fail there.
+    mkdirSync(dirname(OUT_FILE) || '.', { recursive: true });
     writeFileSync(OUT_FILE, banner + doc);
     console.error(`Wrote ${candidates.length} company/companies to ${OUT_FILE}`);
   } else {
