@@ -42,7 +42,7 @@
 
 ## Puanlama Sistemi
 
-Değerlendirme 6 blok (A-F) üzerinden yapılır ve 1-5 arası global bir puan verilir:
+Değerlendirme beş boyutu puanlar ve bunları 1-5 arası tek bir global puanda birleştirir. (Bunlar puanlama boyutlarıdır, rapor blokları değil; rapor yapısı A-H'dir ve `modes/tr/is-ilani.md` içinde tanımlanır.)
 
 | Boyut | Ne ölçülüyor |
 |-------|-------------|
@@ -51,7 +51,7 @@ Değerlendirme 6 blok (A-F) üzerinden yapılır ve 1-5 arası global bir puan v
 | Ücret | Teklifin piyasa konumu (5=üst çeyrek, 1=çok altında) |
 | Kültürel Sinyaller | Şirket kültürü, büyüme, istikrar, uzaktan çalışma politikası |
 | Kırmızı Bayraklar | Engelleyiciler ve uyarılar (negatif düzeltme) |
-| **Global** | Yukarıdakilerin ağırlıklı ortalaması |
+| **Global** | Yukarıdaki beş boyutu birleştiren bütüncül bir değerlendirme (aritmetik formül yok) |
 
 **Puan yorumu:**
 - 4,5+ → Güçlü eşleşme, hemen başvur

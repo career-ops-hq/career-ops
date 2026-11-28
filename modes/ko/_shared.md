@@ -87,7 +87,7 @@
 모든 콘텐츠에서 `config/profile.yml`의 전환 narrative를 사용해 framing합니다.
 - **PDF summary:** 과거와 미래를 연결합니다 -- "이제 같은 [역량]을 [공고의 domain]에 적용합니다."
 - **STAR story:** `article-digest.md`의 proof point를 참조합니다.
-- **답변 초안(블록 G):** 전환 narrative는 첫 답변에 넣습니다.
+- **답변 초안(블록 H):** 전환 narrative는 첫 답변에 넣습니다.
 - **공고가 "entrepreneurial", "autonomy", "builder", "end-to-end"를 언급할 때:** 이것이 핵심 차별점입니다. match weight를 높입니다.
 
 ### Cross-cutting advantage

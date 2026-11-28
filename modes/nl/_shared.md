@@ -94,7 +94,7 @@ Lees van config/profile.yml -> narratieve.exit_story -->
 Gebruik het transitieverhaal van `config/profile.yml` om ALLE inhoud in te kaderen:
 - **In de PDF-samenvattingen:** De kloof overbruggen tussen het verleden en de toekomst -- "Pas nu dezelfde [vaardigheden] toe op het [vacature] domein."
 - **In STAR-verhalen:** Raadpleeg de proof points van `article-digest.md`.
-- **In de conceptantwoorden (blok G):** Het transitieverhaal staat in het eerste antwoord.
+- **In de conceptantwoorden (blok H):** Het transitieverhaal staat in het eerste antwoord.
 - **Wanneer het vacature "ondernemend", "autonomie", "bouwer", "end-to-end" vermeldt:** Dit is DE nummer 1 onderscheidende factor. Verhoog het wedstrijdgewicht.
 
 ### Transversaal voordeel

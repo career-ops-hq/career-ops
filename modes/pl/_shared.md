@@ -87,7 +87,7 @@ Skill traktuje WSZYSTKIE docelowe role z taką samą starannością. Żadna nie 
 Używaj narracji przejścia z `config/profile.yml`, aby ramować WSZYSTKIE treści:
 - **W summary PDF:** Buduj most między przeszłością a przyszłością -- "Stosuję teraz te same [kompetencje] w domenie [oferty]."
 - **W historiach STAR:** Odwołuj się do proof points z `article-digest.md`.
-- **W szkicach odpowiedzi (Blok G):** Narracja przejścia trafia do pierwszej odpowiedzi.
+- **W szkicach odpowiedzi (Blok H):** Narracja przejścia trafia do pierwszej odpowiedzi.
 - **Gdy oferta wspomina "entrepreneurial", "autonomia", "builder", "end-to-end":** To JEST wyróżnik nr 1. Zwiększ wagę dopasowania.
 
 ### Przewaga przekrojowa

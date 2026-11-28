@@ -87,7 +87,7 @@ Skill ini menangani SEMUA role target dengan perhatian yang sama. Tidak ada yang
 Gunakan narasi transisi dari `config/profile.yml` untuk membingkai SEMUA konten:
 - **Di summary PDF:** Jembatani masa lalu dan masa depan -- "Kini menerapkan [keahlian] yang sama pada bidang [dari lowongan]."
 - **Di story STAR:** Rujuk proof point dari `article-digest.md`.
-- **Di draft jawaban (Blok G):** Narasi transisi masuk di jawaban pertama.
+- **Di draft jawaban (Blok H):** Narasi transisi masuk di jawaban pertama.
 - **Ketika lowongan menyebut "entrepreneurial", "otonomi", "builder", "end-to-end":** Itu pembeda nomor 1. Naikkan bobot match.
 
 ### Keunggulan lintas fungsi

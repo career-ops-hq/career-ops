@@ -87,7 +87,7 @@ Il sistema tratta TUTTI i ruoli target con la stessa cura. Nessuno è primario o
 Usare la narrativa di transizione da `config/profile.yml` per inquadrare TUTTI i contenuti:
 - **Nei summary PDF:** Fare il ponte tra passato e futuro -- "Applica ora le stesse [competenze] al dominio [dell'annuncio]."
 - **Nelle storie STAR:** Fare riferimento ai proof point di `article-digest.md`.
-- **Nelle bozze di risposta (Blocco G):** La narrativa di transizione va nella prima risposta.
+- **Nelle bozze di risposta (Blocco H):** La narrativa di transizione va nella prima risposta.
 - **Quando l'annuncio menziona "imprenditoriale", "autonomia", "builder", "end-to-end":** È IL differenziatore n.1. Aumentare il peso del match.
 
 ### Vantaggio trasversale
