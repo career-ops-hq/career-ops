@@ -511,7 +511,8 @@ const twoPassManifestChecks = [
   {
     name: 'apply commit is scoped to expanded update files, not directories (#3504)',
     // Through commitPathspecs, which keeps the list off argv (#5103).
-    pattern: /commitPathspecs\(`chore: auto-update system files to v\$\{remote\}`,\s*expandedPathsToStage\)/,
+    // The message names overlays merged in this update (#4326).
+    pattern: /commitPathspecs\(updateCommitMessage\(remote,[^\n]{0,80}?\),\s*expandedPathsToStage\)/,
   },
   {
     name: 'rollback expands backup and target manifests to safe concrete tree files',
@@ -563,7 +564,8 @@ const twoPassManifestChecks = [
     // #2337: a system file this install edited must be listed and backed up
     // before the checkout, not overwritten in silence.
     name: 'locally edited system files are detected before checkout (#2337)',
-    pattern: /const atRisk = locallyModifiedSystemFiles\(updatePaths, targetCommit\)/,
+    // Merged overlays leave the list; unmergeable ones join it (#4326).
+    pattern: /const atRisk = mergePathLists\(\s*locallyModifiedSystemFiles\(updatePaths, targetCommit\)/,
   },
   {
     name: 'the local copy is saved as .bak before any overwrite (#2337)',
