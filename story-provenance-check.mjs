@@ -959,20 +959,20 @@ const USAGE = `Usage:
 
 if (isMainModule(import.meta.url)) {
   // BEFORE any work. Unhandled, `--help` fell through to the analysis and
-  // printed a full report. A bare or option-followed `--cv` / `--story-bank`
-  // fell back to the default file and reported on a file nobody asked for.
-  validateFlags(args, ['--summary', '--self-test', '--story-bank', '--cv', '--help', '-h'], USAGE, {
-    valueFlags: ['--story-bank', '--cv'],
+  // printed a full report. A bare, empty or option-followed `--cv` /
+  // `--story-bank` fell back to the default file and reported on a file
+  // nobody asked for. validateFlags takes `--cv ""` as an operand, so check
+  // every occurrence for that first, before --help can exit 0.
+  const PATH_FLAGS = ['--story-bank', '--cv'];
+  const emptyPath = args.find((a, i) => PATH_FLAGS.includes(a) && args[i + 1] === '');
+  if (emptyPath) {
+    console.error(`Error: ${emptyPath} requires a value`);
+    process.exit(1);
+  }
+  validateFlags(args, ['--summary', '--self-test', ...PATH_FLAGS, '--help', '-h'], USAGE, {
+    valueFlags: PATH_FLAGS,
     requireOperand: true,
   });
-  // validateFlags accepts `--cv ""` as an operand, and `|| DEFAULT_*_PATH`
-  // would then quietly swap in the default file.
-  for (const flag of ['--story-bank', '--cv']) {
-    if (flagValue(args, flag) === '') {
-      console.error(`Error: ${flag} requires a value`);
-      process.exit(1);
-    }
-  }
   if (selfTestMode) {
     runSelfTest();
   } else {
