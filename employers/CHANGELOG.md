@@ -199,3 +199,5 @@ contribution does not edit this file: maintainers regenerate it on main with
 - 2026-11-27 `2026-11-27-santifer.6` (2 boards, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
 - 2026-11-27 `2026-11-27-santifer.7` (1 board, source `web-index:openai-web-search@2026-11-17`): Found with an assistant's web search
 - 2026-11-27 `2026-11-27-santifer.9` (1 board, source `ats-directory`): ats-directory, repository moonie0201/ats-directory, CC0-1.0: https://github.com/moonie0201/ats-directory
+- 2026-11-28 `2026-11-28-santifer` (16 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
+- 2026-11-28 `2026-11-28-santifer.2` (12 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
