@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import * as yaml from "js-yaml";
 
@@ -17,6 +18,19 @@ export class PortalsConfigError extends Error {
     this.name = "PortalsConfigError";
     this.kind = kind;
   }
+}
+
+/**
+ * Absolute portals.yml path: CAREER_OPS_PORTALS when set, else <root>/portals.yml.
+ * Plain .mjs so the .mjs readers (workplace-policy.mjs) share it with career-ops.ts.
+ *
+ * @param {string} root Absolute data root (careerOpsRoot()).
+ * @param {Record<string, string | undefined>} [env]
+ * @returns {string}
+ */
+export function portalsConfigPath(root, env = process.env) {
+  const override = env.CAREER_OPS_PORTALS?.trim();
+  return override ? path.resolve(override) : path.join(root, "portals.yml");
 }
 
 /** @param {unknown} value */

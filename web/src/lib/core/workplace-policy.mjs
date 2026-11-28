@@ -3,7 +3,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as yaml from 'js-yaml';
 import { resolveCodeRoot } from './code-root.mjs';
-import { isMapping } from '../portals-config.mjs';
+import { isMapping, portalsConfigPath } from '../portals-config.mjs';
 
 /** Synchronous shape-only mirror of the core's workplacePolicyFromConfig,
  * parity-tested so Discover cannot turn broken config into an absent policy.
@@ -22,7 +22,7 @@ export function workplacePolicyConfig(config) {
  */
 export async function loadWorkplacePolicy(root, codeRoot = resolveCodeRoot(process.cwd(), process.env)) {
   let config;
-  try { config = yaml.load(fs.readFileSync(path.join(root, 'portals.yml'), 'utf8')); }
+  try { config = yaml.load(fs.readFileSync(portalsConfigPath(root), 'utf8')); }
   catch (error) { if (error.code === 'ENOENT') return () => ({ eligible: true, reason: 'policy_absent' }); throw error; }
   const policy = workplacePolicyConfig(config);
   if (policy === undefined) return () => ({ eligible: true, reason: 'policy_absent' });
